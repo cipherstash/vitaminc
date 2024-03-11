@@ -1,8 +1,8 @@
-use paranoid::{Paranoid, Protected, SafeEq};
+use paranoid::{Paranoid, Protected, Equatable};
 
 #[derive(Debug, PartialEq)]
 struct Foo {
-    key: SafeEq<Protected<[u8; 32]>>,
+    key: Equatable<Protected<[u8; 32]>>,
 }
 
 fn main() {
@@ -10,7 +10,7 @@ fn main() {
     println!("{:?}", s);
     let key = [0u8; 32];
     let foo = Foo {
-        key: SafeEq::new(key),
+        key: Equatable::new(key),
     };
     println!("{:?}", foo);
 

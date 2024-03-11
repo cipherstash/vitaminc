@@ -3,19 +3,15 @@ use zeroize::Zeroize;
 use crate::Paranoid;
 use subtle::ConstantTimeEq as SubtleCtEq;
 
-pub struct SafeEq<T>(T);
+pub struct Equatable<T>(T);
 
-impl<T: Paranoid> SafeEq<T> where T::Inner: ConstantTimeEq {
-    /*pub fn new(x: T) -> Self {
-        Self(x)
-    }*/
-
+impl<T: Paranoid> Equatable<T> where T::Inner: ConstantTimeEq {
     pub fn constant_time_eq(&self, other: &Self) -> bool {
         self.inner().constant_time_eq(&other.inner())
     }
 }
 
-impl<T: Paranoid> Paranoid for SafeEq<T> {
+impl<T: Paranoid> Paranoid for Equatable<T> {
     type Inner = T::Inner;
 
     fn new(x: Self::Inner) -> Self {
@@ -27,8 +23,14 @@ impl<T: Paranoid> Paranoid for SafeEq<T> {
     }
 }
 
+impl<T: Paranoid> From<T> for Equatable<T> {
+    fn from(x: T) -> Self {
+        Self(x)
+    }
+}
+
 /// PartialEq is implemented in constant time.
-impl<T: Paranoid> PartialEq for SafeEq<T> where T::Inner: ConstantTimeEq {
+impl<T: Paranoid> PartialEq for Equatable<T> where T::Inner: ConstantTimeEq {
     fn eq(&self, other: &Self) -> bool {
         self.inner().constant_time_eq(&other.inner())
     }
@@ -108,14 +110,39 @@ impl ConstantTimeEq for NonZeroU16 {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Paranoid, Protected, SafeEq};
+    use crate::{Paranoid, Protected, Equatable};
 
     #[test]
     fn test_safe_eq_arr() {
-        let x: SafeEq<Protected<[u8; 16]>> = SafeEq::new([0u8; 16]);
-        let y: SafeEq<Protected<[u8; 16]>> = SafeEq::new([0u8; 16]);
+        let x: Equatable<Protected<[u8; 16]>> = Equatable::new([0u8; 16]);
+        let y: Equatable<Protected<[u8; 16]>> = Equatable::new([0u8; 16]);
 
         assert_eq!(x, y);
         assert!(x.constant_time_eq(&y));
+    }
+
+    #[test]
+    fn test_conversion() {
+        let x: Protected<[u8; 16]> = [0u8; 16].into();
+        let y: Equatable<Protected<[u8; 16]>> = x.into();
+        assert_eq!(y, Equatable::new([0u8; 16]));
+    }
+
+    #[test]
+    fn test_equality_u8() {
+        let x: Equatable<Protected<u8>> = Equatable::new(27);
+        let y: Equatable<Protected<u8>> = Equatable::new(27);
+
+        assert_eq!(x, y);
+        assert!(x.constant_time_eq(&y));
+    }
+
+    #[test]
+    fn test_inequality_u8() {
+        let x: Equatable<Protected<u8>> = Equatable::new(27);
+        let y: Equatable<Protected<u8>> = Equatable::new(0);
+
+        assert_ne!(x, y);
+        assert!(!x.constant_time_eq(&y));
     }
 }

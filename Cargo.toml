@@ -2,9 +2,12 @@
 resolver = "2"
 
 members = [
-    "packages/paranoid", "packages/password",
+    "packages/paranoid",
+    "packages/password", "packages/primitives",
     "packages/random",
+    #"packages/safe_eq",
 ]
 
 [workspace.dependencies]
 thiserror = "1.0.57"
+zeroize = "1.7.0"

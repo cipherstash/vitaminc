@@ -1,6 +1,8 @@
 use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::Paranoid;
 
+mod conversions;
+
 /// Basic building block for Paranoid.
 /// Conceptually similar to `std::slide::Iter`.
 /// `Protected` adds Zeroize and OpaqueDebug.
@@ -29,5 +31,11 @@ mod tests {
     fn test_new_array() {
         let x = Protected::new([0u8; 32]);
         assert_eq!(x.0, [0u8; 32]);
+    }
+
+    #[test]
+    fn test_opaque_debug() {
+        let x = Protected::new([0u8; 32]);
+        assert_eq!(format!("{:?}", x), "Protected<[u8; 32]> { ... }");
     }
 }
