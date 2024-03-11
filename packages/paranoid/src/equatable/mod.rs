@@ -1,11 +1,14 @@
-use core::num::NonZeroU16;
-use zeroize::Zeroize;
 use crate::Paranoid;
+use core::num::NonZeroU16;
 use subtle::ConstantTimeEq as SubtleCtEq;
+use zeroize::Zeroize;
 
 pub struct Equatable<T>(T);
 
-impl<T: Paranoid> Equatable<T> where T::Inner: ConstantTimeEq {
+impl<T: Paranoid> Equatable<T>
+where
+    T::Inner: ConstantTimeEq,
+{
     pub fn constant_time_eq(&self, other: &Self) -> bool {
         self.inner().constant_time_eq(&other.inner())
     }
@@ -30,7 +33,10 @@ impl<T: Paranoid> From<T> for Equatable<T> {
 }
 
 /// PartialEq is implemented in constant time.
-impl<T: Paranoid> PartialEq for Equatable<T> where T::Inner: ConstantTimeEq {
+impl<T: Paranoid> PartialEq for Equatable<T>
+where
+    T::Inner: ConstantTimeEq,
+{
     fn eq(&self, other: &Self) -> bool {
         self.inner().constant_time_eq(&other.inner())
     }
@@ -110,7 +116,7 @@ impl ConstantTimeEq for NonZeroU16 {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Paranoid, Protected, Equatable};
+    use crate::{Equatable, Paranoid, Protected};
 
     #[test]
     fn test_safe_eq_arr() {

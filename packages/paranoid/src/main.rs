@@ -1,4 +1,4 @@
-use paranoid::{Paranoid, Protected, Equatable};
+use paranoid::{Equatable, Paranoid, Protected};
 
 #[derive(Debug, PartialEq)]
 struct Foo {
@@ -13,6 +13,4 @@ fn main() {
         key: Equatable::new(key),
     };
     println!("{:?}", foo);
-
-    
 }

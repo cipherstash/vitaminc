@@ -1,10 +1,17 @@
 use crate::{Equatable, Paranoid};
-use serde::{ser::{Serialize, Serializer}, de::{Deserialize, Deserializer}};
+use serde::{
+    de::{Deserialize, Deserializer},
+    ser::{Serialize, Serializer},
+};
 
 // TODO: Docs
 pub struct Exportable<T>(T);
 
-impl <T> PartialEq for Exportable<Equatable<T>> where T: Paranoid, <T as Paranoid>::Inner: PartialEq {
+impl<T> PartialEq for Exportable<Equatable<T>>
+where
+    T: Paranoid,
+    <T as Paranoid>::Inner: PartialEq,
+{
     fn eq(&self, other: &Self) -> bool {
         self.inner() == other.inner()
     }
@@ -22,7 +29,11 @@ impl<T: Paranoid> Paranoid for Exportable<T> {
     }
 }
 
-impl<T> Serialize for Exportable<T> where T: Paranoid, T::Inner: Serialize {
+impl<T> Serialize for Exportable<T>
+where
+    T: Paranoid,
+    T::Inner: Serialize,
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -31,18 +42,23 @@ impl<T> Serialize for Exportable<T> where T: Paranoid, T::Inner: Serialize {
     }
 }
 
-impl<'de, T> Deserialize<'de> for Exportable<T> where T: Paranoid, T::Inner: Deserialize<'de> {
+impl<'de, T> Deserialize<'de> for Exportable<T>
+where
+    T: Paranoid,
+    T::Inner: Deserialize<'de>,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de> {
+        D: Deserializer<'de>,
+    {
         T::Inner::deserialize(deserializer).map(Exportable::new)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{Equatable, Protected};
     use super::*;
+    use crate::{Equatable, Protected};
 
     #[test]
     fn test_serialize_deserialize() {

@@ -1,5 +1,5 @@
-use zeroize::Zeroize;
 use crate::{Paranoid, Protected};
+use zeroize::Zeroize;
 // TODO: Feature flag
 use generic_array::{ArrayLength, GenericArray};
 

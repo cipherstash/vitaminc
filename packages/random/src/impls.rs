@@ -1,13 +1,13 @@
-use std::num::NonZeroU16;
 use crate::{Generatable, RandomError, SafeRand};
 use rand::Fill;
-
+use std::num::NonZeroU16;
 
 impl Generatable for NonZeroU16 {
     fn generate(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let mut buf: [u8; 2] = [0, 0];
 
-        buf.try_fill(rng).map_err(|_| RandomError::GenerationFailed)?;
+        buf.try_fill(rng)
+            .map_err(|_| RandomError::GenerationFailed)?;
         if let Some(value) = NonZeroU16::new(u16::from_be_bytes(buf)) {
             Ok(value)
         } else {

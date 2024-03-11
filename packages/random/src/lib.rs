@@ -22,8 +22,8 @@ pub trait Generatable: Sized {
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU16;
     use super::{Generatable, SafeRand, SeedableRng};
+    use std::num::NonZeroU16;
 
     #[test]
     fn test_generate_nonzerou16() -> Result<(), crate::RandomError> {

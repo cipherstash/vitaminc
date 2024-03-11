@@ -1,6 +1,6 @@
 mod equatable;
-mod protected;
 mod exportable;
+mod protected;
 //mod digest;
 
 pub mod debug;
@@ -15,7 +15,3 @@ pub trait Paranoid {
     // TODO: Use the private trait pattern to prevent direct access to the inner value
     fn inner(&self) -> &Self::Inner;
 }
-
-
-
-

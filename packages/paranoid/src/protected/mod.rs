@@ -1,5 +1,5 @@
-use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::Paranoid;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 mod conversions;
 
@@ -11,7 +11,10 @@ pub struct Protected<T>(T);
 
 impl<T: Zeroize> ZeroizeOnDrop for Protected<T> {}
 
-impl<T> Paranoid for Protected<T> where T: Zeroize {
+impl<T> Paranoid for Protected<T>
+where
+    T: Zeroize,
+{
     type Inner = T;
 
     fn new(x: Self::Inner) -> Self {
