@@ -10,7 +10,7 @@ where
     T::Inner: ConstantTimeEq,
 {
     pub fn constant_time_eq(&self, other: &Self) -> bool {
-        self.inner().constant_time_eq(&other.inner())
+        self.inner().constant_time_eq(other.inner())
     }
 }
 
@@ -38,7 +38,7 @@ where
     T::Inner: ConstantTimeEq,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.inner().constant_time_eq(&other.inner())
+        self.inner().constant_time_eq(other.inner())
     }
 }
 
