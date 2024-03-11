@@ -1,14 +1,10 @@
-[package]
-name = "paranoid"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+resolver = "2"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+members = [
+    "packages/paranoid", "packages/password",
+    "packages/random",
+]
 
-[dependencies]
-digest = "0.10.7"
-generic-array = "1.0.0"
-opaque-debug = "0.3.1"
-sha2 = "0.10.8"
-subtle = "2.5.0"
-zeroize = { version = "1.6.0", features = [ "derive" ] }
+[workspace.dependencies]
+thiserror = "1.0.57"
