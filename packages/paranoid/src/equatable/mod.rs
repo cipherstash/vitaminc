@@ -120,7 +120,8 @@ mod tests {
 
     #[test]
     fn test_safe_eq_arr() {
-        let x: Equatable<Protected<[u8; 16]>> = Equatable::new([0u8; 16]);
+        // Using 2 ways to get an equatable value
+        let x: Equatable<Protected<[u8; 16]>> = Equatable::new([0u8; 16]); //.equatable();
         let y: Equatable<Protected<[u8; 16]>> = Equatable::new([0u8; 16]);
 
         assert_eq!(x, y);

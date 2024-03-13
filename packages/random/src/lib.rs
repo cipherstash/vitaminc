@@ -13,6 +13,7 @@ pub enum RandomError {
     GenerationFailed,
 }
 
+// FIXME: This might be redundant now that we have Named types for everything. We can just use the rand::Fill trait.
 /// A trait for types that can be generated randomly.
 /// The random number generator is passed as an argument to the `generate` method
 /// and must implement the `SafeRand` trait.

@@ -1,4 +1,4 @@
-use crate::Paranoid;
+use crate::{Equatable, Paranoid};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 mod conversions;
@@ -8,6 +8,13 @@ mod conversions;
 /// `Protected` adds Zeroize and OpaqueDebug.
 #[derive(Zeroize)]
 pub struct Protected<T>(T);
+
+/*impl<T: Zeroize> Protected<T> {
+    /// Get an `Equatable` version of the `Protected` value.
+    pub fn equatable(self) -> Equatable<Protected<T>> {
+        Equatable::new(self.0)
+    }
+}*/
 
 impl<T: Zeroize> ZeroizeOnDrop for Protected<T> {}
 

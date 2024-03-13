@@ -14,4 +14,8 @@ pub trait Paranoid {
 
     // TODO: Use the private trait pattern to prevent direct access to the inner value
     fn inner(&self) -> &Self::Inner;
+
+    /*fn equatable(self) -> Equatable<Self> where Self: Sized {
+        Equatable::new(self.inner())
+    }*/
 }
