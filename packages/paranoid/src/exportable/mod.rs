@@ -9,7 +9,10 @@ pub struct Exportable<T>(pub(crate) T);
 
 impl<T> Exportable<T> {
     /// Create a new `Exportable` from an inner value.
-    pub fn new(x: <Exportable<T> as ParanoidPrivate>::Inner) -> Self where Self: Paranoid {
+    pub fn new(x: <Exportable<T> as ParanoidPrivate>::Inner) -> Self
+    where
+        Self: Paranoid,
+    {
         Self::init_from_inner(x)
     }
 

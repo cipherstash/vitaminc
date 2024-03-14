@@ -11,7 +11,10 @@ pub struct Protected<T>(T);
 
 impl<T> Protected<T> {
     /// Create a new `Protected` from an inner value.
-    pub fn new(x: T) -> Self where T: Zeroize {
+    pub fn new(x: T) -> Self
+    where
+        T: Zeroize,
+    {
         Self(x)
     }
 

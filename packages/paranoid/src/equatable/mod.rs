@@ -4,86 +4,86 @@ use subtle::ConstantTimeEq as SubtleCtEq;
 use zeroize::Zeroize;
 
 /// A wrapper type that allows for constant time equality checks of a `Paranoid` type.
-/// 
+///
 /// # Examples
-/// 
+///
 /// Initializing an `Equatable` from a `Protected` type:
-/// 
+///
 /// ```
 /// use paranoid::{Equatable, Protected};
 /// let x: Equatable<Protected<u8>> = 42.into();
 /// let y: Equatable<Protected<u8>> = Protected::new(42).into();
 /// let z: Equatable<Protected<u8>> = Protected::new(42).equatable();
 /// ```
-/// 
+///
 /// # Constant time comparisons
 ///
 /// `Equatable` requires that types are equatable in constant time.
-/// 
+///
 /// ```
 /// use paranoid::{Equatable, Protected};
 /// let x: Equatable<Protected<u8>> = 112.into();
 /// let y: Equatable<Protected<u8>> = 112.into();
-/// 
+///
 /// assert!(x.constant_time_eq(&y));
 /// ```
-/// 
+///
 /// The `Equatable` type also implements `PartialEq` and `Eq` for easy comparison using the constant time implementation.
-/// 
+///
 /// ```
 /// use paranoid::{Equatable, Protected};
 /// let x: Equatable<Protected<u8>> = 112.into();
 /// let y: Equatable<Protected<u8>> = 112.into();
 /// assert_eq!(x, y);
 /// ```
-/// 
+///
 /// # Nesting `Equatable` types
-/// 
+///
 /// Constant time comparison also works for nested `Equatable` types.
 /// This way, the ordering or depth of the nesting doesn't matter, the comparison will always be constant time.
-/// 
+///
 /// See also `Exportable`.
-/// 
+///
 /// ```
 /// use paranoid::{Exportable, Equatable, Protected};
 /// let x: Equatable<Protected<[u8; 16]>> = [0u8; 16].into();
 /// //let y: Exportable<Equatable<Protected<[u8; 16]>>> = [0u8; 16].into();
 /// let y: Exportable<Equatable<Protected<[u8; 16]>>> = Exportable::new([0u8; 16]);
-/// 
+///
 /// assert_eq!(x, y);
 /// ```
-/// 
+///
 /// # Opaque Debug
-/// 
+///
 /// Because `Equatable` wraps `Paranoid`, inner types will never be printed.
 /// It's therefore safe to use `Equatable` in debug output and in custom types.
-/// 
+///
 /// ```
 /// use paranoid::{Equatable, Protected};
-/// 
+///
 /// #[derive(Debug, PartialEq)]
 /// struct SafeType(Equatable<Protected<u8>>);
 /// let x = SafeType(Protected::new(100).equatable());
 /// dbg!(x);
 /// ```
-/// 
+///
 /// # Usage in a struct
-/// 
+///
 /// ```
 /// use paranoid::{Equatable, Protected};
-/// 
+///
 /// #[derive(Debug, PartialEq)]
 /// struct AuthenticatedString {
 ///   tag: Equatable<Protected<[u8; 32]>>,
 ///   value: String
 /// }
-/// 
+///
 /// impl AuthenticatedString {
 ///     fn new(tag: [u8; 32], value: String) -> Self {
 ///         Self { tag: tag.into(), value }
 ///     }
 /// }
-/// 
+///
 /// let a = AuthenticatedString::new([0u8; 32], "Hello, world!".to_string());
 /// let b = AuthenticatedString::new([0u8; 32], "Hello, world!".to_string());
 /// assert_eq!(a, b);
@@ -92,7 +92,10 @@ pub struct Equatable<T>(pub(crate) T);
 
 impl<T> Equatable<T> {
     /// Create a new `Equatable` from an inner value.
-    pub fn new(x: <Equatable<T> as ParanoidPrivate>::Inner) -> Self where Self: ParanoidPrivate {
+    pub fn new(x: <Equatable<T> as ParanoidPrivate>::Inner) -> Self
+    where
+        Self: ParanoidPrivate,
+    {
         Self::init_from_inner(x)
     }
 
@@ -101,7 +104,10 @@ impl<T> Equatable<T> {
     }
 }
 
-impl<T> From<T> for Equatable<T> where T: ParanoidPrivate {
+impl<T> From<T> for Equatable<T>
+where
+    T: ParanoidPrivate,
+{
     fn from(x: T) -> Self {
         Self(x)
     }
@@ -167,7 +173,6 @@ pub trait ConstantTimeEq<Rhs: ?Sized = Self> {
     /// Implementations will mostly use `ConstantTimeEq::ct_eq` to achieve this but because
     /// not everything is implemented in `subtle-ng`, we create our own "wrapping" trait.
     fn constant_time_eq(&self, other: &Rhs) -> bool; // TODO: Use a Choice type like subtle
-
 
     // TODO: Do we also need a constant_time_neq ?
 }
@@ -313,7 +318,7 @@ mod tests {
         let x: Protected<String> = Protected::new("hello".to_string());
         let y: Equatable<Protected<String>> = Equatable::new("hello".to_string());
         assert_eq!(y, x.equatable());
-    } 
+    }
 
     #[test]
     fn test_equality_u8() {

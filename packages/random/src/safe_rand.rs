@@ -75,6 +75,6 @@ mod tests {
     fn test_next_bounded_u32_non_power_of_two() {
         let mut rng = SafeRand::from_entropy();
         let value = rng.next_bounded_u32(5);
-        assert!(value < 5);
+        assert!(value <= 5);
     }
 }

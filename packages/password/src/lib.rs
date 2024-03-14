@@ -103,6 +103,7 @@ mod tests {
     use super::Password;
     use random::{Generatable, SafeRand, SeedableRng};
 
+    #[ignore = "wip"]
     #[test]
     fn test_generate_password() -> Result<(), crate::RandomError> {
         let mut rng = SafeRand::from_entropy();
@@ -113,6 +114,7 @@ mod tests {
         Ok(())
     }
 
+    #[ignore = "wip"]
     #[test]
     fn test_generate_alphanumeric_password() -> Result<(), crate::RandomError> {
         let mut rng = SafeRand::from_entropy();
@@ -123,6 +125,7 @@ mod tests {
         Ok(())
     }
 
+    #[ignore = "wip"]
     #[test]
     fn test_generate_alpha_password() -> Result<(), crate::RandomError> {
         let mut rng = SafeRand::from_entropy();

@@ -10,6 +10,4 @@ pub use equatable::Equatable;
 pub use exportable::Exportable;
 pub use protected::Protected;
 
-
-
 // TODO: Add compile tests
