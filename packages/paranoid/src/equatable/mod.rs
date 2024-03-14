@@ -1,4 +1,4 @@
-use crate::{Paranoid, Protected};
+use crate::{private::ParanoidPrivate, Exportable, Protected};
 use core::num::NonZeroU16;
 use subtle::ConstantTimeEq as SubtleCtEq;
 use zeroize::Zeroize;
@@ -10,7 +10,7 @@ use zeroize::Zeroize;
 /// Initializing an `Equatable` from a `Protected` type:
 /// 
 /// ```
-/// use paranoid::{Equatable, Paranoid, Protected};
+/// use paranoid::{Equatable, Protected};
 /// let x: Equatable<Protected<u8>> = 42.into();
 /// let y: Equatable<Protected<u8>> = Protected::new(42).into();
 /// let z: Equatable<Protected<u8>> = Protected::new(42).equatable();
@@ -45,7 +45,7 @@ use zeroize::Zeroize;
 /// See also `Exportable`.
 /// 
 /// ```
-/// use paranoid::{Exportable, Equatable, Paranoid, Protected};
+/// use paranoid::{Exportable, Equatable, Protected};
 /// let x: Equatable<Protected<[u8; 16]>> = [0u8; 16].into();
 /// //let y: Exportable<Equatable<Protected<[u8; 16]>>> = [0u8; 16].into();
 /// let y: Exportable<Equatable<Protected<[u8; 16]>>> = Exportable::new([0u8; 16]);
@@ -55,18 +55,17 @@ use zeroize::Zeroize;
 /// 
 /// # Opaque Debug
 /// 
-/// Because `Equatable` wraps `Paranoid` inner types will never be printed.
+/// Because `Equatable` wraps `Paranoid`, inner types will never be printed.
 /// It's therefore safe to use `Equatable` in debug output and in custom types.
 /// 
 /// ```
-/// use paranoid::{Equatable, Paranoid, Protected};
+/// use paranoid::{Equatable, Protected};
 /// 
 /// #[derive(Debug, PartialEq)]
 /// struct SafeType(Equatable<Protected<u8>>);
 /// let x = SafeType(Protected::new(100).equatable());
 /// dbg!(x);
 /// ```
-/// 
 /// 
 /// # Usage in a struct
 /// 
@@ -91,13 +90,24 @@ use zeroize::Zeroize;
 /// ```
 pub struct Equatable<T>(pub(crate) T);
 
-impl<T> From<T> for Equatable<T> where T: Paranoid {
+impl<T> Equatable<T> {
+    /// Create a new `Equatable` from an inner value.
+    pub fn new(x: <Equatable<T> as ParanoidPrivate>::Inner) -> Self where Self: ParanoidPrivate {
+        Self::init_from_inner(x)
+    }
+
+    pub fn exportable(self) -> Exportable<Self> {
+        Exportable(self)
+    }
+}
+
+impl<T> From<T> for Equatable<T> where T: ParanoidPrivate {
     fn from(x: T) -> Self {
         Self(x)
     }
 }
 
-impl<T: Paranoid> Equatable<T>
+impl<T: ParanoidPrivate> Equatable<T>
 where
     T::Inner: ConstantTimeEq,
 {
@@ -106,11 +116,12 @@ where
     }
 }
 
-impl<T: Paranoid> Paranoid for Equatable<T> {
+// TODO: Canwe make a blanket impl for all Paranoid types?
+impl<T: ParanoidPrivate> ParanoidPrivate for Equatable<T> {
     type Inner = T::Inner;
 
-    fn new(x: Self::Inner) -> Self {
-        Self(T::new(x))
+    fn init_from_inner(x: Self::Inner) -> Self {
+        Self(T::init_from_inner(x))
     }
 
     fn inner(&self) -> &Self::Inner {
@@ -124,16 +135,16 @@ where
     T: Into<Protected<T>> + Zeroize,
 {
     fn from(x: T) -> Self {
-        Self(Protected::new(x))
+        Self(Protected::init_from_inner(x))
     }
 }
 
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
 impl<T, O> PartialEq<O> for Equatable<T>
 where
-    T: Paranoid,
-    O: Paranoid,
-    <T as Paranoid>::Inner: ConstantTimeEq<O::Inner>,
+    T: ParanoidPrivate,
+    O: ParanoidPrivate,
+    <T as ParanoidPrivate>::Inner: ConstantTimeEq<O::Inner>,
 {
     fn eq(&self, other: &O) -> bool {
         self.inner().constant_time_eq(other.inner())
@@ -142,9 +153,9 @@ where
 
 impl<T, O> ConstantTimeEq<O> for Equatable<T>
 where
-    T: Paranoid,
-    O: Paranoid,
-    <T as Paranoid>::Inner: ConstantTimeEq<O::Inner>,
+    T: ParanoidPrivate,
+    O: ParanoidPrivate,
+    <T as ParanoidPrivate>::Inner: ConstantTimeEq<O::Inner>,
 {
     fn constant_time_eq(&self, other: &O) -> bool {
         self.inner().constant_time_eq(other.inner())
@@ -266,7 +277,7 @@ impl ConstantTimeEq for String {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Equatable, Exportable, Paranoid, Protected};
+    use crate::{Equatable, Exportable, Protected};
 
     #[test]
     fn test_safe_eq_arr() {
@@ -328,6 +339,6 @@ mod tests {
         let y = bincode::serialize(&x.exportable()).unwrap();
 
         let z: Exportable<Equatable<Protected<u8>>> = bincode::deserialize(&y).unwrap();
-        assert_eq!(z.inner(), &42);
+        assert_eq!(z, Protected::new(42).equatable());
     }
 }

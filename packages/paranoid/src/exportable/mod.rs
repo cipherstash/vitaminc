@@ -1,4 +1,4 @@
-use crate::{equatable::ConstantTimeEq, Paranoid};
+use crate::{equatable::ConstantTimeEq, private::ParanoidPrivate, Equatable, Paranoid};
 use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
@@ -7,23 +7,34 @@ use serde::{
 // TODO: Docs
 pub struct Exportable<T>(pub(crate) T);
 
+impl<T> Exportable<T> {
+    /// Create a new `Exportable` from an inner value.
+    pub fn new(x: <Exportable<T> as ParanoidPrivate>::Inner) -> Self where Self: Paranoid {
+        Self::init_from_inner(x)
+    }
+
+    pub fn equatable(self) -> Equatable<Self> {
+        Equatable(self)
+    }
+}
+
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
 impl<T, O> PartialEq<O> for Exportable<T>
 where
-    T: Paranoid,
-    O: Paranoid,
-    <T as Paranoid>::Inner: ConstantTimeEq<O::Inner>,
+    T: ParanoidPrivate,
+    O: ParanoidPrivate,
+    <T as ParanoidPrivate>::Inner: ConstantTimeEq<O::Inner>,
 {
     fn eq(&self, other: &O) -> bool {
         self.inner().constant_time_eq(other.inner())
     }
 }
 
-impl<T: Paranoid> Paranoid for Exportable<T> {
+impl<T: ParanoidPrivate> ParanoidPrivate for Exportable<T> {
     type Inner = T::Inner;
 
-    fn new(x: Self::Inner) -> Self {
-        Self(T::new(x))
+    fn init_from_inner(x: Self::Inner) -> Self {
+        Self(T::init_from_inner(x))
     }
 
     fn inner(&self) -> &Self::Inner {
@@ -31,9 +42,11 @@ impl<T: Paranoid> Paranoid for Exportable<T> {
     }
 }
 
+impl<T> Paranoid for Exportable<T> where T: ParanoidPrivate {}
+
 impl<T> Serialize for Exportable<T>
 where
-    T: Paranoid,
+    T: ParanoidPrivate,
     T::Inner: Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -46,14 +59,14 @@ where
 
 impl<'de, T> Deserialize<'de> for Exportable<T>
 where
-    T: Paranoid,
+    T: ParanoidPrivate,
     T::Inner: Deserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        T::Inner::deserialize(deserializer).map(Exportable::new)
+        T::Inner::deserialize(deserializer).map(Exportable::init_from_inner)
     }
 }
 
@@ -64,7 +77,7 @@ mod tests {
 
     #[test]
     fn test_serialize_deserialize() {
-        let x: Exportable<Protected<u8>> = Exportable::new(42);
+        let x: Exportable<Protected<u8>> = Exportable::init_from_inner(42);
         let y = bincode::serialize(&x).unwrap();
 
         let z: Exportable<Protected<u8>> = bincode::deserialize(&y).unwrap();
@@ -73,7 +86,7 @@ mod tests {
 
     #[test]
     fn test_serialize_deserialize_nested() {
-        let x: Exportable<Equatable<Protected<u8>>> = Exportable::new(42);
+        let x: Exportable<Equatable<Protected<u8>>> = Exportable::init_from_inner(42);
         let y = bincode::serialize(&x).unwrap();
 
         let z: Exportable<Equatable<Protected<u8>>> = bincode::deserialize(&y).unwrap();
@@ -82,8 +95,8 @@ mod tests {
 
     #[test]
     fn test_equatable_inner() {
-        let x: Exportable<Protected<u8>> = Exportable::new(42);
-        let y: Exportable<Equatable<Protected<u8>>> = Exportable::new(42);
+        let x: Exportable<Protected<u8>> = Exportable::init_from_inner(42);
+        let y: Exportable<Equatable<Protected<u8>>> = Exportable::init_from_inner(42);
 
         assert_eq!(x.equatable(), y);
     }
