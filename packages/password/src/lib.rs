@@ -1,4 +1,4 @@
-use paranoid::Protected;
+use protected::Protected;
 use random::{Generatable, RandomError, SafeRand};
 
 const STANDARD_CHARS: [char; 94] = [

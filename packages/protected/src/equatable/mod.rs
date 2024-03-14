@@ -10,7 +10,7 @@ use zeroize::Zeroize;
 /// Initializing an `Equatable` from a `Protected` type:
 ///
 /// ```
-/// use paranoid::{Equatable, Protected};
+/// use protected::{Equatable, Protected};
 /// let x: Equatable<Protected<u8>> = 42.into();
 /// let y: Equatable<Protected<u8>> = Protected::new(42).into();
 /// let z: Equatable<Protected<u8>> = Protected::new(42).equatable();
@@ -21,7 +21,7 @@ use zeroize::Zeroize;
 /// `Equatable` requires that types are equatable in constant time.
 ///
 /// ```
-/// use paranoid::{Equatable, Protected};
+/// use protected::{Equatable, Protected};
 /// let x: Equatable<Protected<u8>> = 112.into();
 /// let y: Equatable<Protected<u8>> = 112.into();
 ///
@@ -31,7 +31,7 @@ use zeroize::Zeroize;
 /// The `Equatable` type also implements `PartialEq` and `Eq` for easy comparison using the constant time implementation.
 ///
 /// ```
-/// use paranoid::{Equatable, Protected};
+/// use protected::{Equatable, Protected};
 /// let x: Equatable<Protected<u8>> = 112.into();
 /// let y: Equatable<Protected<u8>> = 112.into();
 /// assert_eq!(x, y);
@@ -45,9 +45,8 @@ use zeroize::Zeroize;
 /// See also `Exportable`.
 ///
 /// ```
-/// use paranoid::{Exportable, Equatable, Protected};
+/// use protected::{Exportable, Equatable, Protected};
 /// let x: Equatable<Protected<[u8; 16]>> = [0u8; 16].into();
-/// //let y: Exportable<Equatable<Protected<[u8; 16]>>> = [0u8; 16].into();
 /// let y: Exportable<Equatable<Protected<[u8; 16]>>> = Exportable::new([0u8; 16]);
 ///
 /// assert_eq!(x, y);
@@ -59,7 +58,7 @@ use zeroize::Zeroize;
 /// It's therefore safe to use `Equatable` in debug output and in custom types.
 ///
 /// ```
-/// use paranoid::{Equatable, Protected};
+/// use protected::{Equatable, Protected};
 ///
 /// #[derive(Debug, PartialEq)]
 /// struct SafeType(Equatable<Protected<u8>>);
@@ -70,7 +69,7 @@ use zeroize::Zeroize;
 /// # Usage in a struct
 ///
 /// ```
-/// use paranoid::{Equatable, Protected};
+/// use protected::{Equatable, Protected};
 ///
 /// #[derive(Debug, PartialEq)]
 /// struct AuthenticatedString {

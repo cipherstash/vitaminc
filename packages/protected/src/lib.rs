@@ -12,7 +12,6 @@ pub use exportable::Exportable;
 
 // TODO: Add compile tests
 
-
 /// Basic building block for Paranoid.
 /// It uses a similar design "adapter" pattern to `std::slide::Iter`.
 /// `Protected` adds Zeroize and OpaqueDebug.
@@ -31,10 +30,32 @@ impl<T> Protected<T> {
         Self(x)
     }
 
+    /// Convert this `Protected` into one that is equatable in constant time.
+    /// Returns a new `Equatable` adapter.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use protected::{Equatable, Protected};
+    ///
+    /// let x = Protected::new([0u8; 32]);
+    /// let y: Equatable<Protected<[u8; 32]>> = x.equatable();
+    /// ```
     pub fn equatable(self) -> Equatable<Self> {
         Equatable(self)
     }
 
+    /// Convert this `Protected` into one that is exportable in constant time using Serde.
+    /// Returns a new `Exportable` adapter.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use protected::{Exportable, Protected};
+    ///
+    /// let x = Protected::new([0u8; 32]);
+    /// let y: Exportable<Protected<[u8; 32]>> = x.exportable();
+    /// ```
     pub fn exportable(self) -> Exportable<Self> {
         Exportable(self)
     }
@@ -75,4 +96,3 @@ mod tests {
         assert_eq!(format!("{:?}", x), "Protected<[u8; 32]> { ... }");
     }
 }
-
