@@ -1,14 +1,17 @@
 mod conversions;
 mod equatable;
 mod exportable;
+mod indexable;
 use private::ParanoidPrivate;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 mod private;
 pub trait Paranoid: private::ParanoidPrivate {}
 
+// Exports
 pub use equatable::Equatable;
 pub use exportable::Exportable;
+pub use indexable::Indexable;
 
 // TODO: Add compile tests
 
