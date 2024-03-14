@@ -2,8 +2,9 @@
 resolver = "2"
 
 members = [
-    "packages/paranoid",
-    "packages/password", "packages/primitives",
+    "packages/protected",
+    "packages/password",
+    "packages/primitives",
     "packages/random",
     #"packages/safe_eq",
 ]

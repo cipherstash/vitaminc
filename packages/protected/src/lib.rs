@@ -1,7 +1,17 @@
-use crate::{private::ParanoidPrivate, Equatable, Exportable, Paranoid};
+mod conversions;
+mod equatable;
+mod exportable;
+use private::ParanoidPrivate;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-mod conversions;
+mod private;
+pub trait Paranoid: private::ParanoidPrivate {}
+
+pub use equatable::Equatable;
+pub use exportable::Exportable;
+
+// TODO: Add compile tests
+
 
 /// Basic building block for Paranoid.
 /// It uses a similar design "adapter" pattern to `std::slide::Iter`.
@@ -61,7 +71,8 @@ mod tests {
 
     #[test]
     fn test_opaque_debug() {
-        let x = Protected::init_from_inner([0u8; 32]);
+        let x = Protected::new([0u8; 32]);
         assert_eq!(format!("{:?}", x), "Protected<[u8; 32]> { ... }");
     }
 }
+
