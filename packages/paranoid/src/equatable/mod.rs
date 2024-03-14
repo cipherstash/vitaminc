@@ -1,9 +1,15 @@
-use crate::Paranoid;
+use crate::{Paranoid, Protected};
 use core::num::NonZeroU16;
 use subtle::ConstantTimeEq as SubtleCtEq;
 use zeroize::Zeroize;
 
-pub struct Equatable<T>(T);
+pub struct Equatable<T>(pub(crate) T);
+
+impl<T: Zeroize> From<Protected<T>> for Equatable<Protected<T>> {
+    fn from(x: Protected<T>) -> Self {
+        Self(x)
+    }
+}
 
 impl<T: Paranoid> Equatable<T>
 where
@@ -26,19 +32,32 @@ impl<T: Paranoid> Paranoid for Equatable<T> {
     }
 }
 
-impl<T: Paranoid> From<T> for Equatable<T> {
+// Further constrain this
+impl<T> From<T> for Equatable<Protected<T>> where T: Into<Protected<T>> + Zeroize {
     fn from(x: T) -> Self {
-        Self(x)
+        Self(Protected::new(x))
     }
 }
 
 /// PartialEq is implemented in constant time.
-impl<T: Paranoid> PartialEq for Equatable<T>
+/*impl<T: Paranoid> PartialEq for Equatable<T>
 where
     T::Inner: ConstantTimeEq,
 {
     fn eq(&self, other: &Self) -> bool {
         self.inner().constant_time_eq(other.inner())
+    }
+}*/
+
+// FIXME: If this works we should do it for ConstantTimeEq not PartialEq (just do PartialEq on Paranoid)
+impl<T, O> PartialEq<O> for Equatable<T>
+where
+    T: Paranoid,
+    O: Paranoid,
+    <T as Paranoid>::Inner: PartialEq<O::Inner>,
+{
+    fn eq(&self, other: &O) -> bool {
+        self.inner() == other.inner()
     }
 }
 
@@ -116,12 +135,12 @@ impl ConstantTimeEq for NonZeroU16 {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Equatable, Paranoid, Protected};
+    use crate::{Equatable, Exportable, Paranoid, Protected};
 
     #[test]
     fn test_safe_eq_arr() {
         // Using 2 ways to get an equatable value
-        let x: Equatable<Protected<[u8; 16]>> = Equatable::new([0u8; 16]); //.equatable();
+        let x: Equatable<Protected<[u8; 16]>> = Equatable::from([0u8; 16]);
         let y: Equatable<Protected<[u8; 16]>> = Equatable::new([0u8; 16]);
 
         assert_eq!(x, y);
@@ -130,9 +149,20 @@ mod tests {
 
     #[test]
     fn test_conversion() {
+        let x: Equatable<Protected<u8>> = 0.into();
+        let a: Equatable<Protected<u8>> = Protected::new(0).into();
+        let b = Protected::<u8>::new(0).equatable();
+
+        assert_eq!(x, a);
+        assert_eq!(x, b);
+    }
+
+    #[test]
+    fn test_conversion_2() {
+        // TODO: Create a macro to test lots of these
         let x: Protected<[u8; 16]> = [0u8; 16].into();
-        let y: Equatable<Protected<[u8; 16]>> = x.into();
-        assert_eq!(y, Equatable::new([0u8; 16]));
+        let y: Equatable::<Protected<[u8; 16]>> = [0u8; 16].into();
+        assert_eq!(y, x.equatable());
     }
 
     #[test]
@@ -151,5 +181,14 @@ mod tests {
 
         assert_ne!(x, y);
         assert!(!x.constant_time_eq(&y));
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        let x: Equatable<Protected<u8>> = Equatable::new(42);
+        let y = bincode::serialize(&x.exportable()).unwrap();
+
+        let z: Exportable<Equatable<Protected<u8>>> = bincode::deserialize(&y).unwrap();
+        assert_eq!(z.inner(), &42);
     }
 }

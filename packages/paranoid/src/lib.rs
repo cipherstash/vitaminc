@@ -5,17 +5,27 @@ mod protected;
 
 pub mod debug;
 pub use equatable::Equatable;
+pub use exportable::Exportable;
 pub use protected::Protected;
 
-pub trait Paranoid {
+pub trait Paranoid: Sized {
     type Inner;
 
+    // TODO: Don't make this part of the trait, impl From instead
     fn new(x: Self::Inner) -> Self;
 
     // TODO: Use the private trait pattern to prevent direct access to the inner value
     fn inner(&self) -> &Self::Inner;
 
-    /*fn equatable(self) -> Equatable<Self> where Self: Sized {
-        Equatable::new(self.inner())
-    }*/
+    // TODO: into_inner ?
+
+    fn equatable(self) -> Equatable<Self> {
+        Equatable(self)
+    }
+
+    fn exportable(self) -> Exportable<Self> {
+        Exportable(self)
+    }
 }
+
+// TODO: Add compile tests

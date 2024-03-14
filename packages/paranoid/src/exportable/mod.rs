@@ -1,18 +1,19 @@
-use crate::{Equatable, Paranoid};
+use crate::Paranoid;
 use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
 };
 
 // TODO: Docs
-pub struct Exportable<T>(T);
+pub struct Exportable<T>(pub(crate) T);
 
-impl<T> PartialEq for Exportable<Equatable<T>>
+impl<T, O> PartialEq<O> for Exportable<T>
 where
     T: Paranoid,
-    <T as Paranoid>::Inner: PartialEq,
+    O: Paranoid,
+    <T as Paranoid>::Inner: PartialEq<O::Inner>,
 {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &O) -> bool {
         self.inner() == other.inner()
     }
 }
@@ -76,5 +77,13 @@ mod tests {
 
         let z: Exportable<Equatable<Protected<u8>>> = bincode::deserialize(&y).unwrap();
         assert_eq!(z, x);
+    }
+
+    #[test]
+    fn test_equatable_inner() {
+        let x: Exportable<Protected<u8>> = Exportable::new(42);
+        let y: Exportable<Equatable<Protected<u8>>> = Exportable::new(42);
+
+        assert_eq!(x.equatable(), y);
     }
 }
