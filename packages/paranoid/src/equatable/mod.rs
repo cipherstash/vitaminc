@@ -33,7 +33,10 @@ impl<T: Paranoid> Paranoid for Equatable<T> {
 }
 
 // Further constrain this
-impl<T> From<T> for Equatable<Protected<T>> where T: Into<Protected<T>> + Zeroize {
+impl<T> From<T> for Equatable<Protected<T>>
+where
+    T: Into<Protected<T>> + Zeroize,
+{
     fn from(x: T) -> Self {
         Self(Protected::new(x))
     }
@@ -161,7 +164,7 @@ mod tests {
     fn test_conversion_2() {
         // TODO: Create a macro to test lots of these
         let x: Protected<[u8; 16]> = [0u8; 16].into();
-        let y: Equatable::<Protected<[u8; 16]>> = [0u8; 16].into();
+        let y: Equatable<Protected<[u8; 16]>> = [0u8; 16].into();
         assert_eq!(y, x.equatable());
     }
 
