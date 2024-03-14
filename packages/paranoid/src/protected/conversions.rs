@@ -5,7 +5,7 @@ use generic_array::{ArrayLength, GenericArray};
 
 impl<T: Zeroize> From<T> for Protected<T> {
     fn from(x: T) -> Self {
-        Self(x)
+        Self::new(x.into())
     }
 }
 

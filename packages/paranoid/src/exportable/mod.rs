@@ -1,4 +1,4 @@
-use crate::Paranoid;
+use crate::{equatable::ConstantTimeEq, Paranoid};
 use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
@@ -7,14 +7,15 @@ use serde::{
 // TODO: Docs
 pub struct Exportable<T>(pub(crate) T);
 
+/// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
 impl<T, O> PartialEq<O> for Exportable<T>
 where
     T: Paranoid,
     O: Paranoid,
-    <T as Paranoid>::Inner: PartialEq<O::Inner>,
+    <T as Paranoid>::Inner: ConstantTimeEq<O::Inner>,
 {
     fn eq(&self, other: &O) -> bool {
-        self.inner() == other.inner()
+        self.inner().constant_time_eq(other.inner())
     }
 }
 

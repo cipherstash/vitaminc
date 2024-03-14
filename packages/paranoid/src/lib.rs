@@ -11,7 +11,8 @@ pub use protected::Protected;
 pub trait Paranoid: Sized {
     type Inner;
 
-    // TODO: Don't make this part of the trait, impl From instead
+    // TODO: Don't make this part of the trait, just put a trait bound on the different types
+    // We may need a method for internal use though
     fn new(x: Self::Inner) -> Self;
 
     // TODO: Use the private trait pattern to prevent direct access to the inner value
