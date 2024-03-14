@@ -88,6 +88,7 @@ use zeroize::Zeroize;
 /// let b = AuthenticatedString::new([0u8; 32], "Hello, world!".to_string());
 /// assert_eq!(a, b);
 /// ```
+#[derive(Debug)]
 pub struct Equatable<T>(pub(crate) T);
 
 impl<T> Equatable<T> {
@@ -283,6 +284,12 @@ impl ConstantTimeEq for String {
 #[cfg(test)]
 mod tests {
     use crate::{Equatable, Exportable, Protected};
+
+    #[test]
+    fn test_opaque_debug() {
+        let x: Equatable<Protected<[u8; 32]>> = Equatable::new([0u8; 32]);
+        assert_eq!(format!("{:?}", x), "Equatable(Protected<[u8; 32]> { ... })");
+    }
 
     #[test]
     fn test_safe_eq_arr() {

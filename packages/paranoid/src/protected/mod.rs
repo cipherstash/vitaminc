@@ -9,6 +9,9 @@ mod conversions;
 #[derive(Zeroize)]
 pub struct Protected<T>(T);
 
+opaque_debug::implement!(Protected<T>);
+
+// TODO: Docs
 impl<T> Protected<T> {
     /// Create a new `Protected` from an inner value.
     pub fn new(x: T) -> Self
@@ -52,7 +55,7 @@ mod tests {
 
     #[test]
     fn test_new_array() {
-        let x = Protected::init_from_inner([0u8; 32]);
+        let x = Protected::new([0u8; 32]);
         assert_eq!(x.0, [0u8; 32]);
     }
 

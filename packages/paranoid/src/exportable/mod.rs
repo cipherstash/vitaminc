@@ -5,6 +5,7 @@ use serde::{
 };
 
 // TODO: Docs
+#[derive(Debug)]
 pub struct Exportable<T>(pub(crate) T);
 
 impl<T> Exportable<T> {
@@ -77,6 +78,15 @@ where
 mod tests {
     use super::*;
     use crate::{Equatable, Protected};
+
+    #[test]
+    fn test_opaque_debug() {
+        let x: Exportable<Protected<[u8; 32]>> = Exportable::new([0u8; 32]);
+        assert_eq!(
+            format!("{:?}", x),
+            "Exportable(Protected<[u8; 32]> { ... })"
+        );
+    }
 
     #[test]
     fn test_serialize_deserialize() {
