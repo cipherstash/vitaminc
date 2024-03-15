@@ -8,6 +8,7 @@ use serde::{
 #[derive(Debug)]
 pub struct Exportable<T>(pub(crate) T);
 
+// TODO: Can we implement Hex and Base64 for inner types that implement them?
 impl<T> Exportable<T> {
     /// Create a new `Exportable` from an inner value.
     pub fn new(x: <Exportable<T> as ParanoidPrivate>::Inner) -> Self

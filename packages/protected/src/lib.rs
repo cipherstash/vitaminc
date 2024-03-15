@@ -1,4 +1,5 @@
 mod conversions;
+mod digest;
 mod equatable;
 mod exportable;
 mod indexable;
@@ -15,6 +16,7 @@ pub use equatable::Equatable;
 pub use exportable::Exportable;
 pub use indexable::Indexable;
 pub use usage::{DefaultScope, Scope, Usage};
+pub use digest::ProtectedDigest;
 
 // TODO: Add compile tests
 

@@ -1,7 +1,7 @@
 use crate::{private::ParanoidPrivate, Protected};
 use zeroize::Zeroize;
 // TODO: Feature flag
-use generic_array::{ArrayLength, GenericArray};
+use digest::generic_array::{ArrayLength, GenericArray};
 
 impl<T: Zeroize> From<T> for Protected<T> {
     fn from(x: T) -> Self {
@@ -17,7 +17,7 @@ impl<const N: usize> From<[char; N]> for Protected<String> {
 
 impl<const N: usize, U> From<GenericArray<u8, U>> for Protected<[u8; N]>
 where
-    U: ArrayLength,
+    U: ArrayLength<u8>,
     [u8; N]: From<GenericArray<u8, U>>,
 {
     fn from(x: GenericArray<u8, U>) -> Self {
@@ -28,7 +28,6 @@ where
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU8;
-
     use super::*;
 
     macro_rules! test_integer_into_protected {
@@ -89,7 +88,7 @@ mod tests {
 
     #[test]
     fn test_from_generic_array() {
-        let x: GenericArray<u8, generic_array::typenum::U3> = generic_array::arr![1, 2, 3];
+        let x: GenericArray<u8, digest::generic_array::typenum::U3> = digest::generic_array::arr![u8; 1, 2, 3];
         let y: Protected<[u8; 3]> = x.into();
         assert_eq!(y.0, [1, 2, 3]);
     }
