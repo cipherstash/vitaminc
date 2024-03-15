@@ -1,4 +1,4 @@
-use crate::{private::ParanoidPrivate, Exportable, Protected};
+use crate::{private::ParanoidPrivate, Exportable, Paranoid, Protected};
 use core::num::NonZeroU16;
 use subtle::ConstantTimeEq as SubtleCtEq;
 use zeroize::Zeroize;
@@ -134,6 +134,8 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Equatable<T> {
         self.0.inner()
     }
 }
+
+impl<T> Paranoid for Equatable<T> where T: ParanoidPrivate {}
 
 // TODO: Further constrain this
 impl<T> From<T> for Equatable<Protected<T>>
