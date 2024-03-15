@@ -5,6 +5,8 @@ mod exportable;
 mod indexable;
 mod usage;
 
+use std::marker::PhantomData;
+
 use private::ParanoidPrivate;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -16,7 +18,7 @@ pub use digest::ProtectedDigest;
 pub use equatable::Equatable;
 pub use exportable::Exportable;
 pub use indexable::Indexable;
-pub use usage::{DefaultScope, Scope, Usage};
+pub use usage::{Acceptable, DefaultScope, Scope, Usage};
 
 // TODO: Add compile tests
 
@@ -66,6 +68,11 @@ impl<T> Protected<T> {
     /// ```
     pub fn exportable(self) -> Exportable<Self> {
         Exportable(self)
+    }
+
+    // TODO: This needs to be implemented for all types (put on the Paranoid trait)
+    pub fn for_scope<S: Scope>(self) -> Usage<Self, S> {
+        Usage(self, PhantomData)
     }
 }
 
