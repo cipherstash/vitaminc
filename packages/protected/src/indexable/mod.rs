@@ -39,6 +39,10 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Indexable<T> {
     fn inner(&self) -> &Self::Inner {
         self.0.inner()
     }
+
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        self.0.inner_mut()
+    }
 }
 
 #[cfg(test)]

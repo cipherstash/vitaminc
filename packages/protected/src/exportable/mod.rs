@@ -45,6 +45,10 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Exportable<T> {
     fn inner(&self) -> &Self::Inner {
         self.0.inner()
     }
+
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        self.0.inner_mut()
+    }
 }
 
 impl<T> Paranoid for Exportable<T> where T: ParanoidPrivate {}

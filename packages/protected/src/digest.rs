@@ -1,40 +1,15 @@
 use crate::Paranoid;
 use digest::generic_array::GenericArray;
 use digest::Digest;
+use digest::FixedOutputReset;
+use digest::Output;
 use digest::OutputSizeUser;
-
-pub trait ProtectedDigestTmp {
-    //: OutputSizeUser {
-    type OutputType: Paranoid; // TODO: Also implements Acceptable<DefaultScope> + Acceptable<MyScope> + Acceptable<OtherScope> + ...
-
-    // Required methods
-    fn new() -> Self;
-    fn new_with_prefix<T>(data: &T) -> Self
-    where
-        T: Paranoid,
-        T::Inner: AsRef<[u8]>;
-    fn update<T>(&mut self, data: &T)
-    where
-        T: Paranoid,
-        T::Inner: AsRef<[u8]>;
-    //fn chain_update(self, data: impl AsRef<[u8]>) -> Self;
-    fn finalize(self) -> Self::OutputType;
-    /*fn finalize_into(self, out: &mut Output<Self>);
-    fn finalize_reset(&mut self) -> Output<Self>
-       where Self: FixedOutputReset;
-    fn finalize_into_reset(&mut self, out: &mut Output<Self>)
-       where Self: FixedOutputReset;
-    fn reset(&mut self)
-       where Self: Reset;
-    fn output_size() -> usize;
-    fn digest(data: impl AsRef<[u8]>) -> Output<Self>;*/
-}
+use digest::Reset;
 
 pub struct ProtectedDigest<D: Digest>(D);
 
-// TODO: Implement all of the Digest methods for ProtectedDigest
 // TODO: Implement Usage scopes
-// TODO: How can we force that the Digest types have Zeroize enabled? (Its a feature in the digest crate)
+// TODO: How can we force that the Digest types have Zeroize enabled? (Its a feature in the digest crate but in the 0.11.0.pre versions)
 impl<D: Digest> ProtectedDigest<D> {
     pub fn new() -> Self {
         Self(D::new())
@@ -63,6 +38,56 @@ impl<D: Digest> ProtectedDigest<D> {
         let result = self.0.finalize();
         result.into()
     }
+
+    pub fn finalize_into<'m, T>(self, out: &'m mut T)
+    where
+        T: Paranoid,
+        &'m mut GenericArray<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T::Inner>,
+    {
+        let target: &mut Output<D> = out.inner_mut().into();
+        self.0.finalize_into(target);
+    }
+
+    pub fn finalize_reset<T>(&mut self) -> T
+    where
+        D: FixedOutputReset,
+        T: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
+    {
+        let result = self.0.finalize_reset();
+        result.into()
+    }
+
+    pub fn finalize_into_reset<'m, T>(&'m mut self, out: &'m mut T)
+    where
+        D: FixedOutputReset,
+        T: Paranoid,
+        &'m mut GenericArray<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T::Inner>,
+    {
+        let target: &mut Output<D> = out.inner_mut().into();
+        Digest::finalize_into_reset(&mut self.0, target);
+    }
+
+    pub fn reset(&mut self)
+    where
+        D: Reset,
+    {
+        Digest::reset(&mut self.0);
+    }
+
+    pub fn output_size() -> usize {
+        <D as Digest>::output_size()
+    }
+
+    pub fn digest<T, O>(data: &T) -> O
+    where
+        T: Paranoid,
+        T::Inner: AsRef<[u8]>,
+        O: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
+    {
+        let mut hasher = Self::new();
+        hasher.update(data);
+        hasher.finalize()
+    }
 }
 
 #[cfg(test)]
@@ -72,10 +97,26 @@ mod tests {
     use sha2::{Sha256, Sha384};
 
     #[test]
-    fn test_digest_sha256() {
+    fn test_digest_sha256_finalize() {
         let mut digest: ProtectedDigest<Sha256> = ProtectedDigest::new();
         digest.update(&Protected::new([0u8; 32]));
         let result: Protected<[u8; 32]> = digest.finalize();
+        assert_eq!(
+            result.equatable(),
+            Protected::new([
+                102, 104, 122, 173, 248, 98, 189, 119, 108, 143, 193, 139, 142, 159, 142, 32, 8,
+                151, 20, 133, 110, 226, 51, 179, 144, 42, 89, 29, 13, 95, 41, 37
+            ])
+            .equatable()
+        );
+    }
+
+    #[test]
+    fn test_digest_sha256_finalize_into() {
+        let mut digest: ProtectedDigest<Sha256> = ProtectedDigest::new();
+        digest.update(&Protected::new([0u8; 32]));
+        let mut result = Protected::new([0u8; 32]);
+        digest.finalize_into(&mut result);
         assert_eq!(
             result.equatable(),
             Protected::new([

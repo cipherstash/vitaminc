@@ -84,6 +84,10 @@ where
     fn inner(&self) -> &T {
         &self.0
     }
+
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        &mut self.0
+    }
 }
 
 impl<T> Paranoid for Protected<T> where T: Zeroize {}

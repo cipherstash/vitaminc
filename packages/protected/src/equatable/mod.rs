@@ -133,6 +133,10 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Equatable<T> {
     fn inner(&self) -> &Self::Inner {
         self.0.inner()
     }
+
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        self.0.inner_mut()
+    }
 }
 
 impl<T> Paranoid for Equatable<T> where T: ParanoidPrivate {}
