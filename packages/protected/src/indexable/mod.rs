@@ -13,12 +13,15 @@ impl<T> Indexable<T> {
     }
 }
 
+/// Indexable allows you to index into a Paranoid type.
+/// Note that the returned value will implement `Zeroize` but not `ConstantTimeEq`.
 impl<T> Index<usize> for Indexable<T>
 where
     T: ParanoidPrivate,
     <T as ParanoidPrivate>::Inner: Index<usize>,
 {
-    type Output = <<T as ParanoidPrivate>::Inner as Index<usize>>::Output; // TODO: Wrap this in a Protected
+    // TODO: Wrap this in a Protected
+    type Output = <<T as ParanoidPrivate>::Inner as Index<usize>>::Output;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.inner()[index]
