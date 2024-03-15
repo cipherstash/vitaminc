@@ -12,11 +12,11 @@ mod private;
 pub trait Paranoid: private::ParanoidPrivate {}
 
 // Exports
+pub use digest::ProtectedDigest;
 pub use equatable::Equatable;
 pub use exportable::Exportable;
 pub use indexable::Indexable;
 pub use usage::{DefaultScope, Scope, Usage};
-pub use digest::ProtectedDigest;
 
 // TODO: Add compile tests
 

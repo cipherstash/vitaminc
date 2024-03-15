@@ -1,6 +1,6 @@
 use crate::{private::ParanoidPrivate, Protected};
 use zeroize::Zeroize;
-// TODO: Feature flag
+// TODO: Feature flag?
 use digest::generic_array::{ArrayLength, GenericArray};
 
 impl<T: Zeroize> From<T> for Protected<T> {
@@ -27,7 +27,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use digest::consts::U48;
     use std::num::NonZeroU8;
+
     use super::*;
 
     macro_rules! test_integer_into_protected {
@@ -88,8 +90,23 @@ mod tests {
 
     #[test]
     fn test_from_generic_array() {
-        let x: GenericArray<u8, digest::generic_array::typenum::U3> = digest::generic_array::arr![u8; 1, 2, 3];
+        let x: GenericArray<u8, digest::generic_array::typenum::U3> =
+            digest::generic_array::arr![u8; 1, 2, 3];
         let y: Protected<[u8; 3]> = x.into();
         assert_eq!(y.0, [1, 2, 3]);
+    }
+
+    #[test]
+    fn test_from_generic_array_48() {
+        let x: GenericArray<u8, U48> = digest::generic_array::arr![u8; 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48];
+        let y: Protected<[u8; 48]> = x.into();
+        assert_eq!(
+            y.0,
+            [
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+                24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+                45, 46, 47, 48
+            ]
+        );
     }
 }
