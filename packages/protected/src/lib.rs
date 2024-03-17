@@ -6,7 +6,6 @@ mod indexable;
 mod usage;
 
 use std::marker::PhantomData;
-
 use equatable::ConstantTimeEq;
 use private::ParanoidPrivate;
 use serde::Serialize;
@@ -39,6 +38,25 @@ impl<T> Protected<T> {
         T: Zeroize,
     {
         Self(x)
+    }
+
+    /// Create a `Protected` from an inner value which may also be adapted.
+    /// Return values must be given a type hint which means this is mostly useful to handle creation
+    /// of adapted types. If you want to create a non-adapted `Protected` from an inner value, use `new`.
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// use protected::{Protected, Equatable, Usage};
+    /// let x: Protected<[u8; 32]> = Protected::from_inner([0u8; 32]);
+    /// let y: Equatable<Protected<String>> = Protected::from_inner(String::from("hello"));
+    /// let z: Usage<Equatable<Protected<u32>>> = Protected::from_inner(500);
+    /// ```
+    pub fn from_inner<O>(x: T) -> O
+    where
+        O: ParanoidPrivate<Inner = T>,
+    {
+        O::init_from_inner(x)
     }
 
     /// Convert this `Protected` into one that is equatable in constant time.

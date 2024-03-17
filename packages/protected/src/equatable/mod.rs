@@ -47,7 +47,7 @@ use zeroize::Zeroize;
 /// ```
 /// use protected::{Exportable, Equatable, Protected};
 /// let x: Equatable<Protected<[u8; 16]>> = Equatable::new([0u8; 16]);
-/// let y: Exportable<Equatable<Protected<[u8; 16]>>> = Exportable::new([0u8; 16]);
+/// let y: Exportable<Equatable<Protected<[u8; 16]>>> = Protected::from_inner([0u8; 16]);
 ///
 /// assert_eq!(x, y);
 /// ```
@@ -79,7 +79,7 @@ use zeroize::Zeroize;
 ///
 /// impl AuthenticatedString {
 ///     fn new(tag: [u8; 32], value: String) -> Self {
-///         Self { tag: Equatable::new(tag), value }
+///         Self { tag: Protected::from_inner(tag), value }
 ///     }
 /// }
 ///
