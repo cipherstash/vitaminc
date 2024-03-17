@@ -2,6 +2,7 @@ use crate::{private::ParanoidPrivate, Paranoid, Protected};
 use std::marker::PhantomData;
 
 // TODO: Docs, explain compile time
+#[derive(Debug)]
 pub struct Usage<T, Scope = DefaultScope>(pub(crate) T, pub(crate) PhantomData<Scope>);
 
 impl<T, S> Usage<T, S> {
@@ -11,6 +12,16 @@ impl<T, S> Usage<T, S> {
         S: Scope,
     {
         Self::init_from_inner(x)
+    }
+}
+
+impl<T, S> From<T> for Usage<T, S>
+where
+    T: ParanoidPrivate,
+    S: Scope,
+{
+    fn from(x: T) -> Self {
+        Self(x, PhantomData)
     }
 }
 

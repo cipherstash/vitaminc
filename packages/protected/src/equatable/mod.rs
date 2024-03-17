@@ -104,15 +104,6 @@ impl<T> Equatable<T> {
     }
 }
 
-impl<T> From<T> for Equatable<T>
-where
-    T: ParanoidPrivate,
-{
-    fn from(x: T) -> Self {
-        Self(x)
-    }
-}
-
 impl<T: ParanoidPrivate> Equatable<T>
 where
     T::Inner: ConstantTimeEq,
@@ -141,13 +132,12 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Equatable<T> {
 
 impl<T> Paranoid for Equatable<T> where T: ParanoidPrivate {}
 
-// TODO: Further constrain this
-impl<T> From<T> for Equatable<Protected<T>>
+impl<T> From<T> for Equatable<T>
 where
-    T: Into<Protected<T>> + Zeroize,
+    T: ParanoidPrivate,
 {
     fn from(x: T) -> Self {
-        Self(Protected::init_from_inner(x))
+        Self(x)
     }
 }
 
@@ -299,7 +289,7 @@ mod tests {
     #[test]
     fn test_safe_eq_arr() {
         // Using 2 ways to get an equatable value
-        let x: Equatable<Protected<[u8; 16]>> = Equatable::from([0u8; 16]);
+        let x: Equatable<Protected<[u8; 16]>> = Equatable::new([0u8; 16]);
         let y: Equatable<Protected<[u8; 16]>> = Equatable::new([0u8; 16]);
 
         assert_eq!(x, y);
@@ -308,7 +298,7 @@ mod tests {
 
     #[test]
     fn test_conversion() {
-        let x: Equatable<Protected<u8>> = 0.into();
+        let x: Equatable<Protected<u8>> = Equatable::new(0);
         let a: Equatable<Protected<u8>> = Protected::new(0).into();
         let b = Protected::<u8>::new(0).equatable();
 
@@ -320,7 +310,7 @@ mod tests {
     fn test_conversion_2() {
         // TODO: Create a macro to test lots of these
         let x: Protected<[u8; 16]> = [0u8; 16].into();
-        let y: Equatable<Protected<[u8; 16]>> = [0u8; 16].into();
+        let y: Equatable<Protected<[u8; 16]>> = Equatable::new([0u8; 16]);
         assert_eq!(y, x.equatable());
     }
 

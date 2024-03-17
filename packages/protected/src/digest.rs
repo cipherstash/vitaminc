@@ -8,13 +8,13 @@ use digest::Output;
 use digest::OutputSizeUser;
 use digest::Reset;
 
-pub struct ProtectedDigest<D, InputScope = DefaultScope>(D, PhantomData<InputScope>);
+pub struct ProtectedDigest<D, InputScope = DefaultScope, OutputScope = DefaultScope>(D, PhantomData<InputScope>, PhantomData<OutputScope>);
 
 // TODO: Implement Usage scopes
 // TODO: How can we force that the Digest types have Zeroize enabled? (Its a feature in the digest crate but in the 0.11.0.pre versions)
-impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
+impl<D: Digest, InputScope: Scope, OutputScope: Scope> ProtectedDigest<D, InputScope, OutputScope> {
     pub fn new() -> Self {
-        Self(D::new(), PhantomData)
+        Self(D::new(), PhantomData, PhantomData)
     }
 
     pub fn new_with_prefix<T>(data: &T) -> Self
@@ -22,7 +22,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
         T: Paranoid + Acceptable<InputScope>,
         T::Inner: AsRef<[u8]>,
     {
-        Self(D::new_with_prefix(data.inner()), PhantomData)
+        Self(D::new_with_prefix(data.inner()), PhantomData, PhantomData)
     }
 
     pub fn update<T>(&mut self, data: &T)
@@ -35,7 +35,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
 
     pub fn finalize<T>(self) -> T
     where
-        T: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
+        T: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>> + Acceptable<OutputScope>,
     {
         let result = self.0.finalize();
         result.into()
@@ -43,7 +43,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
 
     pub fn finalize_into<'m, T>(self, out: &'m mut T)
     where
-        T: Paranoid,
+        T: Paranoid + Acceptable<OutputScope>,
         &'m mut GenericArray<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T::Inner>,
     {
         let target: &mut Output<D> = out.inner_mut().into();
@@ -53,7 +53,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
     pub fn finalize_reset<T>(&mut self) -> T
     where
         D: FixedOutputReset,
-        T: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
+        T: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>> + Acceptable<OutputScope>,
     {
         let result = self.0.finalize_reset();
         result.into()
@@ -62,7 +62,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
     pub fn finalize_into_reset<'m, T>(&'m mut self, out: &'m mut T)
     where
         D: FixedOutputReset,
-        T: Paranoid,
+        T: Paranoid+ Acceptable<OutputScope>,
         &'m mut GenericArray<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T::Inner>,
     {
         let target: &mut Output<D> = out.inner_mut().into();
@@ -84,7 +84,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
     where
         T: Paranoid + Acceptable<InputScope>,
         T::Inner: AsRef<[u8]>,
-        O: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
+        O: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>> + Acceptable<OutputScope>,
     {
         let mut hasher = Self::new();
         hasher.update(data);
@@ -98,6 +98,7 @@ mod tests {
     use crate::{Protected, Usage};
     use sha2::{Sha256, Sha384};
 
+    #[derive(Debug)]
     struct TestScope;
     impl Scope for TestScope {}
 
@@ -121,6 +122,22 @@ mod tests {
         let mut digest: ProtectedDigest<Sha256, TestScope> = ProtectedDigest::new();
         digest.update(&Protected::new([0; 32]).for_scope::<TestScope>());
         let result: Protected<[u8; 32]> = digest.finalize();
+        assert_eq!(
+            result.equatable(),
+            Protected::new([
+                102, 104, 122, 173, 248, 98, 189, 119, 108, 143, 193, 139, 142, 159, 142, 32, 8,
+                151, 20, 133, 110, 226, 51, 179, 144, 42, 89, 29, 13, 95, 41, 37
+            ])
+            .equatable()
+        );
+    }
+
+    // TODO: Test with Adapters
+    #[test]
+    fn test_digest_acceptable_output() {
+        let mut digest: ProtectedDigest<Sha256, DefaultScope, TestScope> = ProtectedDigest::new();
+        digest.update(&Protected::new([0; 32]));
+        let result: Usage<Protected<[u8; 32]>, TestScope> = digest.finalize();
         assert_eq!(
             result.equatable(),
             Protected::new([
