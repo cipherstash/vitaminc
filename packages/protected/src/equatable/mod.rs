@@ -1,4 +1,4 @@
-use crate::{private::ParanoidPrivate, Exportable, Paranoid, Protected};
+use crate::{private::ParanoidPrivate, Exportable, Paranoid};
 use core::num::NonZeroU16;
 use subtle::ConstantTimeEq as SubtleCtEq;
 use zeroize::Zeroize;
@@ -11,7 +11,7 @@ use zeroize::Zeroize;
 ///
 /// ```
 /// use protected::{Equatable, Protected};
-/// let x: Equatable<Protected<u8>> = 42.into();
+/// let x: Equatable<Protected<u8>> = Equatable::new(42);
 /// let y: Equatable<Protected<u8>> = Protected::new(42).into();
 /// let z: Equatable<Protected<u8>> = Protected::new(42).equatable();
 /// ```
@@ -22,8 +22,8 @@ use zeroize::Zeroize;
 ///
 /// ```
 /// use protected::{Equatable, Protected};
-/// let x: Equatable<Protected<u8>> = 112.into();
-/// let y: Equatable<Protected<u8>> = 112.into();
+/// let x: Equatable<Protected<u8>> = Equatable::new(112);
+/// let y: Equatable<Protected<u8>> = Equatable::new(112);
 ///
 /// assert!(x.constant_time_eq(&y));
 /// ```
@@ -32,8 +32,8 @@ use zeroize::Zeroize;
 ///
 /// ```
 /// use protected::{Equatable, Protected};
-/// let x: Equatable<Protected<u8>> = 112.into();
-/// let y: Equatable<Protected<u8>> = 112.into();
+/// let x: Equatable<Protected<u8>> = Equatable::new(112);
+/// let y: Equatable<Protected<u8>> = Equatable::new(112);
 /// assert_eq!(x, y);
 /// ```
 ///
@@ -46,7 +46,7 @@ use zeroize::Zeroize;
 ///
 /// ```
 /// use protected::{Exportable, Equatable, Protected};
-/// let x: Equatable<Protected<[u8; 16]>> = [0u8; 16].into();
+/// let x: Equatable<Protected<[u8; 16]>> = Equatable::new([0u8; 16]);
 /// let y: Exportable<Equatable<Protected<[u8; 16]>>> = Exportable::new([0u8; 16]);
 ///
 /// assert_eq!(x, y);
@@ -79,7 +79,7 @@ use zeroize::Zeroize;
 ///
 /// impl AuthenticatedString {
 ///     fn new(tag: [u8; 32], value: String) -> Self {
-///         Self { tag: tag.into(), value }
+///         Self { tag: Equatable::new(tag), value }
 ///     }
 /// }
 ///

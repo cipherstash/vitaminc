@@ -4,7 +4,7 @@ resolver = "2"
 members = [
     "packages/protected",
     "packages/password",
-    "packages/primitives",
+    #"packages/primitives",
     "packages/random",
     #"packages/safe_eq",
 ]

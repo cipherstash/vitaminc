@@ -47,11 +47,7 @@ impl<T, Scope> Paranoid for Usage<T, Scope> where T: ParanoidPrivate {}
 pub trait Scope {}
 
 /// Marker trait for types that are acceptable in a certain scope.
-pub trait Acceptable<S>
-where
-    S: Scope,
-{
-}
+pub trait Acceptable<S: Scope> {}
 
 impl<T, S> Acceptable<S> for Usage<T, S> where S: Scope {}
 

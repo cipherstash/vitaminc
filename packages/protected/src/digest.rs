@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use crate::private::ParanoidPrivate;
 use crate::{Acceptable, DefaultScope, Paranoid, Scope};
 use digest::generic_array::GenericArray;
 use digest::Digest;
@@ -35,10 +36,12 @@ impl<D: Digest, InputScope: Scope, OutputScope: Scope> ProtectedDigest<D, InputS
 
     pub fn finalize<T>(self) -> T
     where
-        T: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>> + Acceptable<OutputScope>,
+        T: ParanoidPrivate + Acceptable<OutputScope>,
+        T::Inner: From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
     {
         let result = self.0.finalize();
-        result.into()
+        let inner: T::Inner = result.into();
+        T::init_from_inner(inner)
     }
 
     pub fn finalize_into<'m, T>(self, out: &'m mut T)
@@ -84,7 +87,8 @@ impl<D: Digest, InputScope: Scope, OutputScope: Scope> ProtectedDigest<D, InputS
     where
         T: Paranoid + Acceptable<InputScope>,
         T::Inner: AsRef<[u8]>,
-        O: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>> + Acceptable<OutputScope>,
+        O::Inner: From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
+        O: Paranoid + Acceptable<OutputScope>,
     {
         let mut hasher = Self::new();
         hasher.update(data);
