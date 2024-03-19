@@ -87,7 +87,7 @@ use zeroize::Zeroize;
 /// let b = AuthenticatedString::new([0u8; 32], "Hello, world!".to_string());
 /// assert_eq!(a, b);
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Zeroize)]
 pub struct Equatable<T>(pub(crate) T);
 
 impl<T> Equatable<T> {

@@ -29,6 +29,8 @@ impl<T> Exportable<T> {
 }
 
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
+/// FIXME: This is wrong! It should only work if an inner is wrapped in an Equatable
+/// That might mean we need another trait
 impl<T, O> PartialEq<O> for Exportable<T>
 where
     T: ParanoidPrivate,
@@ -94,6 +96,7 @@ mod tests {
         version: u8,
     }
 
+    // FIXME: This shoudn't compile because key shouldn't implement PartialEq
     #[derive(Serialize, Deserialize, Zeroize, Debug, PartialEq)]
     struct ProtectedFoo {
         key: Exportable<Protected<[u8; 32]>>,
