@@ -1,4 +1,7 @@
-use crate::{private::ParanoidPrivate, Exportable, Paranoid};
+use crate::{
+    private::{self, ParanoidPrivate},
+    Exportable, IsEquatable, Paranoid,
+};
 use core::num::NonZeroU16;
 use subtle::ConstantTimeEq as SubtleCtEq;
 use zeroize::Zeroize;
@@ -19,16 +22,7 @@ use zeroize::Zeroize;
 /// # Constant time comparisons
 ///
 /// `Equatable` requires that types are equatable in constant time.
-///
-/// ```
-/// use protected::{Equatable, Protected};
-/// let x: Equatable<Protected<u8>> = Equatable::new(112);
-/// let y: Equatable<Protected<u8>> = Equatable::new(112);
-///
-/// assert!(x.constant_time_eq(&y));
-/// ```
-///
-/// The `Equatable` type also implements `PartialEq` and `Eq` for easy comparison using the constant time implementation.
+/// It implements `PartialEq`.
 ///
 /// ```
 /// use protected::{Equatable, Protected};
@@ -104,19 +98,14 @@ impl<T> Equatable<T> {
     }
 }
 
-impl<T: ParanoidPrivate> Equatable<T>
-where
-    T::Inner: ConstantTimeEq,
-{
-    pub fn constant_time_eq(&self, other: &Self) -> bool {
-        self.inner().constant_time_eq(other.inner())
-    }
-}
+/// Equatable types implement equatable directly.
+impl<T> private::Equatable for Equatable<T> where T: ParanoidPrivate {}
+impl<T> IsEquatable for Equatable<T> where T: ParanoidPrivate {}
 
-// TODO: Canwe make a blanket impl for all Paranoid types?
 impl<T: ParanoidPrivate> ParanoidPrivate for Equatable<T> {
     type Inner = T::Inner;
 
+    // TODO: Make this a trait default
     fn init_from_inner(x: Self::Inner) -> Self {
         Self(T::init_from_inner(x))
     }
@@ -130,7 +119,7 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Equatable<T> {
     }
 }
 
-impl<T> Paranoid for Equatable<T> where T: ParanoidPrivate {}
+impl<T> Paranoid for Equatable<T> where T: Paranoid {}
 
 impl<T> From<T> for Equatable<T>
 where
@@ -144,8 +133,8 @@ where
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
 impl<T, O> PartialEq<O> for Equatable<T>
 where
-    T: ParanoidPrivate,
-    O: ParanoidPrivate,
+    T: Paranoid,
+    O: Paranoid,
     <T as ParanoidPrivate>::Inner: ConstantTimeEq<O::Inner>,
 {
     fn eq(&self, other: &O) -> bool {
@@ -153,17 +142,18 @@ where
     }
 }
 
-impl<T, O> ConstantTimeEq<O> for Equatable<T>
+impl<T, O> ConstantTimeEq<O> for Equatable<Equatable<T>>
 where
-    T: ParanoidPrivate,
-    O: ParanoidPrivate,
+    T: Paranoid,
+    O: Paranoid,
     <T as ParanoidPrivate>::Inner: ConstantTimeEq<O::Inner>,
 {
     fn constant_time_eq(&self, other: &O) -> bool {
-        self.inner().constant_time_eq(other.inner())
+        self.0.constant_time_eq(other)
     }
 }
 
+// TODO: Move this to a separate crate
 pub trait ConstantTimeEq<Rhs: ?Sized = Self> {
     /// This method tests for `self` and `other` values to be equal, using constant time operations.
     /// Implementations will mostly use `ConstantTimeEq::ct_eq` to achieve this but because
@@ -293,7 +283,6 @@ mod tests {
         let y: Equatable<Protected<[u8; 16]>> = Equatable::new([0u8; 16]);
 
         assert_eq!(x, y);
-        assert!(x.constant_time_eq(&y));
     }
 
     #[test]
@@ -328,7 +317,6 @@ mod tests {
         let y: Equatable<Protected<u8>> = Equatable::new(27);
 
         assert_eq!(x, y);
-        assert!(x.constant_time_eq(&y));
     }
 
     #[test]
@@ -337,7 +325,6 @@ mod tests {
         let y: Equatable<Protected<u8>> = Equatable::new(0);
 
         assert_ne!(x, y);
-        assert!(!x.constant_time_eq(&y));
     }
 
     #[test]

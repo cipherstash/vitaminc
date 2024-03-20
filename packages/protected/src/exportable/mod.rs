@@ -1,13 +1,17 @@
 mod safe_serialize;
 
-use crate::{equatable::ConstantTimeEq, private::ParanoidPrivate, Equatable, Paranoid};
+use self::safe_serialize::SafeType;
+pub use self::safe_serialize::{SafeDeserialize, SafeSerialize};
+use crate::{
+    equatable::ConstantTimeEq,
+    private::{self, ParanoidPrivate},
+    Equatable, IsEquatable, Paranoid,
+};
 use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
 };
 use zeroize::Zeroize;
-pub use self::safe_serialize::{SafeDeserialize, SafeSerialize};
-use self::safe_serialize::SafeType;
 
 // TODO: Docs
 #[derive(Debug, Zeroize)]
@@ -28,13 +32,16 @@ impl<T> Exportable<T> {
     }
 }
 
+/// Equatable types implement equatable directly.
+impl<T> private::Equatable for Exportable<T> where T: Paranoid + private::Equatable {}
+impl<T> IsEquatable for Exportable<T> where T: Paranoid + IsEquatable {}
+
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
-/// FIXME: This is wrong! It should only work if an inner is wrapped in an Equatable
-/// That might mean we need another trait
 impl<T, O> PartialEq<O> for Exportable<T>
 where
-    T: ParanoidPrivate,
-    O: ParanoidPrivate,
+    T: ParanoidPrivate + IsEquatable,
+    O: ParanoidPrivate + IsEquatable,
+    //<T as ParanoidPrivate>::Inner: ConstantTimeEq<O::Inner>,
     <T as ParanoidPrivate>::Inner: ConstantTimeEq<O::Inner>,
 {
     fn eq(&self, other: &O) -> bool {
@@ -58,13 +65,23 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Exportable<T> {
     }
 }
 
-impl<T> Serialize for Exportable<T> where T:ParanoidPrivate, T::Inner: SafeSerialize {
+impl<T> Serialize for Exportable<T>
+where
+    T: ParanoidPrivate,
+    T::Inner: SafeSerialize,
+{
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.inner().safe_serialize(serializer).map(|x| x.into_inner())
+        self.inner()
+            .safe_serialize(serializer)
+            .map(|x| x.into_inner())
     }
 }
 
-impl<'de, T> Deserialize<'de> for Exportable<T> where T:ParanoidPrivate, T::Inner: SafeDeserialize<'de> {
+impl<'de, T> Deserialize<'de> for Exportable<T>
+where
+    T: ParanoidPrivate,
+    T::Inner: SafeDeserialize<'de>,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -74,13 +91,17 @@ impl<'de, T> Deserialize<'de> for Exportable<T> where T:ParanoidPrivate, T::Inne
     }
 }
 
-impl<T> SafeSerialize for Exportable<T> where T:ParanoidPrivate, T::Inner: SafeSerialize {
+impl<T> SafeSerialize for Exportable<T>
+where
+    T: ParanoidPrivate,
+    T::Inner: SafeSerialize,
+{
     fn safe_serialize<S: Serializer>(&self, serializer: S) -> Result<SafeType<S::Ok>, S::Error> {
         self.inner().safe_serialize(serializer)
     }
 }
 
-impl<T> Paranoid for Exportable<T> where T: ParanoidPrivate {}
+impl<T> Paranoid for Exportable<T> where T: Paranoid {}
 
 #[cfg(test)]
 mod tests {
@@ -96,14 +117,18 @@ mod tests {
         version: u8,
     }
 
-    // FIXME: This shoudn't compile because key shouldn't implement PartialEq
-    #[derive(Serialize, Deserialize, Zeroize, Debug, PartialEq)]
+    #[derive(Serialize, Deserialize, Zeroize, Debug)]
     struct ProtectedFoo {
-        key: Exportable<Protected<[u8; 32]>>,
+        key: Exportable<Equatable<Protected<[u8; 32]>>>,
         version: u8,
-    } 
+    }
     impl SafeSerialize for ProtectedFoo {}
     impl<'de> SafeDeserialize<'de> for ProtectedFoo {}
+    impl ConstantTimeEq for ProtectedFoo {
+        fn constant_time_eq(&self, other: &Self) -> bool {
+            self.key == other.key && self.version == other.version
+        }
+    }
 
     #[test]
     fn test_opaque_debug() {
@@ -158,7 +183,8 @@ mod tests {
         let x: Exportable<Protected<ProtectedFoo>> = Protected::new(ProtectedFoo {
             key: Exportable::new([0u8; 32]),
             version: 1,
-        }).exportable();
+        })
+        .exportable();
         let y = bincode::serialize(&x).unwrap();
 
         let z: Foo = bincode::deserialize(&y).unwrap();
@@ -171,11 +197,12 @@ mod tests {
         let x: Exportable<Protected<ProtectedFoo>> = Protected::new(ProtectedFoo {
             key: Exportable::new([0u8; 32]),
             version: 1,
-        }).exportable();
+        })
+        .exportable();
         let y = bincode::serialize(&x).unwrap();
 
         let z: Exportable<Protected<ProtectedFoo>> = bincode::deserialize(&y).unwrap();
         // TODO: would be nice to do assert_eq!(z.equatable(), x.equatable()); but we need a derive macro for ConstantTimeEq
-        assert_eq!(z.inner(), x.inner());
+        assert_eq!(z.equatable(), x.equatable());
     }
 }

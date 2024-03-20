@@ -9,7 +9,11 @@ use digest::Output;
 use digest::OutputSizeUser;
 use digest::Reset;
 
-pub struct ProtectedDigest<D, InputScope = DefaultScope, OutputScope = DefaultScope>(D, PhantomData<InputScope>, PhantomData<OutputScope>);
+pub struct ProtectedDigest<D, InputScope = DefaultScope, OutputScope = DefaultScope>(
+    D,
+    PhantomData<InputScope>,
+    PhantomData<OutputScope>,
+);
 
 // TODO: Implement Usage scopes
 // TODO: How can we force that the Digest types have Zeroize enabled? (Its a feature in the digest crate but in the 0.11.0.pre versions)
@@ -56,7 +60,9 @@ impl<D: Digest, InputScope: Scope, OutputScope: Scope> ProtectedDigest<D, InputS
     pub fn finalize_reset<T>(&mut self) -> T
     where
         D: FixedOutputReset,
-        T: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>> + Acceptable<OutputScope>,
+        T: Paranoid
+            + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>
+            + Acceptable<OutputScope>,
     {
         let result = self.0.finalize_reset();
         result.into()
@@ -65,7 +71,7 @@ impl<D: Digest, InputScope: Scope, OutputScope: Scope> ProtectedDigest<D, InputS
     pub fn finalize_into_reset<'m, T>(&'m mut self, out: &'m mut T)
     where
         D: FixedOutputReset,
-        T: Paranoid+ Acceptable<OutputScope>,
+        T: Paranoid + Acceptable<OutputScope>,
         &'m mut GenericArray<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T::Inner>,
     {
         let target: &mut Output<D> = out.inner_mut().into();

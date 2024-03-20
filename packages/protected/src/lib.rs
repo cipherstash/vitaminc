@@ -5,10 +5,10 @@ mod exportable;
 mod indexable;
 mod usage;
 
-use std::marker::PhantomData;
 use equatable::ConstantTimeEq;
 use private::ParanoidPrivate;
 use serde::Serialize;
+use std::marker::PhantomData;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 mod private;
@@ -43,9 +43,9 @@ impl<T> Protected<T> {
     /// Create a `Protected` from an inner value which may also be adapted.
     /// Return values must be given a type hint which means this is mostly useful to handle creation
     /// of adapted types. If you want to create a non-adapted `Protected` from an inner value, use `new`.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```
     /// use protected::{Protected, Equatable, Usage};
     /// let x: Protected<[u8; 32]> = Protected::from_inner([0u8; 32]);
@@ -120,25 +120,35 @@ pub trait Paranoid: private::ParanoidPrivate {
     fn equatable(self) -> Equatable<Self>
     where
         Self: Sized,
-        Self::Inner: ConstantTimeEq {
-            Equatable(self)
-        }
+        Self::Inner: ConstantTimeEq,
+    {
+        Equatable(self)
+    }
 
     fn exportable(self) -> Exportable<Self>
     where
         Self: Sized,
-        Self::Inner: Serialize {
-            Exportable(self)
-        }
-
-    fn for_scope<S: Scope>(self) -> Usage<Self, S>
+        Self::Inner: Serialize,
     {
-        Usage(self, PhantomData)
+        Exportable(self)
     }
 
+    fn for_scope<S: Scope>(self) -> Usage<Self, S> {
+        Usage(self, PhantomData)
+    }
 }
 
 impl<T> Paranoid for Protected<T> where T: Zeroize {}
+
+pub trait IsEquatable: private::Equatable {
+    fn constant_time_eq<O>(&self, other: &O) -> bool
+    where
+        O: ParanoidPrivate,
+        Self::Inner: ConstantTimeEq<O::Inner>,
+    {
+        self.inner().constant_time_eq(other.inner())
+    }
+}
 
 #[cfg(test)]
 mod tests {

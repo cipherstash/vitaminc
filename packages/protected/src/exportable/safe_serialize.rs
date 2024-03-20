@@ -17,23 +17,29 @@ pub trait SafeSerialize: Serialize {
 pub trait SafeDeserialize<'de>: Deserialize<'de> {
     fn safe_deserialize<D>(deserializer: D) -> Result<SafeType<Self>, D::Error>
     where
-        D: Deserializer<'de>
+        D: Deserializer<'de>,
     {
         Self::deserialize(deserializer).map(SafeType)
     }
 }
 
-impl<const N: usize> SafeSerialize for [u8; N] where [u8; N]: Serialize {
+impl<const N: usize> SafeSerialize for [u8; N]
+where
+    [u8; N]: Serialize,
+{
     fn safe_serialize<S: Serializer>(&self, serializer: S) -> Result<SafeType<S::Ok>, S::Error> {
         // TODO: Make this a method on SafeType (but call it SafeSerializer or something)
         serdect::array::serialize_hex_lower_or_bin(&self, serializer).map(SafeType)
     }
 }
 
-impl<'de, const N: usize> SafeDeserialize<'de> for [u8; N] where [u8; N]: Deserialize<'de> + Default {
+impl<'de, const N: usize> SafeDeserialize<'de> for [u8; N]
+where
+    [u8; N]: Deserialize<'de> + Default,
+{
     fn safe_deserialize<D>(deserializer: D) -> Result<SafeType<Self>, D::Error>
     where
-        D: Deserializer<'de>
+        D: Deserializer<'de>,
     {
         let mut buf: Self = Default::default();
         serdect::array::deserialize_hex_or_bin(&mut buf, deserializer)?;
