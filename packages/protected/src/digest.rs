@@ -102,6 +102,14 @@ impl<D: Digest, InputScope: Scope, OutputScope: Scope> ProtectedDigest<D, InputS
     }
 }
 
+impl<D: Digest, InputScope: Scope, OutputScope: Scope> Default
+    for ProtectedDigest<D, InputScope, OutputScope>
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
