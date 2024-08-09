@@ -50,10 +50,10 @@ pub trait Paranoid: private::ParanoidPrivate {
 
     /// Iterate over the inner value and wrap each element in a `Protected`.
     /// `I` must be `Copy` because [Protected] always takes ownership of the inner value.
-    fn iter<'a, I: 'a>(&'a self) -> impl Iterator<Item = Protected<I>>
+    fn iter<'a, I>(&'a self) -> impl Iterator<Item = Protected<I>>
     where
         <Self as ParanoidPrivate>::Inner: AsRef<[I]>,
-        I: Copy,
+        I: Copy + 'a,
     {
         self.inner().as_ref().iter().copied().map(Protected)
     }

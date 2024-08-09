@@ -15,7 +15,7 @@ impl<'k, K> BitwisePermutation<'k, K> {
     where
         T: BitwisePermutableBy<K>,
     {
-        input.permute(&self.0)
+        input.permute(self.0)
     }
 }
 

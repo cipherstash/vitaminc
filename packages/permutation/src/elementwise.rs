@@ -14,7 +14,7 @@ impl<'k, K> Permutation<'k, K> {
     where
         T: PermutableBy<K>,
     {
-        input.permute(&self.0)
+        input.permute(self.0)
     }
 }
 
