@@ -1,4 +1,6 @@
-use crate::private::ParanoidPrivate;
+use zeroize::DefaultIsZeroes;
+
+use crate::{private::ParanoidPrivate, Paranoid, Protected};
 use std::ops::Index;
 
 pub struct Indexable<T>(pub(crate) T);
@@ -15,18 +17,20 @@ impl<T> Indexable<T> {
 
 /// Indexable allows you to index into a Paranoid type.
 /// Note that the returned value will implement `Zeroize` but not `ConstantTimeEq`.
-impl<T> Index<usize> for Indexable<T>
+/*impl<T> Index<Protected<usize>> for Indexable<T>
 where
     T: ParanoidPrivate,
-    <T as ParanoidPrivate>::Inner: Index<usize>,
+    <T as ParanoidPrivate>::Inner: Index<usize> + Sized,
+    <<T as ParanoidPrivate>::Inner as Index<usize>>::Output: Sized + DefaultIsZeroes,
 {
     // TODO: Wrap this in a Protected
-    type Output = <<T as ParanoidPrivate>::Inner as Index<usize>>::Output;
+    type Output = Protected<&'a <<T as ParanoidPrivate>::Inner as Index<usize>>::Output>;
 
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.inner()[index]
+    fn index(&self, index: Protected<usize>) -> &Self::Output {
+        let inner = self.inner()[index.0];
+        &Protected::new(&inner)
     }
-}
+}*/
 
 // TODO: Canwe make a blanket impl for all Paranoid types?
 impl<T: ParanoidPrivate> ParanoidPrivate for Indexable<T> {
@@ -43,16 +47,22 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Indexable<T> {
     fn inner_mut(&mut self) -> &mut Self::Inner {
         self.0.inner_mut()
     }
+
+    fn into_innner(self) -> Self::Inner {
+        self.0.into_innner()
+    }
 }
+
+impl<T> Paranoid for Indexable<T> where T: ParanoidPrivate {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Protected;
 
-    #[test]
+    /*#[test]
     fn indexable() {
         let x: Indexable<Protected<[u8; 4]>> = Indexable::new([1, 2, 3, 4]);
-        assert_eq!(x[0], 1);
-    }
+        assert_eq!(x[Protected::new(0)], 1);
+    }*/
 }

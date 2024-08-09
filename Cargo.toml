@@ -4,11 +4,13 @@ resolver = "2"
 members = [
     "packages/protected",
     "packages/password",
-    "packages/primitives",
-    "packages/random",
+    #"packages/primitives",
+    "packages/random", "packages/permutation",
     #"packages/safe_eq",
 ]
 
 [workspace.dependencies]
+bitvec = "1.0.1"
+rand = "0.8.5"
 thiserror = "1.0.57"
 zeroize = "1.7.0"

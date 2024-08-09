@@ -137,6 +137,10 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Equatable<T> {
     fn inner_mut(&mut self) -> &mut Self::Inner {
         self.0.inner_mut()
     }
+
+    fn into_innner(self) -> Self::Inner {
+        self.0.into_innner()
+    }
 }
 
 impl<T> Paranoid for Equatable<T> where T: ParanoidPrivate {}
@@ -288,7 +292,7 @@ impl ConstantTimeEq for String {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Equatable, Exportable, Protected};
+    use crate::{Equatable, Exportable, Paranoid, Protected};
 
     #[test]
     fn test_opaque_debug() {

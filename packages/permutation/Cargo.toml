@@ -1,0 +1,13 @@
+[package]
+name = "permutation"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+protected = { path = "../protected", features = ["bitvec"] }
+random = { path = "../random" }
+
+bitvec = { workspace = true }
+rand = { workspace = true }
+zeroize = { workspace = true }
+serde_json = "1.0.122"

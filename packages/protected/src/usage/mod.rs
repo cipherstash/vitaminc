@@ -28,6 +28,10 @@ impl<T: ParanoidPrivate, Scope> ParanoidPrivate for Usage<T, Scope> {
     fn inner_mut(&mut self) -> &mut Self::Inner {
         self.0.inner_mut()
     }
+
+    fn into_innner(self) -> Self::Inner {
+        self.0.into_innner()
+    }
 }
 
 impl<T, Scope> Paranoid for Usage<T, Scope> where T: ParanoidPrivate {}

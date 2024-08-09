@@ -5,13 +5,59 @@ mod exportable;
 mod indexable;
 mod usage;
 
-use std::marker::PhantomData;
-
 use private::ParanoidPrivate;
+use std::marker::PhantomData;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 mod private;
-pub trait Paranoid: private::ParanoidPrivate {}
+
+#[cfg(feature = "bitvec")]
+pub mod bitvec;
+
+pub mod slice_index;
+
+// TODO: This trait is similar to the Iterator trait in std
+// Implement for all "adapter" types - Equatable, Exportable, etc.
+// Come up with a better name for it
+pub trait Paranoid: private::ParanoidPrivate {
+    /// Convert this `Protected` into one that is equatable in constant time.
+    /// Returns a new `Equatable` adapter.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use protected::{Equatable, Protected};
+    ///
+    /// let x = Protected::new([0u8; 32]);
+    /// let y: Equatable<Protected<[u8; 32]>> = x.equatable();
+    /// ```
+    fn equatable(self) -> Equatable<Self> {
+        Equatable(self)
+    }
+
+    fn indexable(self) -> Indexable<Self> {
+        Indexable(self)
+    }
+
+    // TODO: Make this behave like Option and Result where the caller only has to worry about the inner type
+    fn map<B, F>(self, f: F) -> B
+    where
+        F: FnOnce(<Self as ParanoidPrivate>::Inner) -> B,
+        B: Paranoid,
+    {
+        f(self.into_innner())
+    }
+
+    /// Iterate over the inner value and wrap each element in a `Protected`.
+    /// `I` must be `Copy` because [Protected] always takes ownership of the inner value.
+    fn iter<'a, I: 'a>(&'a self) -> impl Iterator<Item = Protected<I>>
+    where
+        <Self as ParanoidPrivate>::Inner: AsRef<[I]>,
+        I: Copy,
+    {
+        self.inner().as_ref().iter().copied().map(Protected)
+    }
+}
 
 // Exports
 pub use digest::ProtectedDigest;
@@ -38,21 +84,6 @@ impl<T> Protected<T> {
         T: Zeroize,
     {
         Self(x)
-    }
-
-    /// Convert this `Protected` into one that is equatable in constant time.
-    /// Returns a new `Equatable` adapter.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use protected::{Equatable, Protected};
-    ///
-    /// let x = Protected::new([0u8; 32]);
-    /// let y: Equatable<Protected<[u8; 32]>> = x.equatable();
-    /// ```
-    pub fn equatable(self) -> Equatable<Self> {
-        Equatable(self)
     }
 
     /// Convert this `Protected` into one that is exportable in constant time using Serde.
@@ -94,6 +125,10 @@ where
 
     fn inner_mut(&mut self) -> &mut Self::Inner {
         &mut self.0
+    }
+
+    fn into_innner(self) -> Self::Inner {
+        self.0
     }
 }
 
