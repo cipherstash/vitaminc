@@ -137,13 +137,13 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Equatable<T> {
     fn inner_mut(&mut self) -> &mut Self::Inner {
         self.0.inner_mut()
     }
-
-    fn into_innner(self) -> Self::Inner {
-        self.0.into_innner()
-    }
 }
 
-impl<T> Paranoid for Equatable<T> where T: ParanoidPrivate {}
+impl<T> Paranoid for Equatable<T> where T: Paranoid {
+    fn unwrap(self) -> Self::Inner {
+        self.0.unwrap()
+    }
+}
 
 // TODO: Further constrain this
 impl<T> From<T> for Equatable<Protected<T>>

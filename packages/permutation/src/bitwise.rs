@@ -19,6 +19,7 @@ impl<'k, K> BitwisePermutation<'k, K> {
     }
 }
 
+// TODO: Convert this to BitwisePermute (like Permute)
 // TODO: Make this a private trait
 pub trait BitwisePermutableBy<K> {
     fn permute(self, key: &K) -> Self;

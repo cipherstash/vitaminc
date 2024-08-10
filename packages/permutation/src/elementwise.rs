@@ -1,45 +1,84 @@
 use protected::{Paranoid, Protected};
 use zeroize::Zeroize;
-
 use crate::PermutationKey;
 
-pub struct Permutation<'k, K>(&'k K);
-
-impl<'k, K> Permutation<'k, K> {
-    pub fn new(k: &'k K) -> Self {
-        Self(k)
-    }
-
-    pub fn permute<T>(&self, input: T) -> T
-    where
-        T: PermutableBy<K>,
-    {
-        input.permute(self.0)
-    }
-}
-
 // TODO: Make this a private trait
-pub trait PermutableBy<K> {
-    fn permute(self, key: &K) -> Self;
+pub trait Permute<T> {
+    fn permute(&self, input: T) -> T;
 }
 
-impl<const N: usize, T> PermutableBy<PermutationKey<N>> for Protected<[T; N]>
+impl<const N: usize, T> Permute<Protected<[T; N]>> for PermutationKey<N>
 where
     T: Zeroize + Default + Copy,
 {
-    fn permute(self, key: &PermutationKey<N>) -> Self {
-        self.map(|source| {
+    fn permute(&self, input: Protected<[T; N]>) -> Protected<[T; N]> {
+        input.map(|source| {
             // TODO: Use MaybeUninit
-            let out = key
+            let out = self
                 .iter()
                 .enumerate()
                 .fold([Default::default(); N], |mut out, (i, k)| {
-                    let k2 = k.map(|x| Protected::from(x as usize));
-                    out[i] = source[k2];
+                    out[i] = source[k.map(|x| Protected::from(x as usize))];
                     out
                 });
 
             Protected::new(out)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use protected::{Paranoid, Protected};
+    use rand::SeedableRng;
+    use random::Generatable;
+    use crate::{PermutationKey, Permute};
+
+    fn gen_key<const N: usize>(seed: [u8; 32]) -> PermutationKey<N> {
+        let mut rng = random::SafeRand::from_seed(seed);
+        PermutationKey::generate(&mut rng).expect("Failed to generate key")
+    }
+
+    fn array_gen<const N: usize>() -> [u8; N] {
+        let mut input: [u8; N] = [0; N];
+        input.iter_mut().enumerate().for_each(|(i, x)| {
+            *x = (i + 1) as u8;
+        });
+        input
+    }
+
+    macro_rules! permutation_test {
+        ($name:ident, $N:expr, $expected:expr) => {
+            #[test]
+            fn $name() {
+                let input: Protected<[u8; $N]> = Protected::generate(array_gen);
+                let key = gen_key([0; 32]);
+                let output = key.permute(input);
+                assert_eq!(output.unwrap(), $expected);
+            }
+        };
+    }
+
+    permutation_test!(test_permutation_4, 4, [2, 4, 1, 3]);
+    permutation_test!(test_permutation_8, 8, [3, 4, 6, 7, 8, 5, 1, 2]);
+    permutation_test!(test_permutation_16, 16, [13, 8, 4, 6, 9, 16, 12, 1, 5, 14, 15, 7, 11, 2, 3, 10]);
+    permutation_test!(test_permutation_32, 32,
+        [13, 9, 28, 12, 22, 24, 1, 15, 26, 11, 27, 31, 30, 20, 21, 8, 17, 3, 25, 18, 10, 32, 7, 29, 2, 14, 6, 16, 23, 4, 5, 19]
+    );
+
+    #[test]
+    fn test_associativity() {
+        let key_1 = gen_key([0; 32]);
+        let key_2 = gen_key([1; 32]);
+
+        // p_2(p_1(input))
+        let input: Protected<[u8; 8]> = Protected::generate(array_gen);
+        let output_1 = key_2.permute(key_1.permute(input));
+
+        // p_2(p_1)(input)
+        let input: Protected<[u8; 8]> = Protected::generate(array_gen);
+        let output_2 = key_2.permute(key_1).permute(input);
+
+        assert_eq!(output_1.unwrap(), output_2.unwrap());
     }
 }

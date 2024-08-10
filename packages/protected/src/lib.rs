@@ -20,6 +20,29 @@ pub mod slice_index;
 // Implement for all "adapter" types - Equatable, Exportable, etc.
 // Come up with a better name for it
 pub trait Paranoid: private::ParanoidPrivate {
+    /// Generate a new `Protected` from a function that returns the inner value.
+    /// 
+    /// # Example
+    /// 
+    /// ```
+    /// use protected::Protected;
+    /// fn array_gen<const N: usize>() -> [u8; N] {
+    ///     let mut input: [u8; N] = [0; N];
+    ///     input.iter_mut().enumerate().for_each(|(i, x)| {
+    ///         *x = (i + 1) as u8;
+    ///     });
+    ///     input
+    /// }
+    /// let input: Protected<[u8; 8]> = Protected::generate(array_gen);
+    /// assert_eq!(input.unwrap(), [1, 2, 3, 4, 5, 6, 7, 8]);
+    /// ```
+    fn generate<F>(f: F) -> Self
+    where
+        F: FnOnce() -> Self::Inner,
+    {
+        Self::init_from_inner(f())
+    }
+
     /// Convert this `Protected` into one that is equatable in constant time.
     /// Returns a new `Equatable` adapter.
     ///
@@ -45,7 +68,7 @@ pub trait Paranoid: private::ParanoidPrivate {
         F: FnOnce(<Self as ParanoidPrivate>::Inner) -> B,
         B: Paranoid,
     {
-        f(self.into_innner())
+        f(self.unwrap())
     }
 
     /// Iterate over the inner value and wrap each element in a `Protected`.
@@ -57,6 +80,9 @@ pub trait Paranoid: private::ParanoidPrivate {
     {
         self.inner().as_ref().iter().copied().map(Protected)
     }
+
+    // TODO: Consider making this unsafe
+    fn unwrap(self) -> Self::Inner;
 }
 
 // Exports
@@ -126,13 +152,13 @@ where
     fn inner_mut(&mut self) -> &mut Self::Inner {
         &mut self.0
     }
+}
 
-    fn into_innner(self) -> Self::Inner {
+impl<T> Paranoid for Protected<T> where T: Zeroize {
+    fn unwrap(self) -> Self::Inner {
         self.0
     }
 }
-
-impl<T> Paranoid for Protected<T> where T: Zeroize {}
 
 #[cfg(test)]
 mod tests {

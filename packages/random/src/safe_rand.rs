@@ -52,6 +52,7 @@ impl RngCore for SafeRand {
 }
 
 impl SeedableRng for SafeRand {
+    // TODO: This should be a ProtectedSeed! Maybe a GAT?
     type Seed = [u8; 32];
 
     fn from_seed(seed: Self::Seed) -> Self {

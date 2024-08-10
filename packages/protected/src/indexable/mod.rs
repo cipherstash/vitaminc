@@ -47,13 +47,13 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Indexable<T> {
     fn inner_mut(&mut self) -> &mut Self::Inner {
         self.0.inner_mut()
     }
-
-    fn into_innner(self) -> Self::Inner {
-        self.0.into_innner()
-    }
 }
 
-impl<T> Paranoid for Indexable<T> where T: ParanoidPrivate {}
+impl<T> Paranoid for Indexable<T> where T: Paranoid {
+    fn unwrap(self) -> Self::Inner {
+        self.0.unwrap()
+    }
+}
 
 #[cfg(test)]
 mod tests {
