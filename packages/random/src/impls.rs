@@ -16,3 +16,15 @@ impl Generatable for NonZeroU16 {
         }
     }
 }
+
+impl<const N: usize> Generatable for [u8; N] {
+    fn generate(rng: &mut SafeRand) -> Result<Self, RandomError> {
+        // TODO: Consider using MaybeUninit
+        let mut buf: [u8; N] = [0; N];
+
+        buf.try_fill(rng)
+            .map_err(|_| RandomError::GenerationFailed)?;
+
+        Ok(buf)
+    }
+}

@@ -63,6 +63,7 @@ pub trait Paranoid: private::ParanoidPrivate {
     }
 
     // TODO: Make this behave like Option and Result where the caller only has to worry about the inner type
+    // TODO: This will have to be a trait to allow for multiple implementations - we can't make it generic or that would allow arbitrary conversion
     fn map<B, F>(self, f: F) -> B
     where
         F: FnOnce(<Self as ParanoidPrivate>::Inner) -> B,
@@ -70,6 +71,8 @@ pub trait Paranoid: private::ParanoidPrivate {
     {
         f(self.unwrap())
     }
+
+    // TODO: A transpose method would be helpful, too! Like Option<Result<T, E>> -> Result<Option<T>, E>
 
     /// Iterate over the inner value and wrap each element in a `Protected`.
     /// `I` must be `Copy` because [Protected] always takes ownership of the inner value.
@@ -157,6 +160,14 @@ where
 impl<T> Paranoid for Protected<T> where T: Zeroize {
     fn unwrap(self) -> Self::Inner {
         self.0
+    }
+}
+
+impl<T> Copy for Protected<T> where T: Copy {}
+
+impl<T> Clone for Protected<T> where T: Clone {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 
