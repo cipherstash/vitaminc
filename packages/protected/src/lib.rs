@@ -84,6 +84,9 @@ pub trait Paranoid: private::ParanoidPrivate {
         self.inner().as_ref().iter().copied().map(Protected)
     }
 
+    // TODO: into_iter will be handy for recipher
+    //fn into_iter(self) -> impl Iterator<Item = Self::Inner> where Self::Inner: IntoIterator;
+        
     // TODO: Consider making this unsafe
     fn unwrap(self) -> Self::Inner;
 }
