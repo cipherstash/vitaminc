@@ -2,7 +2,7 @@ use bitvec::{array::BitArray, order::Msb0};
 use protected::{Paranoid, Protected};
 use std::num::{NonZeroU128, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8};
 
-use crate::PermutationKey;
+use crate::{PermutationKey, ValidPermutationSize};
 
 pub struct BitwisePermutation<'k, K>(&'k K);
 
@@ -27,7 +27,10 @@ pub trait BitwisePermutableBy<K> {
 
 macro_rules! impl_bitwise_permutable {
     ($N:literal, $int_type:ty, $nonzero_type:ty, $array_size:expr) => {
-        impl BitwisePermutableBy<PermutationKey<$N>> for Protected<$nonzero_type> {
+        impl BitwisePermutableBy<PermutationKey<$N>> for Protected<$nonzero_type>
+        where
+            $nonzero_type: ValidPermutationSize,
+        {
             fn permute(self, key: &PermutationKey<$N>) -> Self {
                 self.map(|x| {
                     let bytes = x.get().to_be_bytes();

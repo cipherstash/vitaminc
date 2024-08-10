@@ -18,11 +18,28 @@ pub fn identity<const N: usize>() -> Protected<[u8; N]> {
     })
 }
 
+use std::num::{NonZeroU128, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8};
+
+pub trait ValidPermutationSize {}
+
+// TODO: These can probably be just on the array rather than the protected
+impl ValidPermutationSize for Protected<[u8; 4]> {}
+impl ValidPermutationSize for Protected<[u8; 8]> {}
+impl ValidPermutationSize for Protected<[u8; 16]> {}
+impl ValidPermutationSize for Protected<[u8; 32]> {}
+impl ValidPermutationSize for Protected<[u8; 64]> {}
+impl ValidPermutationSize for Protected<[u8; 128]> {}
+impl ValidPermutationSize for NonZeroU8 {}
+impl ValidPermutationSize for NonZeroU16 {}
+impl ValidPermutationSize for NonZeroU32 {}
+impl ValidPermutationSize for NonZeroU64 {}
+impl ValidPermutationSize for NonZeroU128 {}
+
 #[cfg(test)]
 mod tests {
+    use crate::PermutationKey;
     use rand::SeedableRng;
     use random::Generatable;
-    use crate::PermutationKey;
 
     pub fn gen_rand_key<const N: usize>() -> PermutationKey<N> {
         let mut rng = random::SafeRand::from_entropy();

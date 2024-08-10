@@ -3,7 +3,10 @@ use rand::Rng;
 use random::Generatable;
 use zeroize::Zeroize;
 
-use crate::{elementwise::Permute, identity};
+use crate::{
+    elementwise::{Depermute, Permute},
+    identity, ValidPermutationSize,
+};
 
 #[derive(Copy, Clone, Debug)]
 pub struct PermutationKey<const N: usize>(Protected<[u8; N]>);
@@ -17,29 +20,21 @@ pub struct PermutationKey<const N: usize>(Protected<[u8; N]>);
     }
 }*/
 
-impl<const N: usize> PermutationKey<N> {
+impl<const N: usize> PermutationKey<N>
+where
+    Protected<[u8; N]>: ValidPermutationSize,
+{
     /// # Safety
-    /// 
+    ///
     /// This function is unsafe because it does not check that the key is a valid permutation.
-    /// 
+    ///
     pub unsafe fn new_unchecked(key: [u8; N]) -> Self {
         Self(Protected::new(key))
     }
 
     /// Consumes the key and returns its inverse.
     pub fn invert(self) -> Self {
-        // TODO: This could be implemented as depermute the identity
-        let x = self.0.map(|source| {
-            let mut inverted = [0; N];
-            for (mut i, mut elem) in source.into_iter().enumerate() {
-                inverted[elem as usize] = i as u8;
-                i.zeroize();
-                elem.zeroize();
-            }
-            Protected::new(inverted)
-        });
-
-        Self(x)
+        Self(self.depermute(identity::<N>()))
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = Protected<u8>> + '_ {
@@ -49,16 +44,15 @@ impl<const N: usize> PermutationKey<N> {
 
 impl<const N: usize> Generatable for PermutationKey<N> {
     fn generate(rng: &mut random::SafeRand) -> Result<Self, random::RandomError> {
-        let key =
-            identity::<N>().map(|mut key| {
-                for i in (0..N).rev() {
-                    // TODO: Confirm that this uses rejection sampling to avoid modulo bias
-                    let mut j = rng.gen_range(0..=i);
-                    key.swap(i, j);
-                    j.zeroize();
-                }
-                Protected::new(key)
-            });
+        let key = identity::<N>().map(|mut key| {
+            for i in (0..N).rev() {
+                // TODO: Confirm that this uses rejection sampling to avoid modulo bias
+                let mut j = rng.gen_range(0..=i);
+                key.swap(i, j);
+                j.zeroize();
+            }
+            Protected::new(key)
+        });
 
         Ok(Self(key))
     }
@@ -66,6 +60,8 @@ impl<const N: usize> Generatable for PermutationKey<N> {
 
 /// A permutation key can be permuted by another permutation key.
 impl<const N: usize> Permute<PermutationKey<N>> for PermutationKey<N>
+where
+    Protected<[u8; N]>: ValidPermutationSize,
 {
     fn permute(&self, input: PermutationKey<N>) -> PermutationKey<N> {
         let x = input.0.map(|source| {
@@ -86,18 +82,25 @@ impl<const N: usize> Permute<PermutationKey<N>> for PermutationKey<N>
 
 #[cfg(test)]
 mod tests {
-    use protected::Paranoid;
-    use crate::{elementwise::Permute, identity};
     use super::PermutationKey;
+    use crate::{elementwise::Permute, identity, ValidPermutationSize};
+    use protected::{Paranoid, Protected};
 
     use crate::tests;
 
-    fn test_key_invert<const N: usize>() {
+    fn test_key_invert<const N: usize>()
+    where
+        Protected<[u8; N]>: ValidPermutationSize,
+    {
         let key: PermutationKey<N> = tests::gen_rand_key();
         let inverted = key.invert();
 
         // p(p^-1(x)) = x
-        assert_eq!(key.permute(inverted).0.unwrap(), identity::<N>().unwrap(), "Failed to invert key of size {N}");
+        assert_eq!(
+            key.permute(inverted).0.unwrap(),
+            identity::<N>().unwrap(),
+            "Failed to invert key of size {N}"
+        );
     }
 
     #[test]
