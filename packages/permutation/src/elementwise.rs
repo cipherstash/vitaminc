@@ -48,37 +48,39 @@ mod tests {
     }
 
     macro_rules! permutation_test {
-        ($name:ident, $N:expr, $expected:expr) => {
-            #[test]
-            fn $name() {
-                let input: Protected<[u8; $N]> = Protected::generate(array_gen);
-                let key = gen_key([0; 32]);
-                let output = key.permute(input);
-                assert_eq!(output.unwrap(), $expected);
+        ($N:expr, $expected:expr) => {
+            paste::item! {
+                #[test]
+                fn [< test_permutation_ $N >]() {
+                    let input: Protected<[u8; $N]> = Protected::generate(array_gen);
+                    let key = gen_key([0; 32]);
+                    let output = key.permute(input);
+                    assert_eq!(output.unwrap(), $expected);
+                }
+
+                #[test]
+                fn [< test_associativity_ $N >]() {
+                    let key_1 = gen_key([0; 32]);
+                    let key_2 = gen_key([1; 32]);
+            
+                    // p_2(p_1(input))
+                    let input: Protected<[u8; 8]> = Protected::generate(array_gen);
+                    let output_1 = key_2.permute(key_1.permute(input));
+            
+                    // p_2(p_1)(input)
+                    let input: Protected<[u8; 8]> = Protected::generate(array_gen);
+                    let output_2 = key_2.permute(key_1).permute(input);
+            
+                    assert_eq!(output_1.unwrap(), output_2.unwrap());
+                }
             }
         };
     }
 
-    permutation_test!(test_permutation_4, 4, [2, 4, 1, 3]);
-    permutation_test!(test_permutation_8, 8, [3, 4, 6, 7, 8, 5, 1, 2]);
-    permutation_test!(test_permutation_16, 16, [13, 8, 4, 6, 9, 16, 12, 1, 5, 14, 15, 7, 11, 2, 3, 10]);
-    permutation_test!(test_permutation_32, 32,
+    permutation_test!(4, [2, 4, 1, 3]);
+    permutation_test!(8, [3, 4, 6, 7, 8, 5, 1, 2]);
+    permutation_test!(16, [13, 8, 4, 6, 9, 16, 12, 1, 5, 14, 15, 7, 11, 2, 3, 10]);
+    permutation_test!(32,
         [13, 9, 28, 12, 22, 24, 1, 15, 26, 11, 27, 31, 30, 20, 21, 8, 17, 3, 25, 18, 10, 32, 7, 29, 2, 14, 6, 16, 23, 4, 5, 19]
     );
-
-    #[test]
-    fn test_associativity() {
-        let key_1 = gen_key([0; 32]);
-        let key_2 = gen_key([1; 32]);
-
-        // p_2(p_1(input))
-        let input: Protected<[u8; 8]> = Protected::generate(array_gen);
-        let output_1 = key_2.permute(key_1.permute(input));
-
-        // p_2(p_1)(input)
-        let input: Protected<[u8; 8]> = Protected::generate(array_gen);
-        let output_2 = key_2.permute(key_1).permute(input);
-
-        assert_eq!(output_1.unwrap(), output_2.unwrap());
-    }
 }
