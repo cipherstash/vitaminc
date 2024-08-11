@@ -5,7 +5,7 @@ mod safe_rand;
 pub use safe_rand::SafeRand;
 
 // Re-exports
-pub use rand::{RngCore, SeedableRng};
+pub use rand::{Fill, RngCore, SeedableRng};
 
 #[derive(Error, Debug)]
 pub enum RandomError {
@@ -18,7 +18,7 @@ pub enum RandomError {
 /// The random number generator is passed as an argument to the `generate` method
 /// and must implement the `SafeRand` trait.
 pub trait Generatable: Sized {
-    fn generate(rng: &mut SafeRand) -> Result<Self, RandomError>;
+    fn random(rng: &mut SafeRand) -> Result<Self, RandomError>;
 }
 
 #[cfg(test)]
@@ -29,7 +29,7 @@ mod tests {
     #[test]
     fn test_generate_nonzerou16() -> Result<(), crate::RandomError> {
         let mut rng = SafeRand::from_entropy();
-        let value: NonZeroU16 = Generatable::generate(&mut rng)?;
+        let value: NonZeroU16 = Generatable::random(&mut rng)?;
         assert_ne!(value.get(), 0);
         Ok(())
     }

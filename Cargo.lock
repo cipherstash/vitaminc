@@ -110,8 +110,8 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 name = "password"
 version = "0.1.0"
 dependencies = [
- "protected",
- "random",
+ "vitaminc-protected",
+ "vitaminc-random",
 ]
 
 [[package]]
@@ -119,18 +119,6 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
-
-[[package]]
-name = "permutation"
-version = "0.1.0"
-dependencies = [
- "bitvec",
- "paste",
- "protected",
- "rand",
- "random",
- "zeroize",
-]
 
 [[package]]
 name = "ppv-lite86"
@@ -145,20 +133,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2422ad645d89c99f8f3e6b88a9fdeca7fabeac836b1002371c4367c8f984aae"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "protected"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "bitvec",
- "digest",
- "opaque-debug",
- "serde",
- "sha2",
- "subtle",
- "zeroize",
 ]
 
 [[package]]
@@ -204,15 +178,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
-]
-
-[[package]]
-name = "random"
-version = "0.1.0"
-dependencies = [
- "rand",
- "rand_chacha",
- "thiserror",
 ]
 
 [[package]]
@@ -306,6 +271,43 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "vitaminc-permutation"
+version = "0.1.0"
+dependencies = [
+ "bitvec",
+ "paste",
+ "rand",
+ "vitaminc-protected",
+ "vitaminc-random",
+ "zeroize",
+]
+
+[[package]]
+name = "vitaminc-protected"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "bitvec",
+ "digest",
+ "opaque-debug",
+ "serde",
+ "sha2",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "vitaminc-random"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "rand_chacha",
+ "thiserror",
+ "vitaminc-protected",
+ "zeroize",
+]
 
 [[package]]
 name = "wasi"

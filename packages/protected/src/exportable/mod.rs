@@ -51,7 +51,10 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Exportable<T> {
     }
 }
 
-impl<T> Paranoid for Exportable<T> where T: Paranoid {
+impl<T> Paranoid for Exportable<T>
+where
+    T: Paranoid,
+{
     fn unwrap(self) -> Self::Inner {
         self.0.unwrap()
     }

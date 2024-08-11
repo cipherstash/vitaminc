@@ -1,5 +1,5 @@
-use protected::Protected;
-use random::{Generatable, RandomError, SafeRand};
+use vitaminc_protected::Protected;
+use vitaminc_random::{Generatable, RandomError, SafeRand};
 
 const STANDARD_CHARS: [char; 94] = [
     'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S',
@@ -64,7 +64,7 @@ impl<const N: usize> AlphaPassword<N> {
 }
 
 impl<const N: usize> Generatable for Password<N> {
-    fn generate(rng: &mut SafeRand) -> Result<Self, RandomError> {
+    fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let mut password: [char; N] = [0x00 as char; N];
         (0..N).for_each(|i| {
             let char = rng.next_bounded_u32(STANDARD_CHARS.len() as u32);
@@ -75,7 +75,7 @@ impl<const N: usize> Generatable for Password<N> {
 }
 
 impl<const N: usize> Generatable for AlphaNumericPassword<N> {
-    fn generate(rng: &mut SafeRand) -> Result<Self, RandomError> {
+    fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let mut password: [char; N] = [0x00 as char; N];
         (0..N).for_each(|i| {
             let char = rng.next_bounded_u32(62);
@@ -86,7 +86,7 @@ impl<const N: usize> Generatable for AlphaNumericPassword<N> {
 }
 
 impl<const N: usize> Generatable for AlphaPassword<N> {
-    fn generate(rng: &mut SafeRand) -> Result<Self, RandomError> {
+    fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let mut password: [char; N] = [0x00 as char; N];
         (0..N).for_each(|i| {
             let char = rng.next_bounded_u32(52);
@@ -101,13 +101,13 @@ mod tests {
     use crate::{AlphaNumericPassword, AlphaPassword};
 
     use super::Password;
-    use random::{Generatable, SafeRand, SeedableRng};
+    use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 
     #[ignore = "wip"]
     #[test]
     fn test_generate_password() -> Result<(), crate::RandomError> {
         let mut rng = SafeRand::from_entropy();
-        let value: Password<16> = Generatable::generate(&mut rng)?;
+        let value: Password<16> = Generatable::random(&mut rng)?;
         dbg!(value.into_unprotected_string());
 
         assert!(false);
@@ -118,7 +118,7 @@ mod tests {
     #[test]
     fn test_generate_alphanumeric_password() -> Result<(), crate::RandomError> {
         let mut rng = SafeRand::from_entropy();
-        let value: AlphaNumericPassword<16> = Generatable::generate(&mut rng)?;
+        let value: AlphaNumericPassword<16> = Generatable::random(&mut rng)?;
         dbg!(value.into_unprotected_string());
 
         assert!(false);
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn test_generate_alpha_password() -> Result<(), crate::RandomError> {
         let mut rng = SafeRand::from_entropy();
-        let value: AlphaPassword<16> = Generatable::generate(&mut rng)?;
+        let value: AlphaPassword<16> = Generatable::random(&mut rng)?;
         dbg!(value.into_unprotected_string());
 
         assert!(false);

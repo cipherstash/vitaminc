@@ -49,7 +49,10 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Indexable<T> {
     }
 }
 
-impl<T> Paranoid for Indexable<T> where T: Paranoid {
+impl<T> Paranoid for Indexable<T>
+where
+    T: Paranoid,
+{
     fn unwrap(self) -> Self::Inner {
         self.0.unwrap()
     }

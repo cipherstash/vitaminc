@@ -139,7 +139,10 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Equatable<T> {
     }
 }
 
-impl<T> Paranoid for Equatable<T> where T: Paranoid {
+impl<T> Paranoid for Equatable<T>
+where
+    T: Paranoid,
+{
     fn unwrap(self) -> Self::Inner {
         self.0.unwrap()
     }

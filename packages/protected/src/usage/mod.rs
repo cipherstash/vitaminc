@@ -30,7 +30,10 @@ impl<T: ParanoidPrivate, Scope> ParanoidPrivate for Usage<T, Scope> {
     }
 }
 
-impl<T, Scope> Paranoid for Usage<T, Scope> where T: Paranoid {
+impl<T, Scope> Paranoid for Usage<T, Scope>
+where
+    T: Paranoid,
+{
     fn unwrap(self) -> Self::Inner {
         self.0.unwrap()
     }

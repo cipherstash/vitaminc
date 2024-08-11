@@ -1,5 +1,5 @@
 [package]
-name = "random"
+name = "vitaminc-random"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,3 +9,6 @@ edition = "2021"
 rand_chacha = "0.3.1"
 rand = { workspace = true }
 thiserror = { workspace = true }
+zeroize = { workspace = true }
+
+vitaminc-protected = { path = "../protected" }

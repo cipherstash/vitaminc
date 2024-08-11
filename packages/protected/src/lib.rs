@@ -3,6 +3,7 @@ mod digest;
 mod equatable;
 mod exportable;
 mod indexable;
+mod ops;
 mod usage;
 
 use private::ParanoidPrivate;
@@ -21,9 +22,9 @@ pub mod slice_index;
 // Come up with a better name for it
 pub trait Paranoid: private::ParanoidPrivate {
     /// Generate a new `Protected` from a function that returns the inner value.
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```
     /// use protected::Protected;
     /// fn array_gen<const N: usize>() -> [u8; N] {
@@ -36,11 +37,32 @@ pub trait Paranoid: private::ParanoidPrivate {
     /// let input: Protected<[u8; 8]> = Protected::generate(array_gen);
     /// assert_eq!(input.unwrap(), [1, 2, 3, 4, 5, 6, 7, 8]);
     /// ```
+    /// // TODO: A Generate Array could handle the MaybeUninit stuff
     fn generate<F>(f: F) -> Self
     where
         F: FnOnce() -> Self::Inner,
     {
         Self::init_from_inner(f())
+    }
+
+    /// Generate a new `Protected` from a function that returns a `Result` with the inner value.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use protected::Protected;
+    /// use std::string::FromUtf8Error;
+    ///
+    /// let input: Result<Protected<String>, FromUtf8Error> = Protected::generate_ok(|| {
+    ///    String::from_utf8(vec![1, 2, 3, 4, 5, 6, 7, 8])
+    /// });
+    /// ```
+    ///
+    fn generate_ok<F, E>(f: F) -> Result<Self, E>
+    where
+        F: FnOnce() -> Result<Self::Inner, E>,
+    {
+        f().map(Self::init_from_inner)
     }
 
     /// Convert this `Protected` into one that is equatable in constant time.
@@ -72,6 +94,15 @@ pub trait Paranoid: private::ParanoidPrivate {
         f(self.unwrap())
     }
 
+    fn zip<Other, Out, F>(self, b: Other, f: F) -> Self
+    where
+        Other: Paranoid,
+        Out: Paranoid,
+        F: FnOnce(Self::Inner, Other::Inner) -> Self::Inner,
+    {
+        Self::init_from_inner(f(self.unwrap(), b.unwrap()))
+    }
+
     // TODO: A transpose method would be helpful, too! Like Option<Result<T, E>> -> Result<Option<T>, E>
 
     /// Iterate over the inner value and wrap each element in a `Protected`.
@@ -86,10 +117,12 @@ pub trait Paranoid: private::ParanoidPrivate {
 
     // TODO: into_iter will be handy for recipher
     //fn into_iter(self) -> impl Iterator<Item = Self::Inner> where Self::Inner: IntoIterator;
-        
+
     // TODO: Consider making this unsafe
     fn unwrap(self) -> Self::Inner;
 }
+
+// TODO: Implement Collect for Protected (or Paranoid) so we can use collect() on iterators
 
 // Exports
 pub use digest::ProtectedDigest;
@@ -160,7 +193,10 @@ where
     }
 }
 
-impl<T> Paranoid for Protected<T> where T: Zeroize {
+impl<T> Paranoid for Protected<T>
+where
+    T: Zeroize,
+{
     fn unwrap(self) -> Self::Inner {
         self.0
     }
@@ -168,10 +204,37 @@ impl<T> Paranoid for Protected<T> where T: Zeroize {
 
 impl<T> Copy for Protected<T> where T: Copy {}
 
-impl<T> Clone for Protected<T> where T: Clone {
+impl<T> Clone for Protected<T>
+where
+    T: Clone,
+{
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
+}
+
+/// Convenience function to flatten an array of `Protected` into a `Protected` array.
+///
+/// # Example
+///
+/// ```
+/// use protected::{flatten_array, Protected};
+/// let x = Protected::new([0u8; 32]);
+/// let y = Protected::new([1u8; 32]);
+/// let z = Protected::new([2u8; 32]);
+/// let array = [x, y, z];
+/// let flattened = flatten_array(array);
+/// assert_eq!(flattened.unwrap(), [0u8; 32, 1u8; 32, 2u8; 32]);
+/// ```
+pub fn flatten_array<const N: usize, T>(array: [Protected<T>; N]) -> Protected<[T; N]>
+where
+    T: Zeroize + Default + Copy, // TODO: Default won't be needed if we use MaybeUninit
+{
+    let mut out: [T; N] = [Default::default(); N];
+    array.iter().enumerate().for_each(|(i, x)| {
+        out[i] = x.unwrap();
+    });
+    Protected::new(out)
 }
 
 #[cfg(test)]

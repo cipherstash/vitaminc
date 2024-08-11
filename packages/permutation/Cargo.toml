@@ -1,11 +1,11 @@
 [package]
-name = "permutation"
+name = "vitaminc-permutation"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-protected = { path = "../protected", features = ["bitvec"] }
-random = { path = "../random" }
+vitaminc-protected = { path = "../protected", features = ["bitvec"] }
+vitaminc-random = { path = "../random" }
 
 bitvec = { workspace = true }
 rand = { workspace = true }

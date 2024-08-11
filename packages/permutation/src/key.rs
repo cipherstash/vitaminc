@@ -1,11 +1,11 @@
-use protected::{Paranoid, Protected};
 use rand::Rng;
-use random::Generatable;
+use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_random::{Generatable, RandomError, SafeRand};
 use zeroize::Zeroize;
 
 use crate::{
     elementwise::{Depermute, Permute},
-    identity, ValidPermutationSize,
+    identity, IsPermutable,
 };
 
 #[derive(Copy, Clone, Debug)]
@@ -21,8 +21,8 @@ pub struct PermutationKey<const N: usize>(Protected<[u8; N]>);
 }*/
 
 impl<const N: usize> PermutationKey<N>
-where
-    Protected<[u8; N]>: ValidPermutationSize,
+//where
+//    [u8; N]: ValidPermutationSize,
 {
     /// # Safety
     ///
@@ -33,7 +33,10 @@ where
     }
 
     /// Consumes the key and returns its inverse.
-    pub fn invert(self) -> Self {
+    pub fn invert(self) -> Self
+    where
+        [u8; N]: IsPermutable,
+    {
         Self(self.depermute(identity::<N>()))
     }
 
@@ -43,7 +46,7 @@ where
 }
 
 impl<const N: usize> Generatable for PermutationKey<N> {
-    fn generate(rng: &mut random::SafeRand) -> Result<Self, random::RandomError> {
+    fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let key = identity::<N>().map(|mut key| {
             for i in (0..N).rev() {
                 // TODO: Confirm that this uses rejection sampling to avoid modulo bias
@@ -61,7 +64,7 @@ impl<const N: usize> Generatable for PermutationKey<N> {
 /// A permutation key can be permuted by another permutation key.
 impl<const N: usize> Permute<PermutationKey<N>> for PermutationKey<N>
 where
-    Protected<[u8; N]>: ValidPermutationSize,
+    [u8; N]: IsPermutable,
 {
     fn permute(&self, input: PermutationKey<N>) -> PermutationKey<N> {
         let x = input.0.map(|source| {
@@ -83,14 +86,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::PermutationKey;
-    use crate::{elementwise::Permute, identity, ValidPermutationSize};
-    use protected::{Paranoid, Protected};
+    use crate::{elementwise::Permute, identity, IsPermutable};
+    use vitaminc_protected::Paranoid;
 
     use crate::tests;
 
     fn test_key_invert<const N: usize>()
     where
-        Protected<[u8; N]>: ValidPermutationSize,
+        [u8; N]: IsPermutable,
     {
         let key: PermutationKey<N> = tests::gen_rand_key();
         let inverted = key.invert();

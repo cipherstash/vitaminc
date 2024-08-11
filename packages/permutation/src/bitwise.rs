@@ -1,31 +1,18 @@
 use bitvec::{array::BitArray, order::Msb0};
-use protected::{Paranoid, Protected};
 use std::num::{NonZeroU128, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8};
+use vitaminc_protected::{Paranoid, Protected};
 
-use crate::{PermutationKey, ValidPermutationSize};
+use crate::{IsPermutable, PermutationKey};
 
-pub struct BitwisePermutation<'k, K>(&'k K);
-
-impl<'k, K> BitwisePermutation<'k, K> {
-    pub fn new(k: &'k K) -> Self {
-        Self(k)
-    }
-
-    pub fn permute<T>(&self, input: T) -> T
-    where
-        T: BitwisePermutableBy<K>,
-    {
-        input.permute(self.0)
-    }
-}
-
-// TODO: Convert this to BitwisePermute (like Permute)
 // TODO: Make this a private trait
-pub trait BitwisePermutableBy<K> {
-    fn permute(self, key: &K) -> Self;
+pub trait BitwisePermute<T>
+where
+    T: IsPermutable,
+{
+    fn bitwise_permute(&self, input: Protected<T>) -> Protected<T>;
 }
 
-macro_rules! impl_bitwise_permutable {
+/*macro_rules! impl_bitwise_permutable {
     ($N:literal, $int_type:ty, $nonzero_type:ty, $array_size:expr) => {
         impl BitwisePermutableBy<PermutationKey<$N>> for Protected<$nonzero_type>
         where
@@ -56,3 +43,75 @@ impl_bitwise_permutable!(16, u16, NonZeroU16, 2);
 impl_bitwise_permutable!(32, u32, NonZeroU32, 4);
 impl_bitwise_permutable!(64, u64, NonZeroU64, 8);
 impl_bitwise_permutable!(128, u128, NonZeroU128, 16);
+*/
+
+impl BitwisePermute<u8> for PermutationKey<8>
+where
+    u8: IsPermutable,
+{
+    fn bitwise_permute(&self, input: Protected<u8>) -> Protected<u8> {
+        input.map(|x| {
+            let bytes = x.to_be_bytes();
+            let arr: BitArray<[u8; 1], Msb0> = BitArray::new(bytes);
+            let out: BitArray<[u8; 1], Msb0> =
+                self.iter()
+                    .enumerate()
+                    .fold(BitArray::new([0; 1]), |mut out, (i, k)| {
+                        out.set(i, *unsafe { arr.get_unchecked(k) });
+                        out
+                    });
+
+            let mapped = u8::from_be_bytes(out.into_inner());
+            //Protected::new(unsafe { <$nonzero_type>::new_unchecked(mapped) })
+            Protected::new(mapped)
+        })
+    }
+}
+
+impl BitwisePermute<u16> for PermutationKey<16> {
+    fn bitwise_permute(&self, input: Protected<u16>) -> Protected<u16> {
+        input.map(|x| {
+            let bytes = x.to_be_bytes();
+            let arr: BitArray<[u8; 2], Msb0> = BitArray::new(bytes);
+            let out: BitArray<[u8; 2], Msb0> =
+                self.iter()
+                    .enumerate()
+                    .fold(BitArray::new([0; 2]), |mut out, (i, k)| {
+                        out.set(i, *unsafe { arr.get_unchecked(k) });
+                        out
+                    });
+
+            let mapped = u16::from_be_bytes(out.into_inner());
+            //Protected::new(unsafe { <$nonzero_type>::new_unchecked(mapped) })
+            Protected::new(mapped)
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::Debug;
+
+    use crate::tests;
+    use crate::{BitwisePermute, PermutationKey};
+    use vitaminc_protected::{Paranoid, Protected};
+    use zeroize::Zeroize;
+
+    use super::IsPermutable;
+
+    fn test_permute<const N: usize, T>(input: Protected<T>)
+    where
+        T: IsPermutable + Zeroize + Debug + PartialEq + Copy,
+        PermutationKey<N>: BitwisePermute<T>,
+    {
+        let key = tests::gen_key([0; 32]);
+        let output = key.bitwise_permute(input);
+        assert_ne!(output.unwrap(), input.unwrap());
+    }
+
+    #[test]
+    fn bitwise_permute_case() {
+        test_permute::<8, u8>(Protected::new(117));
+        test_permute::<16, u16>(Protected::new(46321));
+    }
+}

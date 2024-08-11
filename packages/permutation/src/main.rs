@@ -1,6 +1,6 @@
 #![warn(clippy::unwrap_used)]
 
-use protected::{Paranoid, Protected};
+use vitaminc_protected::{Paranoid, Protected};
 
 fn main() {
     let x = Protected::new([0u8; 32]);
