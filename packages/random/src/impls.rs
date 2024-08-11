@@ -46,3 +46,19 @@ impl Generatable for Protected<u16> {
         })
     }
 }
+
+impl Generatable for Protected<u32> {
+    fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
+        Protected::generate_ok(|| {
+            let mut buf: [u8; 4] = [0; 4];
+
+            if buf.try_fill(rng).is_ok() {
+                Ok(u32::from_be_bytes(buf))
+            } else {
+                // Make sure we don't leak anything left-over
+                buf.zeroize();
+                Err(RandomError::GenerationFailed)
+            }
+        })
+    }
+}

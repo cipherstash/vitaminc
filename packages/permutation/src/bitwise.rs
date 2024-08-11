@@ -45,6 +45,7 @@ impl_bitwise_permutable!(64, u64, NonZeroU64, 8);
 impl_bitwise_permutable!(128, u128, NonZeroU128, 16);
 */
 
+// TODO: Use a macro for these
 impl BitwisePermute<u8> for PermutationKey<8>
 where
     u8: IsPermutable,
@@ -62,7 +63,6 @@ where
                     });
 
             let mapped = u8::from_be_bytes(out.into_inner());
-            //Protected::new(unsafe { <$nonzero_type>::new_unchecked(mapped) })
             Protected::new(mapped)
         })
     }
@@ -82,7 +82,25 @@ impl BitwisePermute<u16> for PermutationKey<16> {
                     });
 
             let mapped = u16::from_be_bytes(out.into_inner());
-            //Protected::new(unsafe { <$nonzero_type>::new_unchecked(mapped) })
+            Protected::new(mapped)
+        })
+    }
+}
+
+impl BitwisePermute<u32> for PermutationKey<32> {
+    fn bitwise_permute(&self, input: Protected<u32>) -> Protected<u32> {
+        input.map(|x| {
+            let bytes = x.to_be_bytes();
+            let arr: BitArray<[u8; 4], Msb0> = BitArray::new(bytes);
+            let out: BitArray<[u8; 4], Msb0> =
+                self.iter()
+                    .enumerate()
+                    .fold(BitArray::new([0; 4]), |mut out, (i, k)| {
+                        out.set(i, *unsafe { arr.get_unchecked(k) });
+                        out
+                    });
+
+            let mapped = u32::from_be_bytes(out.into_inner());
             Protected::new(mapped)
         })
     }
