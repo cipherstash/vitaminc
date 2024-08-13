@@ -15,15 +15,12 @@ where
     fn permute(&self, input: Protected<[T; N]>) -> Protected<[T; N]> {
         input.map(|source| {
             // TODO: Use MaybeUninit or array::from_fn
-            let out = self
-                .iter()
+            self.iter()
                 .enumerate()
                 .fold([Default::default(); N], |mut out, (i, k)| {
-                    out[i] = source[k.map(|x| Protected::from(x as usize))];
+                    out[i] = source[k.map(|x| x as usize)];
                     out
-                });
-
-            Protected::new(out)
+                })
         })
     }
 }
@@ -40,15 +37,12 @@ where
     fn depermute(&self, input: Protected<[T; N]>) -> Protected<[T; N]> {
         input.map(|source| {
             // TODO: Use MaybeUninit
-            let out = self
-                .iter()
+            self.iter()
                 .enumerate()
                 .fold([Default::default(); N], |mut out, (i, k)| {
-                    out[k.map(|x| Protected::from(x as usize))] = source[i];
+                    out[k.map(|x| x as usize)] = source[i];
                     out
-                });
-
-            Protected::new(out)
+                })
         })
     }
 }

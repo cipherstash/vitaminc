@@ -14,16 +14,14 @@ pub struct PermutationKey<const N: usize>(Protected<[u8; N]>);
 // TODO: It would be really handy to be able to mark named types as Paranoid, too
 // but this currently doesn't work.
 // We could move the Associated type to the Paranoid trait, and give it a bound of ParanoidPrivate
+// This is basically providing a way to make custom adapters
 /*impl Paranoid for PermutationKey<1> {
     fn unwrap(self) -> Protected<[u8; 1]> {
         self.0.unwrap()
     }
 }*/
 
-impl<const N: usize> PermutationKey<N>
-//where
-//    [u8; N]: ValidPermutationSize,
-{
+impl<const N: usize> PermutationKey<N> {
     /// # Safety
     ///
     /// This function is unsafe because it does not check that the key is a valid permutation.
@@ -45,16 +43,19 @@ impl<const N: usize> PermutationKey<N>
     }
 }
 
-impl<const N: usize> Generatable for PermutationKey<N> where [u8; N]: IsPermutable {
+impl<const N: usize> Generatable for PermutationKey<N>
+where
+    [u8; N]: IsPermutable,
+{
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        let key = identity::<N, u8>().map(|mut key| {
-            for i in (0..N).rev() {
+        let key = identity::<N, u8>().map(|key| {
+            (0..N).rev().fold(key, |mut key, i| {
                 // TODO: Confirm that this uses rejection sampling to avoid modulo bias
                 let mut j = rng.gen_range(0..=i);
                 key.swap(i, j);
                 j.zeroize();
-            }
-            Protected::new(key)
+                key
+            })
         });
 
         Ok(Self(key))
@@ -67,19 +68,7 @@ where
     [u8; N]: IsPermutable,
 {
     fn permute(&self, input: PermutationKey<N>) -> PermutationKey<N> {
-        let x = input.0.map(|source| {
-            // TODO: Use MaybeUninit
-            let out = self
-                .iter()
-                .enumerate()
-                .fold([Default::default(); N], |mut out, (i, k)| {
-                    out[i] = source[k.map(|x| Protected::from(x as usize))];
-                    out
-                });
-
-            Protected::new(out)
-        });
-        Self(x)
+        Self(self.permute(input.0))
     }
 }
 

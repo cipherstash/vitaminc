@@ -7,7 +7,10 @@ pub use elementwise::{Depermute, Permute};
 pub use key::PermutationKey;
 use vitaminc_protected::Protected;
 
-const fn identity<const N: usize, T>() -> Protected<[u8; N]> where [T; N]: IsPermutable {
+const fn identity<const N: usize, T>() -> Protected<[u8; N]>
+where
+    [T; N]: IsPermutable,
+{
     let mut out = [0; N];
     let mut i = 0;
     while i < N {
@@ -48,12 +51,18 @@ mod tests {
     use rand::SeedableRng;
     use vitaminc_random::{Generatable, SafeRand};
 
-    pub fn gen_rand_key<const N: usize>() -> PermutationKey<N> where [u8; N]: IsPermutable {
+    pub fn gen_rand_key<const N: usize>() -> PermutationKey<N>
+    where
+        [u8; N]: IsPermutable,
+    {
         let mut rng = SafeRand::from_entropy();
         PermutationKey::random(&mut rng).expect("Failed to generate key")
     }
 
-    pub fn gen_key<const N: usize>(seed: [u8; 32]) -> PermutationKey<N> where [u8; N]: IsPermutable {
+    pub fn gen_key<const N: usize>(seed: [u8; 32]) -> PermutationKey<N>
+    where
+        [u8; N]: IsPermutable,
+    {
         let mut rng = SafeRand::from_seed(seed);
         PermutationKey::random(&mut rng).expect("Failed to generate key")
     }

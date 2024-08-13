@@ -62,8 +62,7 @@ where
                         out
                     });
 
-            let mapped = u8::from_be_bytes(out.into_inner());
-            Protected::new(mapped)
+            u8::from_be_bytes(out.into_inner())
         })
     }
 }
@@ -81,8 +80,7 @@ impl BitwisePermute<u16> for PermutationKey<16> {
                         out
                     });
 
-            let mapped = u16::from_be_bytes(out.into_inner());
-            Protected::new(mapped)
+            u16::from_be_bytes(out.into_inner())
         })
     }
 }
@@ -100,8 +98,7 @@ impl BitwisePermute<u32> for PermutationKey<32> {
                         out
                     });
 
-            let mapped = u32::from_be_bytes(out.into_inner());
-            Protected::new(mapped)
+            u32::from_be_bytes(out.into_inner())
         })
     }
 }

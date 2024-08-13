@@ -86,12 +86,12 @@ pub trait Paranoid: private::ParanoidPrivate {
 
     // TODO: Make this behave like Option and Result where the caller only has to worry about the inner type
     // TODO: This will have to be a trait to allow for multiple implementations - we can't make it generic or that would allow arbitrary conversion
-    fn map<B, F>(self, f: F) -> B
+    fn map<B, F>(self, f: F) -> Protected<B>
     where
         F: FnOnce(<Self as ParanoidPrivate>::Inner) -> B,
-        B: Paranoid,
+        B: Zeroize,
     {
-        f(self.unwrap())
+        Protected(f(self.unwrap()))
     }
 
     fn zip<Other, Out, F>(self, b: Other, f: F) -> Self
