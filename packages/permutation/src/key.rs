@@ -37,7 +37,7 @@ impl<const N: usize> PermutationKey<N>
     where
         [u8; N]: IsPermutable,
     {
-        Self(self.depermute(identity::<N>()))
+        Self(self.depermute(identity::<N, u8>()))
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = Protected<u8>> + '_ {
@@ -45,9 +45,9 @@ impl<const N: usize> PermutationKey<N>
     }
 }
 
-impl<const N: usize> Generatable for PermutationKey<N> {
+impl<const N: usize> Generatable for PermutationKey<N> where [u8; N]: IsPermutable {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        let key = identity::<N>().map(|mut key| {
+        let key = identity::<N, u8>().map(|mut key| {
             for i in (0..N).rev() {
                 // TODO: Confirm that this uses rejection sampling to avoid modulo bias
                 let mut j = rng.gen_range(0..=i);
@@ -101,7 +101,7 @@ mod tests {
         // p(p^-1(x)) = x
         assert_eq!(
             key.permute(inverted).0.unwrap(),
-            identity::<N>().unwrap(),
+            identity::<N, u8>().unwrap(),
             "Failed to invert key of size {N}"
         );
     }

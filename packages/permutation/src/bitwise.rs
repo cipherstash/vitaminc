@@ -119,7 +119,9 @@ mod tests {
 
     fn test_permute<const N: usize, T>(input: Protected<T>)
     where
+        // FIXME: These trait bounds are pretty clunky
         T: IsPermutable + Zeroize + Debug + PartialEq + Copy,
+        [u8; N]: IsPermutable,
         PermutationKey<N>: BitwisePermute<T>,
     {
         let key = tests::gen_key([0; 32]);

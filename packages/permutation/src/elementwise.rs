@@ -14,7 +14,7 @@ where
 {
     fn permute(&self, input: Protected<[T; N]>) -> Protected<[T; N]> {
         input.map(|source| {
-            // TODO: Use MaybeUninit
+            // TODO: Use MaybeUninit or array::from_fn
             let out = self
                 .iter()
                 .enumerate()

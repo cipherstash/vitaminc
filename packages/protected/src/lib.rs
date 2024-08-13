@@ -144,7 +144,7 @@ opaque_debug::implement!(Protected<T>);
 // TODO: Docs
 impl<T> Protected<T> {
     /// Create a new `Protected` from an inner value.
-    pub fn new(x: T) -> Self
+    pub const fn new(x: T) -> Self
     where
         T: Zeroize,
     {
