@@ -38,6 +38,32 @@ impl<const N: usize> PermutationKey<N> {
         Self(self.depermute(identity::<N, u8>()))
     }
 
+    /// Returns the complement of the key with respect to the target key.
+    /// That is: `C(T) = Self`
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use vitaminc_permutation::{Permute, PermutationKey};
+    /// use vitaminc_random::{Generatable, SafeRand, SeedableRng};
+    /// use vitaminc_protected::{Paranoid, Protected};
+    /// let mut rng = SafeRand::from_entropy();
+    /// let key = PermutationKey::random(&mut rng).unwrap();
+    /// let target = PermutationKey::random(&mut rng).unwrap();
+    /// let complement = key.complement(&target);
+    /// let input: Protected<[u8; 16]> = Protected::random(&mut rng).unwrap();
+    /// assert_eq!(
+    ///     complement.permute(target).permute(input).unwrap(),
+    ///     key.permute(input).unwrap()
+    /// );
+    /// ```
+    pub fn complement(&self, target: &Self) -> Self
+    where
+        [u8; N]: IsPermutable,
+    {
+        self.permute(target.invert())
+    }
+
     pub(crate) fn iter(&self) -> impl Iterator<Item = Protected<u8>> + '_ {
         self.0.iter()
     }
@@ -76,7 +102,8 @@ where
 mod tests {
     use super::PermutationKey;
     use crate::{elementwise::Permute, identity, IsPermutable};
-    use vitaminc_protected::Paranoid;
+    use vitaminc_protected::{Paranoid, Protected};
+    use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 
     use crate::tests;
 
@@ -95,11 +122,38 @@ mod tests {
         );
     }
 
+    fn test_key_complement<const N: usize>()
+    where
+        [u8; N]: IsPermutable,
+    {
+        let key: PermutationKey<N> = tests::gen_rand_key();
+        let target: PermutationKey<N> = tests::gen_rand_key();
+        let complement = key.complement(&target);
+
+        let mut rng = SafeRand::from_entropy();
+        let input: Protected<[u8; N]> = Protected::random(&mut rng).unwrap();
+
+        // c(t)(x) = p(x)
+        assert_eq!(
+            complement.permute(target).permute(input).unwrap(),
+            key.permute(input).unwrap(),
+            "Failed to complement key of size {N}"
+        );
+    }
+
     #[test]
     fn key_inversion_case() {
         test_key_invert::<8>();
         test_key_invert::<16>();
         test_key_invert::<32>();
         test_key_invert::<64>();
+    }
+
+    #[test]
+    fn key_complement_case() {
+        test_key_complement::<8>();
+        test_key_complement::<16>();
+        test_key_complement::<32>();
+        test_key_complement::<64>();
     }
 }

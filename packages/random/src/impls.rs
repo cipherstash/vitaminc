@@ -20,13 +20,21 @@ impl Generatable for NonZeroU16 {
 
 impl<const N: usize> Generatable for [u8; N] {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        // TODO: Consider using MaybeUninit
+        // TODO: Consider using MaybeUninit or array::from_fn
         let mut buf: [u8; N] = [0; N];
 
         buf.try_fill(rng)
             .map_err(|_| RandomError::GenerationFailed)?;
 
         Ok(buf)
+    }
+}
+
+impl<const N: usize> Generatable for Protected<[u8; N]> {
+    fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
+        Protected::generate_ok(|| {
+            Generatable::random(rng)
+        })
     }
 }
 

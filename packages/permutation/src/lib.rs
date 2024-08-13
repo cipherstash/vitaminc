@@ -45,6 +45,8 @@ impl IsPermutable for u32 {}
 impl IsPermutable for u64 {}
 impl IsPermutable for u128 {}
 
+// TODO: Add a Lockable implementation for PermutationKey (under a feature flag)
+
 #[cfg(test)]
 mod tests {
     use crate::{IsPermutable, PermutationKey};
@@ -65,14 +67,5 @@ mod tests {
     {
         let mut rng = SafeRand::from_seed(seed);
         PermutationKey::random(&mut rng).expect("Failed to generate key")
-    }
-
-    // TODO: Make this a function inside protected (maybe there are others we can do too) - a util module
-    pub fn array_gen<const N: usize>() -> [u8; N] {
-        let mut input: [u8; N] = [0; N];
-        input.iter_mut().enumerate().for_each(|(i, x)| {
-            *x = (i + 1) as u8;
-        });
-        input
     }
 }
