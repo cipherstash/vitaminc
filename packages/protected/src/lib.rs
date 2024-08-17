@@ -172,6 +172,25 @@ impl<T> Protected<T> {
     }
 }
 
+impl<T> Protected<Protected<T>> {
+    #[inline]
+    /// Flatten a `Protected` of `Protected` into a single `Protected`.
+    /// Similar to `Option::flatten`.
+    /// 
+    /// ```
+    /// use protected::Protected;
+    /// let x = Protected::new(Protected::new([0u8; 32]));
+    /// let y = x.flatten();
+    /// assert_eq!(y.unwrap(), [0u8; 32]);
+    /// ```
+    /// 
+    /// Like [Option], flattening only removes one level of nesting at a time.
+    /// 
+    pub fn flatten(self) -> Protected<T> {
+        self.0
+    }
+}
+
 impl<T: Zeroize> ZeroizeOnDrop for Protected<T> {}
 
 impl<T> ParanoidPrivate for Protected<T>
