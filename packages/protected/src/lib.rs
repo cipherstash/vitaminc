@@ -2,7 +2,6 @@ mod conversions;
 mod digest;
 mod equatable;
 mod exportable;
-mod indexable;
 mod ops;
 mod usage;
 
@@ -80,10 +79,6 @@ pub trait Paranoid: private::ParanoidPrivate {
         Equatable(self)
     }
 
-    fn indexable(self) -> Indexable<Self> {
-        Indexable(self)
-    }
-
     // TODO: Make this behave like Option and Result where the caller only has to worry about the inner type
     // TODO: This will have to be a trait to allow for multiple implementations - we can't make it generic or that would allow arbitrary conversion
     fn map<B, F>(self, f: F) -> Protected<B>
@@ -128,7 +123,6 @@ pub trait Paranoid: private::ParanoidPrivate {
 pub use digest::ProtectedDigest;
 pub use equatable::Equatable;
 pub use exportable::Exportable;
-pub use indexable::Indexable;
 pub use usage::{Acceptable, DefaultScope, Scope, Usage};
 
 // TODO: Add compile tests
@@ -188,6 +182,22 @@ impl<T> Protected<Protected<T>> {
     /// 
     pub fn flatten(self) -> Protected<T> {
         self.0
+    }
+}
+
+impl<T> Protected<Option<T>> {
+    #[inline]
+    /// Transpose a `Protected` of `Option` into an `Option` of `Protected`.
+    /// Similar to `Option::transpose`.
+    /// 
+    /// ```
+    /// use vitaminc_protected::Protected;
+    /// let x = Protected::new(Some([0u8; 32]));
+    /// let y = x.transpose();
+    /// assert!(matches!(y, Some(Protected)));
+    /// ```
+    pub fn transpose(self) -> Option<Protected<T>> {
+        self.0.map(Protected)
     }
 }
 
