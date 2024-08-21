@@ -7,7 +7,6 @@ documentation = "https://docs.rs/vitaminc-permutation"
 repository = "https://github.com/cipherstash/vitaminc"
 homepage = "https://cipherstash.com"
 license = "MIT"
-license-file = "LICENSE"
 readme = "README.md"
 keywords = ["cryptography", "permutation"]
 categories = ["cryptography"]
