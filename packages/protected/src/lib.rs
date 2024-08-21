@@ -25,7 +25,7 @@ pub trait Paranoid: private::ParanoidPrivate {
     /// # Example
     ///
     /// ```
-    /// use protected::Protected;
+    /// use vitaminc_protected::{Paranoid, Protected};
     /// fn array_gen<const N: usize>() -> [u8; N] {
     ///     let mut input: [u8; N] = [0; N];
     ///     input.iter_mut().enumerate().for_each(|(i, x)| {
@@ -49,7 +49,7 @@ pub trait Paranoid: private::ParanoidPrivate {
     /// # Example
     ///
     /// ```
-    /// use protected::Protected;
+    /// use vitaminc_protected::{Paranoid, Protected};
     /// use std::string::FromUtf8Error;
     ///
     /// let input: Result<Protected<String>, FromUtf8Error> = Protected::generate_ok(|| {
@@ -70,7 +70,7 @@ pub trait Paranoid: private::ParanoidPrivate {
     /// # Example
     ///
     /// ```
-    /// use protected::{Equatable, Protected};
+    /// use vitaminc_protected::{Equatable, Paranoid, Protected};
     ///
     /// let x = Protected::new([0u8; 32]);
     /// let y: Equatable<Protected<[u8; 32]>> = x.equatable();
@@ -151,7 +151,7 @@ impl<T> Protected<T> {
     /// # Example
     ///
     /// ```
-    /// use protected::{Exportable, Protected};
+    /// use vitaminc_protected::{Exportable, Protected};
     ///
     /// let x = Protected::new([0u8; 32]);
     /// let y: Exportable<Protected<[u8; 32]>> = x.exportable();
@@ -172,7 +172,7 @@ impl<T> Protected<Protected<T>> {
     /// Similar to `Option::flatten`.
     ///
     /// ```
-    /// use protected::Protected;
+    /// use vitaminc_protected::{Paranoid, Protected};
     /// let x = Protected::new(Protected::new([0u8; 32]));
     /// let y = x.flatten();
     /// assert_eq!(y.unwrap(), [0u8; 32]);
@@ -247,13 +247,14 @@ where
 /// # Example
 ///
 /// ```
-/// use protected::{flatten_array, Protected};
-/// let x = Protected::new([0u8; 32]);
-/// let y = Protected::new([1u8; 32]);
-/// let z = Protected::new([2u8; 32]);
-/// let array = [x, y, z];
+/// use vitaminc_protected::{flatten_array, Paranoid, Protected};
+/// let x = Protected::new(1);
+/// let y = Protected::new(2);
+/// let z = Protected::new(3);
+/// let array: [Protected<u8>; 3] = [x, y, z];
 /// let flattened = flatten_array(array);
-/// assert_eq!(flattened.unwrap(), [0u8; 32, 1u8; 32, 2u8; 32]);
+/// assert!(matches!(flattened, Protected));
+/// assert_eq!(flattened.unwrap(), [1, 2, 3]);
 /// ```
 pub fn flatten_array<const N: usize, T>(array: [Protected<T>; N]) -> Protected<[T; N]>
 where
