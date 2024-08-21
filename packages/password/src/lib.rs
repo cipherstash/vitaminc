@@ -110,7 +110,6 @@ mod tests {
         let value: Password<16> = Generatable::random(&mut rng)?;
         dbg!(value.into_unprotected_string());
 
-        assert!(false);
         Ok(())
     }
 
@@ -121,7 +120,6 @@ mod tests {
         let value: AlphaNumericPassword<16> = Generatable::random(&mut rng)?;
         dbg!(value.into_unprotected_string());
 
-        assert!(false);
         Ok(())
     }
 
@@ -132,7 +130,6 @@ mod tests {
         let value: AlphaPassword<16> = Generatable::random(&mut rng)?;
         dbg!(value.into_unprotected_string());
 
-        assert!(false);
         Ok(())
     }
 }
