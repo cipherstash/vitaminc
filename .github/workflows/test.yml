@@ -1,54 +1,45 @@
-name: "Test all packages"
+name: "Test"
 on:
   push:
     branches:
       - main
-    paths:
-      - packages/**
-      - .github/workflows/test.yml
-
   pull_request:
-      branches:
-        - main
-      paths:
-        - packages/**
-        - .github/workflows/test.yml
-
-  workflow_call:
+    branches:
+      - main
+  workflow_dispatch:
 
 defaults:
   run:
     shell: bash -l {0}
 
-env:
-  RUSTFLAGS: "-D warnings"
-  RUST_BACKTRACE: full
-  CARGO_TERM_COLOR: always
-
 jobs:
   test:
     runs-on: ubuntu-latest
+    name: "🧪 Test"
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/rust
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: test
-        run: cargo test --workspace
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: ./.github/actions/rust
-
-      - name: format
-        run: cargo fmt --all -- --check
-
-      - name: check
-        run: cargo check
+      - name: setup rust 1.78
+        uses: dtolnay/rust-toolchain@1.78.0
+        with:
+          components: clippy, rustfmt
 
       - name: clippy
-        run: cargo clippy --all --no-deps --all-features --all-targets
+        run: cargo clippy --no-deps --all-targets --all-features  -- -D warnings
+
+      - name: format
+        run: cargo fmt -- --check
+
+      - name: test
+        run: cargo test
