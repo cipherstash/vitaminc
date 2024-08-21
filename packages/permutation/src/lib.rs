@@ -1,3 +1,4 @@
+//! A library for permuting data in a secure and efficient manner.
 mod bitwise;
 mod elementwise;
 mod key;
@@ -7,6 +8,7 @@ pub use elementwise::{Depermute, Permute};
 pub use key::PermutationKey;
 use vitaminc_protected::Protected;
 
+/// Defines the identity permutation for a given type and length.
 const fn identity<const N: usize, T>() -> Protected<[u8; N]>
 where
     [T; N]: private::IsPermutable,

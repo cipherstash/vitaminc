@@ -274,7 +274,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "vitaminc-permutation"
-version = "0.1.0"
+version = "0.1.0-pre"
 dependencies = [
  "bitvec",
  "paste",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-protected"
-version = "0.1.0"
+version = "0.1.0-pre"
 dependencies = [
  "bincode",
  "bitvec",
@@ -300,7 +300,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-random"
-version = "0.1.0"
+version = "0.1.0-pre"
 dependencies = [
  "rand",
  "rand_chacha",

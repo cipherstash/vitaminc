@@ -4,9 +4,8 @@ resolver = "2"
 members = [
     "packages/protected",
     "packages/password",
-    #"packages/primitives",
-    "packages/random", "packages/permutation",
-    #"packages/safe_eq",
+    "packages/permutation",
+    "packages/random",
 ]
 
 [workspace.dependencies]
