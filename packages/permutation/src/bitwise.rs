@@ -1,4 +1,4 @@
-use crate::{IsPermutable, PermutationKey};
+use crate::{private::IsPermutable, PermutationKey};
 use bitvec::{array::BitArray, order::Msb0};
 use std::num::{NonZeroU128, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8};
 use vitaminc_protected::{Paranoid, Protected};

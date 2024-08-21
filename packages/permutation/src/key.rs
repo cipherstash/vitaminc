@@ -3,9 +3,10 @@ use vitaminc_protected::{Paranoid, Protected};
 use vitaminc_random::{Generatable, RandomError, SafeRand};
 use zeroize::Zeroize;
 
+use super::private::IsPermutable;
 use crate::{
     elementwise::{Depermute, Permute},
-    identity, IsPermutable,
+    identity,
 };
 
 #[derive(Copy, Clone, Debug)]
@@ -100,8 +101,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::PermutationKey;
-    use crate::{elementwise::Permute, identity, IsPermutable};
+    use crate::{elementwise::Permute, identity, private::IsPermutable, PermutationKey};
     use vitaminc_protected::{Paranoid, Protected};
     use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 

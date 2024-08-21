@@ -9,7 +9,7 @@ use vitaminc_protected::Protected;
 
 const fn identity<const N: usize, T>() -> Protected<[u8; N]>
 where
-    [T; N]: IsPermutable,
+    [T; N]: private::IsPermutable,
 {
     let mut out = [0; N];
     let mut i = 0;
@@ -20,36 +20,36 @@ where
     Protected::new(out)
 }
 
-use std::num::{NonZeroU128, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8};
+mod private {
+    use std::num::{NonZeroU128, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8};
+    pub trait IsPermutable {}
 
-pub trait IsPermutable {}
-
-impl IsPermutable for [u8; 8] {}
-impl IsPermutable for [u8; 16] {}
-impl IsPermutable for [u8; 32] {}
-impl IsPermutable for [u8; 64] {}
-impl IsPermutable for [u8; 128] {}
-impl IsPermutable for [u16; 8] {}
-impl IsPermutable for [u16; 16] {}
-impl IsPermutable for [u16; 32] {}
-impl IsPermutable for [u16; 64] {}
-impl IsPermutable for [u16; 128] {}
-impl IsPermutable for NonZeroU8 {}
-impl IsPermutable for NonZeroU16 {}
-impl IsPermutable for NonZeroU32 {}
-impl IsPermutable for NonZeroU64 {}
-impl IsPermutable for NonZeroU128 {}
-impl IsPermutable for u8 {}
-impl IsPermutable for u16 {}
-impl IsPermutable for u32 {}
-impl IsPermutable for u64 {}
-impl IsPermutable for u128 {}
-
-// TODO: Add a Lockable implementation for PermutationKey (under a feature flag)
+    impl IsPermutable for [u8; 8] {}
+    impl IsPermutable for [u8; 16] {}
+    impl IsPermutable for [u8; 32] {}
+    impl IsPermutable for [u8; 64] {}
+    impl IsPermutable for [u8; 128] {}
+    impl IsPermutable for [u16; 8] {}
+    impl IsPermutable for [u16; 16] {}
+    impl IsPermutable for [u16; 32] {}
+    impl IsPermutable for [u16; 64] {}
+    impl IsPermutable for [u16; 128] {}
+    impl IsPermutable for NonZeroU8 {}
+    impl IsPermutable for NonZeroU16 {}
+    impl IsPermutable for NonZeroU32 {}
+    impl IsPermutable for NonZeroU64 {}
+    impl IsPermutable for NonZeroU128 {}
+    impl IsPermutable for u8 {}
+    impl IsPermutable for u16 {}
+    impl IsPermutable for u32 {}
+    impl IsPermutable for u64 {}
+    impl IsPermutable for u128 {}
+}
 
 #[cfg(test)]
 mod tests {
-    use crate::{IsPermutable, PermutationKey};
+    use super::private::IsPermutable;
+    use crate::PermutationKey;
     use rand::SeedableRng;
     use vitaminc_random::{Generatable, SafeRand};
 

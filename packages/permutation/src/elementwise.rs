@@ -1,4 +1,4 @@
-use crate::{IsPermutable, PermutationKey};
+use crate::{private::IsPermutable, PermutationKey};
 use vitaminc_protected::{Paranoid, Protected};
 use zeroize::Zeroize;
 
