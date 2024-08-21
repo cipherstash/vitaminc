@@ -32,9 +32,7 @@ impl<const N: usize> Generatable for [u8; N] {
 
 impl<const N: usize> Generatable for Protected<[u8; N]> {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        Protected::generate_ok(|| {
-            Generatable::random(rng)
-        })
+        Protected::generate_ok(|| Generatable::random(rng))
     }
 }
 

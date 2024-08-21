@@ -170,16 +170,16 @@ impl<T> Protected<Protected<T>> {
     #[inline]
     /// Flatten a `Protected` of `Protected` into a single `Protected`.
     /// Similar to `Option::flatten`.
-    /// 
+    ///
     /// ```
     /// use protected::Protected;
     /// let x = Protected::new(Protected::new([0u8; 32]));
     /// let y = x.flatten();
     /// assert_eq!(y.unwrap(), [0u8; 32]);
     /// ```
-    /// 
+    ///
     /// Like [Option], flattening only removes one level of nesting at a time.
-    /// 
+    ///
     pub fn flatten(self) -> Protected<T> {
         self.0
     }
@@ -189,7 +189,7 @@ impl<T> Protected<Option<T>> {
     #[inline]
     /// Transpose a `Protected` of `Option` into an `Option` of `Protected`.
     /// Similar to `Option::transpose`.
-    /// 
+    ///
     /// ```
     /// use vitaminc_protected::Protected;
     /// let x = Protected::new(Some([0u8; 32]));
