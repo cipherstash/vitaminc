@@ -92,10 +92,16 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
     }
 }
 
+impl<D: Digest, InputScope: Scope> Default for ProtectedDigest<D, InputScope> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Protected, Usage};
+    use crate::Protected;
     use sha2::{Sha256, Sha384};
 
     struct TestScope;

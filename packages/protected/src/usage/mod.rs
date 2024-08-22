@@ -30,7 +30,14 @@ impl<T: ParanoidPrivate, Scope> ParanoidPrivate for Usage<T, Scope> {
     }
 }
 
-impl<T, Scope> Paranoid for Usage<T, Scope> where T: ParanoidPrivate {}
+impl<T, Scope> Paranoid for Usage<T, Scope>
+where
+    T: Paranoid,
+{
+    fn unwrap(self) -> Self::Inner {
+        self.0.unwrap()
+    }
+}
 
 /// Marker trait for a type that defines a usage scope
 pub trait Scope {}

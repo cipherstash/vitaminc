@@ -1,11 +1,14 @@
 [package]
-name = "random"
-version = "0.1.0"
+name = "vitaminc-random"
+version = "0.1.0-pre"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rand = "0.8.5"
 rand_chacha = "0.3.1"
+rand = { workspace = true }
 thiserror = { workspace = true }
+zeroize = { workspace = true }
+
+vitaminc-protected = { path = "../protected" }
