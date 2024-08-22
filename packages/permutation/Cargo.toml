@@ -21,3 +21,6 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 paste = "1.0.15"
+
+[badges]
+github = { repository = "cipherstash/vitaminc" }
