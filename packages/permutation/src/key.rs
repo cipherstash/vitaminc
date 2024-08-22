@@ -76,6 +76,7 @@ where
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let key = identity::<N, u8>().map(|key| {
             (0..N).rev().fold(key, |mut key, i| {
+                // TODO: Use Protected
                 let mut j = rng.next_bounded_u32(i as u32) as usize;
                 key.swap(i, j);
                 j.zeroize();
