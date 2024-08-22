@@ -2,6 +2,14 @@
 name = "vitaminc-random"
 version = "0.1.0-pre"
 edition = "2021"
+description = "Secure Random Number Generation. Part of the Vitamin-C cryptographic suite."
+documentation = "https://docs.rs/vitaminc-random"
+repository = "https://github.com/cipherstash/vitaminc"
+homepage = "https://cipherstash.com"
+license = "MIT"
+readme = "README.md"
+keywords = ["cryptography", "random", "security"]
+categories = ["cryptography"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -11,4 +19,4 @@ rand = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { workspace = true }
 
-vitaminc-protected = { path = "../protected" }
+vitaminc-protected = { version = "0.1.0-pre", path = "../protected" }
