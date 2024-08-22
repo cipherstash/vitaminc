@@ -10,7 +10,7 @@ bitvec = { workspace = true }
 
 digest = "0.10.7"
 opaque-debug = "0.3.1"
-serde = "1.0.197"
+serde = "1.0.208"
 subtle = "2.5.0"
 zeroize = { version = "1.6.0", features = [ "derive" ] }
 
