@@ -7,11 +7,17 @@ It is actually a suite of crates that you can use individually or via this top-l
 VitaminC is in active development and aims to address the following:
 
 * **Misuse Resistance:** VitaminC aims to make it difficult to write code that is insecure.
+
 * **Verified**: VitaminC will be verified using formal methods and testing and selects dependencies that are verified.
+
 * **Vetted**: VitaminC will be vetted by security experts and selects dependencies that are vetted.
+
 * **Minimal**: VitaminC will be minimal and only include what is necessary.
+
 * **Consistent**: VitaminC should have a consistent interface with everything in one place.
+
 * **Compatible**: VitaminC will support embedded (`no_std`) and WASM targets.
+
 * **Fast**: Speed and security _can_ be friends!
 
 ## Usage
