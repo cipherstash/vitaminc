@@ -19,13 +19,13 @@ VitaminC is in active development and aims to address the following:
 
 You can install the top-level `vitaminc` crate and enable specific features:
 
-```
+```plaintext
 cargo add vitaminc --features protected,random
 ```
 
 Or, if you only need a specific capability, you can install a crate directly:
 
-```
+```plaintext
 cargo add vitaminc-protected
 ```
 
