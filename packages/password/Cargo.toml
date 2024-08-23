@@ -2,6 +2,14 @@
 name = "password"
 version = "0.1.0"
 edition = "2021"
+description = "Secure password generator. Part of the Vitamin-C cryptographic suite."
+documentation = "https://docs.rs/vitaminc-password"
+repository = "https://github.com/cipherstash/vitaminc"
+homepage = "https://cipherstash.com"
+license = "MIT"
+readme = "README.md"
+keywords = ["cryptography", "security", "passwords"]
+categories = ["cryptography"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
