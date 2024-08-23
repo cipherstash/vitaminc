@@ -15,7 +15,7 @@ use vitaminc_random::{BoundedRng, SafeRand, SeedableRng};
 
 let mut rng = SafeRand::from_entropy();
 let value: u32 = rng.next_bounded(10);
-assert!(value < 10);
+assert!(value <= 10);
 ```
 
 Or using a `Protected` value:
@@ -26,7 +26,7 @@ use vitaminc_random::{BoundedRng, SafeRand, SeedableRng};
 
 let mut rng = SafeRand::from_entropy();
 let value: Protected<u32> = rng.next_bounded(Protected::new(10));
-assert!(value.unwrap() < 10);
+assert!(value.unwrap() <= 10);
 ```
 
 
