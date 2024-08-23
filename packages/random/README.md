@@ -2,7 +2,7 @@
 [![Crates.io](https://img.shields.io/crates/v/vitaminc-random.svg)](https://crates.io/crates/vitaminc-random)
 [![Workflow Status](https://github.com/cipherstash/vitaminc/workflows/main/badge.svg)](https://github.com/cipherstash/vitaminc/actions?query=workflow%3A%22main%22)
 
-# vitaminc-random
+# Vitamin C Random
 
 A carefully designed random number generator that is safe to use for cryptographic purposes.
 
@@ -34,6 +34,6 @@ Current version: 0.1.0-pre
 
 ## CipherStash
 
-VitaminC is brought to you by the team at [CipherStash](https://cipherstash.com).
+Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
 
 License: MIT

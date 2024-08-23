@@ -1,11 +1,9 @@
 [![Crates.io](https://img.shields.io/crates/v/vitaminc-protected.svg)](https://crates.io/crates/vitaminc-protected)
 [![Workflow Status](https://github.com/cipherstash/vitaminc/workflows/main/badge.svg)](https://github.com/cipherstash/vitaminc/actions?query=workflow%3A%22main%22)
 
-# vitaminc-protected
+# Vitamin C Protected
 
-## VitaminC Protected
-
-### Safe wrappers for sensitive data
+## Safe wrappers for sensitive data
 
 `Protected` is a set of types that remove some of the sharp edges of working with sensitive data in Rust.
 Its interface is conceptually similar to `Option` or `Result`.
@@ -22,7 +20,7 @@ These can include (but are not limited to):
 
 `Protected` and the other types in this crate aim to make it easier to avoid these mistakes.
 
-### Usage
+## Usage
 
 The `Protected` type is the most basic building block in this crate.
 You can use it to wrap any type that you want to protect so long as it implements the `Zeroize` trait.
@@ -157,11 +155,10 @@ let input: Result<Protected<String>, FromUtf8Error> = Protected::generate_ok(|| 
 });
 ```
 
-
 Current version: 0.1.0-pre
 
 ## CipherStash
 
-VitaminC is brought to you by the team at [CipherStash](https://cipherstash.com).
+Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
 
 License: MIT
