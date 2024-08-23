@@ -1,11 +1,11 @@
 [![Crates.io](https://img.shields.io/crates/v/vitaminc-permutation.svg)](https://crates.io/crates/vitaminc-permutation)
 [![Workflow Status](https://github.com/cipherstash/vitaminc/workflows/main/badge.svg)](https://github.com/cipherstash/vitaminc/actions?query=workflow%3A%22main%22)
 
-# vitaminc-permutation
+# Vitamin C Permutation
 
 A library for permuting data in a secure and efficient manner.
 
-### Warning
+## Warning
 
 This library is a low-level primitive designed to be used in cryptographic applications.
 It is not recommended to use this library directly unless you are familiar with the underlying
@@ -16,7 +16,7 @@ cryptographic principles.
 This library is designed to work with the `vitaminc-protected` library.
 All inputs and outputs are wrapped in a `Protected` type which ensures that the data is correctly zeroized when it goes out of scope.
 
-### Example: Permuting an array
+## Example: Permuting an array
 
 ```rust
 use vitaminc_permutation::{Permute, PermutationKey};
@@ -28,7 +28,7 @@ let input = Protected::new([1, 2, 3, 4, 5, 6, 7, 8]);
 assert_eq!(key.permute(input).unwrap(), [5, 3, 6, 2, 4, 8, 1, 7]);
 ```
 
-### Bitwise Permutations
+## Bitwise Permutations
 
 The `BitwisePermute` trait is a low-level trait that allows for bitwise permutations.
 This is useful for when you need to permute a single byte or a small number of bytes.
@@ -43,7 +43,7 @@ let input: Protected<u32> = Protected::new(1000);
 assert_eq!(key.bitwise_permute(input).unwrap(), 1082155265);
 ```
 
-### Permutations and Security
+## Permutations and Security
 
 As a quick primer (or refresher), a permutation is an array of numbers which “shuffles” an input.
 Each element of the permutation says which element of the input should be output in that position.
@@ -113,6 +113,6 @@ Current version: 0.1.0-pre
 
 ## CipherStash
 
-VitaminC is brought to you by the team at [CipherStash](https://cipherstash.com).
+Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
 
 License: MIT
