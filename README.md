@@ -1,6 +1,5 @@
-TODO: Logo
-
-# VitaminC
+<!-- TODO: Logo -->
+# Vitamin C
 
 VitaminC is like vitamins for your Rust code, especially code dealing with cryptography and managing sensitive data.
 It is actually a suite of crates that you can use individually or via this top-level crate via features.
@@ -31,15 +30,8 @@ cargo add vitaminc-protected
 
 # Features and sub-crates
 
-| Feature      | Crate            | Crates.io                                                                                              | Documentation |
+| Feature      | Source            | Crates.io                                                                                              | Documentation |
 |--------------|------------------|--------------------------------------------------------------------------------------------------------|---------------|
-| `protected`  | [`vitaminc-protected`] | [![crates.io](https://img.shields.io/crates/v/vitaminc-protected.svg)](https://crates.io/crates/vitaminc-protected) | [![docs.rs](https://docs.rs/vitaminc-protected/badge.svg)](https://docs.rs/vitaminc-protected) |
-| `permutation`  | [`vitaminc-permutation`] | [![crates.io](https://img.shields.io/crates/v/vitaminc-permutation.svg)](https://crates.io/crates/vitaminc-permutation) | [![docs.rs](https://docs.rs/vitaminc-permutation/badge.svg)](https://docs.rs/vitaminc-permutation) |
-| `random`  | [`vitaminc-random`] | [![crates.io](https://img.shields.io/crates/v/vitaminc-random.svg)](https://crates.io/crates/vitaminc-random) | [![docs.rs](https://docs.rs/vitaminc-random/badge.svg)](https://docs.rs/vitaminc-random) |
-
-
-[//]: # (crates)
-
-[vitaminc-permutation]: ./packages/permutation/
-[vitaminc-protected]: ./packages/protected/
-[vitaminc-random]: ./packages/random/
+| `protected`  | [`vitaminc-protected`](https://github.com/cipherstash/vitaminc/tree/main/packages/protected) | [![crates.io](https://img.shields.io/crates/v/vitaminc-protected.svg)](https://crates.io/crates/vitaminc-protected) | [![docs.rs](https://docs.rs/vitaminc-protected/badge.svg)](https://docs.rs/vitaminc-protected) |
+| `permutation`  | [`vitaminc-permutation`](https://github.com/cipherstash/vitaminc/tree/main/packages/permutation) | [![crates.io](https://img.shields.io/crates/v/vitaminc-permutation.svg)](https://crates.io/crates/vitaminc-permutation) | [![docs.rs](https://docs.rs/vitaminc-permutation/badge.svg)](https://docs.rs/vitaminc-permutation) |
+| `random`  | [`vitaminc-random`](https://github.com/cipherstash/vitaminc/tree/main/packages/random) | [![crates.io](https://img.shields.io/crates/v/vitaminc-random.svg)](https://crates.io/crates/vitaminc-random) | [![docs.rs](https://docs.rs/vitaminc-random/badge.svg)](https://docs.rs/vitaminc-random) |
