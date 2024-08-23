@@ -181,7 +181,7 @@ where
     }
 }
 
-pub trait ConstantTimeEq<Rhs: ?Sized = Self> {
+pub trait ConstantTimeEq<Rhs: ?Sized = Self>: private::SupportsConstantTimeEq {
     /// This method tests for `self` and `other` values to be equal, using constant time operations.
     /// Implementations will mostly use `ConstantTimeEq::ct_eq` to achieve this but because
     /// not everything is implemented in `subtle-ng`, we create our own "wrapping" trait.
@@ -291,6 +291,28 @@ impl ConstantTimeEq for String {
     fn constant_time_eq(&self, other: &Self) -> bool {
         self.as_bytes().constant_time_eq(other.as_bytes())
     }
+}
+
+mod private {
+    use std::num::NonZeroU16;
+
+    use super::Equatable;
+
+    /// Private marker trait.
+    pub trait SupportsConstantTimeEq {}
+
+    impl<T> SupportsConstantTimeEq for Equatable<T> {}
+    impl<const N: usize, T> SupportsConstantTimeEq for [T; N] {}
+    impl SupportsConstantTimeEq for u8 {}
+    impl SupportsConstantTimeEq for u16 {}
+    impl SupportsConstantTimeEq for u32 {}
+    impl SupportsConstantTimeEq for u64 {}
+    impl SupportsConstantTimeEq for u128 {}
+    impl SupportsConstantTimeEq for usize {}
+    impl SupportsConstantTimeEq for NonZeroU16 {}
+    impl SupportsConstantTimeEq for [u8] {}
+    impl SupportsConstantTimeEq for String {}
+    impl SupportsConstantTimeEq for str {}
 }
 
 #[cfg(test)]
