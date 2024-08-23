@@ -38,6 +38,7 @@ It also provides an "opaque" implementation of the `Debug` trait so you can debu
 without accidentally leaking their innards.
 
 ```rust
+use vitaminc_protected::{Paranoid, Protected};
 let x = Protected::new([0u8; 32]);
 assert_eq!(format!("{x:?}"), "Protected<[u8; 32]> { ... }");
 ```
@@ -123,6 +124,8 @@ assert!(matches!(y, Some(Protected)));
 A `Protected` of `Protected` can be "flattened" into a single `Protected`.
 
 ```rust
+# use vitaminc_protected::{Paranoid, Protected};
+
 let x = Protected::new(Protected::new([0u8; 32]));
 let y = x.flatten();
 assert_eq!(y.unwrap(), [0u8; 32]);
@@ -135,6 +138,7 @@ Use [flatten_array] to convert a `[Protected<T>; N]` into a `Protected<[T; N]>`.
 `Protected` supports generating new values from functions that return the inner value.
 
 ```rust
+# use vitaminc_protected::{Paranoid, Protected};
 fn array_gen<const N: usize>() -> [u8; N] {
     core::array::from_fn(|i| (i + 1) as u8)
 }
@@ -145,6 +149,7 @@ let input: Protected<[u8; 8]> = Protected::generate(array_gen);
 You can also generate values from functions that return a `Result` with the inner value.
 
 ```rust
+# use vitaminc_protected::{Paranoid, Protected};
 use std::string::FromUtf8Error;
 
 let input: Result<Protected<String>, FromUtf8Error> = Protected::generate_ok(|| {

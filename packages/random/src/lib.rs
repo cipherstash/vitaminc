@@ -1,28 +1,4 @@
-//! A carefully designed random number generator that is safe to use for cryptographic purposes.
-//!
-//! # Bounded Random Numbers
-//!
-//! The `BoundedRng` trait provides a way to generate random numbers within a specific range.
-//!
-//! ```
-//! use vitaminc_random::{BoundedRng, SafeRand, SeedableRng};
-//!
-//! let mut rng = SafeRand::from_entropy();
-//! let value: u32 = rng.next_bounded(10);
-//! assert!(value <= 10);
-//! ```
-//!
-//! Or using a `Protected` value:
-//!
-//! ```
-//! use vitaminc_protected::{Paranoid, Protected};
-//! use vitaminc_random::{BoundedRng, SafeRand, SeedableRng};
-//!
-//! let mut rng = SafeRand::from_entropy();
-//! let value: Protected<u32> = rng.next_bounded(Protected::new(10));
-//! assert!(value.unwrap() <= 10);
-//! ```
-//!
+#![doc = include_str!("../README.md")]
 use thiserror::Error;
 mod bounded;
 mod generatable;
