@@ -1,4 +1,3 @@
-use rand::Rng;
 use vitaminc_protected::{Paranoid, Protected};
 use vitaminc_random::{Generatable, RandomError, SafeRand};
 use zeroize::Zeroize;
@@ -77,8 +76,8 @@ where
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let key = identity::<N, u8>().map(|key| {
             (0..N).rev().fold(key, |mut key, i| {
-                // TODO: Confirm that this uses rejection sampling to avoid modulo bias
-                let mut j = rng.gen_range(0..=i);
+                // TODO: Use Protected
+                let mut j = rng.next_bounded_u32(i as u32) as usize;
                 key.swap(i, j);
                 j.zeroize();
                 key

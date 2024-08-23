@@ -1,18 +1,19 @@
+//! A secure random number generator that is safe to use for cryptographic purposes.
+//! It is intentionally opinionated so that developers don't have to think about what Rng they should use
+//! for cryptographic purposes.
+//!
+//! Internally it uses `rand_chacha` but this will be replaced with https://crates.io/crates/chacha20 in the future.
+//! However, this implementation does not perform any zeroization and the authors of the `rand` crate
+//! have explictly [stepped away](https://github.com/rust-random/rand/issues/1358) from making it a "cryptographically secure" random number generator.
 use rand::{CryptoRng, RngCore, SeedableRng};
 
 /// A secure random number generator that is safe to use for cryptographic purposes.
-/// It is intentionally opinionated so that developers don't have to think about what Rng they should use
-/// for cryptographic purposes.
-///
-/// Internally it uses `rand_chacha` but this will be replaced with https://crates.io/crates/chacha20 in the future.
-/// However, this implementation does not perform any zeroization and the authors of the `rand` crate
-/// have explictly [stepped away](https://github.com/rust-random/rand/issues/1358) from making it a "cryptographically secure" random number generator.
 pub struct SafeRand(rand_chacha::ChaCha20Rng);
 
 impl SafeRand {
     // TODO: Kani proof, tests, and possible paranoid argument
-    /// Gets an unbiased random value up to and including the given maximum using rejection sampling
-    /// for non-power of two values.
+    /// Gets an unbiased random value up to and including the given maximum.
+    /// It uses rejection sampling to avoid modulo bias.
     pub fn next_bounded_u32(&mut self, max: u32) -> u32 {
         if max.is_power_of_two() {
             // TODO: Is this constant time?
