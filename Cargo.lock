@@ -108,7 +108,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "password"
-version = "0.1.0"
+version = "0.1.0-pre"
 dependencies = [
  "vitaminc-protected",
  "vitaminc-random",
@@ -271,6 +271,15 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "vitaminc"
+version = "0.1.0-pre"
+dependencies = [
+ "vitaminc-permutation",
+ "vitaminc-protected",
+ "vitaminc-random",
+]
 
 [[package]]
 name = "vitaminc-permutation"

@@ -1,12 +1,23 @@
 [workspace]
 resolver = "2"
-
 members = [
     "packages/protected",
     "packages/password",
     "packages/permutation",
     "packages/random",
+    "packages/vitaminc",
 ]
+
+[workspace.package]
+documentation = "https://docs.rs/vitaminc"
+version = "0.1.0-pre"
+repository = "https://github.com/cipherstash/vitaminc"
+edition = "2021"
+homepage = "https://cipherstash.com"
+license = "MIT"
+readme = "README.md"
+keywords = ["cryptography", "security"]
+categories = ["cryptography"]
 
 [workspace.dependencies]
 bitvec = "1.0.1"

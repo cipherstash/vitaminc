@@ -1,0 +1,22 @@
+[package]
+name = "vitaminc"
+description = "VitaminC cryptographic suite by CipherStash"
+documentation = "https://docs.rs/vitaminc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vitaminc-permutation = { path = "../permutation", version = "0.1.0-pre", optional = true }
+vitaminc-protected = { path = "../protected", version = "0.1.0-pre", optional = true }
+vitaminc-random = { path = "../random", version = "0.1.0-pre", optional = true }
+
+[features]
+protected = ["dep:vitaminc-protected"]
+random = ["dep:vitaminc-random"]
+permutation = ["dep:vitaminc-permutation"]

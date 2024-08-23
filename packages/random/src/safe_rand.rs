@@ -2,7 +2,7 @@
 //! It is intentionally opinionated so that developers don't have to think about what Rng they should use
 //! for cryptographic purposes.
 //!
-//! Internally it uses `rand_chacha` but this will be replaced with https://crates.io/crates/chacha20 in the future.
+//! Internally it uses `rand_chacha` but this will be replaced with <https://crates.io/crates/chacha20> in the future.
 //! However, this implementation does not perform any zeroization and the authors of the `rand` crate
 //! have explictly [stepped away](https://github.com/rust-random/rand/issues/1358) from making it a "cryptographically secure" random number generator.
 use rand::{CryptoRng, RngCore, SeedableRng};

@@ -1,15 +1,15 @@
 [package]
 name = "vitaminc-permutation"
-version = "0.1.0-pre"
-edition = "2021"
 description = "Secure Permutation functions. Part of the Vitamin-C cryptographic suite."
 documentation = "https://docs.rs/vitaminc-permutation"
-repository = "https://github.com/cipherstash/vitaminc"
-homepage = "https://cipherstash.com"
-license = "MIT"
-readme = "README.md"
-keywords = ["cryptography", "permutation"]
-categories = ["cryptography"]
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 vitaminc-protected = { version = "0.1.0-pre", path = "../protected", features = ["bitvec"] }

@@ -1,15 +1,15 @@
 [package]
 name = "vitaminc-random"
-version = "0.1.0-pre"
-edition = "2021"
 description = "Secure Random Number Generation. Part of the Vitamin-C cryptographic suite."
 documentation = "https://docs.rs/vitaminc-random"
-repository = "https://github.com/cipherstash/vitaminc"
-homepage = "https://cipherstash.com"
-license = "MIT"
-readme = "README.md"
-keywords = ["cryptography", "random", "security"]
-categories = ["cryptography"]
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

@@ -1,15 +1,15 @@
 [package]
 name = "vitaminc-protected"
-version = "0.1.0-pre"
-edition = "2021"
-description = "Protected type wrappers for handling sensitive data. Part of the Vitamin-C cryptographic suite."
+description = "Protected type wrappers for handling sensitive data. Part of the VitaminC cryptographic suite."
 documentation = "https://docs.rs/vitaminc-protected"
-repository = "https://github.com/cipherstash/vitaminc"
-homepage = "https://cipherstash.com"
-license = "MIT"
-readme = "README.md"
-keywords = ["cryptography", "security"]
-categories = ["cryptography"]
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
