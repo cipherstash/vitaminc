@@ -8,14 +8,14 @@
 //! use vitaminc_random::{BoundedRng, SafeRand, SeedableRng};
 //!
 //! let mut rng = SafeRand::from_entropy();
-//! let value = rng.next_bounded(10);
+//! let value: u32 = rng.next_bounded(10);
 //! assert!(value < 10);
 //! ```
 //!
 //! Or using a `Protected` value:
 //!
 //! ```
-//! use vitaminc_protected::Protected;
+//! use vitaminc_protected::{Paranoid, Protected};
 //! use vitaminc_random::{BoundedRng, SafeRand, SeedableRng};
 //!
 //! let mut rng = SafeRand::from_entropy();

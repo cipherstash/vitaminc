@@ -5,11 +5,11 @@
 //! ## Example
 //!
 //! ```rust
-//! use vitaminc_random::{Generatable, SafeRand};
+//! use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 //! use std::num::NonZeroU16;
 //!
 //! let mut rng = SafeRand::from_entropy();
-//! let value: NonZeroU16 = Generatable::random(&mut rng)?;
+//! let value: NonZeroU16 = Generatable::random(&mut rng).unwrap();
 //! ```
 //!
 use crate::{Fill, RandomError, SafeRand};
