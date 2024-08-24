@@ -16,6 +16,8 @@ vitaminc-permutation = { path = "../permutation", version = "0.1.0-pre", optiona
 vitaminc-protected = { path = "../protected", version = "0.1.0-pre", optional = true }
 vitaminc-random = { path = "../random", version = "0.1.0-pre", optional = true }
 
+thiserror = { workspace = true }
+
 [features]
 protected = ["dep:vitaminc-protected"]
 random = ["dep:vitaminc-random"]
