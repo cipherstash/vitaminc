@@ -1,0 +1,21 @@
+[package]
+name = "vitaminc-kms"
+documentation.workspace = true
+version.workspace = true
+repository.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vitaminc-traits = { version = "0.1.0-pre", path = "../traits" }
+vitaminc-protected = { version = "0.1.0-pre", path = "../protected" }
+aws-sdk-kms = "1.40.0"
+async-trait = { workspace = true }
+aws-config = "1.5.5"
+
+[dev-dependencies]
+tokio = { version = "1.39.3", features = ["rt", "macros"] }
