@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use aws_sdk_kms::{primitives::Blob, Client};
-use vitaminc_protected::{Paranoid, Protected};
-use vitaminc_traits::AsyncMac;
+use vitaminc_protected::{AsProtectedRef, Paranoid, Protected};
+use vitaminc_traits::{AsyncMac, Update};
 
 /// Re-export the `MacAlgorithmSpec` type from the `aws_sdk_kms` crate.
 pub use aws_sdk_kms::types::MacAlgorithmSpec;
@@ -23,17 +23,20 @@ impl<'c> AwsKmsHmac<'c> {
         }
     }
 
-    pub fn update(mut self, input: Protected<Vec<u8>>) -> Self {
-        self.input = self.input.zip(input, |mut input, data| {
-            input.extend(data);
-            input
-        });
-        self
-    }
-
     pub fn set_mac_algorithm(mut self, spec: MacAlgorithmSpec) -> Self {
         self.spec = spec;
         self
+    }
+}
+
+impl<'c> Update<Protected<Vec<u8>>> for AwsKmsHmac<'c> {
+    fn update<'a, A>(&mut self, data: &'a A)
+    where
+        A: ?Sized + AsProtectedRef<'a, [u8]>,
+    {
+        self.input.update_with_ref(data, |input, data| {
+            input.extend(data);
+        });
     }
 }
 
@@ -67,7 +70,7 @@ mod tests {
         Client,
     };
     use vitaminc_protected::{Paranoid, Protected};
-    use vitaminc_traits::AsyncMac;
+    use vitaminc_traits::{AsyncMac, Update};
 
     async fn get_client() -> Result<Client, Box<dyn std::error::Error>> {
         // Set up AWS client
@@ -102,9 +105,23 @@ mod tests {
     async fn test_update() -> Result<(), Box<dyn std::error::Error>> {
         let client = get_client().await?;
 
+        let mut hmac = super::AwsKmsHmac::new(&client, "0cce5331-13a6-437f-a477-1c8988667281");
+        hmac.update(&Protected::new(vec![0, 1]));
+        hmac.update(&Protected::new(vec![2, 3]));
+        hmac.update("test");
+
+        assert_eq!(hmac.input.unwrap(), vec![0, 1, 2, 3, 116, 101, 115, 116]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_chain() -> Result<(), Box<dyn std::error::Error>> {
+        let client = get_client().await?;
+
         let hmac = super::AwsKmsHmac::new(&client, "0cce5331-13a6-437f-a477-1c8988667281")
-            .update(Protected::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]))
-            .update(Protected::new(vec![11, 12]));
+            .chain(&Protected::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]))
+            .chain(&Protected::new(vec![11, 12]));
 
         assert_eq!(
             hmac.input.unwrap(),
@@ -118,15 +135,13 @@ mod tests {
     async fn test_finalize() -> Result<(), Box<dyn std::error::Error>> {
         let client = get_client().await?;
 
-        println!("bbbbb");
         let key_id = get_key_id(&client, KeySpec::Hmac512).await?;
-        println!("bbbbbccc");
 
-        let hmac = super::AwsKmsHmac::new(&client, key_id)
-            .update(Protected::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]))
-            .set_mac_algorithm(super::MacAlgorithmSpec::HmacSha512);
-
-        hmac.finalize_async().await?;
+        super::AwsKmsHmac::new(&client, key_id)
+            .set_mac_algorithm(super::MacAlgorithmSpec::HmacSha512)
+            .chain(&Protected::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]))
+            .finalize_async()
+            .await?;
 
         Ok(())
     }

@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+mod as_protected_ref;
 mod conversions;
 mod digest;
 mod equatable;
@@ -6,6 +7,7 @@ mod exportable;
 mod ops;
 mod usage;
 
+use as_protected_ref::ProtectedRef;
 use private::ParanoidPrivate;
 use std::marker::PhantomData;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -16,6 +18,8 @@ mod private;
 pub mod bitvec;
 
 pub mod slice_index;
+
+pub use as_protected_ref::AsProtectedRef;
 
 // TODO: This trait is similar to the Iterator trait in std
 // Implement for all "adapter" types - Equatable, Exportable, etc.
@@ -40,6 +44,7 @@ pub trait Paranoid: private::ParanoidPrivate {
     /// // TODO: A Generate Array could handle the MaybeUninit stuff
     fn generate<F>(f: F) -> Self
     where
+        Self: Sized,
         F: FnOnce() -> Self::Inner,
     {
         Self::init_from_inner(f())
@@ -60,6 +65,7 @@ pub trait Paranoid: private::ParanoidPrivate {
     ///
     fn generate_ok<F, E>(f: F) -> Result<Self, E>
     where
+        Self: Sized,
         F: FnOnce() -> Result<Self::Inner, E>,
     {
         f().map(Self::init_from_inner)
@@ -76,28 +82,152 @@ pub trait Paranoid: private::ParanoidPrivate {
     /// let x = Protected::new([0u8; 32]);
     /// let y: Equatable<Protected<[u8; 32]>> = x.equatable();
     /// ```
-    fn equatable(self) -> Equatable<Self> {
+    fn equatable(self) -> Equatable<Self>
+    where
+        Self: Sized,
+    {
         Equatable(self)
     }
 
-    // TODO: This will have to be a trait to allow for multiple implementations - we can't make it generic or that would allow arbitrary conversion
     /// Map `Protected<Self::Inner>` value into a new `Protected<B>`.
     /// Conceptually similar to `Option::map`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use vitaminc_protected::{Paranoid, Protected};
+    /// let x = Protected::new(100u8);
+    /// let y = x.map(|x| x + 10);
+    /// assert_eq!(y.unwrap(), 110);
+    /// ```
+    ///
+    /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
+    /// e.g. `other` must have the same, or broader scope as `self`
     fn map<B, F>(self, f: F) -> Protected<B>
     where
+        Self: Sized,
         F: FnOnce(<Self as ParanoidPrivate>::Inner) -> B,
         B: Zeroize,
     {
         Protected(f(self.unwrap()))
     }
 
+    /// Zip two `Protected` values together with a function that combines them.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use vitaminc_protected::{Paranoid, Protected};
+    /// let x = Protected::new(1);
+    /// let y = Protected::new(2);
+    /// let z = x.zip(y, |x, y| x + y);
+    /// assert_eq!(z.unwrap(), 3);
+    /// ```
+    ///
+    /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
+    /// e.g. `other` must have the same, or broader scope as `self`
     fn zip<Other, Out, F>(self, b: Other, f: F) -> Protected<Out>
     where
+        Self: Sized,
         Other: Paranoid,
         Out: Zeroize,
         F: FnOnce(Self::Inner, Other::Inner) -> Out,
     {
         Protected::init_from_inner(f(self.unwrap(), b.unwrap()))
+    }
+
+    /// Like `zip` but the second argument is a reference.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use vitaminc_protected::{Paranoid, Protected};
+    /// let x = Protected::new(String::from("hello "));
+    /// let y = Protected::new(String::from("world"));
+    /// let z = x.zip_ref(&y, |x, y| x + y);
+    /// assert_eq!(z.unwrap(), "hello world");
+    /// ```
+    ///
+    fn zip_ref<'a, A, Other, Out, F>(self, other: &'a Other, f: F) -> Protected<Out>
+    where
+        Self: Sized,
+        A: ?Sized + 'a,
+        Other: AsProtectedRef<'a, A>,
+        Out: Zeroize,
+        F: FnOnce(Self::Inner, &A) -> Out,
+    {
+        let arg: ProtectedRef<'a, A> = other.as_protected_ref();
+        Protected::init_from_inner(f(self.unwrap(), arg.inner_ref()))
+    }
+
+    /// Similar to `map` but using references to that the inner value is updated in place.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use vitaminc_protected::{Paranoid, Protected};
+    /// let mut x = Protected::new([0u8; 4]);
+    /// x.update(|x| {
+    ///   x.iter_mut().for_each(|x| {
+    ///    *x += 1;
+    ///  });
+    /// });
+    /// assert_eq!(x.unwrap(), [1, 1, 1, 1]);
+    /// ```
+    ///
+    fn update<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Self::Inner),
+    {
+        f(self.inner_mut());
+    }
+
+    /// Update the inner value with another Paranoid value.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use vitaminc_protected::{Paranoid, Protected};
+    /// let mut x = Protected::new([0u8; 32]);
+    /// let y = Protected::new([1u8; 32]);
+    /// x.update_with(y, |x, y| {
+    ///    x.copy_from_slice(&y);
+    /// });
+    /// assert_eq!(x.unwrap(), [1u8; 32]);
+    /// ```
+    ///
+    /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
+    /// e.g. `other` must have the same, or broader scope as `self`
+    fn update_with<Other, F>(&mut self, other: Other, mut f: F)
+    where
+        F: FnMut(&mut Self::Inner, Other::Inner),
+        Other: Paranoid,
+    {
+        f(self.inner_mut(), other.unwrap());
+    }
+
+    /// Like `update_with` but the second argument is a reference.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use vitaminc_protected::{Paranoid, Protected};
+    /// let mut x = Protected::new([0u8; 32]);
+    /// let y = Protected::new([1u8; 32]);
+    /// x.update_with_ref(&y, |x, y| {
+    ///   x.copy_from_slice(y);
+    /// });
+    /// assert_eq!(x.unwrap(), [1u8; 32]);
+    /// ```
+    ///
+    fn update_with_ref<'a, Other, A, F>(&mut self, other: &'a Other, mut f: F)
+    where
+        A: ?Sized + 'a,
+        Other: AsProtectedRef<'a, A> + ?Sized,
+        F: FnMut(&mut Self::Inner, &A),
+    {
+        let arg: ProtectedRef<'a, A> = other.as_protected_ref();
+        f(self.inner_mut(), arg.inner_ref());
     }
 
     /// Iterate over the inner value and wrap each element in a `Protected`.
