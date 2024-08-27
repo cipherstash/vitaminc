@@ -16,14 +16,14 @@
 //!     # let endpoint_url = "http://localhost:4566";
 //!     # let creds = aws_sdk_kms::config::Credentials::new("fake", "fake", None, None, "test");
 //!     use aws_config::{BehaviorVersion, Region};
-//! 
+//!
 //!     let config = aws_sdk_kms::config::Builder::default()
 //!         .behavior_version(BehaviorVersion::v2024_03_28())
 //!         .region(Region::new("us-east-1"))
 //!     #   .credentials_provider(creds)
 //!         .endpoint_url(endpoint_url)
 //!         .build();
-//! 
+//!
 //!     # let key = Client::from_conf(config.clone())
 //!     #   .create_key()
 //!     #   .key_usage(KeyUsageType::GenerateVerifyMac)
@@ -41,26 +41,25 @@
 //!     Ok(())
 //! }
 //! ```
-//! 
+//!
+use crate::private::ValidMacSize;
 use async_trait::async_trait;
 use aws_sdk_kms::{primitives::Blob, Client, Config};
 use vitaminc_protected::{AsProtectedRef, Paranoid, Protected, ProtectedRef};
 use vitaminc_traits::{AsyncFixedOutputReset, AsyncMac, OutputSize, Update};
 use zeroize::Zeroize;
-use crate::private::ValidMacSize;
 
 // TODO: Should we re-export the SDK?
 
-
 /// A `Mac` implementation that uses AWS KMS to generate HMACs of `N` bytes.
 /// Valid sizes are 28, 32, 48, and 64 bytes.
-/// 
+///
 /// These corespond to the following algorithms:
 /// - 28 bytes: HMAC-SHA224
 /// - 32 bytes: HMAC-SHA256
 /// - 48 bytes: HMAC-SHA384
 /// - 64 bytes: HMAC-SHA512
-/// 
+///
 pub struct AwsKmsHmac<const N: usize> {
     client: Client,
     key_id: String,
@@ -68,7 +67,10 @@ pub struct AwsKmsHmac<const N: usize> {
     input: Protected<Vec<u8>>,
 }
 
-impl<const N: usize> AwsKmsHmac<N> where Self: private::ValidMacSize<N> {
+impl<const N: usize> AwsKmsHmac<N>
+where
+    Self: private::ValidMacSize<N>,
+{
     pub fn new(config: Config, key_id: impl Into<String>) -> Self {
         Self {
             client: Client::from_conf(config),
@@ -78,7 +80,8 @@ impl<const N: usize> AwsKmsHmac<N> where Self: private::ValidMacSize<N> {
     }
 
     async fn generate_mac(&self) -> Result<Blob, aws_sdk_kms::Error> {
-        Ok(self.client
+        Ok(self
+            .client
             .generate_mac()
             .key_id(&self.key_id)
             .mac_algorithm(Self::spec())
@@ -105,7 +108,10 @@ impl<const N: usize> AwsKmsHmac<N> where Self: private::ValidMacSize<N> {
 /// TODO: This probably should be part of the `vitaminc_traits` crate.
 pub struct Info(pub &'static str);
 
-impl<const N: usize, T> Update<&Protected<T>> for AwsKmsHmac<N> where T: AsRef<[u8]> + Zeroize {
+impl<const N: usize, T> Update<&Protected<T>> for AwsKmsHmac<N>
+where
+    T: AsRef<[u8]> + Zeroize,
+{
     fn update(&mut self, data: &Protected<T>) {
         let pref: ProtectedRef<[u8]> = data.as_protected_ref();
         self.input.update_with_ref(pref, |input, data| {
@@ -114,7 +120,10 @@ impl<const N: usize, T> Update<&Protected<T>> for AwsKmsHmac<N> where T: AsRef<[
     }
 }
 
-impl<const N: usize, T> Update<Protected<T>> for AwsKmsHmac<N> where T: AsRef<[u8]> + Zeroize {
+impl<const N: usize, T> Update<Protected<T>> for AwsKmsHmac<N>
+where
+    T: AsRef<[u8]> + Zeroize,
+{
     fn update(&mut self, data: Protected<T>) {
         self.input.update_with(data, |input, mut data| {
             input.extend_from_slice(data.as_ref());
@@ -140,7 +149,10 @@ impl<'r, const N: usize> Update<ProtectedRef<'r, [u8]>> for AwsKmsHmac<N> {
     }
 }
 
-impl<const N: usize> OutputSize for AwsKmsHmac<N> where Self: private::ValidMacSize<N> {
+impl<const N: usize> OutputSize for AwsKmsHmac<N>
+where
+    Self: private::ValidMacSize<N>,
+{
     const SIZE: usize = N;
 }
 
@@ -149,9 +161,7 @@ impl AsyncMac<Protected<[u8; 64]>> for AwsKmsHmac<64> {
     type Error = aws_sdk_kms::Error;
 
     async fn finalize_async(self) -> Result<Protected<[u8; 64]>, Self::Error> {
-        self.generate_mac()
-            .await
-            .map(Self::process_kms_response)
+        self.generate_mac().await.map(Self::process_kms_response)
     }
 }
 
@@ -161,9 +171,7 @@ impl AsyncFixedOutputReset<Protected<[u8; 64]>> for AwsKmsHmac<64> {
     type Error = aws_sdk_kms::Error;
 
     async fn finalize_reset(&mut self) -> Result<Protected<[u8; 64]>, Self::Error> {
-        let output = self.generate_mac()
-            .await
-            .map(Self::process_kms_response)?;
+        let output = self.generate_mac().await.map(Self::process_kms_response)?;
 
         // Clear the input
         self.input.update(|input| input.clear());
@@ -245,7 +253,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_update() -> Result<(), Box<dyn std::error::Error>> {
-        let mut hmac: AwsKmsHmac<32> = AwsKmsHmac::new(get_config(), "0cce5331-13a6-437f-a477-1c8988667281");
+        let mut hmac: AwsKmsHmac<32> =
+            AwsKmsHmac::new(get_config(), "0cce5331-13a6-437f-a477-1c8988667281");
         hmac.update(&Protected::new(vec![0, 1]));
         hmac.update(&Protected::new(vec![2, 3]));
         hmac.update(Info("test"));
@@ -259,9 +268,10 @@ mod tests {
     async fn test_chain() -> Result<(), Box<dyn std::error::Error>> {
         // TODO: Test all the variants
         // Also doctest with invalid sizes
-        let hmac: AwsKmsHmac<32> = AwsKmsHmac::new(get_config(), "0cce5331-13a6-437f-a477-1c8988667281")
-            .chain(&Protected::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]))
-            .chain(&Protected::new(vec![11, 12]));
+        let hmac: AwsKmsHmac<32> =
+            AwsKmsHmac::new(get_config(), "0cce5331-13a6-437f-a477-1c8988667281")
+                .chain(&Protected::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]))
+                .chain(&Protected::new(vec![11, 12]));
 
         assert_eq!(
             hmac.input.unwrap(),
