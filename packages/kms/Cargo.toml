@@ -14,8 +14,10 @@ categories.workspace = true
 vitaminc-traits = { version = "0.1.0-pre", path = "../traits" }
 vitaminc-protected = { version = "0.1.0-pre", path = "../protected" }
 aws-sdk-kms = "1.40.0"
-async-trait = { workspace = true }
 aws-config = "1.5.5"
+
+async-trait = { workspace = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 tokio = { version = "1.39.3", features = ["rt", "rt-multi-thread", "macros"] }

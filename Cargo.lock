@@ -1456,6 +1456,7 @@ dependencies = [
  "tokio",
  "vitaminc-protected",
  "vitaminc-traits",
+ "zeroize",
 ]
 
 [[package]]
