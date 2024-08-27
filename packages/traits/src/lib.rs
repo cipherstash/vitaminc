@@ -19,16 +19,19 @@ pub trait FixedOutput: Sized {
     }
 }
 
-pub trait Update<T: Paranoid> {
-    fn update<'a, A>(&mut self, data: &'a A)
-    where
-        A: ?Sized + AsProtectedRef<'a, [u8]>;
+/// Trait for updating a hash with input data with a specific input type.
+/// This differs from the `Update` trait in `digest` in that it takes a specific input type.
+/// This allows us to reason about the input type and its sensitivity.
+pub trait Update<T>
+where
+    T: for<'a> AsProtectedRef<'a, [u8]>,
+{
+    fn update(&mut self, data: &T);
 
     /// Digest input data in a chained manner.
     #[must_use]
-    fn chain<'a, A>(mut self, data: &'a A) -> Self
+    fn chain(mut self, data: &T) -> Self
     where
-        A: AsProtectedRef<'a, [u8]>,
         Self: Sized,
     {
         self.update(data);

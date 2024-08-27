@@ -7,7 +7,6 @@ mod exportable;
 mod ops;
 mod usage;
 
-use as_protected_ref::ProtectedRef;
 use private::ParanoidPrivate;
 use std::marker::PhantomData;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -19,7 +18,7 @@ pub mod bitvec;
 
 pub mod slice_index;
 
-pub use as_protected_ref::AsProtectedRef;
+pub use as_protected_ref::{AsProtectedRef, ProtectedRef};
 
 // TODO: This trait is similar to the Iterator trait in std
 // Implement for all "adapter" types - Equatable, Exportable, etc.
@@ -211,23 +210,24 @@ pub trait Paranoid: private::ParanoidPrivate {
     /// # Example
     ///
     /// ```
-    /// use vitaminc_protected::{Paranoid, Protected};
+    /// # use vitaminc_protected::{Paranoid, Protected};
+    /// use vitaminc_protected::AsProtectedRef;
+    ///
     /// let mut x = Protected::new([0u8; 32]);
     /// let y = Protected::new([1u8; 32]);
-    /// x.update_with_ref(&y, |x, y| {
+    /// x.update_with_ref(y.as_protected_ref(), |x, y| {
     ///   x.copy_from_slice(y);
     /// });
     /// assert_eq!(x.unwrap(), [1u8; 32]);
     /// ```
     ///
-    fn update_with_ref<'a, Other, A, F>(&mut self, other: &'a Other, mut f: F)
+    fn update_with_ref<'a, A, F>(&mut self, other: ProtectedRef<'a, A>, mut f: F)
     where
         A: ?Sized + 'a,
-        Other: AsProtectedRef<'a, A> + ?Sized,
         F: FnMut(&mut Self::Inner, &A),
     {
-        let arg: ProtectedRef<'a, A> = other.as_protected_ref();
-        f(self.inner_mut(), arg.inner_ref());
+        //let arg: ProtectedRef<'a, A> = other.as_protected_ref();
+        f(self.inner_mut(), other.inner_ref());
     }
 
     /// Iterate over the inner value and wrap each element in a `Protected`.

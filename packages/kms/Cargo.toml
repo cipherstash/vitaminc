@@ -18,4 +18,4 @@ async-trait = { workspace = true }
 aws-config = "1.5.5"
 
 [dev-dependencies]
-tokio = { version = "1.39.3", features = ["rt", "macros"] }
+tokio = { version = "1.39.3", features = ["rt", "rt-multi-thread", "macros"] }
