@@ -21,6 +21,6 @@ vitaminc-traits = { path = "../traits", version = "0.1.0-pre", optional = true }
 [features]
 protected = ["dep:vitaminc-protected"]
 random = ["dep:vitaminc-random"]
-permutation = ["dep:vitaminc-permutation"]
+permutation = ["dep:vitaminc-permutation", "protected"]
 traits = ["dep:vitaminc-traits"]
 aws-kms = ["traits", "dep:vitaminc-kms"]
