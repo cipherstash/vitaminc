@@ -1,10 +1,16 @@
 #![doc = include_str!("../../../README.md")]
 
 #[cfg(feature = "protected")]
-pub use vitaminc_protected::{Equatable, Exportable, Paranoid, Protected, Usage};
+pub use vitaminc_protected::*;
 
 #[cfg(feature = "random")]
-pub use vitaminc_random::{BoundedRng, Fill, Generatable, RngCore, SafeRand, SeedableRng};
+pub use vitaminc_random::*;
 
 #[cfg(feature = "permutation")]
-pub use vitaminc_permutation::{BitwisePermute, Depermute, PermutationKey, Permute};
+pub use vitaminc_permutation::*;
+
+#[cfg(feature = "traits")]
+pub use vitaminc_traits::*;
+
+#[cfg(feature = "aws-kms")]
+pub use vitaminc_kms::*;

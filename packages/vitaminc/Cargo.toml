@@ -12,11 +12,15 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+vitaminc-kms = { path = "../kms", version = "0.1.0-pre", optional = true }
 vitaminc-permutation = { path = "../permutation", version = "0.1.0-pre", optional = true }
 vitaminc-protected = { path = "../protected", version = "0.1.0-pre", optional = true }
 vitaminc-random = { path = "../random", version = "0.1.0-pre", optional = true }
+vitaminc-traits = { path = "../traits", version = "0.1.0-pre", optional = true }
 
 [features]
 protected = ["dep:vitaminc-protected"]
 random = ["dep:vitaminc-random"]
-permutation = ["dep:vitaminc-permutation"]
+permutation = ["dep:vitaminc-permutation", "protected"]
+traits = ["dep:vitaminc-traits"]
+aws-kms = ["traits", "dep:vitaminc-kms"]

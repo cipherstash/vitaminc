@@ -34,6 +34,12 @@ jobs:
         uses: dtolnay/rust-toolchain@1.78.0
         with:
           components: clippy, rustfmt
+      
+      - name: Start LocalStack
+        uses: LocalStack/setup-localstack@v0.2.2
+        with:
+          image-tag: 'latest'
+          install-awslocal: 'true'
 
       - name: clippy
         run: cargo clippy --no-deps --all-targets --all-features  -- -D warnings

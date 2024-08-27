@@ -1,0 +1,16 @@
+[package]
+name = "vitaminc-traits"
+documentation.workspace = true
+version.workspace = true
+repository.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+vitaminc-protected = { version = "0.1.0-pre", path = "../protected" }
+
