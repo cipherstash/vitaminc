@@ -7,7 +7,8 @@
 //! ```
 //! use aws_sdk_kms::Client;
 //! use vitaminc_protected::Protected;
-//! use vitaminc_traits::{AsyncFixedOutput, Update};
+//! use vitaminc_traits::Update;
+//! use vitaminc_async_traits::AsyncFixedOutput;
 //! use vitaminc_kms::{AwsKmsHmac, Info};
 //!
 //! #[tokio::main]
@@ -44,8 +45,9 @@
 //!
 use crate::private::ValidMacSize;
 use aws_sdk_kms::{primitives::Blob, Client, Config};
+use vitaminc_async_traits::{AsyncFixedOutput, AsyncFixedOutputReset};
 use vitaminc_protected::{AsProtectedRef, Paranoid, Protected, ProtectedRef};
-use vitaminc_traits::{AsyncFixedOutput, AsyncFixedOutputReset, OutputSize, Update};
+use vitaminc_traits::{OutputSize, Update};
 use zeroize::Zeroize;
 
 /// A `Mac` implementation that uses AWS KMS to generate HMACs of `N` bytes.
@@ -218,8 +220,9 @@ mod tests {
         types::{KeySpec, KeyUsageType},
         Client, Config,
     };
+    use vitaminc_async_traits::AsyncFixedOutput;
     use vitaminc_protected::{Paranoid, Protected};
-    use vitaminc_traits::{AsyncFixedOutput, Update};
+    use vitaminc_traits::Update;
 
     fn get_config() -> Config {
         use aws_config::{BehaviorVersion, Region};

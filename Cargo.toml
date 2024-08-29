@@ -1,11 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
+    "packages/async-traits",
+    "packages/kms",
     "packages/protected",
     "packages/password",
     "packages/permutation",
     "packages/random",
-    "packages/vitaminc", "packages/traits", "packages/kms",
+    "packages/traits",
+    "packages/vitaminc",
 ]
 
 [workspace.package]

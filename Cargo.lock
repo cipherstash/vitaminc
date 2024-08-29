@@ -1436,12 +1436,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "vitaminc-async-traits"
+version = "0.1.0-pre"
+dependencies = [
+ "vitaminc-protected",
+ "vitaminc-traits",
+]
+
+[[package]]
 name = "vitaminc-kms"
 version = "0.1.0-pre"
 dependencies = [
  "aws-config",
  "aws-sdk-kms",
  "tokio",
+ "vitaminc-async-traits",
  "vitaminc-protected",
  "vitaminc-traits",
  "zeroize",
