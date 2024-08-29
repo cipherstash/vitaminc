@@ -1,7 +1,7 @@
+# Vitamin C Permutation
+
 [![Crates.io](https://img.shields.io/crates/v/vitaminc-permutation.svg)](https://crates.io/crates/vitaminc-permutation)
 [![Workflow Status](https://github.com/cipherstash/vitaminc/workflows/main/badge.svg)](https://github.com/cipherstash/vitaminc/actions?query=workflow%3A%22main%22)
-
-# Vitamin C Permutation
 
 A library for permuting data in a secure and efficient manner.
 
@@ -107,9 +107,6 @@ an input and output to an XOR is accessible to an attacker without a key.
 In a sense, permutations are the generalised version of XOR.
 They too have perfect secrecy but, like XOR, if an attacker knows the input and output to a permutation,
 the permutation itself is trivially recoverable.
-
-
-Current version: 0.1.0-pre
 
 ## CipherStash
 

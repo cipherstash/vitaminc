@@ -1,5 +1,7 @@
+#![doc = include_str!("../README.md")]
 use vitaminc_protected::{Paranoid, Zeroed};
 
+/// Defines the size of the output of a hash function.
 pub trait OutputSize {
     const SIZE: usize;
 }
@@ -12,6 +14,7 @@ where
     const SIZE: usize = N;
 }
 
+/// Trait for hash functions with fixed-size output.
 pub trait FixedOutput<O>: Sized + OutputSize
 where
     O: Sized,
@@ -49,6 +52,7 @@ pub trait Update<T> {
     }
 }
 
+/// Trait for hash functions with fixed-size output able to reset themselves.
 pub trait FixedOutputReset<O>: OutputSize
 where
     O: Paranoid,

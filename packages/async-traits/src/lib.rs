@@ -1,3 +1,4 @@
+#![doc = include_str!("../README.md")]
 use vitaminc_protected::{Paranoid, Zeroed};
 use vitaminc_traits::OutputSize;
 
