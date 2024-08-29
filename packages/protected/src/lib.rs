@@ -6,6 +6,7 @@ mod equatable;
 mod exportable;
 mod ops;
 mod usage;
+mod zeroed;
 
 use private::ParanoidPrivate;
 use std::marker::PhantomData;
@@ -19,6 +20,7 @@ pub mod bitvec;
 pub mod slice_index;
 
 pub use as_protected_ref::{AsProtectedRef, ProtectedRef};
+pub use zeroed::Zeroed;
 
 // TODO: This trait is similar to the Iterator trait in std
 // Implement for all "adapter" types - Equatable, Exportable, etc.

@@ -20,7 +20,6 @@ keywords = ["cryptography", "security"]
 categories = ["cryptography"]
 
 [workspace.dependencies]
-async-trait = "*"
 bitvec = "1.0.1"
 rand = "0.8.5"
 thiserror = "1.0.63"

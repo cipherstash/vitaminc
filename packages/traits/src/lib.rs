@@ -1,5 +1,4 @@
-use async_trait::async_trait;
-use vitaminc_protected::Paranoid;
+use vitaminc_protected::{Paranoid, Zeroed};
 
 pub trait OutputSize {
     const SIZE: usize;
@@ -24,11 +23,37 @@ where
     #[inline]
     fn finalize_fixed(self) -> O
     where
-        O: Default,
+        O: Zeroed,
     {
-        let mut out = Default::default();
+        let mut out = Zeroed::zeroed();
         self.finalize_into(&mut out);
         out
+    }
+}
+
+#[allow(async_fn_in_trait)]
+pub trait AsyncFixedOutput<O>: Sized + OutputSize
+where
+    // TODO: Make this bound on a "tagged" value (i.e. sensitive or safe)
+    O: Sized + Send,
+{
+    type Error;
+
+    /// Consume value and write result into provided array.
+    async fn try_finalize_into(self, out: &mut O) -> Result<(), Self::Error>;
+
+    /// Retrieve result and consume the hasher instance.
+    #[inline]
+    async fn try_finalize_fixed(self) -> Result<O, Self::Error>
+    where
+        O: Zeroed,
+    {
+        let mut out = Zeroed::zeroed();
+        if let Err(err) = self.try_finalize_into(&mut out).await {
+            Err(err)
+        } else {
+            Ok(out)
+        }
     }
 }
 
@@ -50,23 +75,41 @@ pub trait Update<T> {
     }
 }
 
-// TODO: Replace this with trait-variant
-#[async_trait]
-pub trait AsyncMac<O>: OutputSize
+pub trait FixedOutputReset<O>: OutputSize
 where
     O: Paranoid,
 {
-    type Error;
+    fn finalize_into_reset(&mut self, out: &mut O);
 
-    async fn finalize_async(self) -> Result<O, Self::Error>;
+    fn finalize_reset(&mut self) -> O
+    where
+        O: Zeroed,
+    {
+        let mut out = Zeroed::zeroed();
+        self.finalize_into_reset(&mut out);
+        out
+    }
 }
 
-#[async_trait]
+#[allow(async_fn_in_trait)]
 pub trait AsyncFixedOutputReset<O>: OutputSize
 where
     O: Paranoid,
 {
     type Error;
 
-    async fn finalize_reset(&mut self) -> Result<O, Self::Error>;
+    async fn try_finalize_into_reset(&mut self, out: &mut O) -> Result<(), Self::Error>;
+
+    #[inline]
+    async fn try_finalize_fixed_reset(&mut self) -> Result<O, Self::Error>
+    where
+        O: Zeroed,
+    {
+        let mut out = Zeroed::zeroed();
+        if let Err(err) = self.try_finalize_into_reset(&mut out).await {
+            Err(err)
+        } else {
+            Ok(out)
+        }
+    }
 }

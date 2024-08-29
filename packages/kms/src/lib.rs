@@ -7,7 +7,7 @@
 //! ```
 //! use aws_sdk_kms::Client;
 //! use vitaminc_protected::Protected;
-//! use vitaminc_traits::{AsyncMac, Update};
+//! use vitaminc_traits::{AsyncFixedOutput, Update};
 //! use vitaminc_kms::{AwsKmsHmac, Info};
 //!
 //! #[tokio::main]
@@ -35,7 +35,7 @@
 //!     let tag = AwsKmsHmac::new(config, key_id)
 //!         .chain(&Protected::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]))
 //!         .chain(Info("account_id"))
-//!         .finalize_async()
+//!         .try_finalize_fixed()
 //!         .await?;
 //!     
 //!     Ok(())
@@ -43,13 +43,10 @@
 //! ```
 //!
 use crate::private::ValidMacSize;
-use async_trait::async_trait;
 use aws_sdk_kms::{primitives::Blob, Client, Config};
 use vitaminc_protected::{AsProtectedRef, Paranoid, Protected, ProtectedRef};
-use vitaminc_traits::{AsyncFixedOutputReset, AsyncMac, OutputSize, Update};
+use vitaminc_traits::{AsyncFixedOutput, AsyncFixedOutputReset, OutputSize, Update};
 use zeroize::Zeroize;
-
-// TODO: Should we re-export the SDK?
 
 /// A `Mac` implementation that uses AWS KMS to generate HMACs of `N` bytes.
 /// Valid sizes are 28, 32, 48, and 64 bytes.
@@ -90,16 +87,6 @@ where
             .send()
             .await
             .map(|response| response.mac.unwrap())?)
-    }
-
-    // Consumes the response and returns a `Protected` array making sure to Zeroize the response.
-    fn process_kms_response(response: Blob) -> Protected<[u8; N]> {
-        let mut response = response.into_inner();
-        let mut output = [0; N];
-        output.copy_from_slice(&response);
-        let output = Protected::new(output);
-        response.zeroize();
-        output
     }
 }
 
@@ -156,27 +143,39 @@ where
     const SIZE: usize = N;
 }
 
-#[async_trait]
-impl AsyncMac<Protected<[u8; 64]>> for AwsKmsHmac<64> {
+impl AsyncFixedOutput<Protected<[u8; 64]>> for AwsKmsHmac<64> {
     type Error = aws_sdk_kms::Error;
 
-    async fn finalize_async(self) -> Result<Protected<[u8; 64]>, Self::Error> {
-        self.generate_mac().await.map(Self::process_kms_response)
+    async fn try_finalize_into(self, out: &mut Protected<[u8; 64]>) -> Result<(), Self::Error> {
+        let output = self.generate_mac().await?;
+        let response = Protected::new(output.into_inner());
+
+        out.update_with(response, |out, data| {
+            out.copy_from_slice(data.as_ref());
+        });
+
+        Ok(())
     }
 }
 
 // TODO: Handle all valid sizes
-#[async_trait]
 impl AsyncFixedOutputReset<Protected<[u8; 64]>> for AwsKmsHmac<64> {
     type Error = aws_sdk_kms::Error;
 
-    async fn finalize_reset(&mut self) -> Result<Protected<[u8; 64]>, Self::Error> {
-        let output = self.generate_mac().await.map(Self::process_kms_response)?;
+    async fn try_finalize_into_reset(
+        &mut self,
+        out: &mut Protected<[u8; 64]>,
+    ) -> Result<(), Self::Error> {
+        let output = self.generate_mac().await?;
+        let response = Protected::new(output.into_inner());
 
-        // Clear the input
+        out.update_with(response, |out, data| {
+            out.copy_from_slice(data.as_ref());
+        });
+
         self.input.update(|input| input.clear());
 
-        Ok(output)
+        Ok(())
     }
 }
 
@@ -220,7 +219,7 @@ mod tests {
         Client, Config,
     };
     use vitaminc_protected::{Paranoid, Protected};
-    use vitaminc_traits::{AsyncMac, Update};
+    use vitaminc_traits::{AsyncFixedOutput, Update};
 
     fn get_config() -> Config {
         use aws_config::{BehaviorVersion, Region};
@@ -289,7 +288,7 @@ mod tests {
 
         AwsKmsHmac::new(get_config(), key_id)
             .chain(&Protected::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]))
-            .finalize_async()
+            .try_finalize_fixed()
             .await?;
 
         Ok(())
