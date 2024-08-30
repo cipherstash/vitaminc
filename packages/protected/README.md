@@ -1,7 +1,7 @@
+# Vitamin C Protected
+
 [![Crates.io](https://img.shields.io/crates/v/vitaminc-protected.svg)](https://crates.io/crates/vitaminc-protected)
 [![Workflow Status](https://github.com/cipherstash/vitaminc/workflows/main/badge.svg)](https://github.com/cipherstash/vitaminc/actions?query=workflow%3A%22main%22)
-
-# Vitamin C Protected
 
 ## Safe wrappers for sensitive data
 
@@ -154,8 +154,6 @@ let input: Result<Protected<String>, FromUtf8Error> = Protected::generate_ok(|| 
   String::from_utf8(vec![1, 2, 3, 4, 5, 6, 7, 8])
 });
 ```
-
-Current version: 0.1.0-pre
 
 ## CipherStash
 

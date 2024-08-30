@@ -6,6 +6,7 @@ mod equatable;
 mod exportable;
 mod ops;
 mod usage;
+mod zeroed;
 
 use private::ParanoidPrivate;
 use std::marker::PhantomData;
@@ -19,6 +20,7 @@ pub mod bitvec;
 pub mod slice_index;
 
 pub use as_protected_ref::{AsProtectedRef, ProtectedRef};
+pub use zeroed::Zeroed;
 
 // TODO: This trait is similar to the Iterator trait in std
 // Implement for all "adapter" types - Equatable, Exportable, etc.
@@ -202,6 +204,10 @@ pub trait Paranoid: private::ParanoidPrivate {
         F: FnMut(&mut Self::Inner, Other::Inner),
         Other: Paranoid,
     {
+        // FIXME: There's a chance here that other will be dropped and not zeroized correctly
+        // But not all Zeroize types are ZeroizeOnDrop - we may need to yield a wrapper type that Derefs to the inner value
+        // Ditto for the zip method
+        // Either that or just make sure the caller uses zeroize() on the other value :/
         f(self.inner_mut(), other.unwrap());
     }
 

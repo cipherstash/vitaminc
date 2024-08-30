@@ -1,8 +1,7 @@
-<!-- Run cargo readme to generate this file -->
+# Vitamin C Random
+
 [![Crates.io](https://img.shields.io/crates/v/vitaminc-random.svg)](https://crates.io/crates/vitaminc-random)
 [![Workflow Status](https://github.com/cipherstash/vitaminc/workflows/main/badge.svg)](https://github.com/cipherstash/vitaminc/actions?query=workflow%3A%22main%22)
-
-# Vitamin C Random
 
 A carefully designed random number generator that is safe to use for cryptographic purposes.
 
@@ -28,9 +27,6 @@ let mut rng = SafeRand::from_entropy();
 let value: Protected<u32> = rng.next_bounded(Protected::new(10));
 assert!(value.unwrap() <= 10);
 ```
-
-
-Current version: 0.1.0-pre
 
 ## CipherStash
 

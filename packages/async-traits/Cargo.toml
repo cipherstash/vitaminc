@@ -1,6 +1,6 @@
 [package]
-name = "vitaminc-traits"
-description = "Vitamin C traits"
+name = "vitaminc-async-traits"
+description = "Vitamin C async traits"
 documentation.workspace = true
 version.workspace = true
 repository.workspace = true
@@ -10,8 +10,8 @@ license.workspace = true
 readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
-rust-version = "1.61.0"
+rust-version = "1.75.0"
 
 [dependencies]
 vitaminc-protected = { version = "0.1.0-pre", path = "../protected" }
-
+vitaminc-traits = { version = "0.1.0-pre", path = "../traits" }
