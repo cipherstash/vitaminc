@@ -3,10 +3,10 @@ use vitaminc_protected::{Controlled, Zeroed};
 use vitaminc_traits::OutputSize;
 
 #[allow(async_fn_in_trait)]
-pub trait AsyncFixedOutput<O>: Sized + OutputSize
+pub trait AsyncFixedOutput<const N: usize, O>: Sized
 where
     // TODO: Make this bound on a "tagged" value (i.e. sensitive or safe)
-    O: Sized + Send,
+    O: Sized + Send + OutputSize<N>,
 {
     type Error;
 
@@ -29,9 +29,9 @@ where
 }
 
 #[allow(async_fn_in_trait)]
-pub trait AsyncFixedOutputReset<O>: OutputSize
+pub trait AsyncFixedOutputReset<const N: usize, O>
 where
-    O: Controlled,
+    O: OutputSize<N>, // TODO: Output should Paranoid (perhaps even a concrete type: MacOutput which is a Paranoid)
 {
     type Error;
 

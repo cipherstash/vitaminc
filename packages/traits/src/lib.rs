@@ -2,22 +2,39 @@
 use vitaminc_protected::{Controlled, Zeroed};
 
 /// Defines the size of the output of a hash function.
-pub trait OutputSize {
+pub trait OutputSize<const N: usize> {
     const SIZE: usize;
 }
 
 /// Output size for Paranoid types with the same sized inner value.
-impl<const N: usize, T> OutputSize for T
+impl<const N: usize, T> OutputSize<N> for T
 where
     T: Controlled<Inner = [u8; N]>,
 {
     const SIZE: usize = N;
 }
 
+pub trait KeySize {
+    const SIZE: usize;
+}
+
+impl<const N: usize, T> KeySize for T
+where 
+    T: Paranoid<Inner = [u8; N]>,
+{
+    const SIZE: usize = N;
+}
+
+pub trait KeyInit: KeySize {
+    type Key: Paranoid;
+
+    fn new(key: Self::Key) -> Self;
+}
+
 /// Trait for hash functions with fixed-size output.
-pub trait FixedOutput<O>: Sized + OutputSize
+pub trait FixedOutput<const N: usize, O>: Sized
 where
-    O: Sized,
+    O: Sized + OutputSize<N>,
 {
     /// Consume value and write result into provided array.
     fn finalize_into(self, out: &mut O);
@@ -53,9 +70,9 @@ pub trait Update<T> {
 }
 
 /// Trait for hash functions with fixed-size output able to reset themselves.
-pub trait FixedOutputReset<O>: OutputSize
+pub trait FixedOutputReset<const N: usize, O>
 where
-    O: Controlled,
+    O: Controlled + OutputSize<N>,
 {
     fn finalize_into_reset(&mut self, out: &mut O);
 
