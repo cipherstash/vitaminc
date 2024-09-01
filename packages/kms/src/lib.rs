@@ -45,6 +45,7 @@
 //!
 use crate::private::ValidMacSize;
 use aws_sdk_kms::{primitives::Blob, Client, Config};
+use thiserror::Error;
 use vitaminc_async_traits::{AsyncFixedOutput, AsyncFixedOutputReset};
 use vitaminc_protected::{AsProtectedRef, Controlled, Protected, ProtectedRef};
 use vitaminc_traits::{OutputSize, Update};
@@ -66,6 +67,12 @@ pub struct AwsKmsHmac<const N: usize> {
     input: Protected<Vec<u8>>,
 }
 
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error(transparent)]
+    AwsSdk(#[from] aws_sdk_kms::Error),
+}
+
 impl<const N: usize> AwsKmsHmac<N>
 where
     Self: private::ValidMacSize<N>,
@@ -78,9 +85,8 @@ where
         }
     }
 
-    async fn generate_mac(&self) -> Result<Blob, aws_sdk_kms::Error> {
-        Ok(self
-            .client
+    async fn generate_mac(&self) -> Result<Blob, Error> {
+        self.client
             .generate_mac()
             .key_id(&self.key_id)
             .mac_algorithm(Self::spec())
@@ -88,7 +94,9 @@ where
             .message(Blob::new(self.input.clone().risky_unwrap()))
             .send()
             .await
-            .map(|response| response.mac.unwrap())?)
+            .map(|response| response.mac.unwrap())
+            .map_err(aws_sdk_kms::Error::from)
+            .map_err(Error::AwsSdk)
     }
 }
 
@@ -146,7 +154,7 @@ where
 }
 
 impl AsyncFixedOutput<Protected<[u8; 64]>> for AwsKmsHmac<64> {
-    type Error = aws_sdk_kms::Error;
+    type Error = Error;
 
     async fn try_finalize_into(self, out: &mut Protected<[u8; 64]>) -> Result<(), Self::Error> {
         let output = self.generate_mac().await?;
@@ -162,7 +170,7 @@ impl AsyncFixedOutput<Protected<[u8; 64]>> for AwsKmsHmac<64> {
 
 // TODO: Handle all valid sizes
 impl AsyncFixedOutputReset<Protected<[u8; 64]>> for AwsKmsHmac<64> {
-    type Error = aws_sdk_kms::Error;
+    type Error = Error;
 
     async fn try_finalize_into_reset(
         &mut self,

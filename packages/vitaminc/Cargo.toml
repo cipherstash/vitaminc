@@ -17,10 +17,12 @@ vitaminc-permutation = { path = "../permutation", version = "0.1.0-pre", optiona
 vitaminc-protected = { path = "../protected", version = "0.1.0-pre", optional = true }
 vitaminc-random = { path = "../random", version = "0.1.0-pre", optional = true }
 vitaminc-traits = { path = "../traits", version = "0.1.0-pre", optional = true }
+vitaminc-async-traits = { path = "../async-traits", version = "0.1.0-pre", optional = true }
 
 [features]
 protected = ["dep:vitaminc-protected"]
 random = ["dep:vitaminc-random"]
 permutation = ["dep:vitaminc-permutation", "protected"]
 traits = ["dep:vitaminc-traits"]
+async-traits = ["dep:vitaminc-async-traits", "traits"]
 aws-kms = ["traits", "dep:vitaminc-kms"]
