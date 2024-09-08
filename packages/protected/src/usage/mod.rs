@@ -1,41 +1,26 @@
-use crate::{private::ProtectSealed, ProtectAdapter, Protected};
+use crate::{Protect, ProtectNew, Protected};
 use std::marker::PhantomData;
 
 // TODO: Docs, explain compile time
 pub struct Usage<T, Scope = DefaultScope>(pub(crate) T, pub(crate) PhantomData<Scope>);
 
-impl<T, S> Usage<T, S> {
-    pub fn new(x: <Usage<T, S> as ProtectSealed>::Inner) -> Self
-    where
-        Self: ProtectAdapter,
-        S: Scope,
-    {
-        Self::init_from_inner(x)
+impl<T, S> Usage<T, S> where T: Protect {
+    pub fn init(x: T) -> Self {
+        Self(x, PhantomData)
     }
 }
 
-impl<T: ProtectSealed, Scope> ProtectSealed for Usage<T, Scope> {
-    type Inner = T::Inner;
+impl<T, S> Protect for Usage<T, S> where T: Protect {
+    type RawType = T::RawType;
 
-    fn init_from_inner(x: Self::Inner) -> Self {
-        Self(T::init_from_inner(x), PhantomData)
-    }
-
-    fn inner(&self) -> &Self::Inner {
-        self.0.inner()
-    }
-
-    fn inner_mut(&mut self) -> &mut Self::Inner {
-        self.0.inner_mut()
+    fn risky_unwrap(self) -> T::RawType {
+        self.0.risky_unwrap()
     }
 }
 
-impl<T, Scope> ProtectAdapter for Usage<T, Scope>
-where
-    T: ProtectAdapter,
-{
-    fn unwrap(self) -> Self::Inner {
-        self.0.unwrap()
+impl<T, I, S> ProtectNew<I> for Usage<T, S> where T: ProtectNew<I>, Self: Protect<RawType = I> {
+    fn new(raw: Self::RawType) -> Self {
+        Self(T::new(raw), PhantomData)
     }
 }
 

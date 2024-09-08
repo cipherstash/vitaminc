@@ -13,4 +13,5 @@ pub trait ProtectSealed {
 impl<T> ProtectSealed for super::Protected<T> {}
 impl<T> ProtectSealed for super::Equatable<T> {}
 impl<T> ProtectSealed for super::Exportable<T> {}
+impl<T, S> ProtectSealed for super::Usage<T, S> {}
 impl<T> ProtectSealed for T where T: ProtectInit, <T as ProtectInit>::Inner: Protect {}

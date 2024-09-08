@@ -7,7 +7,7 @@ mod equatable;
 mod exportable;
 //mod ops;
 mod protected;
-//mod usage;
+mod usage;
 mod zeroed;
 
 use zeroize::Zeroize;
@@ -25,7 +25,7 @@ pub use as_protected_ref::{AsProtectedRef, ProtectedRef};
 pub use equatable::{ConstantTimeEq, Equatable};
 pub use exportable::Exportable;
 pub use protected::{flatten_array, Protected};
-//pub use usage::{Acceptable, DefaultScope, Scope, Usage};
+pub use usage::{Acceptable, DefaultScope, Scope, Usage};
 pub use zeroed::Zeroed;
 
 pub trait Protect: private::ProtectSealed {
