@@ -1,11 +1,11 @@
-use crate::{private::ProtectSealed, Protected};
+use crate::{Protected};
 use zeroize::Zeroize;
 // TODO: Feature flag?
 use digest::generic_array::{ArrayLength, GenericArray};
 
 impl<T: Zeroize> From<T> for Protected<T> {
     fn from(x: T) -> Self {
-        Self::init_from_inner(x)
+        Self::init(x)
     }
 }
 
@@ -21,7 +21,7 @@ where
     [u8; N]: From<GenericArray<u8, U>>,
 {
     fn from(x: GenericArray<u8, U>) -> Self {
-        Self::init_from_inner(x.into())
+        Self::init(x.into())
     }
 }
 

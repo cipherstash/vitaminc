@@ -1,7 +1,7 @@
 #![recursion_limit = "256"]
 #![doc = include_str!("../README.md")]
 mod as_protected_ref;
-//mod conversions;
+mod conversions;
 //mod digest;
 mod equatable;
 mod exportable;

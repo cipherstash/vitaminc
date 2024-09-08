@@ -9,6 +9,12 @@ pub struct Protected<T>(pub(super) T);
 
 opaque_debug::implement!(Protected<T>);
 
+impl<T> Protected<T> {
+    pub fn init(raw: T) -> Self {
+        Self(raw)
+    }
+}
+
 impl<T> Protect for Protected<T> where T: Zeroize {
     type RawType = T;
 
