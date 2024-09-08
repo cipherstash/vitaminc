@@ -1,4 +1,4 @@
-use vitaminc_protected::Protected;
+use vitaminc_protected::{ProtectNew, Protected};
 use vitaminc_random::{Generatable, RandomError, SafeRand};
 
 const STANDARD_CHARS: [char; 94] = [

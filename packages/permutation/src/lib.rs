@@ -19,7 +19,7 @@ where
         out[i] = i as u8;
         i += 1;
     }
-    Protected::new(out)
+    Protected::init(out)
 }
 
 mod private {

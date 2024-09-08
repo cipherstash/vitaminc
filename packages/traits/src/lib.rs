@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-use vitaminc_protected::{ProtectMethods, Zeroed};
+use vitaminc_protected::{Protect, ProtectMethods, Zeroed};
 
 /// Defines the size of the output of a hash function.
 pub trait OutputSize {
@@ -9,7 +9,7 @@ pub trait OutputSize {
 /// Output size for Paranoid types with the same sized inner value.
 impl<const N: usize, T> OutputSize for T
 where
-    T: ProtectMethods<Inner = [u8; N]>,
+    T: Protect<RawType = [u8; N]>,
 {
     const SIZE: usize = N;
 }

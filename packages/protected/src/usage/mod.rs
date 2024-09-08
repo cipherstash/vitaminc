@@ -4,13 +4,19 @@ use std::marker::PhantomData;
 // TODO: Docs, explain compile time
 pub struct Usage<T, Scope = DefaultScope>(pub(crate) T, pub(crate) PhantomData<Scope>);
 
-impl<T, S> Usage<T, S> where T: Protect {
-    pub fn init(x: T) -> Self {
+impl<T, S> Usage<T, S>
+where
+    T: Protect,
+{
+    pub const fn init(x: T) -> Self {
         Self(x, PhantomData)
     }
 }
 
-impl<T, S> Protect for Usage<T, S> where T: Protect {
+impl<T, S> Protect for Usage<T, S>
+where
+    T: Protect,
+{
     type RawType = T::RawType;
 
     fn risky_unwrap(self) -> T::RawType {
@@ -18,7 +24,11 @@ impl<T, S> Protect for Usage<T, S> where T: Protect {
     }
 }
 
-impl<T, I, S> ProtectNew<I> for Usage<T, S> where T: ProtectNew<I>, Self: Protect<RawType = I> {
+impl<T, I, S> ProtectNew<I> for Usage<T, S>
+where
+    T: ProtectNew<I>,
+    Self: Protect<RawType = I>,
+{
     fn new(raw: Self::RawType) -> Self {
         Self(T::new(raw), PhantomData)
     }

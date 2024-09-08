@@ -8,21 +8,31 @@ use serde::{
 #[derive(Debug)]
 pub struct Exportable<T>(pub(crate) T);
 
-impl<T> Exportable<T> where T: Protect {
-    pub fn init(x: T) -> Self {
+impl<T> Exportable<T>
+where
+    T: Protect,
+{
+    pub const fn init(x: T) -> Self {
         Self(x)
     }
 }
 
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
-impl<T, O> PartialEq<O> for Exportable<T> where Self: ProtectMethods, <Exportable<T> as Protect>::RawType: ConstantTimeEq<<O as Protect>::RawType>, O: ProtectMethods {
+impl<T, O> PartialEq<O> for Exportable<T>
+where
+    Self: ProtectMethods,
+    <Exportable<T> as Protect>::RawType: ConstantTimeEq<<O as Protect>::RawType>,
+    O: ProtectMethods,
+{
     fn eq(&self, other: &O) -> bool {
         self.inner().constant_time_eq(other.inner())
     }
 }
 
-
-impl<T> Protect for Exportable<T> where T: Protect {
+impl<T> Protect for Exportable<T>
+where
+    T: Protect,
+{
     type RawType = T::RawType;
 
     fn risky_unwrap(self) -> T::RawType {
@@ -30,7 +40,11 @@ impl<T> Protect for Exportable<T> where T: Protect {
     }
 }
 
-impl<T, I> ProtectNew<I> for Exportable<T> where T: ProtectNew<I>, Self: Protect<RawType = I> {
+impl<T, I> ProtectNew<I> for Exportable<T>
+where
+    T: ProtectNew<I>,
+    Self: Protect<RawType = I>,
+{
     fn new(raw: Self::RawType) -> Self {
         Self(T::new(raw))
     }
@@ -38,7 +52,10 @@ impl<T, I> ProtectNew<I> for Exportable<T> where T: ProtectNew<I>, Self: Protect
 
 // FIXME: This is super clunky
 // We should have a separate trait for getting the inner value of a `Protected`
-impl<T> ProtectMethods for Exportable<T> where T: Protect + ProtectMethods {
+impl<T> ProtectMethods for Exportable<T>
+where
+    T: Protect + ProtectMethods,
+{
     // TODO: Consider removing this or making it a separate trait usable only within the crate
     // Or could it return a ProtectedRef?
     fn inner(&self) -> &Self::RawType {

@@ -35,7 +35,11 @@ pub trait Protect: private::ProtectSealed {
     fn risky_unwrap(self) -> Self::RawType;
 }
 
-impl<T> Protect for T where T: ProtectInit, <T as ProtectInit>::Inner: Protect {
+impl<T> Protect for T
+where
+    T: ProtectInit,
+    <T as ProtectInit>::Inner: Protect,
+{
     type RawType = <T::Inner as Protect>::RawType;
 
     fn risky_unwrap(self) -> Self::RawType {
@@ -47,7 +51,11 @@ pub trait ProtectNew<T>: Protect {
     fn new(raw: T) -> Self;
 }
 
-impl<T, I> ProtectNew<I> for T where T: ProtectInit, T::Inner: ProtectNew<I> {
+impl<T, I> ProtectNew<I> for T
+where
+    T: ProtectInit,
+    T::Inner: ProtectNew<I>,
+{
     fn new(raw: I) -> Self {
         T::init(T::Inner::new(raw))
     }
@@ -66,7 +74,6 @@ pub trait ProtectInit {
     /// Returns the inner value which implements [Protect].
     fn into_inner(self) -> Self::Inner;
 }
-
 
 // TODO: This trait is similar to the Iterator trait in std
 // Implement for all "adapter" types - Equatable, Exportable, etc.
@@ -165,7 +172,7 @@ pub trait ProtectMethods: Protect {
         Out::new(f(self.risky_unwrap(), b.risky_unwrap()))
     }
 
-   /*/// Like `zip` but the second argument is a reference.
+    /*/// Like `zip` but the second argument is a reference.
     ///
     /// # Example
     ///

@@ -1,5 +1,5 @@
-use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::{Protect, ProtectMethods, ProtectNew};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Basic building block for Paranoid.
 /// It uses a similar design "adapter" pattern to `std::slide::Iter`.
@@ -10,12 +10,15 @@ pub struct Protected<T>(pub(super) T);
 opaque_debug::implement!(Protected<T>);
 
 impl<T> Protected<T> {
-    pub fn init(raw: T) -> Self {
+    pub const fn init(raw: T) -> Self {
         Self(raw)
     }
 }
 
-impl<T> Protect for Protected<T> where T: Zeroize {
+impl<T> Protect for Protected<T>
+where
+    T: Zeroize,
+{
     type RawType = T;
 
     fn risky_unwrap(self) -> T {
@@ -23,7 +26,10 @@ impl<T> Protect for Protected<T> where T: Zeroize {
     }
 }
 
-impl<T> ProtectNew<T> for Protected<T> where Self: Protect {
+impl<T> ProtectNew<T> for Protected<T>
+where
+    Self: Protect,
+{
     fn new(raw: T) -> Self {
         Protected(raw)
     }
@@ -68,7 +74,10 @@ impl<T: Zeroize> ZeroizeOnDrop for Protected<T> {}
 
 /// Implement `ProtectMethods` for `Protected`.
 /// Note that not all `Protected<T>` are `Protect` because the inner type may not be `Zeroize`.
-impl<T> ProtectMethods for Protected<T> where Protected<T>: Protect<RawType = T> {
+impl<T> ProtectMethods for Protected<T>
+where
+    Protected<T>: Protect<RawType = T>,
+{
     // TODO: Consider removing this or making it a separate trait usable only within the crate
     fn inner(&self) -> &T {
         &self.0
@@ -153,9 +162,7 @@ mod tests {
     fn test_zip() {
         let x = Protected::new(1);
         let y = Protected::new(2);
-        let z: Protected<u32> = x.zip(y, |a, b| {
-            a + b
-        });
+        let z: Protected<u32> = x.zip(y, |a, b| a + b);
         assert_eq!(z.risky_unwrap(), 3);
     }
 }

@@ -27,7 +27,7 @@ impl<const N: usize> PermutationKey<N> {
     /// This function is unsafe because it does not check that the key is a valid permutation.
     ///
     pub unsafe fn new_unchecked(key: [u8; N]) -> Self {
-        Self(Protected::new(key))
+        Self(Protected::init(key))
     }
 
     /// Consumes the key and returns its inverse.
@@ -46,15 +46,15 @@ impl<const N: usize> PermutationKey<N> {
     /// ```
     /// use vitaminc_permutation::{Permute, PermutationKey};
     /// use vitaminc_random::{Generatable, SafeRand, SeedableRng};
-    /// use vitaminc_protected::{Paranoid, Protected};
+    /// use vitaminc_protected::{Protect, Protected};
     /// let mut rng = SafeRand::from_entropy();
     /// let key = PermutationKey::random(&mut rng).unwrap();
     /// let target = PermutationKey::random(&mut rng).unwrap();
     /// let complement = key.complement(&target);
     /// let input: Protected<[u8; 16]> = Protected::random(&mut rng).unwrap();
     /// assert_eq!(
-    ///     complement.permute(target).permute(input).unwrap(),
-    ///     key.permute(input).unwrap()
+    ///     complement.permute(target).permute(input).risky_unwrap(),
+    ///     key.permute(input).risky_unwrap()
     /// );
     /// ```
     pub fn complement(&self, target: &Self) -> Self
@@ -101,7 +101,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{elementwise::Permute, identity, private::IsPermutable, PermutationKey};
-    use vitaminc_protected::{ProtectMethods, Protected};
+    use vitaminc_protected::{Protect, Protected};
     use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 
     use crate::tests;
@@ -115,8 +115,8 @@ mod tests {
 
         // p(p^-1(x)) = x
         assert_eq!(
-            key.permute(inverted).0.unwrap(),
-            identity::<N, u8>().unwrap(),
+            key.permute(inverted).0.risky_unwrap(),
+            identity::<N, u8>().risky_unwrap(),
             "Failed to invert key of size {N}"
         );
     }
@@ -134,8 +134,8 @@ mod tests {
 
         // c(t)(x) = p(x)
         assert_eq!(
-            complement.permute(target).permute(input).unwrap(),
-            key.permute(input).unwrap(),
+            complement.permute(target).permute(input).risky_unwrap(),
+            key.permute(input).risky_unwrap(),
             "Failed to complement key of size {N}"
         );
     }

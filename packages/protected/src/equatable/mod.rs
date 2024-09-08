@@ -1,4 +1,4 @@
-use crate::{private::ProtectSealed, Protect, ProtectNew, ProtectMethods, Protected};
+use crate::{private::ProtectSealed, Protect, ProtectMethods, ProtectNew, Protected};
 use core::num::NonZeroU16;
 use subtle::ConstantTimeEq as SubtleCtEq;
 use zeroize::Zeroize;
@@ -92,31 +92,37 @@ use zeroize::Zeroize;
 #[derive(Debug)]
 pub struct Equatable<T>(pub(crate) T);
 
-impl<T> Equatable<T> where T: Protect {
+impl<T> Equatable<T>
+where
+    T: Protect,
+{
     /// Initialize an `Equatable` from an inner value.
     /// Note that this is different to [ProtectNew::new] as it takes the immediate child of the `Equatable`
     /// rather than the innermost "raw" value.
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```
     /// use vitaminc_protected::{Equatable, Protected, ProtectNew};
     /// let x: Equatable<Protected<u8>> = Equatable::init(Protected::new(42));
     /// ```
-    /// 
+    ///
     /// Trying to call `init` with a type that is not `Protect` will result in a compile error.
-    /// 
+    ///
     /// ```compile_fail
     /// use vitaminc_protected::Equatable;
     /// let x: Equatable<u8> = Equatable::init(42);
     /// ```
-    /// 
-    pub fn init(x: T) -> Self {
+    ///
+    pub const fn init(x: T) -> Self {
         Self(x)
     }
 }
 
-impl<T> Protect for Equatable<T> where T: Protect {
+impl<T> Protect for Equatable<T>
+where
+    T: Protect,
+{
     type RawType = T::RawType;
 
     fn risky_unwrap(self) -> T::RawType {
@@ -124,7 +130,11 @@ impl<T> Protect for Equatable<T> where T: Protect {
     }
 }
 
-impl<T, I> ProtectNew<I> for Equatable<T> where T: ProtectNew<I>, Self: Protect<RawType = I> {
+impl<T, I> ProtectNew<I> for Equatable<T>
+where
+    T: ProtectNew<I>,
+    Self: Protect<RawType = I>,
+{
     fn new(raw: Self::RawType) -> Self {
         Self(T::new(raw))
     }
@@ -151,7 +161,10 @@ where
 
 // FIXME: This is super clunky
 // We should have a separate trait for getting the inner value of a `Protected`
-impl<T> ProtectMethods for Equatable<T> where T: Protect + ProtectMethods {
+impl<T> ProtectMethods for Equatable<T>
+where
+    T: Protect + ProtectMethods,
+{
     // TODO: Consider removing this or making it a separate trait usable only within the crate
     // Or could it return a ProtectedRef?
     fn inner(&self) -> &Self::RawType {
@@ -332,7 +345,7 @@ mod private {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Equatable, Protected, ProtectNew};
+    use crate::{Equatable, ProtectNew, Protected};
 
     #[test]
     fn test_opaque_debug() {
