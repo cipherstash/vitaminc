@@ -1,4 +1,4 @@
-use crate::{equatable::ConstantTimeEq, private::ProtectSealed, Equatable, ProtectAdapter};
+use crate::{equatable::ConstantTimeEq, Protect, ProtectMethods, ProtectNew};
 use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
@@ -8,62 +8,52 @@ use serde::{
 #[derive(Debug)]
 pub struct Exportable<T>(pub(crate) T);
 
-// TODO: Can we implement Hex and Base64 for inner types that implement them?
-impl<T> Exportable<T> {
-    /// Create a new `Exportable` from an inner value.
-    pub fn new(x: <Exportable<T> as ProtectSealed>::Inner) -> Self
-    where
-        Self: ProtectAdapter,
-    {
-        Self::init_from_inner(x)
-    }
-
-    pub fn equatable(self) -> Equatable<Self> {
-        Equatable(self)
+impl<T> Exportable<T> where T: Protect {
+    pub fn init(x: T) -> Self {
+        Self(x)
     }
 }
 
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
-impl<T, O> PartialEq<O> for Exportable<T>
-where
-    T: ProtectSealed,
-    O: ProtectSealed,
-    <T as ProtectSealed>::Inner: ConstantTimeEq<O::Inner>,
-{
+impl<T, O> PartialEq<O> for Exportable<T> where Self: ProtectMethods, <Exportable<T> as Protect>::RawType: ConstantTimeEq<<O as Protect>::RawType>, O: ProtectMethods {
     fn eq(&self, other: &O) -> bool {
         self.inner().constant_time_eq(other.inner())
     }
 }
 
-/*impl<T: ParanoidPrivate> ParanoidPrivate for Exportable<T> {
-    type Inner = T::Inner;
 
-    fn init_from_inner(x: Self::Inner) -> Self {
-        Self(T::init_from_inner(x))
+impl<T> Protect for Exportable<T> where T: Protect {
+    type RawType = T::RawType;
+
+    fn risky_unwrap(self) -> T::RawType {
+        self.0.risky_unwrap()
     }
+}
 
-    fn inner(&self) -> &Self::Inner {
+impl<T, I> ProtectNew<I> for Exportable<T> where T: ProtectNew<I>, Self: Protect<RawType = I> {
+    fn new(raw: Self::RawType) -> Self {
+        Self(T::new(raw))
+    }
+}
+
+// FIXME: This is super clunky
+// We should have a separate trait for getting the inner value of a `Protected`
+impl<T> ProtectMethods for Exportable<T> where T: Protect + ProtectMethods {
+    // TODO: Consider removing this or making it a separate trait usable only within the crate
+    // Or could it return a ProtectedRef?
+    fn inner(&self) -> &Self::RawType {
         self.0.inner()
     }
 
-    fn inner_mut(&mut self) -> &mut Self::Inner {
+    fn inner_mut(&mut self) -> &mut Self::RawType {
         self.0.inner_mut()
-    }
-}*/
-
-impl<T> ProtectAdapter for Exportable<T>
-where
-    T: ProtectAdapter,
-{
-    fn unwrap(self) -> Self::Inner {
-        self.0.unwrap()
     }
 }
 
 impl<T> Serialize for Exportable<T>
 where
-    T: ProtectSealed,
-    T::Inner: Serialize,
+    Self: ProtectMethods,
+    <Exportable<T> as Protect>::RawType: Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -75,14 +65,14 @@ where
 
 impl<'de, T> Deserialize<'de> for Exportable<T>
 where
-    T: ProtectSealed,
-    T::Inner: Deserialize<'de>,
+    Self: ProtectMethods + ProtectNew<<Exportable<T> as Protect>::RawType>,
+    <Exportable<T> as Protect>::RawType: Deserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        T::Inner::deserialize(deserializer).map(Exportable::init_from_inner)
+        <Exportable<T> as Protect>::RawType::deserialize(deserializer).map(Self::new)
     }
 }
 
@@ -102,7 +92,7 @@ mod tests {
 
     #[test]
     fn test_serialize_deserialize() {
-        let x: Exportable<Protected<u8>> = Exportable::init_from_inner(42);
+        let x: Exportable<Protected<u8>> = Exportable::new(42);
         let y = bincode::serialize(&x).unwrap();
 
         let z: Exportable<Protected<u8>> = bincode::deserialize(&y).unwrap();
@@ -111,7 +101,7 @@ mod tests {
 
     #[test]
     fn test_serialize_deserialize_nested() {
-        let x: Exportable<Equatable<Protected<u8>>> = Exportable::init_from_inner(42);
+        let x: Exportable<Equatable<Protected<u8>>> = Exportable::new(42);
         let y = bincode::serialize(&x).unwrap();
 
         let z: Exportable<Equatable<Protected<u8>>> = bincode::deserialize(&y).unwrap();
@@ -120,9 +110,9 @@ mod tests {
 
     #[test]
     fn test_equatable_inner() {
-        let x: Exportable<Protected<u8>> = Exportable::init_from_inner(42);
-        let y: Exportable<Equatable<Protected<u8>>> = Exportable::init_from_inner(42);
+        let x: Equatable<Exportable<Protected<u8>>> = Equatable::new(42);
+        let y: Exportable<Equatable<Protected<u8>>> = Exportable::new(42);
 
-        assert_eq!(x.equatable(), y);
+        assert_eq!(x, y);
     }
 }
