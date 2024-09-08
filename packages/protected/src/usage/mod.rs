@@ -1,20 +1,20 @@
-use crate::{private::ParanoidPrivate, Paranoid, Protected};
+use crate::{private::ProtectSealed, ProtectAdapter, Protected};
 use std::marker::PhantomData;
 
 // TODO: Docs, explain compile time
 pub struct Usage<T, Scope = DefaultScope>(pub(crate) T, pub(crate) PhantomData<Scope>);
 
 impl<T, S> Usage<T, S> {
-    pub fn new(x: <Usage<T, S> as ParanoidPrivate>::Inner) -> Self
+    pub fn new(x: <Usage<T, S> as ProtectSealed>::Inner) -> Self
     where
-        Self: Paranoid,
+        Self: ProtectAdapter,
         S: Scope,
     {
         Self::init_from_inner(x)
     }
 }
 
-impl<T: ParanoidPrivate, Scope> ParanoidPrivate for Usage<T, Scope> {
+impl<T: ProtectSealed, Scope> ProtectSealed for Usage<T, Scope> {
     type Inner = T::Inner;
 
     fn init_from_inner(x: Self::Inner) -> Self {
@@ -30,9 +30,9 @@ impl<T: ParanoidPrivate, Scope> ParanoidPrivate for Usage<T, Scope> {
     }
 }
 
-impl<T, Scope> Paranoid for Usage<T, Scope>
+impl<T, Scope> ProtectAdapter for Usage<T, Scope>
 where
-    T: Paranoid,
+    T: ProtectAdapter,
 {
     fn unwrap(self) -> Self::Inner {
         self.0.unwrap()

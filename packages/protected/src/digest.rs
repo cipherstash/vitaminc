@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::{Acceptable, DefaultScope, Paranoid, Scope};
+use crate::{Acceptable, DefaultScope, ProtectAdapter, Scope};
 use digest::generic_array::GenericArray;
 use digest::Digest;
 use digest::FixedOutputReset;
@@ -19,7 +19,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
 
     pub fn new_with_prefix<T>(data: &T) -> Self
     where
-        T: Paranoid + Acceptable<InputScope>,
+        T: ProtectAdapter + Acceptable<InputScope>,
         T::Inner: AsRef<[u8]>,
     {
         Self(D::new_with_prefix(data.inner()), PhantomData)
@@ -27,7 +27,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
 
     pub fn update<T>(&mut self, data: &T)
     where
-        T: Paranoid + Acceptable<InputScope>,
+        T: ProtectAdapter + Acceptable<InputScope>,
         T::Inner: AsRef<[u8]>,
     {
         self.0.update(data.inner())
@@ -35,7 +35,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
 
     pub fn finalize<T>(self) -> T
     where
-        T: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
+        T: ProtectAdapter + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
     {
         let result = self.0.finalize();
         result.into()
@@ -43,7 +43,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
 
     pub fn finalize_into<'m, T>(self, out: &'m mut T)
     where
-        T: Paranoid,
+        T: ProtectAdapter,
         &'m mut GenericArray<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T::Inner>,
     {
         let target: &mut Output<D> = out.inner_mut().into();
@@ -53,7 +53,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
     pub fn finalize_reset<T>(&mut self) -> T
     where
         D: FixedOutputReset,
-        T: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
+        T: ProtectAdapter + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
     {
         let result = self.0.finalize_reset();
         result.into()
@@ -62,7 +62,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
     pub fn finalize_into_reset<'m, T>(&'m mut self, out: &'m mut T)
     where
         D: FixedOutputReset,
-        T: Paranoid,
+        T: ProtectAdapter,
         &'m mut GenericArray<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T::Inner>,
     {
         let target: &mut Output<D> = out.inner_mut().into();
@@ -82,9 +82,9 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
 
     pub fn digest<T, O>(data: &T) -> O
     where
-        T: Paranoid + Acceptable<InputScope>,
+        T: ProtectAdapter + Acceptable<InputScope>,
         T::Inner: AsRef<[u8]>,
-        O: Paranoid + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
+        O: ProtectAdapter + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
     {
         let mut hasher = Self::new();
         hasher.update(data);

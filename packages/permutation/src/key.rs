@@ -1,4 +1,4 @@
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{ProtectMethods, Protected};
 use vitaminc_random::{Generatable, RandomError, SafeRand};
 use zeroize::Zeroize;
 
@@ -101,7 +101,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{elementwise::Permute, identity, private::IsPermutable, PermutationKey};
-    use vitaminc_protected::{Paranoid, Protected};
+    use vitaminc_protected::{ProtectMethods, Protected};
     use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 
     use crate::tests;

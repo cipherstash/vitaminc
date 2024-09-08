@@ -1,4 +1,4 @@
-use crate::{private::ParanoidPrivate, Paranoid};
+use crate::{Protect, ProtectMethods};
 use std::borrow::Cow;
 
 /// Trait for types that can be converted to a `ProtectedRef`.
@@ -13,7 +13,7 @@ use std::borrow::Cow;
 /// because `ProtectedRef` cannot be constructed from the inner type directly.
 ///
 /// ```
-/// use vitaminc_protected::{AsProtectedRef, Protected, ProtectedRef};
+/// use vitaminc_protected::{AsProtectedRef, Protected, ProtectNew, ProtectedRef};
 ///
 /// pub struct SensitiveData(Protected<Vec<u8>>);
 ///
@@ -33,8 +33,8 @@ pub trait AsProtectedRef<'a, A: ?Sized> {
 
 impl<'a, T, A: ?Sized> AsProtectedRef<'a, A> for T
 where
-    <T as ParanoidPrivate>::Inner: AsRef<A>,
-    T: Paranoid,
+    <T as Protect>::RawType: AsRef<A>,
+    T: ProtectMethods,
 {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, A> {
         ProtectedRef(self.inner().as_ref())
