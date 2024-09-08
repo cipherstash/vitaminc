@@ -1,7 +1,7 @@
 use std::ops::BitXor;
 use zeroize::Zeroize;
 
-use crate::Protected;
+use crate::{Protected, ProtectNew};
 
 // TODO: These ops could be generalised for all Paranoid types by using the zip trait method on Paranoid.
 // Alternatively, we could create another wrapper type so that Ops are explicitly opted into.

@@ -5,7 +5,7 @@ mod as_protected_ref;
 //mod digest;
 mod equatable;
 mod exportable;
-//mod ops;
+mod ops;
 mod protected;
 mod usage;
 mod zeroed;
