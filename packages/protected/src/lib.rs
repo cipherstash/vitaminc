@@ -8,7 +8,7 @@ mod equatable;
 //mod ops;
 mod protected;
 //mod usage;
-//mod zeroed;
+mod zeroed;
 
 use zeroize::Zeroize;
 
@@ -26,7 +26,7 @@ pub use equatable::{ConstantTimeEq, Equatable};
 //pub use exportable::Exportable;
 pub use protected::{flatten_array, Protected};
 //pub use usage::{Acceptable, DefaultScope, Scope, Usage};
-//pub use zeroed::Zeroed;
+pub use zeroed::Zeroed;
 
 pub trait Protect: private::ProtectSealed {
     type RawType;
@@ -47,12 +47,11 @@ pub trait ProtectNew<T>: Protect {
     fn new(raw: T) -> Self;
 }
 
-
-/*impl<T, I> ProtectNew<I> for T where T: ProtectInit, T::Inner: ProtectNew<I> {
+impl<T, I> ProtectNew<I> for T where T: ProtectInit, T::Inner: ProtectNew<I> {
     fn new(raw: I) -> Self {
         T::init(T::Inner::new(raw))
     }
-}*/
+}
 
 /// A trait for types that can be initialized from a `Protect` value.
 /// This is only used by user defined types that wrap a `Protect` value

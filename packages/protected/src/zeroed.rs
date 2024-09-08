@@ -1,8 +1,8 @@
-use crate::{Equatable, Exportable, ProtectAdapter, Protected};
+use crate::{Equatable, Protect, Protected, ProtectNew};
 
 /// Similar to `Default`, but doesn't rely on the standard library,
 /// is only implemented for Paranoid types, and covers array sizes up to 1024.
-pub trait Zeroed: ProtectAdapter {
+pub trait Zeroed: Protect {
     fn zeroed() -> Self;
 }
 
@@ -25,14 +25,14 @@ where
     }
 }
 
-impl<T> Zeroed for Exportable<T>
+/*impl<T> Zeroed for Exportable<T>
 where
     T: Zeroed,
 {
     fn zeroed() -> Self {
         Exportable(T::zeroed())
     }
-}
+}*/
 
 impl_zeroed_for_byte_array!(1);
 impl_zeroed_for_byte_array!(2);
