@@ -1,4 +1,4 @@
-use crate::{Protect, ProtectNew, Protected};
+use crate::{Controlled, ControlledNew, Protected};
 use std::marker::PhantomData;
 
 // TODO: Docs, explain compile time
@@ -6,16 +6,16 @@ pub struct Usage<T, Scope = DefaultScope>(pub(crate) T, pub(crate) PhantomData<S
 
 impl<T, S> Usage<T, S>
 where
-    T: Protect,
+    T: Controlled,
 {
     pub const fn init(x: T) -> Self {
         Self(x, PhantomData)
     }
 }
 
-impl<T, S> Protect for Usage<T, S>
+impl<T, S> Controlled for Usage<T, S>
 where
-    T: Protect,
+    T: Controlled,
 {
     type RawType = T::RawType;
 
@@ -24,10 +24,10 @@ where
     }
 }
 
-impl<T, I, S> ProtectNew<I> for Usage<T, S>
+impl<T, I, S> ControlledNew<I> for Usage<T, S>
 where
-    T: ProtectNew<I>,
-    Self: Protect<RawType = I>,
+    T: ControlledNew<I>,
+    Self: Controlled<RawType = I>,
 {
     fn new(raw: Self::RawType) -> Self {
         Self(T::new(raw), PhantomData)

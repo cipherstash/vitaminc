@@ -1,6 +1,6 @@
 use crate::SafeRand;
 use rand::{CryptoRng, RngCore};
-use vitaminc_protected::{ProtectMethods, Protected};
+use vitaminc_protected::{ControlledMethods, Protected};
 
 /// A trait for generating random numbers within a specific range.
 pub trait BoundedRng<T> {

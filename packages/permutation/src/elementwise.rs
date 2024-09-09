@@ -1,5 +1,5 @@
 use crate::{private::IsPermutable, PermutationKey};
-use vitaminc_protected::{ProtectMethods, Protected};
+use vitaminc_protected::{ControlledMethods, Protected};
 use zeroize::Zeroize;
 
 // TODO: Make this a private trait
@@ -53,7 +53,7 @@ mod tests {
     use crate::tests;
     use crate::{Depermute, PermutationKey, Permute};
     use rand::SeedableRng;
-    use vitaminc_protected::{Protect, ProtectMethods, Protected};
+    use vitaminc_protected::{Controlled, ControlledMethods, Protected};
     use vitaminc_random::{Generatable, SafeRand};
 
     fn test_permute<const N: usize>()

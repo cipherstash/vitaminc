@@ -1,4 +1,4 @@
-use crate::{private::ProtectSealed, Protect, ProtectMethods, ProtectNew, Protected};
+use crate::{private::ProtectSealed, Controlled, ControlledMethods, ControlledNew, Protected};
 use core::num::NonZeroU16;
 use subtle::ConstantTimeEq as SubtleCtEq;
 use zeroize::Zeroize;
@@ -94,7 +94,7 @@ pub struct Equatable<T>(pub(crate) T);
 
 impl<T> Equatable<T>
 where
-    T: Protect,
+    T: Controlled,
 {
     /// Initialize an `Equatable` from an inner value.
     /// Note that this is different to [ProtectNew::new] as it takes the immediate child of the `Equatable`
@@ -119,9 +119,9 @@ where
     }
 }
 
-impl<T> Protect for Equatable<T>
+impl<T> Controlled for Equatable<T>
 where
-    T: Protect,
+    T: Controlled,
 {
     type RawType = T::RawType;
 
@@ -130,10 +130,10 @@ where
     }
 }
 
-impl<T, I> ProtectNew<I> for Equatable<T>
+impl<T, I> ControlledNew<I> for Equatable<T>
 where
-    T: ProtectNew<I>,
-    Self: Protect<RawType = I>,
+    T: ControlledNew<I>,
+    Self: Controlled<RawType = I>,
 {
     fn new(raw: Self::RawType) -> Self {
         Self(T::new(raw))
@@ -151,8 +151,8 @@ where
 
 impl<T> Equatable<T>
 where
-    Self: ProtectMethods,
-    <Equatable<T> as Protect>::RawType: ConstantTimeEq,
+    Self: ControlledMethods,
+    <Equatable<T> as Controlled>::RawType: ConstantTimeEq,
 {
     pub fn constant_time_eq(&self, other: &Self) -> bool {
         self.inner().constant_time_eq(other.inner())
@@ -161,9 +161,9 @@ where
 
 // FIXME: This is super clunky
 // We should have a separate trait for getting the inner value of a `Protected`
-impl<T> ProtectMethods for Equatable<T>
+impl<T> ControlledMethods for Equatable<T>
 where
-    T: Protect + ProtectMethods,
+    T: Controlled + ControlledMethods,
 {
     // TODO: Consider removing this or making it a separate trait usable only within the crate
     // Or could it return a ProtectedRef?
@@ -189,9 +189,9 @@ where
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
 impl<T, O> PartialEq<O> for Equatable<T>
 where
-    Self: ProtectMethods,
-    <Equatable<T> as Protect>::RawType: ConstantTimeEq<O::RawType>,
-    O: ProtectMethods,
+    Self: ControlledMethods,
+    <Equatable<T> as Controlled>::RawType: ConstantTimeEq<O::RawType>,
+    O: ControlledMethods,
 {
     fn eq(&self, other: &O) -> bool {
         self.inner().constant_time_eq(other.inner())
@@ -200,8 +200,8 @@ where
 
 impl<T, O> ConstantTimeEq<O> for Equatable<T>
 where
-    Self: ProtectMethods<RawType = T>,
-    O: ProtectMethods,
+    Self: ControlledMethods<RawType = T>,
+    O: ControlledMethods,
     T: ConstantTimeEq<O::RawType>,
 {
     fn constant_time_eq(&self, other: &O) -> bool {
@@ -345,7 +345,7 @@ mod private {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Equatable, ProtectNew, Protected};
+    use crate::{Equatable, ControlledNew, Protected};
 
     #[test]
     fn test_opaque_debug() {

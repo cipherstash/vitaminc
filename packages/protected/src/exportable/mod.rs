@@ -1,4 +1,4 @@
-use crate::{equatable::ConstantTimeEq, Protect, ProtectMethods, ProtectNew};
+use crate::{equatable::ConstantTimeEq, Controlled, ControlledMethods, ControlledNew};
 use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
@@ -10,7 +10,7 @@ pub struct Exportable<T>(pub(crate) T);
 
 impl<T> Exportable<T>
 where
-    T: Protect,
+    T: Controlled,
 {
     pub const fn init(x: T) -> Self {
         Self(x)
@@ -20,18 +20,18 @@ where
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
 impl<T, O> PartialEq<O> for Exportable<T>
 where
-    Self: ProtectMethods,
-    <Exportable<T> as Protect>::RawType: ConstantTimeEq<<O as Protect>::RawType>,
-    O: ProtectMethods,
+    Self: ControlledMethods,
+    <Exportable<T> as Controlled>::RawType: ConstantTimeEq<<O as Controlled>::RawType>,
+    O: ControlledMethods,
 {
     fn eq(&self, other: &O) -> bool {
         self.inner().constant_time_eq(other.inner())
     }
 }
 
-impl<T> Protect for Exportable<T>
+impl<T> Controlled for Exportable<T>
 where
-    T: Protect,
+    T: Controlled,
 {
     type RawType = T::RawType;
 
@@ -40,10 +40,10 @@ where
     }
 }
 
-impl<T, I> ProtectNew<I> for Exportable<T>
+impl<T, I> ControlledNew<I> for Exportable<T>
 where
-    T: ProtectNew<I>,
-    Self: Protect<RawType = I>,
+    T: ControlledNew<I>,
+    Self: Controlled<RawType = I>,
 {
     fn new(raw: Self::RawType) -> Self {
         Self(T::new(raw))
@@ -52,9 +52,9 @@ where
 
 // FIXME: This is super clunky
 // We should have a separate trait for getting the inner value of a `Protected`
-impl<T> ProtectMethods for Exportable<T>
+impl<T> ControlledMethods for Exportable<T>
 where
-    T: Protect + ProtectMethods,
+    T: Controlled + ControlledMethods,
 {
     // TODO: Consider removing this or making it a separate trait usable only within the crate
     // Or could it return a ProtectedRef?
@@ -69,8 +69,8 @@ where
 
 impl<T> Serialize for Exportable<T>
 where
-    Self: ProtectMethods,
-    <Exportable<T> as Protect>::RawType: Serialize,
+    Self: ControlledMethods,
+    <Exportable<T> as Controlled>::RawType: Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -82,14 +82,14 @@ where
 
 impl<'de, T> Deserialize<'de> for Exportable<T>
 where
-    Self: ProtectMethods + ProtectNew<<Exportable<T> as Protect>::RawType>,
-    <Exportable<T> as Protect>::RawType: Deserialize<'de>,
+    Self: ControlledMethods + ControlledNew<<Exportable<T> as Controlled>::RawType>,
+    <Exportable<T> as Controlled>::RawType: Deserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        <Exportable<T> as Protect>::RawType::deserialize(deserializer).map(Self::new)
+        <Exportable<T> as Controlled>::RawType::deserialize(deserializer).map(Self::new)
     }
 }
 

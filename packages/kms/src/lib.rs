@@ -47,7 +47,7 @@ use crate::private::ValidMacSize;
 use aws_sdk_kms::{primitives::Blob, Client, Config};
 use vitaminc_async_traits::{AsyncFixedOutput, AsyncFixedOutputReset};
 use vitaminc_protected::{
-    AsProtectedRef, Protect, ProtectMethods, ProtectNew, Protected, ProtectedRef,
+    AsProtectedRef, Controlled, ControlledMethods, ControlledNew, Protected, ProtectedRef,
 };
 use vitaminc_traits::{OutputSize, Update};
 use zeroize::Zeroize;
@@ -223,7 +223,7 @@ mod tests {
         Client, Config,
     };
     use vitaminc_async_traits::AsyncFixedOutput;
-    use vitaminc_protected::{Protect, ProtectNew, Protected};
+    use vitaminc_protected::{Controlled, ControlledNew, Protected};
     use vitaminc_traits::Update;
 
     fn get_config() -> Config {

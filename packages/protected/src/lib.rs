@@ -28,33 +28,33 @@ pub use protected::{flatten_array, Protected};
 pub use usage::{Acceptable, DefaultScope, Scope, Usage};
 pub use zeroed::Zeroed;
 
-pub trait Protect: private::ProtectSealed {
+pub trait Controlled: private::ProtectSealed {
     type RawType;
 
     /// Unwraps the raw inner value.
     fn risky_unwrap(self) -> Self::RawType;
 }
 
-impl<T> Protect for T
+impl<T> Controlled for T
 where
-    T: ProtectInit,
-    <T as ProtectInit>::Inner: Protect,
+    T: ControlledInit,
+    <T as ControlledInit>::Inner: Controlled,
 {
-    type RawType = <T::Inner as Protect>::RawType;
+    type RawType = <T::Inner as Controlled>::RawType;
 
     fn risky_unwrap(self) -> Self::RawType {
         self.into_inner().risky_unwrap()
     }
 }
 
-pub trait ProtectNew<T>: Protect {
+pub trait ControlledNew<T>: Controlled {
     fn new(raw: T) -> Self;
 }
 
-impl<T, I> ProtectNew<I> for T
+impl<T, I> ControlledNew<I> for T
 where
-    T: ProtectInit,
-    T::Inner: ProtectNew<I>,
+    T: ControlledInit,
+    T::Inner: ControlledNew<I>,
 {
     fn new(raw: I) -> Self {
         T::init(T::Inner::new(raw))
@@ -66,8 +66,8 @@ where
 /// as it must take a concrete type.
 /// Internal adapters like `Equatable` and `Exportable` are able to wrap any protected type so
 /// they do not implement [ProtectInit].
-pub trait ProtectInit {
-    type Inner: Protect;
+pub trait ControlledInit {
+    type Inner: Controlled;
 
     fn init(safe: Self::Inner) -> Self;
 
@@ -78,7 +78,7 @@ pub trait ProtectInit {
 // TODO: This trait is similar to the Iterator trait in std
 // Implement for all "adapter" types - Equatable, Exportable, etc.
 // Come up with a better name for it
-pub trait ProtectMethods: Protect {
+pub trait ControlledMethods: Controlled {
     /// Generate a new `Protected` from a function that returns the inner value.
     ///
     /// # Example
@@ -98,7 +98,7 @@ pub trait ProtectMethods: Protect {
     /// // TODO: A Generate Array could handle the MaybeUninit stuff
     fn generate<F, FunOut>(f: F) -> Self
     where
-        Self: Sized + ProtectNew<FunOut>,
+        Self: Sized + ControlledNew<FunOut>,
         F: FnOnce() -> FunOut,
     {
         Self::new(f())
@@ -119,7 +119,7 @@ pub trait ProtectMethods: Protect {
     ///
     fn generate_ok<F, FunOut, E>(f: F) -> Result<Self, E>
     where
-        Self: Sized + ProtectNew<FunOut>,
+        Self: Sized + ControlledNew<FunOut>,
         F: FnOnce() -> Result<FunOut, E>,
     {
         f().map(Self::new)
@@ -165,8 +165,8 @@ pub trait ProtectMethods: Protect {
     fn zip<Other, Out, F, FunOut>(self, b: Other, f: F) -> Out
     where
         Self: Sized,
-        Other: ProtectMethods,
-        Out: ProtectNew<FunOut>,
+        Other: ControlledMethods,
+        Out: ControlledNew<FunOut>,
         F: FnOnce(Self::RawType, Other::RawType) -> FunOut,
     {
         Out::new(f(self.risky_unwrap(), b.risky_unwrap()))
@@ -237,7 +237,7 @@ pub trait ProtectMethods: Protect {
     fn update_with<Other, F>(&mut self, other: Other, mut f: F)
     where
         F: FnMut(&mut Self::RawType, Other::RawType),
-        Other: ProtectMethods,
+        Other: ControlledMethods,
     {
         // FIXME: There's a chance here that other will be dropped and not zeroized correctly
         // But not all Zeroize types are ZeroizeOnDrop - we may need to yield a wrapper type that Derefs to the inner value

@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-use vitaminc_protected::{ProtectMethods, Zeroed};
+use vitaminc_protected::{ControlledMethods, Zeroed};
 use vitaminc_traits::OutputSize;
 
 #[allow(async_fn_in_trait)]
@@ -31,7 +31,7 @@ where
 #[allow(async_fn_in_trait)]
 pub trait AsyncFixedOutputReset<O>: OutputSize
 where
-    O: ProtectMethods,
+    O: ControlledMethods,
 {
     type Error;
 

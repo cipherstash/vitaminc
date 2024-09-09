@@ -1,4 +1,4 @@
-use crate::{Protect, ProtectMethods, ProtectNew};
+use crate::{Controlled, ControlledMethods, ControlledNew};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Basic building block for Paranoid.
@@ -15,7 +15,7 @@ impl<T> Protected<T> {
     }
 }
 
-impl<T> Protect for Protected<T>
+impl<T> Controlled for Protected<T>
 where
     T: Zeroize,
 {
@@ -26,9 +26,9 @@ where
     }
 }
 
-impl<T> ProtectNew<T> for Protected<T>
+impl<T> ControlledNew<T> for Protected<T>
 where
-    Self: Protect,
+    Self: Controlled,
 {
     fn new(raw: T) -> Self {
         Protected(raw)
@@ -74,9 +74,9 @@ impl<T: Zeroize> ZeroizeOnDrop for Protected<T> {}
 
 /// Implement `ProtectMethods` for `Protected`.
 /// Note that not all `Protected<T>` are `Protect` because the inner type may not be `Zeroize`.
-impl<T> ProtectMethods for Protected<T>
+impl<T> ControlledMethods for Protected<T>
 where
-    Protected<T>: Protect<RawType = T>,
+    Protected<T>: Controlled<RawType = T>,
 {
     // TODO: Consider removing this or making it a separate trait usable only within the crate
     fn inner(&self) -> &T {

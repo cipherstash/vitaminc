@@ -1,4 +1,4 @@
-use crate::{Protect, ProtectMethods};
+use crate::{Controlled, ControlledMethods};
 use std::borrow::Cow;
 
 /// Trait for types that can be converted to a `ProtectedRef`.
@@ -33,8 +33,8 @@ pub trait AsProtectedRef<'a, A: ?Sized> {
 
 impl<'a, T, A: ?Sized> AsProtectedRef<'a, A> for T
 where
-    <T as Protect>::RawType: AsRef<A>,
-    T: ProtectMethods,
+    <T as Controlled>::RawType: AsRef<A>,
+    T: ControlledMethods,
 {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, A> {
         ProtectedRef(self.inner().as_ref())

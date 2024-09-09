@@ -1,4 +1,4 @@
-use vitaminc_protected::{ProtectMethods, Protected};
+use vitaminc_protected::{ControlledInit, ControlledMethods, Protected};
 use vitaminc_random::{Generatable, RandomError, SafeRand};
 use zeroize::Zeroize;
 
@@ -10,6 +10,19 @@ use crate::{
 
 #[derive(Copy, Clone, Debug)]
 pub struct PermutationKey<const N: usize>(Protected<[u8; N]>);
+
+impl<const N: usize> ControlledInit for PermutationKey<N> {
+    type Inner = Protected<[u8; N]>;
+
+    fn init(value: Protected<[u8; N]>) -> Self {
+        Self(value)
+    }
+
+    fn into_inner(self) -> Self::Inner {
+        self.0
+    }
+}
+
 // TODO: Derive macro
 // TODO: It would be really handy to be able to mark named types as Paranoid, too
 // but this currently doesn't work.
@@ -101,7 +114,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{elementwise::Permute, identity, private::IsPermutable, PermutationKey};
-    use vitaminc_protected::{Protect, Protected};
+    use vitaminc_protected::{Controlled, Protected};
     use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 
     use crate::tests;
