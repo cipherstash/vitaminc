@@ -1,8 +1,9 @@
-use crate::{private::IsPermutable, PermutationKey};
+use crate::{key::KeyInner, private::IsPermutable, PermutationKey};
 use vitaminc_protected::{ControlledMethods, Protected};
 use zeroize::Zeroize;
 
 // TODO: Make this a private trait
+// TODO: Docs
 pub trait Permute<T> {
     fn permute(&self, input: T) -> T;
 }
@@ -29,13 +30,12 @@ pub trait Depermute<T> {
     fn depermute(&self, input: T) -> T;
 }
 
-impl<const N: usize, T> Depermute<Protected<[T; N]>> for PermutationKey<N>
+impl<const N: usize> Depermute<KeyInner<N>> for PermutationKey<N>
 where
-    T: Zeroize + Default + Copy,
-    [T; N]: IsPermutable,
+    [u8; N]: IsPermutable,
 {
-    fn depermute(&self, input: Protected<[T; N]>) -> Protected<[T; N]> {
-        input.map(|source| {
+    fn depermute(&self, input: KeyInner<N>) -> KeyInner<N> {
+        let _out = input.map(|source| {
             // TODO: Use MaybeUninit
             self.iter()
                 .enumerate()
@@ -43,7 +43,9 @@ where
                     out[k.map(|x| x as usize)] = source[i];
                     out
                 })
-        })
+        });
+
+        unimplemented!()
     }
 }
 

@@ -89,7 +89,7 @@ use zeroize::Zeroize;
 /// let b = AuthenticatedString::new([0u8; 32], "Hello, world!".to_string());
 /// assert_eq!(a, b);
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Zeroize)]
 pub struct Equatable<T>(pub(crate) T);
 
 impl<T> Equatable<T>
@@ -183,6 +183,18 @@ where
 {
     fn from(x: T) -> Self {
         Self(Protected::new(x))
+    }
+}
+
+// Clone and Copy are implemented for `Equatable` if the inner type is Clone and Copy
+impl<T> Copy for Equatable<T> where T: Copy {}
+
+impl<T> Clone for Equatable<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 

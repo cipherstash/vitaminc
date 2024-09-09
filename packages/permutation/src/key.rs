@@ -1,4 +1,4 @@
-use vitaminc_protected::{ControlledInit, ControlledMethods, Protected};
+use vitaminc_protected::{ControlledInit, ControlledNew, ControlledMethods, Exportable, Protected};
 use vitaminc_random::{Generatable, RandomError, SafeRand};
 use zeroize::Zeroize;
 
@@ -8,13 +8,16 @@ use crate::{
     identity,
 };
 
-#[derive(Copy, Clone, Debug)]
-pub struct PermutationKey<const N: usize>(Protected<[u8; N]>);
+// Controls for the key: Protected and Exportable
+pub(crate) type KeyInner<const N: usize> = Exportable<Protected<[u8; N]>>;
+
+#[derive(Copy, Clone, Debug, Zeroize)]
+pub struct PermutationKey<const N: usize>(KeyInner<N>);
 
 impl<const N: usize> ControlledInit for PermutationKey<N> {
-    type Inner = Protected<[u8; N]>;
+    type Inner = KeyInner<N>;
 
-    fn init(value: Protected<[u8; N]>) -> Self {
+    fn init(value: Exportable<Protected<[u8; N]>>) -> Self {
         Self(value)
     }
 
@@ -23,24 +26,13 @@ impl<const N: usize> ControlledInit for PermutationKey<N> {
     }
 }
 
-// TODO: Derive macro
-// TODO: It would be really handy to be able to mark named types as Paranoid, too
-// but this currently doesn't work.
-// We could move the Associated type to the Paranoid trait, and give it a bound of ParanoidPrivate
-// This is basically providing a way to make custom adapters
-/*impl Paranoid for PermutationKey<1> {
-    fn unwrap(self) -> Protected<[u8; 1]> {
-        self.0.unwrap()
-    }
-}*/
-
 impl<const N: usize> PermutationKey<N> {
     /// # Safety
     ///
     /// This function is unsafe because it does not check that the key is a valid permutation.
     ///
     pub unsafe fn new_unchecked(key: [u8; N]) -> Self {
-        Self(Protected::init(key))
+        Self::new(key)
     }
 
     /// Consumes the key and returns its inverse.

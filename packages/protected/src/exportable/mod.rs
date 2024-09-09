@@ -3,9 +3,10 @@ use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
 };
+use zeroize::Zeroize;
 
 // TODO: Docs
-#[derive(Debug)]
+#[derive(Debug, Zeroize)]
 pub struct Exportable<T>(pub(crate) T);
 
 impl<T> Exportable<T>
@@ -14,6 +15,18 @@ where
 {
     pub const fn init(x: T) -> Self {
         Self(x)
+    }
+}
+
+// Clone and Copy are implemented for `Exportable` if the inner type is Clone and Copy
+impl<T> Copy for Exportable<T> where T: Copy {}
+
+impl<T> Clone for Exportable<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 

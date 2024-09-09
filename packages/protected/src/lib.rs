@@ -139,13 +139,14 @@ pub trait ControlledMethods: Controlled {
     ///
     /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
     /// e.g. `other` must have the same, or broader scope as `self`
-    fn map<B, F>(self, f: F) -> Protected<B>
+    fn map<B, F>(self, f: F) -> Self
     where
-        Self: Sized,
+        Self: Sized + ControlledNew<B>,
         F: FnOnce(Self::RawType) -> B,
         B: Zeroize,
     {
-        Protected(f(self.risky_unwrap()))
+        // TODO: Fixme
+        Self::new(f(self.risky_unwrap()))
     }
 
     /// Zip two `Protected` values together with a function that combines them.
