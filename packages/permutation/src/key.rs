@@ -40,7 +40,7 @@ impl<const N: usize> PermutationKey<N> {
     where
         [u8; N]: IsPermutable,
     {
-        Self(self.depermute(identity::<N, u8>()))
+        Self(self.depermute(Exportable::init(identity::<N, u8>())))
     }
 
     /// Returns the complement of the key with respect to the target key.

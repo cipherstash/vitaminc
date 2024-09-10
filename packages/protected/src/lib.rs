@@ -10,8 +10,6 @@ mod protected;
 mod usage;
 mod zeroed;
 
-use zeroize::Zeroize;
-
 mod private;
 
 #[cfg(feature = "bitvec")]
@@ -74,6 +72,25 @@ pub trait ControlledInit {
     /// Returns the inner value which implements [Protect].
     fn into_inner(self) -> Self::Inner;
 }
+
+
+/// ReplaceT is a trait that is used to replace the inner value of a type.
+pub trait ControlledReplace<K> {
+    type Output: Controlled;
+}
+
+impl<T, K> ControlledReplace<K> for Protected<T> where Protected<K>: Controlled {
+    type Output = Protected<K>;
+}
+
+impl<T, K> ControlledReplace<K> for Equatable<T> where Equatable<K>: Controlled {
+    type Output = Equatable<K>;
+}
+
+impl<T, K> ControlledReplace<K> for Exportable<T> where Exportable<K>: Controlled {
+    type Output = Exportable<K>;
+}
+
 
 // TODO: This trait is similar to the Iterator trait in std
 // Implement for all "adapter" types - Equatable, Exportable, etc.
@@ -139,14 +156,13 @@ pub trait ControlledMethods: Controlled {
     ///
     /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
     /// e.g. `other` must have the same, or broader scope as `self`
-    fn map<B, F>(self, f: F) -> Self
+    fn map<B, F>(self, f: F) -> <Self as ControlledReplace<B>>::Output
     where
-        Self: Sized + ControlledNew<B>,
+        Self: Sized + ControlledReplace<B>,
+        <Self as ControlledReplace<B>>::Output: ControlledNew<B>,
         F: FnOnce(Self::RawType) -> B,
-        B: Zeroize,
     {
-        // TODO: Fixme
-        Self::new(f(self.risky_unwrap()))
+        <Self as ControlledReplace::<B>>::Output::new(f(self.risky_unwrap()))
     }
 
     /// Zip two `Protected` values together with a function that combines them.
