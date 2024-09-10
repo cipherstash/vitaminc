@@ -38,7 +38,7 @@ mod tests {
             // TODO: Use proptests or kani proof
             let x: $t = 0;
             let y: Protected<_> = x.into();
-            assert_eq!(y.unwrap(), x);
+            assert_eq!(y.risky_unwrap(), x);
         )*)
     }
 
@@ -47,7 +47,7 @@ mod tests {
             // TODO: Use proptests or kani proof
             let x: [$t; $size] = [0; $size];
             let y: Protected<_> = x.into();
-            assert_eq!(y.unwrap(), x);
+            assert_eq!(y.risky_unwrap(), x);
         )*);
     }
 
@@ -72,21 +72,21 @@ mod tests {
     fn test_non_zero_into_protected() {
         let x: NonZeroU8 = NonZeroU8::new(1).unwrap();
         let y: Protected<_> = x.into();
-        assert_eq!(y.unwrap(), x);
+        assert_eq!(y.risky_unwrap(), x);
     }
 
     #[test]
     fn test_string_into_protected() {
         let x: String = "hello".into();
         let y: Protected<_> = x.into();
-        assert_eq!(&y.unwrap(), "hello");
+        assert_eq!(&y.risky_unwrap(), "hello");
     }
 
     #[test]
     fn test_char_array_into_string() {
         let x: [char; 10] = ['c', 'o', 'o', 'k', 'i', 'e', 's', '!', '!', '!'];
         let y: Protected<String> = x.into();
-        assert_eq!(y.unwrap(), "cookies!!!");
+        assert_eq!(y.risky_unwrap(), "cookies!!!");
     }
 
     #[test]
@@ -94,7 +94,7 @@ mod tests {
         let x: GenericArray<u8, digest::generic_array::typenum::U3> =
             digest::generic_array::arr![u8; 1, 2, 3];
         let y: Protected<[u8; 3]> = x.into();
-        assert_eq!(y.unwrap(), [1, 2, 3]);
+        assert_eq!(y.risky_unwrap(), [1, 2, 3]);
     }
 
     #[test]
@@ -102,7 +102,7 @@ mod tests {
         let x: GenericArray<u8, U48> = digest::generic_array::arr![u8; 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48];
         let y: Protected<[u8; 48]> = x.into();
         assert_eq!(
-            y.unwrap(),
+            y.risky_unwrap(),
             [
                 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
                 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,

@@ -14,7 +14,7 @@ cryptographic principles.
 ### Relationship to `vitaminc-protected`
 
 This library is designed to work with the `vitaminc-protected` library.
-All inputs and outputs are wrapped in a `Protected` type which ensures that the data is correctly zeroized when it goes out of scope.
+All inputs and outputs are wrapped in a [Protected] type which ensures that the data is correctly zeroized when it goes out of scope.
 
 ## Example: Permuting an array
 
@@ -23,9 +23,9 @@ use vitaminc_permutation::{Permute, PermutationKey};
 use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 use vitaminc_protected::{Controlled, Protected};
 let mut rng = SafeRand::from_seed([0; 32]);
-let key = PermutationKey::random(&mut rng).unwrap();
+let key = PermutationKey::random(&mut rng).expect("Random error");
 let input = Protected::new([1, 2, 3, 4, 5, 6, 7, 8]);
-assert_eq!(key.permute(input).unwrap(), [5, 3, 6, 2, 4, 8, 1, 7]);
+assert_eq!(key.permute(input).risky_unwrap(), [5, 3, 6, 2, 4, 8, 1, 7]);
 ```
 
 ## Bitwise Permutations
@@ -38,9 +38,9 @@ use vitaminc_permutation::{BitwisePermute, PermutationKey};
 use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 let mut rng = SafeRand::from_seed([0; 32]);
-let key = PermutationKey::random(&mut rng).unwrap();
+let key = PermutationKey::random(&mut rng).expect("Random error");
 let input: Protected<u32> = Protected::new(1000);
-assert_eq!(key.bitwise_permute(input).unwrap(), 1082155265);
+assert_eq!(key.bitwise_permute(input).risky_unwrap(), 1082155265);
 ```
 
 ## Permutations and Security

@@ -110,7 +110,7 @@ mod tests {
         digest.update(&Protected::new([0u8; 32]));
         let result: Protected<[u8; 32]> = digest.finalize();
         assert_eq!(
-            result.unwrap(),
+            result.risky_unwrap(),
             [
                 102, 104, 122, 173, 248, 98, 189, 119, 108, 143, 193, 139, 142, 159, 142, 32, 8,
                 151, 20, 133, 110, 226, 51, 179, 144, 42, 89, 29, 13, 95, 41, 37
@@ -125,7 +125,7 @@ mod tests {
         let mut result = Protected::new([0u8; 32]);
         digest.finalize_into(&mut result);
         assert_eq!(
-            result.unwrap(),
+            result.risky_unwrap(),
             [
                 102, 104, 122, 173, 248, 98, 189, 119, 108, 143, 193, 139, 142, 159, 142, 32, 8,
                 151, 20, 133, 110, 226, 51, 179, 144, 42, 89, 29, 13, 95, 41, 37
@@ -139,7 +139,7 @@ mod tests {
         digest.update(&Protected::new([0u8; 32]));
         let result: Protected<[u8; 48]> = digest.finalize();
         assert_eq!(
-            result.unwrap(),
+            result.risky_unwrap(),
             [
                 163, 143, 255, 75, 162, 108, 21, 228, 172, 156, 222, 140, 3, 16, 58, 200, 144, 128,
                 253, 71, 84, 95, 222, 148, 70, 200, 241, 146, 114, 158, 171, 123, 208, 58, 77, 92,

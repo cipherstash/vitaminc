@@ -19,7 +19,7 @@ pub trait Controlled: ControlledPrivate {
     ///     input
     /// }
     /// let input: Protected<[u8; 8]> = Protected::generate(array_gen);
-    /// assert_eq!(input.unwrap(), [1, 2, 3, 4, 5, 6, 7, 8]);
+    /// assert_eq!(input.risky_unwrap(), [1, 2, 3, 4, 5, 6, 7, 8]);
     /// ```
     /// // TODO: A Generate Array could handle the MaybeUninit stuff
     fn generate<F>(f: F) -> Self
@@ -64,7 +64,7 @@ pub trait Controlled: ControlledPrivate {
     /// use vitaminc_protected::{Controlled, Protected};
     /// let x = Protected::new(100u8);
     /// let y = x.map(|x| x + 10);
-    /// assert_eq!(y.unwrap(), 110);
+    /// assert_eq!(y.risky_unwrap(), 110);
     /// ```
     ///
     /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
@@ -76,7 +76,7 @@ pub trait Controlled: ControlledPrivate {
         B: Zeroize,
     {
         // TODO: Use Replace private trait
-        Protected(f(self.unwrap()))
+        Protected(f(self.risky_unwrap()))
     }
 
     /// Zip two [Controlled] values of the same type together with a function that combines them.
@@ -90,7 +90,7 @@ pub trait Controlled: ControlledPrivate {
     /// let x = Protected::new(1);
     /// let y = Protected::new(2);
     /// let z = x.zip(y, |x, y| x + y);
-    /// assert_eq!(z.unwrap(), 3);
+    /// assert_eq!(z.risky_unwrap(), 3);
     /// ```
     ///
     /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
@@ -103,7 +103,7 @@ pub trait Controlled: ControlledPrivate {
         F: FnOnce(Self::Inner, Other::Inner) -> Out,
     {
         // TODO: Use Replace private trait
-        Protected::init_from_inner(f(self.unwrap(), b.unwrap()))
+        Protected::init_from_inner(f(self.risky_unwrap(), b.risky_unwrap()))
     }
 
     /// Like `zip` but the second argument is a reference.
@@ -115,7 +115,7 @@ pub trait Controlled: ControlledPrivate {
     /// let x = Protected::new(String::from("hello "));
     /// let y = Protected::new(String::from("world"));
     /// let z = x.zip_ref(&y, |x, y| x + y);
-    /// assert_eq!(z.unwrap(), "hello world");
+    /// assert_eq!(z.risky_unwrap(), "hello world");
     /// ```
     ///
     fn zip_ref<'a, A, Other, Out, F>(self, other: &'a Other, f: F) -> Protected<Out>
@@ -127,7 +127,7 @@ pub trait Controlled: ControlledPrivate {
         F: FnOnce(Self::Inner, &A) -> Out,
     {
         let arg: ProtectedRef<'a, A> = other.as_protected_ref();
-        Protected::init_from_inner(f(self.unwrap(), arg.inner_ref()))
+        Protected::init_from_inner(f(self.risky_unwrap(), arg.inner_ref()))
     }
 
     /// Similar to `map` but using references to that the inner value is updated in place.
@@ -142,7 +142,7 @@ pub trait Controlled: ControlledPrivate {
     ///    *x += 1;
     ///  });
     /// });
-    /// assert_eq!(x.unwrap(), [1, 1, 1, 1]);
+    /// assert_eq!(x.risky_unwrap(), [1, 1, 1, 1]);
     /// ```
     ///
     fn update<F>(&mut self, mut f: F)
@@ -164,7 +164,7 @@ pub trait Controlled: ControlledPrivate {
     /// x.update_with(y, |x, y| {
     ///    x.copy_from_slice(&y);
     /// });
-    /// assert_eq!(x.unwrap(), [1u8; 32]);
+    /// assert_eq!(x.risky_unwrap(), [1u8; 32]);
     /// ```
     ///
     /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
@@ -178,7 +178,7 @@ pub trait Controlled: ControlledPrivate {
         // But not all Zeroize types are ZeroizeOnDrop - we may need to yield a wrapper type that Derefs to the inner value
         // Ditto for the zip method
         // Either that or just make sure the caller uses zeroize() on the other value :/
-        f(self.inner_mut(), other.unwrap());
+        f(self.inner_mut(), other.risky_unwrap());
     }
 
     /// Like `update_with` but the second argument is a reference.
@@ -194,7 +194,7 @@ pub trait Controlled: ControlledPrivate {
     /// x.update_with_ref(y.as_protected_ref(), |x, y| {
     ///   x.copy_from_slice(y);
     /// });
-    /// assert_eq!(x.unwrap(), [1u8; 32]);
+    /// assert_eq!(x.risky_unwrap(), [1u8; 32]);
     /// ```
     ///
     fn update_with_ref<'a, A, F>(&mut self, other: ProtectedRef<'a, A>, mut f: F)
@@ -215,8 +215,14 @@ pub trait Controlled: ControlledPrivate {
         self.inner().as_ref().iter().copied().map(Protected)
     }
 
-    // TODO: Consider renaming this to `risky_unwrap`
-    fn unwrap(self) -> Self::Inner;
+    /// Unwraps the inner value of the [Controlled] type.
+    /// This is a risky operation because it consumes the [Controlled] type and returns the inner value
+    /// negating the protections that the [Controlled] type provides.
+    /// 
+    /// **Use with caution!**
+    /// 
+    // TODO: Consider feature flagging this method
+    fn risky_unwrap(self) -> Self::Inner;
 }
 
 // TODO: Implement Collect for Protected (or Paranoid) so we can use collect() on iterators

@@ -146,8 +146,8 @@ impl<T> Controlled for Equatable<T>
 where
     T: Controlled,
 {
-    fn unwrap(self) -> Self::Inner {
-        self.0.unwrap()
+    fn risky_unwrap(self) -> Self::Inner {
+        self.0.risky_unwrap()
     }
 }
 
@@ -362,6 +362,6 @@ mod tests {
         let y = bincode::serialize(&x.exportable()).unwrap();
 
         let z: Exportable<Equatable<Protected<u8>>> = bincode::deserialize(&y).unwrap();
-        assert_eq!(z.unwrap(), 42);
+        assert_eq!(z.risky_unwrap(), 42);
     }
 }

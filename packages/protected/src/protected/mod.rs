@@ -28,7 +28,7 @@ impl<T> Protected<Protected<T>> {
     /// use vitaminc_protected::{Controlled, Protected};
     /// let x = Protected::new(Protected::new([0u8; 32]));
     /// let y = x.flatten();
-    /// assert_eq!(y.unwrap(), [0u8; 32]);
+    /// assert_eq!(y.risky_unwrap(), [0u8; 32]);
     /// ```
     ///
     /// Like [Option], flattening only removes one level of nesting at a time.
@@ -79,7 +79,7 @@ impl<T> Controlled for Protected<T>
 where
     T: Zeroize,
 {
-    fn unwrap(self) -> Self::Inner {
+    fn risky_unwrap(self) -> Self::Inner {
         self.0
     }
 }
@@ -107,7 +107,7 @@ where
 /// let array: [Protected<u8>; 3] = [x, y, z];
 /// let flattened = flatten_array(array);
 /// assert!(matches!(flattened, Protected));
-/// assert_eq!(flattened.unwrap(), [1, 2, 3]);
+/// assert_eq!(flattened.risky_unwrap(), [1, 2, 3]);
 /// ```
 pub fn flatten_array<const N: usize, T>(array: [Protected<T>; N]) -> Protected<[T; N]>
 where
@@ -115,7 +115,7 @@ where
 {
     let mut out: [T; N] = [Default::default(); N];
     array.iter().enumerate().for_each(|(i, x)| {
-        out[i] = x.unwrap();
+        out[i] = x.risky_unwrap();
     });
     Protected::new(out)
 }
@@ -140,7 +140,7 @@ mod tests {
     fn test_flatten() {
         let x = Protected::new(Protected::new([0u8; 32]));
         let y = x.flatten();
-        assert_eq!(y.unwrap(), [0u8; 32]);
+        assert_eq!(y.risky_unwrap(), [0u8; 32]);
     }
 
     #[test]
@@ -151,6 +151,6 @@ mod tests {
         let array: [Protected<u8>; 3] = [x, y, z];
         let flattened = flatten_array(array);
         assert!(matches!(flattened, Protected(_)));
-        assert_eq!(flattened.unwrap(), [1, 2, 3]);
+        assert_eq!(flattened.risky_unwrap(), [1, 2, 3]);
     }
 }

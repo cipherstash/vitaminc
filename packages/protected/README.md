@@ -41,14 +41,14 @@ let x = Protected::new([0u8; 32]);
 assert_eq!(format!("{x:?}"), "Protected<[u8; 32]> { ... }");
 ```
 
-The inner value is not accessible directly, but you can use the `unwrap` method as an escape hatch to get it back.
-`unwrap` is defined in the `Paranoid` trait so you'll need to bring that in scope.
+The inner value is not accessible directly, but you can use the `risky_unwrap` method as an escape hatch to get it back.
+`risky_unwrap` is defined in the [Controlled] trait so you'll need to bring that in scope.
 
 ```rust
 use vitaminc_protected::{Controlled, Protected};
 
 let x = Protected::new([0u8; 32]);
-assert_eq!(x.unwrap(), [0; 32]);
+assert_eq!(x.risky_unwrap(), [0; 32]);
 ```
 
 `Protected` does not implement `Deref` so you cannot access the data directly.
@@ -96,7 +96,7 @@ use vitaminc_protected::{Controlled, Protected};
 // Calculate the sum of values in the array with the result as a `Protected`
 let x: Protected<[u8; 4]> = Protected::new([1, 2, 3, 4]);
 let result: Protected<u8> = x.map(|arr| arr.as_slice().iter().sum());
-assert_eq!(result.unwrap(), 10);
+assert_eq!(result.risky_unwrap(), 10);
 ```
 
 If you have a pair of `Protected` values, you can `zip` them together with a function that combines them.
@@ -126,7 +126,7 @@ A `Protected` of `Protected` can be "flattened" into a single `Protected`.
 
 let x = Protected::new(Protected::new([0u8; 32]));
 let y = x.flatten();
-assert_eq!(y.unwrap(), [0u8; 32]);
+assert_eq!(y.risky_unwrap(), [0u8; 32]);
 ```
 
 Use [flatten_array] to convert a `[Protected<T>; N]` into a `Protected<[T; N]>`.

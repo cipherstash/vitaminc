@@ -81,7 +81,7 @@ mod tests {
     {
         let key = tests::gen_key([0; 32]);
         let output = key.bitwise_permute(input);
-        assert_ne!(output.unwrap(), input.unwrap());
+        assert_ne!(output.risky_unwrap(), input.risky_unwrap());
     }
 
     #[test]

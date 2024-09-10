@@ -34,8 +34,8 @@ impl<T, Scope> Controlled for Usage<T, Scope>
 where
     T: Controlled,
 {
-    fn unwrap(self) -> Self::Inner {
-        self.0.unwrap()
+    fn risky_unwrap(self) -> Self::Inner {
+        self.0.risky_unwrap()
     }
 }
 
