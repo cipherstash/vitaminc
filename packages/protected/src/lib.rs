@@ -6,6 +6,7 @@ mod digest;
 mod equatable;
 mod exportable;
 mod ops;
+mod protected;
 mod usage;
 mod zeroed;
 
@@ -19,10 +20,10 @@ pub use zeroed::Zeroed;
 
 // Exports
 pub use controlled::Controlled;
-pub use controlled::{flatten_array, Protected};
 pub use digest::ProtectedDigest;
 pub use equatable::{ConstantTimeEq, Equatable};
 pub use exportable::Exportable;
+pub use protected::{flatten_array, Protected};
 pub use usage::{Acceptable, DefaultScope, Scope, Usage};
 
 mod private {

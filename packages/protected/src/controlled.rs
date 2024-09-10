@@ -1,6 +1,5 @@
-mod protected;
+pub use crate::Protected;
 use crate::{private::ControlledPrivate, AsProtectedRef, ProtectedRef};
-pub use protected::{flatten_array, Protected};
 use zeroize::Zeroize;
 
 pub trait Controlled: ControlledPrivate {
