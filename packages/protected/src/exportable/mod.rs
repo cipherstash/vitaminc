@@ -23,6 +23,17 @@ impl<T> Exportable<T> {
     }
 }
 
+impl<T> Copy for Exportable<T> where T: Copy {}
+
+impl<T> Clone for Exportable<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
 impl<T, O> PartialEq<O> for Exportable<T>
 where

@@ -1,8 +1,16 @@
 pub use crate::Protected;
-use crate::{private::ControlledPrivate, AsProtectedRef, ProtectedRef};
+use crate::{private::ControlledPrivate, AsProtectedRef, ProtectedRef, ReplaceT};
 use zeroize::Zeroize;
 
 pub trait Controlled: ControlledPrivate {
+    /// Initialize a new instance of the [Controlled] type from the inner value.
+    fn new(inner: Self::Inner) -> Self
+    where
+        Self: Sized,
+    {
+        Self::init_from_inner(inner)
+    }
+
     /// Generate a new instance of the [Controlled] type from a function that returns the inner value.
     ///
     /// # Example
@@ -66,17 +74,14 @@ pub trait Controlled: ControlledPrivate {
     /// let y = x.map(|x| x + 10);
     /// assert_eq!(y.risky_unwrap(), 110);
     /// ```
-    ///
-    /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
-    /// e.g. `other` must have the same, or broader scope as `self`
-    fn map<B, F>(self, f: F) -> Protected<B>
+    fn map<B, F>(self, f: F) -> <Self as ReplaceT<B>>::Output
     where
-        Self: Sized,
+        Self: Sized + ReplaceT<B>,
         F: FnOnce(<Self as ControlledPrivate>::Inner) -> B,
+        <Self as ReplaceT<B>>::Output: ControlledPrivate<Inner = B>,
         B: Zeroize,
     {
-        // TODO: Use Replace private trait
-        Protected(f(self.risky_unwrap()))
+        <Self as ReplaceT<B>>::Output::init_from_inner(f(self.risky_unwrap()))
     }
 
     /// Zip two [Controlled] values of the same type together with a function that combines them.
@@ -226,3 +231,78 @@ pub trait Controlled: ControlledPrivate {
 }
 
 // TODO: Implement Collect for Protected (or Paranoid) so we can use collect() on iterators
+
+#[cfg(test)]
+mod tests {
+    use crate::{Controlled, Equatable, Exportable, Protected};
+
+    #[test]
+    fn test_map_homogenous_inner() {
+        let x = Protected::new(100u8);
+        let y = x.map(|x| x + 10);
+        assert_eq!(y.risky_unwrap(), 110u8);
+    }
+
+    #[test]
+    fn test_map_different_inner() {
+        let x = Protected::new(100u8);
+        let y: Protected<u16> = x.map(u16::from);
+        assert_eq!(y.risky_unwrap(), 100u16);
+    }
+
+    #[test]
+    fn test_map_adapter_homogenous_inner() {
+        assert_eq!(
+            Exportable::<Protected<u8>>::new(100)
+                .map(|x| x + 10)
+                .risky_unwrap(),
+            110u8
+        );
+        assert_eq!(
+            Equatable::<Protected<u8>>::new(100)
+                .map(|x| x + 10)
+                .risky_unwrap(),
+            110u8
+        );
+        assert_eq!(
+            Exportable::<Equatable<Protected<u8>>>::new(100)
+                .map(|x| x + 10)
+                .risky_unwrap(),
+            110u8
+        );
+        assert_eq!(
+            Equatable::<Exportable<Protected<u8>>>::new(100)
+                .map(|x| x + 10)
+                .risky_unwrap(),
+            110u8
+        );
+    }
+
+    #[test]
+    fn test_map_adapter_different_inner() {
+        assert_eq!(
+            Exportable::<Protected<u8>>::new(100)
+                .map(u16::from)
+                .risky_unwrap(),
+            100u16
+        );
+        assert_eq!(
+            Equatable::<Protected<u8>>::new(100)
+                .map(u16::from)
+                .risky_unwrap(),
+            100u16
+        );
+        assert_eq!(
+            Exportable::<Equatable<Protected<u8>>>::new(100)
+                .map(u16::from)
+                .risky_unwrap(),
+            100u16
+        );
+        assert_eq!(
+            Equatable::<Exportable<Protected<u8>>>::new(100)
+                .map(u16::from)
+                .risky_unwrap(),
+            100u16
+        );
+    }
+}

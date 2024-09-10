@@ -3,29 +3,16 @@ mod bitwise;
 mod elementwise;
 mod key;
 
+// TODO: Add tests and docs for use with Controlled types
+
 pub use bitwise::BitwisePermute;
 pub use elementwise::{Depermute, Permute};
 pub use key::PermutationKey;
-use vitaminc_protected::Protected;
-
-/// Defines the identity permutation for a given type and length.
-const fn identity<const N: usize, T>() -> Protected<[u8; N]>
-where
-    [T; N]: private::IsPermutable,
-{
-    let mut out = [0; N];
-    let mut i = 0;
-    while i < N {
-        out[i] = i as u8;
-        i += 1;
-    }
-    Protected::new(out)
-}
 
 mod private {
-    use std::num::{NonZeroU128, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8};
-    pub trait IsPermutable {}
+    use vitaminc_protected::Zeroed;
 
+    pub trait IsPermutable: Zeroed {}
     impl IsPermutable for [u8; 8] {}
     impl IsPermutable for [u8; 16] {}
     impl IsPermutable for [u8; 32] {}
@@ -36,16 +23,19 @@ mod private {
     impl IsPermutable for [u16; 32] {}
     impl IsPermutable for [u16; 64] {}
     impl IsPermutable for [u16; 128] {}
-    impl IsPermutable for NonZeroU8 {}
-    impl IsPermutable for NonZeroU16 {}
-    impl IsPermutable for NonZeroU32 {}
-    impl IsPermutable for NonZeroU64 {}
-    impl IsPermutable for NonZeroU128 {}
-    impl IsPermutable for u8 {}
-    impl IsPermutable for u16 {}
-    impl IsPermutable for u32 {}
-    impl IsPermutable for u64 {}
-    impl IsPermutable for u128 {}
+
+    pub(crate) const fn identity<const N: usize>() -> [u8; N]
+    where
+        [u8; N]: IsPermutable,
+    {
+        let mut out = [0; N];
+        let mut i = 0;
+        while i < N {
+            out[i] = i as u8;
+            i += 1;
+        }
+        out
+    }
 }
 
 #[cfg(test)]
