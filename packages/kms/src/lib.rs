@@ -33,7 +33,7 @@
 //!     #   .await?;
 //!     # let key_id = key.key_metadata().unwrap().key_id().to_owned();
 //!     // `key_id` is the ID or ARN of the KMS key to use
-//!     let tag = AwsKmsHmac::new(config, key_id)
+//!     let tag = AwsKmsHmac::<64>::new(config, key_id)
 //!         .chain(&Protected::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]))
 //!         .chain(Info("account_id"))
 //!         .try_finalize_fixed()
@@ -310,7 +310,7 @@ mod tests {
         let client = Client::from_conf(config);
         let key_id = get_key_id(&client, KeySpec::Hmac512).await?;
 
-        AwsKmsHmac::new(get_config(), key_id)
+        AwsKmsHmac::<64>::new(get_config(), key_id)
             .chain(&Protected::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]))
             .try_finalize_fixed()
             .await?;

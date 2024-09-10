@@ -20,13 +20,13 @@ pub trait KeySize {
 
 impl<const N: usize, T> KeySize for T
 where 
-    T: Paranoid<Inner = [u8; N]>,
+    T: Controlled<Inner = [u8; N]>,
 {
     const SIZE: usize = N;
 }
 
 pub trait KeyInit: KeySize {
-    type Key: Paranoid;
+    type Key: Controlled;
 
     fn new(key: Self::Key) -> Self;
 }

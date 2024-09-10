@@ -226,15 +226,15 @@ pub trait Controlled: ControlledPrivate {
     /// # Example
     /// 
     /// ```
-    /// use vitaminc_protected::{Paranoid, Protected};
+    /// use vitaminc_protected::{Controlled, Protected};
     /// let mut x = Protected::new([0u8; 32]);
     /// let y = Protected::new([1u8; 32]);
     /// x.replace(y);
-    /// assert_eq!(x.unwrap(), [1u8; 32]);
+    /// assert_eq!(x.risky_unwrap(), [1u8; 32]);
     /// ```
     /// 
     fn replace(&mut self, new: Self) -> Self where Self: Sized {
-        Self::init_from_inner(std::mem::replace(self.inner_mut(), new.unwrap()))
+        Self::init_from_inner(std::mem::replace(self.inner_mut(), new.risky_unwrap()))
     }
 
     /// Unwraps the inner value of the [Controlled] type.

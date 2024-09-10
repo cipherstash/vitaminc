@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-use vitaminc_protected::{Controlled, Zeroed};
+use vitaminc_protected::Zeroed;
 use vitaminc_traits::OutputSize;
 
 #[allow(async_fn_in_trait)]
