@@ -21,4 +21,4 @@ aws-config = "1.5.5"
 zeroize = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1.39.3", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1.40.0", features = ["rt", "rt-multi-thread", "macros"] }
