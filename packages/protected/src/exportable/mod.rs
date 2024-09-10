@@ -1,4 +1,4 @@
-use crate::{equatable::ConstantTimeEq, private::ParanoidPrivate, Equatable, Paranoid};
+use crate::{equatable::ConstantTimeEq, private::ControlledPrivate, Controlled, Equatable};
 use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
@@ -11,9 +11,9 @@ pub struct Exportable<T>(pub(crate) T);
 // TODO: Can we implement Hex and Base64 for inner types that implement them?
 impl<T> Exportable<T> {
     /// Create a new `Exportable` from an inner value.
-    pub fn new(x: <Exportable<T> as ParanoidPrivate>::Inner) -> Self
+    pub fn new(x: <Exportable<T> as ControlledPrivate>::Inner) -> Self
     where
-        Self: Paranoid,
+        Self: Controlled,
     {
         Self::init_from_inner(x)
     }
@@ -26,16 +26,16 @@ impl<T> Exportable<T> {
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
 impl<T, O> PartialEq<O> for Exportable<T>
 where
-    T: ParanoidPrivate,
-    O: ParanoidPrivate,
-    <T as ParanoidPrivate>::Inner: ConstantTimeEq<O::Inner>,
+    T: ControlledPrivate,
+    O: ControlledPrivate,
+    <T as ControlledPrivate>::Inner: ConstantTimeEq<O::Inner>,
 {
     fn eq(&self, other: &O) -> bool {
         self.inner().constant_time_eq(other.inner())
     }
 }
 
-impl<T: ParanoidPrivate> ParanoidPrivate for Exportable<T> {
+impl<T: ControlledPrivate> ControlledPrivate for Exportable<T> {
     type Inner = T::Inner;
 
     fn init_from_inner(x: Self::Inner) -> Self {
@@ -51,18 +51,18 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Exportable<T> {
     }
 }
 
-impl<T> Paranoid for Exportable<T>
+impl<T> Controlled for Exportable<T>
 where
-    T: Paranoid,
+    T: Controlled,
 {
-    fn unwrap(self) -> Self::Inner {
-        self.0.unwrap()
+    fn risky_unwrap(self) -> Self::Inner {
+        self.0.risky_unwrap()
     }
 }
 
 impl<T> Serialize for Exportable<T>
 where
-    T: ParanoidPrivate,
+    T: ControlledPrivate,
     T::Inner: Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -75,7 +75,7 @@ where
 
 impl<'de, T> Deserialize<'de> for Exportable<T>
 where
-    T: ParanoidPrivate,
+    T: ControlledPrivate,
     T::Inner: Deserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

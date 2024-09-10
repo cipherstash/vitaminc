@@ -1,4 +1,4 @@
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::{Generatable, RandomError, SafeRand};
 use zeroize::Zeroize;
 
@@ -10,16 +10,6 @@ use crate::{
 
 #[derive(Copy, Clone, Debug)]
 pub struct PermutationKey<const N: usize>(Protected<[u8; N]>);
-// TODO: Derive macro
-// TODO: It would be really handy to be able to mark named types as Paranoid, too
-// but this currently doesn't work.
-// We could move the Associated type to the Paranoid trait, and give it a bound of ParanoidPrivate
-// This is basically providing a way to make custom adapters
-/*impl Paranoid for PermutationKey<1> {
-    fn unwrap(self) -> Protected<[u8; 1]> {
-        self.0.unwrap()
-    }
-}*/
 
 impl<const N: usize> PermutationKey<N> {
     /// # Safety
@@ -46,15 +36,15 @@ impl<const N: usize> PermutationKey<N> {
     /// ```
     /// use vitaminc_permutation::{Permute, PermutationKey};
     /// use vitaminc_random::{Generatable, SafeRand, SeedableRng};
-    /// use vitaminc_protected::{Paranoid, Protected};
+    /// use vitaminc_protected::{Controlled, Protected};
     /// let mut rng = SafeRand::from_entropy();
-    /// let key = PermutationKey::random(&mut rng).unwrap();
-    /// let target = PermutationKey::random(&mut rng).unwrap();
+    /// let key = PermutationKey::random(&mut rng).expect("Random error");
+    /// let target = PermutationKey::random(&mut rng).expect("Random error");
     /// let complement = key.complement(&target);
-    /// let input: Protected<[u8; 16]> = Protected::random(&mut rng).unwrap();
+    /// let input: Protected<[u8; 16]> = Protected::random(&mut rng).expect("Random error");
     /// assert_eq!(
-    ///     complement.permute(target).permute(input).unwrap(),
-    ///     key.permute(input).unwrap()
+    ///     complement.permute(target).permute(input).risky_unwrap(),
+    ///     key.permute(input).risky_unwrap()
     /// );
     /// ```
     pub fn complement(&self, target: &Self) -> Self
@@ -101,7 +91,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{elementwise::Permute, identity, private::IsPermutable, PermutationKey};
-    use vitaminc_protected::{Paranoid, Protected};
+    use vitaminc_protected::{Controlled, Protected};
     use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 
     use crate::tests;
@@ -115,8 +105,8 @@ mod tests {
 
         // p(p^-1(x)) = x
         assert_eq!(
-            key.permute(inverted).0.unwrap(),
-            identity::<N, u8>().unwrap(),
+            key.permute(inverted).0.risky_unwrap(),
+            identity::<N, u8>().risky_unwrap(),
             "Failed to invert key of size {N}"
         );
     }
@@ -134,8 +124,8 @@ mod tests {
 
         // c(t)(x) = p(x)
         assert_eq!(
-            complement.permute(target).permute(input).unwrap(),
-            key.permute(input).unwrap(),
+            complement.permute(target).permute(input).risky_unwrap(),
+            key.permute(input).risky_unwrap(),
             "Failed to complement key of size {N}"
         );
     }

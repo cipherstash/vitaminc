@@ -36,19 +36,19 @@ It also provides an "opaque" implementation of the `Debug` trait so you can debu
 without accidentally leaking their innards.
 
 ```rust
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{Controlled, Protected};
 let x = Protected::new([0u8; 32]);
 assert_eq!(format!("{x:?}"), "Protected<[u8; 32]> { ... }");
 ```
 
-The inner value is not accessible directly, but you can use the `unwrap` method as an escape hatch to get it back.
-`unwrap` is defined in the `Paranoid` trait so you'll need to bring that in scope.
+The inner value is not accessible directly, but you can use the `risky_unwrap` method as an escape hatch to get it back.
+`risky_unwrap` is defined in the [Controlled] trait so you'll need to bring that in scope.
 
 ```rust
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{Controlled, Protected};
 
 let x = Protected::new([0u8; 32]);
-assert_eq!(x.unwrap(), [0; 32]);
+assert_eq!(x.risky_unwrap(), [0; 32]);
 ```
 
 `Protected` does not implement `Deref` so you cannot access the data directly.
@@ -91,18 +91,18 @@ You can `map` over the inner value to transform it, so long as the adapter is th
 For example, you can map a `Protected<T>` to a `Protected<U>`.
 
 ```rust
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{Controlled, Protected};
 
 // Calculate the sum of values in the array with the result as a `Protected`
 let x: Protected<[u8; 4]> = Protected::new([1, 2, 3, 4]);
 let result: Protected<u8> = x.map(|arr| arr.as_slice().iter().sum());
-assert_eq!(result.unwrap(), 10);
+assert_eq!(result.risky_unwrap(), 10);
 ```
 
 If you have a pair of `Protected` values, you can `zip` them together with a function that combines them.
 
 ```rust
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{Controlled, Protected};
 
 let x: Protected<u8> = Protected::new(1);
 let y: Protected<u8> = Protected::new(2);
@@ -112,7 +112,7 @@ let z: Protected<u8> = x.zip(y, |a, b| a + b);
 If the inner type is an `Option` you can call `transpose` to swap the `Protected` and the `Option`.
 
 ```rust
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{Controlled, Protected};
 
 let x = Protected::new(Some([0u8; 32]));
 let y = x.transpose();
@@ -122,11 +122,11 @@ assert!(matches!(y, Some(Protected)));
 A `Protected` of `Protected` can be "flattened" into a single `Protected`.
 
 ```rust
-# use vitaminc_protected::{Paranoid, Protected};
+# use vitaminc_protected::{Controlled, Protected};
 
 let x = Protected::new(Protected::new([0u8; 32]));
 let y = x.flatten();
-assert_eq!(y.unwrap(), [0u8; 32]);
+assert_eq!(y.risky_unwrap(), [0u8; 32]);
 ```
 
 Use [flatten_array] to convert a `[Protected<T>; N]` into a `Protected<[T; N]>`.
@@ -136,7 +136,7 @@ Use [flatten_array] to convert a `[Protected<T>; N]` into a `Protected<[T; N]>`.
 `Protected` supports generating new values from functions that return the inner value.
 
 ```rust
-# use vitaminc_protected::{Paranoid, Protected};
+# use vitaminc_protected::{Controlled, Protected};
 fn array_gen<const N: usize>() -> [u8; N] {
     core::array::from_fn(|i| (i + 1) as u8)
 }
@@ -147,7 +147,7 @@ let input: Protected<[u8; 8]> = Protected::generate(array_gen);
 You can also generate values from functions that return a `Result` with the inner value.
 
 ```rust
-# use vitaminc_protected::{Paranoid, Protected};
+# use vitaminc_protected::{Controlled, Protected};
 use std::string::FromUtf8Error;
 
 let input: Result<Protected<String>, FromUtf8Error> = Protected::generate_ok(|| {

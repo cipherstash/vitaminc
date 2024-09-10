@@ -46,7 +46,7 @@
 use crate::private::ValidMacSize;
 use aws_sdk_kms::{primitives::Blob, Client, Config};
 use vitaminc_async_traits::{AsyncFixedOutput, AsyncFixedOutputReset};
-use vitaminc_protected::{AsProtectedRef, Paranoid, Protected, ProtectedRef};
+use vitaminc_protected::{AsProtectedRef, Controlled, Protected, ProtectedRef};
 use vitaminc_traits::{OutputSize, Update};
 use zeroize::Zeroize;
 
@@ -85,7 +85,7 @@ where
             .key_id(&self.key_id)
             .mac_algorithm(Self::spec())
             // TODO: Prefer not to unwrap - async map for Paranoid?
-            .message(Blob::new(self.input.clone().unwrap()))
+            .message(Blob::new(self.input.clone().risky_unwrap()))
             .send()
             .await
             .map(|response| response.mac.unwrap())?)
@@ -221,7 +221,7 @@ mod tests {
         Client, Config,
     };
     use vitaminc_async_traits::AsyncFixedOutput;
-    use vitaminc_protected::{Paranoid, Protected};
+    use vitaminc_protected::{Controlled, Protected};
     use vitaminc_traits::Update;
 
     fn get_config() -> Config {
@@ -261,7 +261,10 @@ mod tests {
         hmac.update(&Protected::new(vec![2, 3]));
         hmac.update(Info("test"));
 
-        assert_eq!(hmac.input.unwrap(), vec![0, 1, 2, 3, 116, 101, 115, 116]);
+        assert_eq!(
+            hmac.input.risky_unwrap(),
+            vec![0, 1, 2, 3, 116, 101, 115, 116]
+        );
 
         Ok(())
     }
@@ -276,7 +279,7 @@ mod tests {
                 .chain(&Protected::new(vec![11, 12]));
 
         assert_eq!(
-            hmac.input.unwrap(),
+            hmac.input.risky_unwrap(),
             vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 11, 12]
         );
 

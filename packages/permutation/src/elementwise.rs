@@ -1,5 +1,5 @@
 use crate::{private::IsPermutable, PermutationKey};
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{Controlled, Protected};
 use zeroize::Zeroize;
 
 // TODO: Make this a private trait
@@ -53,7 +53,7 @@ mod tests {
     use crate::tests;
     use crate::{Depermute, PermutationKey, Permute};
     use rand::SeedableRng;
-    use vitaminc_protected::{Paranoid, Protected};
+    use vitaminc_protected::{Controlled, Protected};
     use vitaminc_random::{Generatable, SafeRand};
 
     fn test_permute<const N: usize>()
@@ -65,7 +65,7 @@ mod tests {
         let key: PermutationKey<N> = tests::gen_rand_key();
         let output = key.permute(input);
         // Note that this may fail for some inputs
-        assert_ne!(output.unwrap(), input.unwrap());
+        assert_ne!(output.risky_unwrap(), input.risky_unwrap());
     }
 
     fn test_depermute<const N: usize>()
@@ -78,7 +78,7 @@ mod tests {
         let key: PermutationKey<N> = tests::gen_rand_key();
         let output = key.permute(input);
         let depermuted = key.depermute(output);
-        assert_eq!(depermuted.unwrap(), input.unwrap());
+        assert_eq!(depermuted.risky_unwrap(), input.risky_unwrap());
     }
 
     fn test_associativity<const N: usize>()
@@ -96,7 +96,7 @@ mod tests {
         // p_2(p_1)(input)
         let output_2 = key_2.permute(key_1).permute(input);
 
-        assert_eq!(output_1.unwrap(), output_2.unwrap());
+        assert_eq!(output_1.risky_unwrap(), output_2.risky_unwrap());
     }
 
     #[test]

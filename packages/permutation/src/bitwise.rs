@@ -1,7 +1,7 @@
 use crate::{private::IsPermutable, PermutationKey};
 use bitvec::{array::BitArray, order::Msb0};
 use std::num::{NonZeroU128, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8};
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{Controlled, Protected};
 
 // TODO: Make this a private trait
 pub trait BitwisePermute<T>
@@ -67,7 +67,7 @@ mod tests {
 
     use crate::tests;
     use crate::{BitwisePermute, PermutationKey};
-    use vitaminc_protected::{Paranoid, Protected};
+    use vitaminc_protected::{Controlled, Protected};
     use zeroize::Zeroize;
 
     use super::IsPermutable;
@@ -81,7 +81,7 @@ mod tests {
     {
         let key = tests::gen_key([0; 32]);
         let output = key.bitwise_permute(input);
-        assert_ne!(output.unwrap(), input.unwrap());
+        assert_ne!(output.risky_unwrap(), input.risky_unwrap());
     }
 
     #[test]

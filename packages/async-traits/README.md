@@ -6,7 +6,7 @@
 This is the companion crate to [`vitaminc-traits`](https://github.com/cipherstash/vitaminc/tree/main/packages/traits) and offers
 `async` versions of some of the traits defined there.
 
-For example, [AsyncFixedOutputReset], the async version of [FixedOutputReset], is used to implement HMAC using Amazon's KMS.
+For example, [AsyncFixedOutputReset], the async version of `FixedOutputReset`, is used to implement HMAC using Amazon's KMS.
 See [`vitaminc-kms`](https://github.com/cipherstash/vitaminc/tree/main/packages/kms).
 
 ## Acknowledgements

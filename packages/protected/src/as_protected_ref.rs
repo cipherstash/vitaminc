@@ -1,4 +1,4 @@
-use crate::{private::ParanoidPrivate, Paranoid};
+use crate::{private::ControlledPrivate, Controlled};
 use std::borrow::Cow;
 
 /// Trait for types that can be converted to a `ProtectedRef`.
@@ -33,8 +33,8 @@ pub trait AsProtectedRef<'a, A: ?Sized> {
 
 impl<'a, T, A: ?Sized> AsProtectedRef<'a, A> for T
 where
-    <T as ParanoidPrivate>::Inner: AsRef<A>,
-    T: Paranoid,
+    <T as ControlledPrivate>::Inner: AsRef<A>,
+    T: Controlled,
 {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, A> {
         ProtectedRef(self.inner().as_ref())

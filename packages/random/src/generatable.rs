@@ -14,7 +14,7 @@
 //!
 use crate::{Fill, RandomError, SafeRand};
 use std::num::NonZeroU16;
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{Controlled, Protected};
 use zeroize::Zeroize;
 
 /// A trait for types that can be generated randomly.
