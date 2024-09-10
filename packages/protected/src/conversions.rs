@@ -27,10 +27,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::Controlled;
     use digest::consts::U48;
     use std::num::NonZeroU8;
-    use super::*;
 
     macro_rules! test_integer_into_protected {
         ($($t:ty)*) => ($(

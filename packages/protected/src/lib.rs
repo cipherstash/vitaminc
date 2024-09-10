@@ -33,23 +33,38 @@ pub trait ReplaceT<K>: private::Sealed {
     type Output: Controlled;
 }
 
-impl<T, K> ReplaceT<K> for Protected<T> where Protected<K>: Controlled {
+impl<T, K> ReplaceT<K> for Protected<T>
+where
+    Protected<K>: Controlled,
+{
     type Output = Protected<K>;
 }
 
-impl<T, K> ReplaceT<K> for Equatable<Protected<T>> where Equatable<Protected<K>>: Controlled {
+impl<T, K> ReplaceT<K> for Equatable<Protected<T>>
+where
+    Equatable<Protected<K>>: Controlled,
+{
     type Output = Equatable<Protected<K>>;
 }
 
-impl<T, K> ReplaceT<K> for Equatable<Exportable<Protected<T>>> where Equatable<Exportable<Protected<K>>>: Controlled {
+impl<T, K> ReplaceT<K> for Equatable<Exportable<Protected<T>>>
+where
+    Equatable<Exportable<Protected<K>>>: Controlled,
+{
     type Output = Equatable<Exportable<Protected<K>>>;
 }
 
-impl<T, K> ReplaceT<K> for Exportable<Protected<T>> where K: Zeroize {
+impl<T, K> ReplaceT<K> for Exportable<Protected<T>>
+where
+    K: Zeroize,
+{
     type Output = Exportable<Protected<K>>;
 }
 
-impl<T, K> ReplaceT<K> for Exportable<Equatable<Protected<T>>> where K: Zeroize {
+impl<T, K> ReplaceT<K> for Exportable<Equatable<Protected<T>>>
+where
+    K: Zeroize,
+{
     type Output = Exportable<Equatable<Protected<K>>>;
 }
 

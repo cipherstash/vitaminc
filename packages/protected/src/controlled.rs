@@ -1,10 +1,13 @@
 pub use crate::Protected;
-use crate::{private::ControlledPrivate, ReplaceT, AsProtectedRef, ProtectedRef};
+use crate::{private::ControlledPrivate, AsProtectedRef, ProtectedRef, ReplaceT};
 use zeroize::Zeroize;
 
 pub trait Controlled: ControlledPrivate {
     /// Initialize a new instance of the [Controlled] type from the inner value.
-    fn new(inner: Self::Inner) -> Self where Self: Sized {
+    fn new(inner: Self::Inner) -> Self
+    where
+        Self: Sized,
+    {
         Self::init_from_inner(inner)
     }
 
@@ -78,7 +81,7 @@ pub trait Controlled: ControlledPrivate {
         <Self as ReplaceT<B>>::Output: ControlledPrivate<Inner = B>,
         B: Zeroize,
     {
-        <Self as ReplaceT::<B>>::Output::init_from_inner(f(self.risky_unwrap()))
+        <Self as ReplaceT<B>>::Output::init_from_inner(f(self.risky_unwrap()))
     }
 
     /// Zip two [Controlled] values of the same type together with a function that combines them.
@@ -249,17 +252,57 @@ mod tests {
 
     #[test]
     fn test_map_adapter_homogenous_inner() {
-        assert_eq!(Exportable::<Protected<u8>>::new(100).map(|x| x + 10).risky_unwrap(), 110u8);
-        assert_eq!(Equatable::<Protected<u8>>::new(100).map(|x| x + 10).risky_unwrap(), 110u8);
-        assert_eq!(Exportable::<Equatable<Protected<u8>>>::new(100).map(|x| x + 10).risky_unwrap(), 110u8);
-        assert_eq!(Equatable::<Exportable<Protected<u8>>>::new(100).map(|x| x + 10).risky_unwrap(), 110u8);
+        assert_eq!(
+            Exportable::<Protected<u8>>::new(100)
+                .map(|x| x + 10)
+                .risky_unwrap(),
+            110u8
+        );
+        assert_eq!(
+            Equatable::<Protected<u8>>::new(100)
+                .map(|x| x + 10)
+                .risky_unwrap(),
+            110u8
+        );
+        assert_eq!(
+            Exportable::<Equatable<Protected<u8>>>::new(100)
+                .map(|x| x + 10)
+                .risky_unwrap(),
+            110u8
+        );
+        assert_eq!(
+            Equatable::<Exportable<Protected<u8>>>::new(100)
+                .map(|x| x + 10)
+                .risky_unwrap(),
+            110u8
+        );
     }
 
     #[test]
     fn test_map_adapter_different_inner() {
-        assert_eq!(Exportable::<Protected<u8>>::new(100).map(u16::from).risky_unwrap(), 100u16);
-        assert_eq!(Equatable::<Protected<u8>>::new(100).map(u16::from).risky_unwrap(), 100u16);
-        assert_eq!(Exportable::<Equatable<Protected<u8>>>::new(100).map(u16::from).risky_unwrap(), 100u16);
-        assert_eq!(Equatable::<Exportable<Protected<u8>>>::new(100).map(u16::from).risky_unwrap(), 100u16);
+        assert_eq!(
+            Exportable::<Protected<u8>>::new(100)
+                .map(u16::from)
+                .risky_unwrap(),
+            100u16
+        );
+        assert_eq!(
+            Equatable::<Protected<u8>>::new(100)
+                .map(u16::from)
+                .risky_unwrap(),
+            100u16
+        );
+        assert_eq!(
+            Exportable::<Equatable<Protected<u8>>>::new(100)
+                .map(u16::from)
+                .risky_unwrap(),
+            100u16
+        );
+        assert_eq!(
+            Equatable::<Exportable<Protected<u8>>>::new(100)
+                .map(u16::from)
+                .risky_unwrap(),
+            100u16
+        );
     }
 }
