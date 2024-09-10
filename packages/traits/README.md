@@ -9,7 +9,7 @@ with some key differences:
 
 * The `Update` trait takes a specific input type. This allows us to reason about the input type and its sensitivity.
 * The `Output` traits are generic over the output type. This allows us to reason about the output type and its sensitivity.
-* All types have a trait bound of [Paranoid]
+* All types have a trait bound of [Controlled]
 * `const` generics are used to specify the output size of the hash instead of GenericArray.
 
 Async versions of some of these traits are provided in the `async-traits` crate.
