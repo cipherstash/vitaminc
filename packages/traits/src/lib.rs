@@ -19,7 +19,7 @@ pub trait KeySize {
 }
 
 impl<const N: usize, T> KeySize for T
-where 
+where
     T: Controlled<Inner = [u8; N]>,
 {
     const SIZE: usize = N;

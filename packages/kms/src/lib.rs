@@ -155,7 +155,10 @@ impl<const N: usize> OutputSize<N> for AwsKmsHmacOutput<N> {
     const SIZE: usize = N;
 }
 
-impl<const N: usize> Zeroed for AwsKmsHmacOutput<N> where Protected<[u8; N]>: Zeroed {
+impl<const N: usize> Zeroed for AwsKmsHmacOutput<N>
+where
+    Protected<[u8; N]>: Zeroed,
+{
     fn zeroed() -> Self {
         Self {
             output: Zeroed::zeroed(),
@@ -163,7 +166,10 @@ impl<const N: usize> Zeroed for AwsKmsHmacOutput<N> where Protected<[u8; N]>: Ze
     }
 }
 
-impl<const N: usize> AsyncFixedOutput<N, AwsKmsHmacOutput<N>> for AwsKmsHmac<N> where Self: private::ValidMacSize<N> {
+impl<const N: usize> AsyncFixedOutput<N, AwsKmsHmacOutput<N>> for AwsKmsHmac<N>
+where
+    Self: private::ValidMacSize<N>,
+{
     type Error = Error;
 
     async fn try_finalize_into(self, out: &mut AwsKmsHmacOutput<N>) -> Result<(), Self::Error> {
@@ -179,7 +185,10 @@ impl<const N: usize> AsyncFixedOutput<N, AwsKmsHmacOutput<N>> for AwsKmsHmac<N> 
 }
 
 // TODO: Handle all valid sizes
-impl<const N: usize> AsyncFixedOutputReset<N, AwsKmsHmacOutput<N>> for AwsKmsHmac<N> where Self: private::ValidMacSize<N> {
+impl<const N: usize> AsyncFixedOutputReset<N, AwsKmsHmacOutput<N>> for AwsKmsHmac<N>
+where
+    Self: private::ValidMacSize<N>,
+{
     type Error = Error;
 
     async fn try_finalize_into_reset(

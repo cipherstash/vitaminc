@@ -31,7 +31,7 @@ where
 #[allow(async_fn_in_trait)]
 pub trait AsyncFixedOutputReset<const N: usize, O>
 where
-    O: OutputSize<N>, // TODO: Output should Paranoid (perhaps even a concrete type: MacOutput which is a Paranoid)
+    O: OutputSize<N>,
 {
     type Error;
 
