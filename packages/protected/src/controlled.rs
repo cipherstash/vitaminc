@@ -218,9 +218,9 @@ pub trait Controlled: ControlledPrivate {
     /// Unwraps the inner value of the [Controlled] type.
     /// This is a risky operation because it consumes the [Controlled] type and returns the inner value
     /// negating the protections that the [Controlled] type provides.
-    /// 
+    ///
     /// **Use with caution!**
-    /// 
+    ///
     // TODO: Consider feature flagging this method
     fn risky_unwrap(self) -> Self::Inner;
 }

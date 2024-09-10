@@ -261,7 +261,10 @@ mod tests {
         hmac.update(&Protected::new(vec![2, 3]));
         hmac.update(Info("test"));
 
-        assert_eq!(hmac.input.risky_unwrap(), vec![0, 1, 2, 3, 116, 101, 115, 116]);
+        assert_eq!(
+            hmac.input.risky_unwrap(),
+            vec![0, 1, 2, 3, 116, 101, 115, 116]
+        );
 
         Ok(())
     }
