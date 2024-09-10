@@ -9,7 +9,6 @@ mod usage;
 mod zeroed;
 
 use private::ParanoidPrivate;
-use std::marker::PhantomData;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 mod private;
@@ -22,16 +21,15 @@ pub mod slice_index;
 pub use as_protected_ref::{AsProtectedRef, ProtectedRef};
 pub use zeroed::Zeroed;
 
-// TODO: This trait is similar to the Iterator trait in std
-// Implement for all "adapter" types - Equatable, Exportable, etc.
-// Come up with a better name for it
-pub trait Paranoid: private::ParanoidPrivate {
-    /// Generate a new `Protected` from a function that returns the inner value.
+pub trait Controlled: private::ParanoidPrivate {
+    /// Generate a new instance of the [Controlled] type from a function that returns the inner value.
     ///
     /// # Example
     ///
+    /// Generate a new [Protected] from a function that returns an array.
+    ///
     /// ```
-    /// use vitaminc_protected::{Paranoid, Protected};
+    /// use vitaminc_protected::{Controlled, Protected};
     /// fn array_gen<const N: usize>() -> [u8; N] {
     ///     let mut input: [u8; N] = [0; N];
     ///     input.iter_mut().enumerate().for_each(|(i, x)| {
@@ -51,12 +49,14 @@ pub trait Paranoid: private::ParanoidPrivate {
         Self::init_from_inner(f())
     }
 
-    /// Generate a new `Protected` from a function that returns a `Result` with the inner value.
+    /// Generate a new [Controlled] type from a function that returns a `Result` with the inner value.
     ///
     /// # Example
     ///
+    /// Generate a new [Protected] from a function that returns a `Result` with the inner value.
+    ///
     /// ```
-    /// use vitaminc_protected::{Paranoid, Protected};
+    /// use vitaminc_protected::{Controlled, Protected};
     /// use std::string::FromUtf8Error;
     ///
     /// let input: Result<Protected<String>, FromUtf8Error> = Protected::generate_ok(|| {
@@ -72,31 +72,15 @@ pub trait Paranoid: private::ParanoidPrivate {
         f().map(Self::init_from_inner)
     }
 
-    /// Convert this `Protected` into one that is equatable in constant time.
-    /// Returns a new `Equatable` adapter.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use vitaminc_protected::{Equatable, Paranoid, Protected};
-    ///
-    /// let x = Protected::new([0u8; 32]);
-    /// let y: Equatable<Protected<[u8; 32]>> = x.equatable();
-    /// ```
-    fn equatable(self) -> Equatable<Self>
-    where
-        Self: Sized,
-    {
-        Equatable(self)
-    }
-
-    /// Map `Protected<Self::Inner>` value into a new `Protected<B>`.
+    /// Map the inner value of this [Controlled] type`.
     /// Conceptually similar to `Option::map`.
     ///
     /// # Example
     ///
+    /// Map the inner value of a [Protected] to a new value.
+    ///
     /// ```
-    /// use vitaminc_protected::{Paranoid, Protected};
+    /// use vitaminc_protected::{Controlled, Protected};
     /// let x = Protected::new(100u8);
     /// let y = x.map(|x| x + 10);
     /// assert_eq!(y.unwrap(), 110);
@@ -110,15 +94,18 @@ pub trait Paranoid: private::ParanoidPrivate {
         F: FnOnce(<Self as ParanoidPrivate>::Inner) -> B,
         B: Zeroize,
     {
+        // TODO: Use Replace private trait
         Protected(f(self.unwrap()))
     }
 
-    /// Zip two `Protected` values together with a function that combines them.
+    /// Zip two [Controlled] values of the same type together with a function that combines them.
     ///
     /// # Example
     ///
+    /// Add two [Protected] values together.
+    ///
     /// ```
-    /// use vitaminc_protected::{Paranoid, Protected};
+    /// use vitaminc_protected::{Controlled, Protected};
     /// let x = Protected::new(1);
     /// let y = Protected::new(2);
     /// let z = x.zip(y, |x, y| x + y);
@@ -130,10 +117,11 @@ pub trait Paranoid: private::ParanoidPrivate {
     fn zip<Other, Out, F>(self, b: Other, f: F) -> Protected<Out>
     where
         Self: Sized,
-        Other: Paranoid,
+        Other: Controlled,
         Out: Zeroize,
         F: FnOnce(Self::Inner, Other::Inner) -> Out,
     {
+        // TODO: Use Replace private trait
         Protected::init_from_inner(f(self.unwrap(), b.unwrap()))
     }
 
@@ -142,7 +130,7 @@ pub trait Paranoid: private::ParanoidPrivate {
     /// # Example
     ///
     /// ```
-    /// use vitaminc_protected::{Paranoid, Protected};
+    /// use vitaminc_protected::{Controlled, Protected};
     /// let x = Protected::new(String::from("hello "));
     /// let y = Protected::new(String::from("world"));
     /// let z = x.zip_ref(&y, |x, y| x + y);
@@ -166,7 +154,7 @@ pub trait Paranoid: private::ParanoidPrivate {
     /// # Example
     ///
     /// ```
-    /// # use vitaminc_protected::{Paranoid, Protected};
+    /// # use vitaminc_protected::{Controlled, Protected};
     /// let mut x = Protected::new([0u8; 4]);
     /// x.update(|x| {
     ///   x.iter_mut().for_each(|x| {
@@ -183,12 +171,13 @@ pub trait Paranoid: private::ParanoidPrivate {
         f(self.inner_mut());
     }
 
-    /// Update the inner value with another Paranoid value.
+    /// Update the inner value with another [Controlled] value.
+    /// The inner value of the second argument is passed to the closure.
     ///
     /// # Example
     ///
     /// ```
-    /// use vitaminc_protected::{Paranoid, Protected};
+    /// use vitaminc_protected::{Controlled, Protected};
     /// let mut x = Protected::new([0u8; 32]);
     /// let y = Protected::new([1u8; 32]);
     /// x.update_with(y, |x, y| {
@@ -202,7 +191,7 @@ pub trait Paranoid: private::ParanoidPrivate {
     fn update_with<Other, F>(&mut self, other: Other, mut f: F)
     where
         F: FnMut(&mut Self::Inner, Other::Inner),
-        Other: Paranoid,
+        Other: Controlled,
     {
         // FIXME: There's a chance here that other will be dropped and not zeroized correctly
         // But not all Zeroize types are ZeroizeOnDrop - we may need to yield a wrapper type that Derefs to the inner value
@@ -216,7 +205,7 @@ pub trait Paranoid: private::ParanoidPrivate {
     /// # Example
     ///
     /// ```
-    /// # use vitaminc_protected::{Paranoid, Protected};
+    /// # use vitaminc_protected::{Controlled, Protected};
     /// use vitaminc_protected::AsProtectedRef;
     ///
     /// let mut x = Protected::new([0u8; 32]);
@@ -232,7 +221,6 @@ pub trait Paranoid: private::ParanoidPrivate {
         A: ?Sized + 'a,
         F: FnMut(&mut Self::Inner, &A),
     {
-        //let arg: ProtectedRef<'a, A> = other.as_protected_ref();
         f(self.inner_mut(), other.inner_ref());
     }
 
@@ -258,51 +246,30 @@ pub use equatable::{ConstantTimeEq, Equatable};
 pub use exportable::Exportable;
 pub use usage::{Acceptable, DefaultScope, Scope, Usage};
 
-/// Basic building block for Paranoid.
-/// It uses a similar design "adapter" pattern to `std::slide::Iter`.
-/// `Protected` adds Zeroize and OpaqueDebug.
+/// The most basic controlled type.
+/// It ensures inner types are `Zeroize` and implements `Debug` and `Display` safely (i.e. inner sensitive values are redacted).
 #[derive(Zeroize)]
 pub struct Protected<T>(T);
 
 opaque_debug::implement!(Protected<T>);
 
 impl<T> Protected<T> {
-    /// Create a new `Protected` from an inner value.
+    /// Create a new [Protected] from an inner value.
     pub const fn new(x: T) -> Self
     where
         T: Zeroize,
     {
         Self(x)
     }
-
-    /// Convert this `Protected` into one that is exportable in constant time using Serde.
-    /// Returns a new `Exportable` adapter.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use vitaminc_protected::{Exportable, Protected};
-    ///
-    /// let x = Protected::new([0u8; 32]);
-    /// let y: Exportable<Protected<[u8; 32]>> = x.exportable();
-    /// ```
-    pub fn exportable(self) -> Exportable<Self> {
-        Exportable(self)
-    }
-
-    // TODO: This needs to be implemented for all types (put on the Paranoid trait)
-    pub fn for_scope<S: Scope>(self) -> Usage<Self, S> {
-        Usage(self, PhantomData)
-    }
 }
 
 impl<T> Protected<Protected<T>> {
     #[inline]
-    /// Flatten a `Protected` of `Protected` into a single `Protected`.
+    /// Flatten a [Protected] of [Protected] into a single [Protected].
     /// Similar to `Option::flatten`.
     ///
     /// ```
-    /// use vitaminc_protected::{Paranoid, Protected};
+    /// use vitaminc_protected::{Controlled, Protected};
     /// let x = Protected::new(Protected::new([0u8; 32]));
     /// let y = x.flatten();
     /// assert_eq!(y.unwrap(), [0u8; 32]);
@@ -317,7 +284,7 @@ impl<T> Protected<Protected<T>> {
 
 impl<T> Protected<Option<T>> {
     #[inline]
-    /// Transpose a `Protected` of `Option` into an `Option` of `Protected`.
+    /// Transpose a [Protected] of `Option` into an `Option` of [Protected].
     /// Similar to `Option::transpose`.
     ///
     /// ```
@@ -352,7 +319,7 @@ where
     }
 }
 
-impl<T> Paranoid for Protected<T>
+impl<T> Controlled for Protected<T>
 where
     T: Zeroize,
 {
@@ -372,12 +339,12 @@ where
     }
 }
 
-/// Convenience function to flatten an array of `Protected` into a `Protected` array.
+/// Convenience function to flatten an array of [Protected] into a [Protected] array.
 ///
 /// # Example
 ///
 /// ```
-/// use vitaminc_protected::{flatten_array, Paranoid, Protected};
+/// use vitaminc_protected::{flatten_array, Controlled, Protected};
 /// let x = Protected::new(1);
 /// let y = Protected::new(2);
 /// let z = Protected::new(3);

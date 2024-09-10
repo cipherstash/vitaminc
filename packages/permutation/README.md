@@ -21,7 +21,7 @@ All inputs and outputs are wrapped in a `Protected` type which ensures that the 
 ```rust
 use vitaminc_permutation::{Permute, PermutationKey};
 use vitaminc_random::{Generatable, SafeRand, SeedableRng};
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{Controlled, Protected};
 let mut rng = SafeRand::from_seed([0; 32]);
 let key = PermutationKey::random(&mut rng).unwrap();
 let input = Protected::new([1, 2, 3, 4, 5, 6, 7, 8]);
@@ -35,7 +35,7 @@ This is useful for when you need to permute a single byte or a small number of b
 
 ```rust
 use vitaminc_permutation::{BitwisePermute, PermutationKey};
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 let mut rng = SafeRand::from_seed([0; 32]);
 let key = PermutationKey::random(&mut rng).unwrap();

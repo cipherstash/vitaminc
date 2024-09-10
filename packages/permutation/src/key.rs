@@ -1,4 +1,4 @@
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::{Generatable, RandomError, SafeRand};
 use zeroize::Zeroize;
 
@@ -46,7 +46,7 @@ impl<const N: usize> PermutationKey<N> {
     /// ```
     /// use vitaminc_permutation::{Permute, PermutationKey};
     /// use vitaminc_random::{Generatable, SafeRand, SeedableRng};
-    /// use vitaminc_protected::{Paranoid, Protected};
+    /// use vitaminc_protected::{Controlled, Protected};
     /// let mut rng = SafeRand::from_entropy();
     /// let key = PermutationKey::random(&mut rng).unwrap();
     /// let target = PermutationKey::random(&mut rng).unwrap();
@@ -101,7 +101,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{elementwise::Permute, identity, private::IsPermutable, PermutationKey};
-    use vitaminc_protected::{Paranoid, Protected};
+    use vitaminc_protected::{Controlled, Protected};
     use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 
     use crate::tests;

@@ -20,7 +20,7 @@ assert!(value <= 10);
 Or using a `Protected` value:
 
 ```rust
-use vitaminc_protected::{Paranoid, Protected};
+use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::{BoundedRng, SafeRand, SeedableRng};
 
 let mut rng = SafeRand::from_entropy();

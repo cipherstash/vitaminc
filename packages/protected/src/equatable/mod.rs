@@ -1,24 +1,24 @@
-use crate::{private::ParanoidPrivate, Exportable, Paranoid, Protected};
+use crate::{private::ParanoidPrivate, Controlled, Exportable, Protected};
 use core::num::NonZeroU16;
 use subtle::ConstantTimeEq as SubtleCtEq;
 use zeroize::Zeroize;
 
-/// A wrapper type that allows for constant time equality checks of a `Paranoid` type.
+/// A _controlled_ wrapper type that allows for constant time equality checks of a [Controlled] type.
+/// The immediate inner type must also be [Controlled] (typically [Protected]).
 ///
 /// # Examples
 ///
-/// Initializing an `Equatable` from a `Protected` type:
+/// Initializing an [Equatable]:
 ///
 /// ```
-/// use vitaminc_protected::{Equatable, Paranoid, Protected};
+/// use vitaminc_protected::{Equatable, Controlled, Protected};
 /// let x: Equatable<Protected<u8>> = 42.into();
-/// let y: Equatable<Protected<u8>> = Protected::new(42).into();
-/// let z: Equatable<Protected<u8>> = Protected::new(42).equatable();
+/// let y: Equatable<Protected<u8>> = Equatable::<Protected<u8>>::new(42);
 /// ```
 ///
 /// # Constant time comparisons
 ///
-/// `Equatable` requires that types are equatable in constant time.
+/// [Equatable] requires that types are equatable in constant time.
 ///
 /// ```
 /// use vitaminc_protected::{Equatable, Protected};
@@ -28,7 +28,7 @@ use zeroize::Zeroize;
 /// assert!(x.constant_time_eq(&y));
 /// ```
 ///
-/// The `Equatable` type also implements `PartialEq` and `Eq` for easy comparison using the constant time implementation.
+/// The [Equatable] type also implements `PartialEq` and `Eq` for easy comparison using the constant time implementation.
 ///
 /// ```
 /// use vitaminc_protected::{Equatable, Protected};
@@ -37,12 +37,12 @@ use zeroize::Zeroize;
 /// assert_eq!(x, y);
 /// ```
 ///
-/// # Nesting `Equatable` types
+/// # Nesting [Equatable] types
 ///
 /// Constant time comparison also works for nested `Equatable` types.
 /// This way, the ordering or depth of the nesting doesn't matter, the comparison will always be constant time.
 ///
-/// See also `Exportable`.
+/// See also [Exportable].
 ///
 /// ```
 /// use vitaminc_protected::{Exportable, Equatable, Protected};
@@ -54,16 +54,18 @@ use zeroize::Zeroize;
 ///
 /// # Opaque Debug
 ///
-/// Because `Equatable` wraps `Paranoid`, inner types will never be printed.
-/// It's therefore safe to use `Equatable` in debug output and in custom types.
+/// Because [Equatable] wraps [Controlled], inner types will never be printed.
+/// It's therefore safe to use it in debug output and in custom types.
 ///
 /// ```
-/// use vitaminc_protected::{Equatable, Paranoid, Protected};
+/// use vitaminc_protected::{Equatable, Controlled, Protected};
+///
+/// type Inner = Equatable<Protected<u8>>;
 ///
 /// #[derive(Debug, PartialEq)]
-/// struct SafeType(Equatable<Protected<u8>>);
-/// let x = SafeType(Protected::new(100).equatable());
-/// dbg!(x);
+/// struct SafeType(Inner);
+/// let x = SafeType(Inner::new(100));
+/// assert_eq!(format!("{:?}", x), "SafeType(Equatable(Protected<u8> { ... }))");
 /// ```
 ///
 /// # Usage in a struct
@@ -99,6 +101,7 @@ impl<T> Equatable<T> {
         Self::init_from_inner(x)
     }
 
+    // TODO: Remove
     pub fn exportable(self) -> Exportable<Self> {
         Exportable(self)
     }
@@ -139,9 +142,9 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Equatable<T> {
     }
 }
 
-impl<T> Paranoid for Equatable<T>
+impl<T> Controlled for Equatable<T>
 where
-    T: Paranoid,
+    T: Controlled,
 {
     fn unwrap(self) -> Self::Inner {
         self.0.unwrap()
@@ -317,7 +320,7 @@ mod private {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Equatable, Exportable, Paranoid, Protected};
+    use crate::{Controlled, Equatable, Exportable, Protected};
 
     #[test]
     fn test_opaque_debug() {
@@ -333,32 +336,6 @@ mod tests {
 
         assert_eq!(x, y);
         assert!(x.constant_time_eq(&y));
-    }
-
-    #[test]
-    fn test_conversion() {
-        let x: Equatable<Protected<u8>> = 0.into();
-        let a: Equatable<Protected<u8>> = Protected::new(0).into();
-        let b = Protected::<u8>::new(0).equatable();
-
-        assert_eq!(x, a);
-        assert_eq!(x, b);
-    }
-
-    #[test]
-    fn test_conversion_2() {
-        // TODO: Create a macro to test lots of these
-        let x: Protected<[u8; 16]> = [0u8; 16].into();
-        let y: Equatable<Protected<[u8; 16]>> = [0u8; 16].into();
-        assert_eq!(y, x.equatable());
-    }
-
-    #[test]
-    fn test_conversion_string() {
-        // TODO: Create a macro to test lots of these
-        let x: Protected<String> = Protected::new("hello".to_string());
-        let y: Equatable<Protected<String>> = Equatable::new("hello".to_string());
-        assert_eq!(y, x.equatable());
     }
 
     #[test]
@@ -385,6 +362,6 @@ mod tests {
         let y = bincode::serialize(&x.exportable()).unwrap();
 
         let z: Exportable<Equatable<Protected<u8>>> = bincode::deserialize(&y).unwrap();
-        assert_eq!(z, Protected::new(42).equatable());
+        assert_eq!(z.unwrap(), 42);
     }
 }

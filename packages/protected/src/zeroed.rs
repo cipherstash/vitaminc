@@ -1,8 +1,8 @@
-use crate::{Equatable, Exportable, Paranoid, Protected};
+use crate::{Controlled, Equatable, Exportable, Protected};
 
 /// Similar to `Default`, but doesn't rely on the standard library,
 /// is only implemented for Paranoid types, and covers array sizes up to 1024.
-pub trait Zeroed: Paranoid {
+pub trait Zeroed: Controlled {
     fn zeroed() -> Self;
 }
 

@@ -1,4 +1,4 @@
-use crate::{equatable::ConstantTimeEq, private::ParanoidPrivate, Equatable, Paranoid};
+use crate::{equatable::ConstantTimeEq, private::ParanoidPrivate, Controlled, Equatable};
 use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
@@ -13,7 +13,7 @@ impl<T> Exportable<T> {
     /// Create a new `Exportable` from an inner value.
     pub fn new(x: <Exportable<T> as ParanoidPrivate>::Inner) -> Self
     where
-        Self: Paranoid,
+        Self: Controlled,
     {
         Self::init_from_inner(x)
     }
@@ -51,9 +51,9 @@ impl<T: ParanoidPrivate> ParanoidPrivate for Exportable<T> {
     }
 }
 
-impl<T> Paranoid for Exportable<T>
+impl<T> Controlled for Exportable<T>
 where
-    T: Paranoid,
+    T: Controlled,
 {
     fn unwrap(self) -> Self::Inner {
         self.0.unwrap()
