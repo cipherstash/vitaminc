@@ -1,7 +1,7 @@
+mod protected;
+use crate::{private::ControlledPrivate, AsProtectedRef, ProtectedRef};
+pub use protected::{flatten_array, Protected};
 use zeroize::Zeroize;
-
-use crate::{private::ControlledPrivate, AsProtectedRef, Protected, ProtectedRef};
-
 
 pub trait Controlled: ControlledPrivate {
     /// Generate a new instance of the [Controlled] type from a function that returns the inner value.
