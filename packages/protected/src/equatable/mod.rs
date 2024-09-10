@@ -1,4 +1,4 @@
-use crate::{private::ParanoidPrivate, Controlled, Exportable, Protected};
+use crate::{private::ControlledPrivate, Controlled, Exportable, Protected};
 use core::num::NonZeroU16;
 use subtle::ConstantTimeEq as SubtleCtEq;
 use zeroize::Zeroize;
@@ -94,9 +94,9 @@ pub struct Equatable<T>(pub(crate) T);
 
 impl<T> Equatable<T> {
     /// Create a new `Equatable` from an inner value.
-    pub fn new(x: <Equatable<T> as ParanoidPrivate>::Inner) -> Self
+    pub fn new(x: <Equatable<T> as ControlledPrivate>::Inner) -> Self
     where
-        Self: ParanoidPrivate,
+        Self: ControlledPrivate,
     {
         Self::init_from_inner(x)
     }
@@ -109,14 +109,14 @@ impl<T> Equatable<T> {
 
 impl<T> From<T> for Equatable<T>
 where
-    T: ParanoidPrivate,
+    T: ControlledPrivate,
 {
     fn from(x: T) -> Self {
         Self(x)
     }
 }
 
-impl<T: ParanoidPrivate> Equatable<T>
+impl<T: ControlledPrivate> Equatable<T>
 where
     T::Inner: ConstantTimeEq,
 {
@@ -126,7 +126,7 @@ where
 }
 
 // TODO: Canwe make a blanket impl for all Paranoid types?
-impl<T: ParanoidPrivate> ParanoidPrivate for Equatable<T> {
+impl<T: ControlledPrivate> ControlledPrivate for Equatable<T> {
     type Inner = T::Inner;
 
     fn init_from_inner(x: Self::Inner) -> Self {
@@ -164,9 +164,9 @@ where
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
 impl<T, O> PartialEq<O> for Equatable<T>
 where
-    T: ParanoidPrivate,
-    O: ParanoidPrivate,
-    <T as ParanoidPrivate>::Inner: ConstantTimeEq<O::Inner>,
+    T: ControlledPrivate,
+    O: ControlledPrivate,
+    <T as ControlledPrivate>::Inner: ConstantTimeEq<O::Inner>,
 {
     fn eq(&self, other: &O) -> bool {
         self.inner().constant_time_eq(other.inner())
@@ -175,9 +175,9 @@ where
 
 impl<T, O> ConstantTimeEq<O> for Equatable<T>
 where
-    T: ParanoidPrivate,
-    O: ParanoidPrivate,
-    <T as ParanoidPrivate>::Inner: ConstantTimeEq<O::Inner>,
+    T: ControlledPrivate,
+    O: ControlledPrivate,
+    <T as ControlledPrivate>::Inner: ConstantTimeEq<O::Inner>,
 {
     fn constant_time_eq(&self, other: &O) -> bool {
         self.inner().constant_time_eq(other.inner())

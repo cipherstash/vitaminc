@@ -8,10 +8,8 @@ mod ops;
 mod usage;
 mod zeroed;
 
-use private::ParanoidPrivate;
 use zeroize::{Zeroize, ZeroizeOnDrop};
-
-mod private;
+use private::ControlledPrivate;
 
 #[cfg(feature = "bitvec")]
 pub mod bitvec;
@@ -21,7 +19,7 @@ pub mod slice_index;
 pub use as_protected_ref::{AsProtectedRef, ProtectedRef};
 pub use zeroed::Zeroed;
 
-pub trait Controlled: private::ParanoidPrivate {
+pub trait Controlled: private::ControlledPrivate {
     /// Generate a new instance of the [Controlled] type from a function that returns the inner value.
     ///
     /// # Example
@@ -91,7 +89,7 @@ pub trait Controlled: private::ParanoidPrivate {
     fn map<B, F>(self, f: F) -> Protected<B>
     where
         Self: Sized,
-        F: FnOnce(<Self as ParanoidPrivate>::Inner) -> B,
+        F: FnOnce(<Self as private::ControlledPrivate>::Inner) -> B,
         B: Zeroize,
     {
         // TODO: Use Replace private trait
@@ -228,7 +226,7 @@ pub trait Controlled: private::ParanoidPrivate {
     /// `I` must be `Copy` because [Protected] always takes ownership of the inner value.
     fn iter<'a, I>(&'a self) -> impl Iterator<Item = Protected<I>>
     where
-        <Self as ParanoidPrivate>::Inner: AsRef<[I]>,
+        <Self as private::ControlledPrivate>::Inner: AsRef<[I]>,
         I: Copy + 'a,
     {
         self.inner().as_ref().iter().copied().map(Protected)
@@ -300,7 +298,7 @@ impl<T> Protected<Option<T>> {
 
 impl<T: Zeroize> ZeroizeOnDrop for Protected<T> {}
 
-impl<T> ParanoidPrivate for Protected<T>
+impl<T> private::ControlledPrivate for Protected<T>
 where
     T: Zeroize,
 {
@@ -362,6 +360,18 @@ where
         out[i] = x.unwrap();
     });
     Protected::new(out)
+}
+
+mod private {
+    /// Private trait that is used to hide the inner value of a Controlled type
+    /// as well as preventing consumers from implementing Controlled themselves.
+    pub trait ControlledPrivate {
+        type Inner;
+
+        fn init_from_inner(x: Self::Inner) -> Self;
+        fn inner(&self) -> &Self::Inner;
+        fn inner_mut(&mut self) -> &mut Self::Inner;
+    }
 }
 
 #[cfg(test)]
