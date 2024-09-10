@@ -1,5 +1,5 @@
 pub use crate::Protected;
-use crate::{private::ControlledPrivate, AsProtectedRef, ProtectedRef, ReplaceT};
+use crate::{private::ControlledPrivate, ReplaceT, AsProtectedRef, ProtectedRef};
 use zeroize::Zeroize;
 
 pub trait Controlled: ControlledPrivate {
@@ -81,7 +81,7 @@ pub trait Controlled: ControlledPrivate {
         <Self as ReplaceT<B>>::Output: ControlledPrivate<Inner = B>,
         B: Zeroize,
     {
-        <Self as ReplaceT<B>>::Output::init_from_inner(f(self.risky_unwrap()))
+        <Self as ReplaceT::<B>>::Output::init_from_inner(f(self.risky_unwrap()))
     }
 
     /// Zip two [Controlled] values of the same type together with a function that combines them.
@@ -218,6 +218,23 @@ pub trait Controlled: ControlledPrivate {
         I: Copy + 'a,
     {
         self.inner().as_ref().iter().copied().map(Protected)
+    }
+
+    /// Replace the inner value with a new one.
+    /// The new value must be `Self`.
+    /// 
+    /// # Example
+    /// 
+    /// ```
+    /// use vitaminc_protected::{Paranoid, Protected};
+    /// let mut x = Protected::new([0u8; 32]);
+    /// let y = Protected::new([1u8; 32]);
+    /// x.replace(y);
+    /// assert_eq!(x.unwrap(), [1u8; 32]);
+    /// ```
+    /// 
+    fn replace(&mut self, new: Self) -> Self where Self: Sized {
+        Self::init_from_inner(std::mem::replace(self.inner_mut(), new.unwrap()))
     }
 
     /// Unwraps the inner value of the [Controlled] type.
