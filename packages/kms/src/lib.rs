@@ -47,8 +47,8 @@ use crate::private::ValidMacSize;
 use aws_sdk_kms::{primitives::Blob, Client, Config};
 use thiserror::Error;
 use vitaminc_async_traits::{AsyncFixedOutput, AsyncFixedOutputReset};
-use vitaminc_protected::{AsProtectedRef, Controlled, Protected, ProtectedRef, Zeroed};
-use vitaminc_traits::{OutputSize, Update};
+use vitaminc_protected::{AsProtectedRef, Controlled, Protected, ProtectedRef};
+use vitaminc_traits::Update;
 use zeroize::Zeroize;
 
 /// A `Mac` implementation that uses AWS KMS to generate HMACs of `N` bytes.
@@ -146,37 +146,17 @@ impl<'r, const N: usize> Update<ProtectedRef<'r, [u8]>> for AwsKmsHmac<N> {
     }
 }
 
-// TODO: All Macs should return an Output type (then wrappers can convert from that)
-pub struct AwsKmsHmacOutput<const N: usize> {
-    output: Protected<[u8; N]>,
-}
-
-impl<const N: usize> OutputSize<N> for AwsKmsHmacOutput<N> {
-    const SIZE: usize = N;
-}
-
-impl<const N: usize> Zeroed for AwsKmsHmacOutput<N>
-where
-    Protected<[u8; N]>: Zeroed,
-{
-    fn zeroed() -> Self {
-        Self {
-            output: Zeroed::zeroed(),
-        }
-    }
-}
-
-impl<const N: usize> AsyncFixedOutput<N, AwsKmsHmacOutput<N>> for AwsKmsHmac<N>
+impl<const N: usize> AsyncFixedOutput<N, Protected<[u8; N]>> for AwsKmsHmac<N>
 where
     Self: private::ValidMacSize<N>,
 {
     type Error = Error;
 
-    async fn try_finalize_into(self, out: &mut AwsKmsHmacOutput<N>) -> Result<(), Self::Error> {
+    async fn try_finalize_into(self, out: &mut Protected<[u8; N]>) -> Result<(), Self::Error> {
         let output = self.generate_mac().await?;
         let response = Protected::new(output.into_inner());
 
-        out.output.update_with(response, |out, data| {
+        out.update_with(response, |out, data| {
             out.copy_from_slice(data.as_ref());
         });
 
@@ -184,8 +164,7 @@ where
     }
 }
 
-// TODO: Handle all valid sizes
-impl<const N: usize> AsyncFixedOutputReset<N, AwsKmsHmacOutput<N>> for AwsKmsHmac<N>
+impl<const N: usize> AsyncFixedOutputReset<N, Protected<[u8; N]>> for AwsKmsHmac<N>
 where
     Self: private::ValidMacSize<N>,
 {
@@ -193,12 +172,12 @@ where
 
     async fn try_finalize_into_reset(
         &mut self,
-        out: &mut AwsKmsHmacOutput<N>,
+        out: &mut Protected<[u8; N]>,
     ) -> Result<(), Self::Error> {
         let output = self.generate_mac().await?;
         let response = Protected::new(output.into_inner());
 
-        out.output.update_with(response, |out, data| {
+        out.update_with(response, |out, data| {
             out.copy_from_slice(data.as_ref());
         });
 

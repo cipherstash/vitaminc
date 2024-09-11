@@ -1,5 +1,5 @@
 use vitaminc_protected::{Controlled, Exportable, Protected, Zeroed};
-use vitaminc_random::{Generatable, RandomError, SafeRand};
+use vitaminc_random::{Generatable, RandomError, SafeRand, SeedableRng};
 use zeroize::Zeroize;
 
 use super::private::IsPermutable;
@@ -10,7 +10,7 @@ use crate::{
 
 pub(crate) type KeyInner<const N: usize> = Exportable<Protected<[u8; N]>>;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Zeroize)]
 pub struct PermutationKey<const N: usize>(KeyInner<N>);
 
 impl<const N: usize> PermutationKey<N> {
@@ -20,6 +20,16 @@ impl<const N: usize> PermutationKey<N> {
     ///
     pub unsafe fn new_unchecked(key: [u8; N]) -> Self {
         Self(KeyInner::<N>::new(key))
+    }
+
+    /// Creates a new permutation key from a seed.
+    /// TODO: Perhaps seed should be protected?
+    pub fn from_seed(seed: [u8; 32]) -> Result<Self, RandomError>
+    where
+        [u8; N]: IsPermutable,
+    {
+        let mut rng = SafeRand::from_seed(seed);
+        Generatable::random(&mut rng)
     }
 
     /// Consumes the key and returns its inverse.

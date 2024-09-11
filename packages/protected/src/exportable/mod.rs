@@ -3,9 +3,10 @@ use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
 };
+use zeroize::Zeroize;
 
 // TODO: Docs
-#[derive(Debug)]
+#[derive(Debug, Zeroize)]
 pub struct Exportable<T>(pub(crate) T);
 
 // TODO: Can we implement Hex and Base64 for inner types that implement them?

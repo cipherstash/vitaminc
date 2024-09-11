@@ -2,6 +2,9 @@
 use vitaminc_protected::Zeroed;
 use vitaminc_traits::OutputSize;
 
+/// Defines an asynchronous digest or MAC algorithm output function.
+/// `N` is the output size in bytes.
+/// `O` is the output type which must implement `OutputSize<N>`.
 #[allow(async_fn_in_trait)]
 pub trait AsyncFixedOutput<const N: usize, O>: Sized
 where
@@ -28,6 +31,9 @@ where
     }
 }
 
+/// Defines an asynchronous digest or MAC algorithm output function that resets the state.
+/// `N` is the output size in bytes.
+/// `O` is the output type which must implement `OutputSize<N>`.
 #[allow(async_fn_in_trait)]
 pub trait AsyncFixedOutputReset<const N: usize, O>
 where
