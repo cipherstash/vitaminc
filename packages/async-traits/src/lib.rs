@@ -1,12 +1,15 @@
 #![doc = include_str!("../README.md")]
-use vitaminc_protected::{Controlled, Zeroed};
+use vitaminc_protected::Zeroed;
 use vitaminc_traits::OutputSize;
 
+/// Defines an asynchronous digest or MAC algorithm output function.
+/// `N` is the output size in bytes.
+/// `O` is the output type which must implement `OutputSize<N>`.
 #[allow(async_fn_in_trait)]
-pub trait AsyncFixedOutput<O>: Sized + OutputSize
+pub trait AsyncFixedOutput<const N: usize, O>: Sized
 where
     // TODO: Make this bound on a "tagged" value (i.e. sensitive or safe)
-    O: Sized + Send,
+    O: Sized + Send + OutputSize<N>,
 {
     type Error;
 
@@ -28,10 +31,13 @@ where
     }
 }
 
+/// Defines an asynchronous digest or MAC algorithm output function that resets the state.
+/// `N` is the output size in bytes.
+/// `O` is the output type which must implement `OutputSize<N>`.
 #[allow(async_fn_in_trait)]
-pub trait AsyncFixedOutputReset<O>: OutputSize
+pub trait AsyncFixedOutputReset<const N: usize, O>
 where
-    O: Controlled,
+    O: OutputSize<N>,
 {
     type Error;
 

@@ -14,7 +14,6 @@ cryptographic principles.
 ### Relationship to `vitaminc-protected`
 
 This library is designed to work with the `vitaminc-protected` library.
-All inputs and outputs are wrapped in a [Protected] type which ensures that the data is correctly zeroized when it goes out of scope.
 
 ## Example: Permuting an array
 

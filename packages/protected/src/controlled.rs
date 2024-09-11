@@ -220,6 +220,26 @@ pub trait Controlled: ControlledPrivate {
         self.inner().as_ref().iter().copied().map(Protected)
     }
 
+    /// Replace the inner value with a new one.
+    /// The new value must be `Self`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use vitaminc_protected::{Controlled, Protected};
+    /// let mut x = Protected::new([0u8; 32]);
+    /// let y = Protected::new([1u8; 32]);
+    /// x.replace(y);
+    /// assert_eq!(x.risky_unwrap(), [1u8; 32]);
+    /// ```
+    ///
+    fn replace(&mut self, new: Self) -> Self
+    where
+        Self: Sized,
+    {
+        Self::init_from_inner(std::mem::replace(self.inner_mut(), new.risky_unwrap()))
+    }
+
     /// Unwraps the inner value of the [Controlled] type.
     /// This is a risky operation because it consumes the [Controlled] type and returns the inner value
     /// negating the protections that the [Controlled] type provides.

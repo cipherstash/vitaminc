@@ -1428,6 +1428,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 name = "vitaminc"
 version = "0.1.0-pre"
 dependencies = [
+ "vitaminc-async-traits",
  "vitaminc-kms",
  "vitaminc-permutation",
  "vitaminc-protected",
@@ -1449,6 +1450,7 @@ version = "0.1.0-pre"
 dependencies = [
  "aws-config",
  "aws-sdk-kms",
+ "thiserror",
  "tokio",
  "vitaminc-async-traits",
  "vitaminc-protected",

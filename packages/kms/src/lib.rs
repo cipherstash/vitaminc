@@ -33,7 +33,7 @@
 //!     #   .await?;
 //!     # let key_id = key.key_metadata().unwrap().key_id().to_owned();
 //!     // `key_id` is the ID or ARN of the KMS key to use
-//!     let tag = AwsKmsHmac::new(config, key_id)
+//!     let tag = AwsKmsHmac::<64>::new(config, key_id)
 //!         .chain(&Protected::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]))
 //!         .chain(Info("account_id"))
 //!         .try_finalize_fixed()
@@ -45,9 +45,10 @@
 //!
 use crate::private::ValidMacSize;
 use aws_sdk_kms::{primitives::Blob, Client, Config};
+use thiserror::Error;
 use vitaminc_async_traits::{AsyncFixedOutput, AsyncFixedOutputReset};
 use vitaminc_protected::{AsProtectedRef, Controlled, Protected, ProtectedRef};
-use vitaminc_traits::{OutputSize, Update};
+use vitaminc_traits::Update;
 use zeroize::Zeroize;
 
 /// A `Mac` implementation that uses AWS KMS to generate HMACs of `N` bytes.
@@ -66,6 +67,12 @@ pub struct AwsKmsHmac<const N: usize> {
     input: Protected<Vec<u8>>,
 }
 
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error(transparent)]
+    AwsSdk(#[from] aws_sdk_kms::Error),
+}
+
 impl<const N: usize> AwsKmsHmac<N>
 where
     Self: private::ValidMacSize<N>,
@@ -78,9 +85,8 @@ where
         }
     }
 
-    async fn generate_mac(&self) -> Result<Blob, aws_sdk_kms::Error> {
-        Ok(self
-            .client
+    async fn generate_mac(&self) -> Result<Blob, Error> {
+        self.client
             .generate_mac()
             .key_id(&self.key_id)
             .mac_algorithm(Self::spec())
@@ -88,7 +94,9 @@ where
             .message(Blob::new(self.input.clone().risky_unwrap()))
             .send()
             .await
-            .map(|response| response.mac.unwrap())?)
+            .map(|response| response.mac.unwrap())
+            .map_err(aws_sdk_kms::Error::from)
+            .map_err(Error::AwsSdk)
     }
 }
 
@@ -138,17 +146,13 @@ impl<'r, const N: usize> Update<ProtectedRef<'r, [u8]>> for AwsKmsHmac<N> {
     }
 }
 
-impl<const N: usize> OutputSize for AwsKmsHmac<N>
+impl<const N: usize> AsyncFixedOutput<N, Protected<[u8; N]>> for AwsKmsHmac<N>
 where
     Self: private::ValidMacSize<N>,
 {
-    const SIZE: usize = N;
-}
+    type Error = Error;
 
-impl AsyncFixedOutput<Protected<[u8; 64]>> for AwsKmsHmac<64> {
-    type Error = aws_sdk_kms::Error;
-
-    async fn try_finalize_into(self, out: &mut Protected<[u8; 64]>) -> Result<(), Self::Error> {
+    async fn try_finalize_into(self, out: &mut Protected<[u8; N]>) -> Result<(), Self::Error> {
         let output = self.generate_mac().await?;
         let response = Protected::new(output.into_inner());
 
@@ -160,13 +164,15 @@ impl AsyncFixedOutput<Protected<[u8; 64]>> for AwsKmsHmac<64> {
     }
 }
 
-// TODO: Handle all valid sizes
-impl AsyncFixedOutputReset<Protected<[u8; 64]>> for AwsKmsHmac<64> {
-    type Error = aws_sdk_kms::Error;
+impl<const N: usize> AsyncFixedOutputReset<N, Protected<[u8; N]>> for AwsKmsHmac<N>
+where
+    Self: private::ValidMacSize<N>,
+{
+    type Error = Error;
 
     async fn try_finalize_into_reset(
         &mut self,
-        out: &mut Protected<[u8; 64]>,
+        out: &mut Protected<[u8; N]>,
     ) -> Result<(), Self::Error> {
         let output = self.generate_mac().await?;
         let response = Protected::new(output.into_inner());
@@ -292,7 +298,7 @@ mod tests {
         let client = Client::from_conf(config);
         let key_id = get_key_id(&client, KeySpec::Hmac512).await?;
 
-        AwsKmsHmac::new(get_config(), key_id)
+        AwsKmsHmac::<64>::new(get_config(), key_id)
             .chain(&Protected::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]))
             .try_finalize_fixed()
             .await?;

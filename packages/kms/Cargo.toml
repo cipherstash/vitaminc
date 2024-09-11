@@ -18,6 +18,7 @@ vitaminc-protected = { version = "0.1.0-pre", path = "../protected" }
 aws-sdk-kms = "1.40.0"
 aws-config = "1.5.5"
 
+thiserror = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]

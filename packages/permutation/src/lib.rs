@@ -23,6 +23,11 @@ mod private {
     impl IsPermutable for [u16; 32] {}
     impl IsPermutable for [u16; 64] {}
     impl IsPermutable for [u16; 128] {}
+    impl IsPermutable for [u32; 8] {}
+    impl IsPermutable for [u32; 16] {}
+    impl IsPermutable for [u32; 32] {}
+    impl IsPermutable for [u32; 64] {}
+    impl IsPermutable for [u32; 128] {}
 
     pub(crate) const fn identity<const N: usize>() -> [u8; N]
     where

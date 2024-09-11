@@ -1,4 +1,4 @@
-use crate::{private::ControlledPrivate, Controlled, Exportable, Protected};
+use crate::{private::ControlledPrivate, Controlled, Protected};
 use core::num::NonZeroU16;
 use subtle::ConstantTimeEq as SubtleCtEq;
 use zeroize::Zeroize;
@@ -89,7 +89,7 @@ use zeroize::Zeroize;
 /// let b = AuthenticatedString::new([0u8; 32], "Hello, world!".to_string());
 /// assert_eq!(a, b);
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Zeroize)]
 pub struct Equatable<T>(pub(crate) T);
 
 impl<T> Equatable<T> {
@@ -99,11 +99,6 @@ impl<T> Equatable<T> {
         Self: ControlledPrivate,
     {
         Self::init_from_inner(x)
-    }
-
-    // TODO: Remove
-    pub fn exportable(self) -> Exportable<Self> {
-        Exportable(self)
     }
 }
 
@@ -320,7 +315,7 @@ mod private {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Controlled, Equatable, Exportable, Protected};
+    use crate::{Equatable, Protected};
 
     #[test]
     fn test_opaque_debug() {
@@ -354,14 +349,5 @@ mod tests {
 
         assert_ne!(x, y);
         assert!(!x.constant_time_eq(&y));
-    }
-
-    #[test]
-    fn test_serialize_deserialize_exportable_inner() {
-        let x: Equatable<Protected<u8>> = Equatable::new(42);
-        let y = bincode::serialize(&x.exportable()).unwrap();
-
-        let z: Exportable<Equatable<Protected<u8>>> = bincode::deserialize(&y).unwrap();
-        assert_eq!(z.risky_unwrap(), 42);
     }
 }
