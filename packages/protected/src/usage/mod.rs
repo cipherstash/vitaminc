@@ -1,4 +1,6 @@
-use crate::{private::ControlledPrivate, Controlled, Protected};
+use serde::{Serialize, Serializer};
+
+use crate::{exportable::SafeSerialize, private::ControlledPrivate, Controlled, Protected};
 use std::marker::PhantomData;
 
 // TODO: Docs, explain compile time
@@ -55,6 +57,22 @@ impl<T, S> Acceptable<S> for Usage<T, S> where S: Scope {}
 pub struct DefaultScope;
 impl Scope for DefaultScope {}
 impl<T> Acceptable<DefaultScope> for Protected<T> {}
+
+/// Serialize implementation for Usage if it is controlled and the inner type is safe serializable.
+///
+/// For example, this allows us to serialize a `Usage<Exportable<Protected<[u8; 32]>>>` type.
+impl<T, A> Serialize for Usage<T, A>
+where
+    T: ControlledPrivate,
+    T::Inner: SafeSerialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner().safe_serialize(serializer)
+    }
+}
 
 #[cfg(test)]
 mod tests {

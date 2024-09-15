@@ -1,5 +1,6 @@
-use crate::{private::ControlledPrivate, Controlled, Protected};
+use crate::{exportable::SafeSerialize, private::ControlledPrivate, Controlled, Protected};
 use core::num::NonZeroU16;
+use serde::{Serialize, Serializer};
 use subtle::ConstantTimeEq as SubtleCtEq;
 use zeroize::Zeroize;
 
@@ -42,7 +43,7 @@ use zeroize::Zeroize;
 /// Constant time comparison also works for nested `Equatable` types.
 /// This way, the ordering or depth of the nesting doesn't matter, the comparison will always be constant time.
 ///
-/// See also [Exportable].
+/// See also [crate::Exportable].
 ///
 /// ```
 /// use vitaminc_protected::{Exportable, Equatable, Protected};
@@ -288,6 +289,20 @@ impl ConstantTimeEq for String {
     /// are different.
     fn constant_time_eq(&self, other: &Self) -> bool {
         self.as_bytes().constant_time_eq(other.as_bytes())
+    }
+}
+
+/// Serialize is implemented for any `Equatable` type that has a `SafeSerialize` inner type.
+impl<T> Serialize for Equatable<T>
+where
+    T: ControlledPrivate,
+    T::Inner: SafeSerialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner().safe_serialize(serializer)
     }
 }
 

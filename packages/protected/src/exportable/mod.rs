@@ -1,15 +1,21 @@
-use crate::{equatable::ConstantTimeEq, private::ControlledPrivate, Controlled, Equatable};
+mod safe_deserialize;
+mod safe_serialize;
+use crate::{equatable::ConstantTimeEq, private::ControlledPrivate, Controlled};
 use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
 };
 use zeroize::Zeroize;
 
+pub use safe_deserialize::SafeDeserialize;
+pub use safe_serialize::SafeSerialize;
+
 // TODO: Docs
 #[derive(Debug, Zeroize)]
 pub struct Exportable<T>(pub(crate) T);
 
 // TODO: Can we implement Hex and Base64 for inner types that implement them?
+// But using safe versions
 impl<T> Exportable<T> {
     /// Create a new `Exportable` from an inner value.
     pub fn new(x: <Exportable<T> as ControlledPrivate>::Inner) -> Self
@@ -17,10 +23,6 @@ impl<T> Exportable<T> {
         Self: Controlled,
     {
         Self::init_from_inner(x)
-    }
-
-    pub fn equatable(self) -> Equatable<Self> {
-        Equatable(self)
     }
 }
 
@@ -75,26 +77,54 @@ where
 impl<T> Serialize for Exportable<T>
 where
     T: ControlledPrivate,
-    T::Inner: Serialize,
+    T::Inner: SafeSerialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        self.inner().serialize(serializer)
+        self.inner().safe_serialize(serializer)
     }
 }
 
 impl<'de, T> Deserialize<'de> for Exportable<T>
 where
     T: ControlledPrivate,
-    T::Inner: Deserialize<'de>,
+    T::Inner: SafeDeserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        T::Inner::deserialize(deserializer).map(Exportable::init_from_inner)
+        Self::safe_deserialize(deserializer)
+    }
+}
+
+/// Blanket implementation for all controlled types who's inner type implements `SafeSerialize`.
+impl<T> SafeSerialize for T
+where
+    T::Inner: SafeSerialize,
+    T: ControlledPrivate,
+{
+    fn safe_serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner().safe_serialize(serializer)
+    }
+}
+
+/// Blanket implementation for all controlled types who's inner type implements `SafeSerialize`.
+impl<'de, T> SafeDeserialize<'de> for T
+where
+    T::Inner: SafeDeserialize<'de>,
+    T: ControlledPrivate,
+{
+    fn safe_deserialize<S>(deserializer: S) -> Result<Self, S::Error>
+    where
+        S: Deserializer<'de>,
+    {
+        T::Inner::safe_deserialize(deserializer).map(T::init_from_inner)
     }
 }
 
@@ -131,10 +161,29 @@ mod tests {
     }
 
     #[test]
-    fn test_equatable_inner() {
-        let x: Exportable<Protected<u8>> = Exportable::init_from_inner(42);
-        let y: Exportable<Equatable<Protected<u8>>> = Exportable::init_from_inner(42);
+    fn test_serialize_bytes() {
+        // TODO: Test for other types
+        let x: Exportable<Protected<[u8; 64]>> = Exportable::new([0; 64]);
+        let y = serde_json::to_string(&x).unwrap();
+        dbg!(&y);
+    }
 
-        assert_eq!(x.equatable(), y);
+    // TODO: Controlled types should only implement Serialize/Deserialize
+    // if their inner types implement `SafeSerialize`/`SafeDeserialize`.
+    #[test]
+    fn test_serialize_deserialize_inner() {
+        let x: Equatable<Exportable<Protected<u8>>> = Equatable::new(42);
+        let y = bincode::serialize(&x).unwrap();
+
+        let z: Exportable<Equatable<Protected<u8>>> = bincode::deserialize(&y).unwrap();
+        assert_eq!(z, x);
+    }
+
+    #[test]
+    fn test_equatable_inner() {
+        let x: Equatable<Protected<u8>> = Equatable::new(42);
+        let y: Exportable<Equatable<Protected<u8>>> = Exportable::new(42);
+
+        assert_eq!(x, y);
     }
 }
