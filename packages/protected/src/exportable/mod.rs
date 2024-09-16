@@ -33,7 +33,7 @@ pub use safe_serialize::SafeSerialize;
 ///
 /// # Nesting other controlled types
 ///
-/// You can nest an [crate::Equatable] within an [Exportable] so that the type also implements [crate::SafeEq].
+/// You can nest an [crate::Equatable] within an [Exportable] so that the type also implements `ConstantTimeEq`.
 /// Note that the order of the nesting does not matter.
 ///
 /// ```
