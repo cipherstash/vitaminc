@@ -6,6 +6,8 @@ use std::num::{
 use serde::ser::SerializeTuple;
 use serde::{Serialize, Serializer};
 
+use crate::private::ControlledPrivate;
+
 // TODO: Create a serialize method on exportable which maps into the serialized form
 // Exportable should also implement a "safe" version of Hex (serdect)
 // And a reader?
@@ -14,6 +16,20 @@ pub trait SafeSerialize {
     fn safe_serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer;
+}
+
+/// Blanket implementation for all controlled types who's inner type implements `SafeSerialize`.
+impl<T> SafeSerialize for T
+where
+    T::Inner: SafeSerialize,
+    T: ControlledPrivate,
+{
+    fn safe_serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner().safe_serialize(serializer)
+    }
 }
 
 // This code is adapted from the serde source code
@@ -48,7 +64,7 @@ impl_safe_serialize!(f64, serialize_f64);
 impl_safe_serialize!(char, serialize_char);
 impl_safe_serialize!(bool, serialize_bool);
 
-impl SafeSerialize for str {
+impl SafeSerialize for String {
     #[inline]
     fn safe_serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -146,9 +162,4 @@ tuple_impls! {
     8 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7)
     9 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8)
     10 => (0 T0 1 T1 2 T2 3 T3 4 T4 5 T5 6 T6 7 T7 8 T8 9 T9)
-}
-
-#[cfg(test)]
-mod tests {
-    // TODO: Test the serialization of all the types (once we have deserialization as well)
 }

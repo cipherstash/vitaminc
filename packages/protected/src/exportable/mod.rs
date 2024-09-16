@@ -92,44 +92,18 @@ where
     T: ControlledPrivate,
     T::Inner: SafeDeserialize<'de>,
 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Exportable<T>, D::Error>
     where
         D: Deserializer<'de>,
     {
-        Self::safe_deserialize(deserializer)
-    }
-}
-
-/// Blanket implementation for all controlled types who's inner type implements `SafeSerialize`.
-impl<T> SafeSerialize for T
-where
-    T::Inner: SafeSerialize,
-    T: ControlledPrivate,
-{
-    fn safe_serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.inner().safe_serialize(serializer)
-    }
-}
-
-/// Blanket implementation for all controlled types who's inner type implements `SafeSerialize`.
-impl<'de, T> SafeDeserialize<'de> for T
-where
-    T::Inner: SafeDeserialize<'de>,
-    T: ControlledPrivate,
-{
-    fn safe_deserialize<S>(deserializer: S) -> Result<Self, S::Error>
-    where
-        S: Deserializer<'de>,
-    {
-        T::Inner::safe_deserialize(deserializer).map(T::init_from_inner)
+        T::safe_deserialize(deserializer).map(Exportable)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
+
     use super::*;
     use crate::{Equatable, Protected};
 
@@ -144,46 +118,97 @@ mod tests {
 
     #[test]
     fn test_serialize_deserialize() {
-        let x: Exportable<Protected<u8>> = Exportable::init_from_inner(42);
-        let y = bincode::serialize(&x).unwrap();
+        fn test<T: SafeSerialize + for<'a> SafeDeserialize<'a> + Zeroize + Debug + PartialEq>(
+            input: T,
+        ) {
+            let x: Exportable<Protected<T>> = Exportable::init_from_inner(input);
+            let y = bincode::serialize(&x).unwrap();
+            let z: Exportable<Protected<T>> = bincode::deserialize(&y).unwrap();
+            assert_eq!(z.risky_unwrap(), x.risky_unwrap());
+        }
 
-        let z: Exportable<Protected<u8>> = bincode::deserialize(&y).unwrap();
-        assert_eq!(z.inner(), &42);
+        test::<u8>(42);
+        test::<u16>(42);
+        test::<u32>(42);
+        test::<u64>(42);
+        test::<u128>(42);
+        test::<i8>(42);
+        test::<i16>(42);
+        test::<i32>(42);
+        test::<i64>(42);
+        test::<i128>(42);
+        test::<String>("Hello, World!".to_string());
+        test::<[u8; 32]>([0; 32]);
+        test::<[u8; 64]>([0; 64]);
     }
 
     #[test]
     fn test_serialize_deserialize_nested() {
-        let x: Exportable<Equatable<Protected<u8>>> = Exportable::init_from_inner(42);
-        let y = bincode::serialize(&x).unwrap();
+        fn test<
+            T: SafeSerialize + for<'a> SafeDeserialize<'a> + Zeroize + Debug + ConstantTimeEq,
+        >(
+            input: T,
+        ) {
+            let x: Exportable<Equatable<Protected<T>>> = Exportable::init_from_inner(input);
+            let y = bincode::serialize(&x).unwrap();
+            let z: Exportable<Equatable<Protected<T>>> = bincode::deserialize(&y).unwrap();
+            assert_eq!(z, x);
+        }
 
-        let z: Exportable<Equatable<Protected<u8>>> = bincode::deserialize(&y).unwrap();
-        assert_eq!(z, x);
+        test::<u8>(42);
+        test::<u16>(42);
+        test::<u32>(42);
+        test::<u64>(42);
+        test::<u128>(42);
+        test::<i8>(42);
+        test::<i16>(42);
+        test::<i32>(42);
+        test::<i64>(42);
+        test::<i128>(42);
+        test::<String>("Hello, World!".to_string());
+        test::<[u8; 32]>([0; 32]);
+        test::<[u8; 64]>([0; 64]);
     }
 
     #[test]
     fn test_serialize_bytes() {
-        // TODO: Test for other types
-        let x: Exportable<Protected<[u8; 64]>> = Exportable::new([0; 64]);
-        let y = serde_json::to_string(&x).unwrap();
-        dbg!(&y);
+        fn test<const N: usize>() {
+            let x: Exportable<Protected<[u8; N]>> = Exportable::new([0; N]);
+            let y = serde_json::to_string(&x).unwrap();
+            let z: Exportable<Protected<[u8; N]>> = serde_json::from_str(&y).unwrap();
+            assert_eq!(z, x);
+        }
+        test::<1>();
+        test::<2>();
+        test::<4>();
+        test::<16>();
+        test::<32>();
+        test::<64>();
     }
 
-    // TODO: Controlled types should only implement Serialize/Deserialize
-    // if their inner types implement `SafeSerialize`/`SafeDeserialize`.
     #[test]
     fn test_serialize_deserialize_inner() {
-        let x: Equatable<Exportable<Protected<u8>>> = Equatable::new(42);
-        let y = bincode::serialize(&x).unwrap();
+        fn test<T: SafeSerialize + for<'a> SafeDeserialize<'a> + Zeroize + ConstantTimeEq>(
+            input: T,
+        ) {
+            let x: Equatable<Exportable<Protected<T>>> = Equatable::new(input);
+            let y = bincode::serialize(&x).unwrap();
+            let z: Exportable<Equatable<Protected<T>>> = bincode::deserialize(&y).unwrap();
+            assert_eq!(z, x);
+        }
 
-        let z: Exportable<Equatable<Protected<u8>>> = bincode::deserialize(&y).unwrap();
-        assert_eq!(z, x);
-    }
-
-    #[test]
-    fn test_equatable_inner() {
-        let x: Equatable<Protected<u8>> = Equatable::new(42);
-        let y: Exportable<Equatable<Protected<u8>>> = Exportable::new(42);
-
-        assert_eq!(x, y);
+        test::<u8>(42);
+        test::<u16>(42);
+        test::<u32>(42);
+        test::<u64>(42);
+        test::<u128>(42);
+        test::<i8>(42);
+        test::<i16>(42);
+        test::<i32>(42);
+        test::<i64>(42);
+        test::<i128>(42);
+        test::<String>("Hello, World!".to_string());
+        test::<[u8; 32]>([0; 32]);
+        test::<[u8; 64]>([0; 64]);
     }
 }

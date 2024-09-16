@@ -204,42 +204,19 @@ where
     }
 }
 
-impl ConstantTimeEq for u8 {
-    fn constant_time_eq(&self, other: &Self) -> bool {
-        // TODO: It would be nice to not have to rely on the subtle crate
-        self.ct_eq(other).into()
-    }
+macro_rules! impl_constany_time_eq {
+    ($($type:ty),+) => {
+        $(
+            impl ConstantTimeEq for $type {
+                fn constant_time_eq(&self, other: &Self) -> bool {
+                    self.ct_eq(other).into()
+                }
+            }
+        )+
+    };
 }
 
-impl ConstantTimeEq for u16 {
-    fn constant_time_eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).into()
-    }
-}
-
-impl ConstantTimeEq for u32 {
-    fn constant_time_eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).into()
-    }
-}
-
-impl ConstantTimeEq for u64 {
-    fn constant_time_eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).into()
-    }
-}
-
-impl ConstantTimeEq for u128 {
-    fn constant_time_eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).into()
-    }
-}
-
-impl ConstantTimeEq for usize {
-    fn constant_time_eq(&self, other: &Self) -> bool {
-        self.ct_eq(other).into()
-    }
-}
+impl_constany_time_eq!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128);
 
 impl ConstantTimeEq for NonZeroU16 {
     #[inline]
@@ -322,6 +299,12 @@ mod private {
     impl SupportsConstantTimeEq for u64 {}
     impl SupportsConstantTimeEq for u128 {}
     impl SupportsConstantTimeEq for usize {}
+    impl SupportsConstantTimeEq for i8 {}
+    impl SupportsConstantTimeEq for i16 {}
+    impl SupportsConstantTimeEq for i32 {}
+    impl SupportsConstantTimeEq for i64 {}
+    impl SupportsConstantTimeEq for i128 {}
+    impl SupportsConstantTimeEq for isize {}
     impl SupportsConstantTimeEq for NonZeroU16 {}
     impl SupportsConstantTimeEq for [u8] {}
     impl SupportsConstantTimeEq for String {}
