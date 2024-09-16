@@ -10,7 +10,46 @@ use zeroize::Zeroize;
 pub use safe_deserialize::SafeDeserialize;
 pub use safe_serialize::SafeSerialize;
 
-// TODO: Docs
+/// Exportable is a wrapper type that allows for controlled types to be serialized and deserialized.
+/// Serialization has a bias towards efficient byte representation and uses `serde_bytes` for byte arrays.
+///
+/// In the future, this will only work for Serializers that are marked with a `SafeSerializer` trait.
+/// The goal here is to avoid leaking secrets through serialization (due to timing and other side channel attacks).
+///
+/// Exportable works just like any other controlled type, but it can be serialized and deserialized.
+///
+/// # Example
+///
+/// ```
+/// use vitaminc_protected::{Controlled, Exportable, Protected};
+/// use serde::{Serialize, Deserialize};
+///
+/// pub type Secret = Exportable<Protected<[u8; 32]>>;
+/// let secret = Secret::new([0u8; 32]);
+/// let serialized = serde_json::to_string(&secret).unwrap();
+/// let deserialized: Secret = serde_json::from_str(&serialized).unwrap();
+/// assert_eq!(secret.risky_unwrap(), deserialized.risky_unwrap());
+/// ```
+///
+/// # Nesting other controlled types
+///
+/// You can nest an [crate::Equatable] within an [Exportable] so that the type also implements [crate::SafeEq].
+/// Note that the order of the nesting does not matter.
+///
+/// ```
+/// use vitaminc_protected::{Controlled, Exportable, Equatable, Protected};
+/// use serde::{Serialize, Deserialize};
+///
+/// // Nesting order does not matter
+/// pub type SecretA = Exportable<Equatable<Protected<[u8; 32]>>>;
+/// pub type SecretB = Equatable<Exportable<Protected<[u8; 32]>>>;
+/// let secret_a = SecretA::new([0u8; 32]);
+/// let secret_b = SecretB::new([0u8; 32]);
+///
+/// // Timing safe comparison
+/// assert_eq!(secret_a, secret_b);
+/// ```
+///
 #[derive(Debug, Zeroize)]
 pub struct Exportable<T>(pub(crate) T);
 
