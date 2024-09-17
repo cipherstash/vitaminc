@@ -13,7 +13,7 @@ members = [
 
 [workspace.package]
 documentation = "https://docs.rs/vitaminc"
-version = "0.1.0-pre1"
+version = "0.1.0-pre2"
 repository = "https://github.com/cipherstash/vitaminc"
 authors = ["Dan Draper <dan@cipherstash.com>"]
 edition = "2021"
