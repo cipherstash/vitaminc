@@ -1,13 +1,13 @@
 [package]
 name = "vitaminc-async-traits"
 description = "Vitamin C async traits"
-documentation.workspace = true
+documentation = "https://docs.rs/vitaminc-async-traits"
 version.workspace = true
 repository.workspace = true
 edition.workspace = true
 homepage.workspace = true
 license.workspace = true
-readme.workspace = true
+authors.workspace = true
 keywords.workspace = true
 categories.workspace = true
 rust-version = "1.75.0"
