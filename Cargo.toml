@@ -19,7 +19,6 @@ authors = ["Dan Draper <dan@cipherstash.com>"]
 edition = "2021"
 homepage = "https://cipherstash.com"
 license = "MIT"
-readme = "README.md"
 keywords = ["cryptography", "security"]
 categories = ["cryptography"]
 

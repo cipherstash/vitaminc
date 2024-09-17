@@ -3,3 +3,5 @@
 .envrc
 .mise
 .rtx
+.DS_Store
+.vscode
