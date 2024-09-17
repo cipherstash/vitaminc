@@ -139,12 +139,7 @@ macro_rules! tuple_impl_body {
         }
     };
 }
-
-#[cfg_attr(docsrs, doc(fake_variadic))]
-#[cfg_attr(
-    docsrs,
-    doc = "This trait is implemented for tuples up to 10 items long (the same as Zeroize)."
-)]
+/// This trait is implemented for tuples up to 10 items long (the same as Zeroize).
 impl<T> SafeSerialize for (T,)
 where
     T: Serialize + SafeSerialize,

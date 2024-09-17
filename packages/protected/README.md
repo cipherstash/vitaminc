@@ -3,6 +3,8 @@
 [![Crates.io](https://img.shields.io/crates/v/vitaminc-protected.svg)](https://crates.io/crates/vitaminc-protected)
 [![Workflow Status](https://github.com/cipherstash/vitaminc/workflows/main/badge.svg)](https://github.com/cipherstash/vitaminc/actions?query=workflow%3A%22main%22)
 
+Protected is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) framework to make cryptography code healthy.
+
 ## Safe wrappers for sensitive data
 
 `Protected` is a set of types that remove some of the sharp edges of working with sensitive data in Rust.
