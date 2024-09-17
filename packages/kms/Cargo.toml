@@ -15,7 +15,7 @@ categories.workspace = true
 vitaminc-async-traits = { version = "0.1.0-pre", path = "../async-traits" }
 vitaminc-traits = { version = "0.1.0-pre", path = "../traits" }
 vitaminc-protected = { version = "0.1.0-pre", path = "../protected" }
-aws-sdk-kms = "1.40.0"
+aws-sdk-kms = "1.43.0"
 aws-config = "1.5.6"
 
 thiserror = { workspace = true }
