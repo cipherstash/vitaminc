@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use vitaminc_protected::{Controlled, Exportable, Protected, Zeroed};
 use vitaminc_random::{Generatable, RandomError, SafeRand, SeedableRng};
 use zeroize::Zeroize;
@@ -10,7 +11,7 @@ use crate::{
 
 pub(crate) type KeyInner<const N: usize> = Exportable<Protected<[u8; N]>>;
 
-#[derive(Copy, Clone, Debug, Zeroize)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, Zeroize)]
 pub struct PermutationKey<const N: usize>(KeyInner<N>);
 
 impl<const N: usize> PermutationKey<N> {
