@@ -34,7 +34,7 @@ impl AeadCore<12> for AwsLcAeadCore<32> {
         A: AsRef<[u8]>,
     {
         let nonce_lc = aws_lc_rs::aead::Nonce::try_assume_unique_for_key(nonce.as_ref())?;
-        let mut in_out: Vec<u8> = plaintext.risky_unwrap().into();
+        let mut in_out: Vec<u8> = plaintext.risky_unwrap();
         self.0
             .seal_in_place_append_tag(nonce_lc, aws_lc_rs::aead::Aad::from(aad), &mut in_out)?;
         Ok((nonce, in_out))
