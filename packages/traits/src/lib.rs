@@ -2,6 +2,8 @@
 use vitaminc_protected::{Controlled, Zeroed};
 mod aead;
 
+pub use aead::{Aad, Aead, AeadCore, KeyInit, Nonce, NonceGenerator, RandomNonceGenerator};
+
 /// Defines the size of the output of a hash function.
 pub trait OutputSize<const N: usize> {
     const SIZE: usize;
@@ -26,11 +28,11 @@ where
     const SIZE: usize = N;
 }
 
-pub trait KeyInit: KeySize {
+/*pub trait KeyInit: KeySize {
     type Key: Controlled;
 
     fn new(key: Self::Key) -> Self;
-}
+}*/
 
 /// Trait for hash functions with fixed-size output.
 pub trait FixedOutput<const N: usize, O>: Sized

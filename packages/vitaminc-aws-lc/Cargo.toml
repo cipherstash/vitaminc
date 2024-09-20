@@ -1,0 +1,16 @@
+[package]
+name = "vitaminc-aws-lc"
+documentation.workspace = true
+version.workspace = true
+repository.workspace = true
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+aws-lc-rs = "1.9.0"
+vitaminc-protected = { path = "../protected" }
+vitaminc-traits = { path = "../traits" }
