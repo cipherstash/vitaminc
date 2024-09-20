@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 use vitaminc_protected::{Controlled, Zeroed};
+mod aead;
 
 /// Defines the size of the output of a hash function.
 pub trait OutputSize<const N: usize> {
