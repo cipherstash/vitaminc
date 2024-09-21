@@ -1739,6 +1739,7 @@ name = "vitaminc"
 version = "0.1.0-pre2"
 dependencies = [
  "vitaminc-async-traits",
+ "vitaminc-aws-lc",
  "vitaminc-kms",
  "vitaminc-permutation",
  "vitaminc-protected",
