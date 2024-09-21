@@ -26,4 +26,6 @@ categories = ["cryptography"]
 bitvec = "1.0.1"
 rand = "0.8.5"
 thiserror = "1.0.63"
-zeroize = "1.8.1"
+zeroize = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"

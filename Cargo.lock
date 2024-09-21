@@ -1487,6 +1487,7 @@ dependencies = [
  "bitvec",
  "paste",
  "rand",
+ "serde",
  "vitaminc-protected",
  "vitaminc-random",
  "zeroize",
