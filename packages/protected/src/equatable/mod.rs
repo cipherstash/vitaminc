@@ -147,6 +147,18 @@ where
     }
 }
 
+impl<T, A> Extend<A> for Equatable<T>
+where
+    T: Extend<A>,
+{
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = A>,
+    {
+        self.0.extend(iter);
+    }
+}
+
 // TODO: Further constrain this
 impl<T> From<T> for Equatable<Protected<T>>
 where

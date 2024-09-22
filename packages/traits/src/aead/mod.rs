@@ -1,9 +1,12 @@
+mod ciphertext;
 use rmp_serde::{decode, encode, Deserializer, Serializer};
 use std::fmt::Debug;
 use thiserror::Error;
 use vitaminc_protected::{Controlled, Protected, SafeDeserialize, SafeSerialize};
 use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 use zeroize::Zeroize;
+
+pub use ciphertext::{CipherText, CipherTextBuilder};
 
 pub struct Aad<A>(A)
 where
@@ -26,6 +29,12 @@ impl<const N: usize> AsRef<[u8]> for Nonce<N> {
     }
 }
 
+impl<const N: usize> Nonce<N> {
+    pub fn into_inner(self) -> [u8; N] {
+        self.0
+    }
+}
+
 pub trait KeyInit<const KEY_SIZE: usize> {
     type Key: Controlled<Inner = [u8; KEY_SIZE]>;
 
@@ -34,6 +43,7 @@ pub trait KeyInit<const KEY_SIZE: usize> {
 
 // TODO: How do we prevent users from using this trait directly?
 // We could make the plaintext type a named type with a private contructor
+// FIXME: Making this generic on NonceSize is a bit awkward
 pub trait AeadCore<const NONCE_SIZE: usize> {
     type Error: std::error::Error; // TODO: Define a SAFE error type to prevent leaking sensitive information
     type NonceGen: NonceGenerator<NONCE_SIZE>;
@@ -42,9 +52,11 @@ pub trait AeadCore<const NONCE_SIZE: usize> {
     fn encrypt_with_aad<A>(
         &self,
         plaintext: Protected<Vec<u8>>,
+        // TODO: Instead of taking the Nonce, we could take a builder
+        // which either _has_ a nonce generated already or allows us to call generate (possibly with an arg) and then build
         nonce: Nonce<NONCE_SIZE>,
         aad: Aad<A>,
-    ) -> Result<(Nonce<NONCE_SIZE>, Vec<u8>), Self::Error>
+    ) -> Result<CipherText, Self::Error>
     where
         A: AsRef<[u8]>;
 
@@ -52,14 +64,13 @@ pub trait AeadCore<const NONCE_SIZE: usize> {
         &self,
         plaintext: Protected<Vec<u8>>,
         nonce: Nonce<NONCE_SIZE>,
-    ) -> Result<(Nonce<NONCE_SIZE>, Vec<u8>), Self::Error> {
+    ) -> Result<CipherText, Self::Error> {
         self.encrypt_with_aad(plaintext, nonce, Aad(&[]))
     }
 
     fn decrypt_with_aad<A>(
         &self,
-        ciphertext: Vec<u8>,
-        nonce: Nonce<NONCE_SIZE>,
+        ciphertext: CipherText,
         aad: Aad<A>,
     ) -> Result<Protected<Vec<u8>>, Self::Error>
     where
@@ -67,10 +78,9 @@ pub trait AeadCore<const NONCE_SIZE: usize> {
 
     fn decrypt(
         &self,
-        nonce: Nonce<NONCE_SIZE>,
-        ciphertext: Vec<u8>,
+        ciphertext: CipherText,
     ) -> Result<Protected<Vec<u8>>, Self::Error> {
-        self.decrypt_with_aad(ciphertext, nonce, Aad(&[]))
+        self.decrypt_with_aad(ciphertext, Aad(&[]))
     }
 }
 
@@ -87,17 +97,17 @@ pub enum AeadError<const NONCE_SIZE: usize, C: AeadCore<NONCE_SIZE>> {
 }
 
 impl<const NONCE_SIZE: usize, CIPHER: AeadCore<NONCE_SIZE>> Aead<NONCE_SIZE, CIPHER> {
-    pub fn new(a: CIPHER) -> Self {
-        Self(a, CIPHER::NonceGen::init())
+    pub fn new<const N: usize>(key: <CIPHER as KeyInit<N>>::Key) -> Self where CIPHER: KeyInit<N> {
+        Self(CIPHER::new(key), CIPHER::NonceGen::init())
     }
 
     pub fn encrypt_with_aad<C, A>(
         &mut self,
         plaintext: C,
         aad: Aad<A>,
-    ) -> Result<(Nonce<NONCE_SIZE>, Vec<u8>), AeadError<NONCE_SIZE, CIPHER>>
+    ) -> Result<CipherText, AeadError<NONCE_SIZE, CIPHER>>
     where
-        C: Controlled + SafeSerialize,
+        C: SafeSerialize,
         A: AsRef<[u8]>,
     {
         let nonce = self.1.generate();
@@ -110,18 +120,16 @@ impl<const NONCE_SIZE: usize, CIPHER: AeadCore<NONCE_SIZE>> Aead<NONCE_SIZE, CIP
     pub fn encrypt<C>(
         &mut self,
         plaintext: C,
-    ) -> Result<(Nonce<NONCE_SIZE>, Vec<u8>), AeadError<NONCE_SIZE, CIPHER>>
+    ) -> Result<CipherText, AeadError<NONCE_SIZE, CIPHER>>
     where
-        C: Controlled + SafeSerialize,
+        C: SafeSerialize,
     {
         self.encrypt_with_aad(plaintext, Aad(&[]))
     }
 
-    // TODO: Can we tidy these up a a bit!?
     pub fn decrypt_with_aad<T, A>(
         &self,
-        ciphertext: Vec<u8>,
-        nonce: Nonce<NONCE_SIZE>,
+        ciphertext: CipherText,
         aad: Aad<A>,
     ) -> Result<T, AeadError<NONCE_SIZE, CIPHER>>
     where
@@ -130,23 +138,24 @@ impl<const NONCE_SIZE: usize, CIPHER: AeadCore<NONCE_SIZE>> Aead<NONCE_SIZE, CIP
     {
         let result = self
             .0
-            .decrypt_with_aad(ciphertext, nonce, aad)
+            .decrypt_with_aad(ciphertext, aad)
             .map_err(AeadError::CoreError)?;
         Ok(safe_deserialize(result)?)
     }
 
     pub fn decrypt<T>(
         &self,
-        ciphertext: Vec<u8>,
-        nonce: Nonce<NONCE_SIZE>,
+        ciphertext: CipherText,
     ) -> Result<T, AeadError<NONCE_SIZE, CIPHER>>
     where
         T: for<'de> SafeDeserialize<'de>,
     {
-        self.decrypt_with_aad(ciphertext, nonce, Aad(&[]))
+        self.decrypt_with_aad(ciphertext, Aad(&[]))
     }
 }
 
+// TODO: Make this a trait that can be implemented for a cipher rather than an associated type on the Cipher
+// That way we can have multiple implementations of the same cipher with different nonce generation strategies
 pub trait NonceGenerator<const N: usize> {
     // TODO: Allow an argument to be passed to the init method or make it a separate trait entirely
     fn init() -> Self;

@@ -2,7 +2,7 @@
 use vitaminc_protected::{Controlled, Zeroed};
 mod aead;
 
-pub use aead::{Aad, Aead, AeadCore, KeyInit, Nonce, NonceGenerator, RandomNonceGenerator};
+pub use aead::{Aad, Aead, AeadCore, KeyInit, Nonce, NonceGenerator, RandomNonceGenerator, CipherText, CipherTextBuilder};
 
 /// Defines the size of the output of a hash function.
 pub trait OutputSize<const N: usize> {
