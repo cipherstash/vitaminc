@@ -84,6 +84,30 @@ pub trait Controlled: ControlledPrivate {
         <Self as ReplaceT<B>>::Output::init_from_inner(f(self.risky_unwrap()))
     }
 
+    /// Similar to `map` but the closure returns a `Result` with the new inner value.
+    /// The result is a `Result` with the new [Controlled] type.
+    ///
+    /// # Example
+    ///
+    /// Map the inner value of a [Protected] to a new value that is wrapped in a `Result`.
+    ///
+    /// ```
+    /// use vitaminc_protected::{Controlled, Protected};
+    /// let x = Protected::new(vec![240, 159, 146, 150]);
+    /// let y = x.map_ok(String::from_utf8);
+    /// assert!(matches!(y, Ok(_)));
+    /// assert_eq!(y.unwrap().risky_unwrap(), "💖");
+    /// ```
+    fn map_ok<B, F, E>(self, f: F) -> Result<<Self as ReplaceT<B>>::Output, E>
+    where
+        Self: Sized + ReplaceT<B>,
+        F: FnOnce(<Self as ControlledPrivate>::Inner) -> Result<B, E>,
+        <Self as ReplaceT<B>>::Output: ControlledPrivate<Inner = B>,
+        B: Zeroize,
+    {
+        f(self.risky_unwrap()).map(<Self as ReplaceT<B>>::Output::init_from_inner)
+    }
+
     /// Zip two [Controlled] values of the same type together with a function that combines them.
     ///
     /// # Example
