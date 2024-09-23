@@ -1,8 +1,9 @@
 mod ciphertext;
 use rmp_serde::{decode, encode, Deserializer, Serializer};
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use thiserror::Error;
-use vitaminc_protected::{Controlled, Protected, SafeDeserialize, SafeSerialize};
+use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 use zeroize::Zeroize;
 
@@ -30,6 +31,10 @@ impl<const N: usize> AsRef<[u8]> for Nonce<N> {
 }
 
 impl<const N: usize> Nonce<N> {
+    fn new(inner: [u8; N]) -> Self {
+        Self(inner)
+    }
+
     pub fn into_inner(self) -> [u8; N] {
         self.0
     }
@@ -45,7 +50,7 @@ pub trait KeyInit<const KEY_SIZE: usize> {
 // We could make the plaintext type a named type with a private contructor
 // FIXME: Making this generic on NonceSize is a bit awkward
 pub trait AeadCore<const NONCE_SIZE: usize> {
-    type Error: std::error::Error; // TODO: Define a SAFE error type to prevent leaking sensitive information
+    type Error: std::error::Error + Send + Sync; // TODO: Define a SAFE error type to prevent leaking sensitive information
     type NonceGen: NonceGenerator<NONCE_SIZE>;
 
     // Required methods
@@ -76,10 +81,7 @@ pub trait AeadCore<const NONCE_SIZE: usize> {
     where
         A: AsRef<[u8]>;
 
-    fn decrypt(
-        &self,
-        ciphertext: CipherText,
-    ) -> Result<Protected<Vec<u8>>, Self::Error> {
+    fn decrypt(&self, ciphertext: CipherText) -> Result<Protected<Vec<u8>>, Self::Error> {
         self.decrypt_with_aad(ciphertext, Aad(&[]))
     }
 }
@@ -87,17 +89,29 @@ pub trait AeadCore<const NONCE_SIZE: usize> {
 pub struct Aead<const NONCE_SIZE: usize, A: AeadCore<NONCE_SIZE>>(A, A::NonceGen);
 
 #[derive(Debug, Error)]
-pub enum AeadError<const NONCE_SIZE: usize, C: AeadCore<NONCE_SIZE>> {
+pub enum AeadError {
     #[error(transparent)]
-    CoreError(C::Error),
+    CoreError(anyhow::Error),
     #[error("Encoding failed")]
     Encode(#[from] encode::Error),
     #[error("Decoding failed")]
     Decode(#[from] decode::Error),
 }
 
+impl AeadError {
+    pub fn from_core_error<E>(error: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::CoreError(anyhow::Error::new(error))
+    }
+}
+
 impl<const NONCE_SIZE: usize, CIPHER: AeadCore<NONCE_SIZE>> Aead<NONCE_SIZE, CIPHER> {
-    pub fn new<const N: usize>(key: <CIPHER as KeyInit<N>>::Key) -> Self where CIPHER: KeyInit<N> {
+    pub fn new<const N: usize>(key: <CIPHER as KeyInit<N>>::Key) -> Self
+    where
+        CIPHER: KeyInit<N>,
+    {
         Self(CIPHER::new(key), CIPHER::NonceGen::init())
     }
 
@@ -105,24 +119,23 @@ impl<const NONCE_SIZE: usize, CIPHER: AeadCore<NONCE_SIZE>> Aead<NONCE_SIZE, CIP
         &mut self,
         plaintext: C,
         aad: Aad<A>,
-    ) -> Result<CipherText, AeadError<NONCE_SIZE, CIPHER>>
+    ) -> Result<CipherText, AeadError>
     where
-        C: SafeSerialize,
+        C: Serialize,
         A: AsRef<[u8]>,
+        <CIPHER as AeadCore<NONCE_SIZE>>::Error: 'static,
     {
         let nonce = self.1.generate();
         let input = safe_serialize(plaintext);
         self.0
             .encrypt_with_aad(input, nonce, aad)
-            .map_err(AeadError::CoreError)
+            .map_err(AeadError::from_core_error)
     }
 
-    pub fn encrypt<C>(
-        &mut self,
-        plaintext: C,
-    ) -> Result<CipherText, AeadError<NONCE_SIZE, CIPHER>>
+    pub fn encrypt<C>(&mut self, plaintext: C) -> Result<CipherText, AeadError>
     where
-        C: SafeSerialize,
+        C: Serialize,
+        <CIPHER as AeadCore<NONCE_SIZE>>::Error: 'static,
     {
         self.encrypt_with_aad(plaintext, Aad(&[]))
     }
@@ -131,24 +144,22 @@ impl<const NONCE_SIZE: usize, CIPHER: AeadCore<NONCE_SIZE>> Aead<NONCE_SIZE, CIP
         &self,
         ciphertext: CipherText,
         aad: Aad<A>,
-    ) -> Result<T, AeadError<NONCE_SIZE, CIPHER>>
+    ) -> Result<T, AeadError>
     where
-        T: for<'de> SafeDeserialize<'de>,
+        T: for<'de> Deserialize<'de>,
         A: AsRef<[u8]>,
+        <CIPHER as AeadCore<NONCE_SIZE>>::Error: 'static,
     {
-        let result = self
-            .0
+        self.0
             .decrypt_with_aad(ciphertext, aad)
-            .map_err(AeadError::CoreError)?;
-        Ok(safe_deserialize(result)?)
+            .map_err(AeadError::from_core_error)
+            .and_then(safe_deserialize)
     }
 
-    pub fn decrypt<T>(
-        &self,
-        ciphertext: CipherText,
-    ) -> Result<T, AeadError<NONCE_SIZE, CIPHER>>
+    pub fn decrypt<T>(&self, ciphertext: CipherText) -> Result<T, AeadError>
     where
-        T: for<'de> SafeDeserialize<'de>,
+        T: for<'de> Deserialize<'de>,
+        <CIPHER as AeadCore<NONCE_SIZE>>::Error: 'static,
     {
         self.decrypt_with_aad(ciphertext, Aad(&[]))
     }
@@ -178,25 +189,25 @@ impl<const N: usize> NonceGenerator<N> for RandomNonceGenerator<N> {
 #[inline]
 fn safe_serialize<T>(input: T) -> Protected<Vec<u8>>
 where
-    T: SafeSerialize,
+    T: Serialize,
 {
     // Wrapping in a protected immediately means that the input is zeroized even if the serialization fails
     Protected::new(Vec::new()).map(|mut wr| {
         let mut serializer = Serializer::new(&mut wr);
         // FIXME: map_ok would avoid the unwrap here
-        input.safe_serialize(&mut serializer).map(|_| wr).unwrap()
+        input.serialize(&mut serializer).map(|_| wr).unwrap()
     })
 }
 
 #[inline]
-fn safe_deserialize<T>(input: Protected<Vec<u8>>) -> Result<T, rmp_serde::decode::Error>
+fn safe_deserialize<T>(input: Protected<Vec<u8>>) -> Result<T, AeadError>
 where
-    T: for<'de> SafeDeserialize<'de>,
+    T: for<'de> Deserialize<'de>,
 {
-    // FIXME: If SafeDeserializer could take a Protected<Vec<u8>> we could avoid the risky_unwrap here
+    // FIXME: If a SafeDeserializer could take a Protected<Vec<u8>> we could avoid the risky_unwrap here
     let mut input = input.risky_unwrap();
     let mut deserializer = Deserializer::new(input.as_slice());
-    let result = T::safe_deserialize(&mut deserializer);
+    let result = T::deserialize(&mut deserializer);
     input.zeroize();
-    result
+    result.map_err(AeadError::from)
 }

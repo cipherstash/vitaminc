@@ -1,11 +1,9 @@
+mod read_monads;
 mod write_monads;
 use bytes::Bytes;
+use read_monads::CipherTextReader;
 use serde::{Deserialize, Serialize};
-use super::Nonce;
-
 pub use write_monads::CipherTextBuilder;
-
-const TAG_SIZE: usize = 16;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -16,87 +14,73 @@ impl CipherText {
         self.0
     }
 
-    pub fn into_reader<const N: usize>(self) -> NonceReader<N> {
-        NonceReader(self.0.into())
+    pub fn into_reader(self) -> CipherTextReader {
+        CipherTextReader::new(self.0)
     }
 }
-
-pub struct NonceReader<const N: usize>(Bytes);
-
-impl <const N: usize> NonceReader<N> {
-    pub fn ciphertext(&self) -> &[u8] {
-        &self.0[N..]
-    }
-
-    /// We can prove that the nonce will be read no more than once
-    /// but we can't prove that it will be read at all.
-    pub fn read_nonce(self) -> (Nonce<N>, CiphertextAndTagReader<N>) {
-        let mut buf = [0u8; N];
-        buf.copy_from_slice(&self.0[..N]);
-        (Nonce(buf), CiphertextAndTagReader(self.0))
-    }
-}
-
-pub struct CiphertextAndTagReader<const N: usize>(Bytes);
-
-impl <const N: usize> CiphertextAndTagReader<N> {
-    pub fn ciphertext(&self) -> &[u8] {
-        &self.0[N..]
-    }
-}
-
-
-
-// In general, the name of the next struct should describe what will happen next not the state left over after the current monoid.
-
-// The `read_nonce` method is a side-effect. The side effect could also be a Monoid so that we can determine if that side effect has been applied.
-// For example, `read_nonce` could return `NonceRead` and a `MustReadNonce` could be a monoid.
-// All monoids **must** have `build` or `try_build` called. We can use `#[must_use]` to enforce this.
-// This could be used for `MustWrite` perhaps we well (a bit like a RefCell).
-// Because `try_build` must be called. The side effect must be consumed. `try_build` can ascertain that a condition is met.
-// We could create a derive macro for Monoid on a struct.
-
-// TODO: We can't use Bytes because it doesn't implement Zeroize
-// Just use a Vec in a Protected (or a heapless Vec)
-// TODO: In fact, it shouldn't be either: We should just keep the Nonce and when we get the plaintext we instatiate a Protected<Vec<u8>> of the correct size then
-// along with the offset (as a const generic).
-
-// TODO: **Create this as a monoidic set of types
-
-
-
-
-
-pub struct NonceRead<const N: usize>(Bytes);
-
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::aead::Nonce;
-    use vitaminc_protected::Protected;
+    use vitaminc_protected::{Controlled, Protected};
 
     #[test]
-    fn test_ciphertext_builder_with_plaintext_in_place() {
+    fn test_ciphertext_builder_with_plaintext_in_place() -> Result<(), ()> {
         let nonce = Nonce([1u8; 12]);
         let plaintext: Protected<Vec<u8>> = Protected::new(vec![0u8; 10]);
         let ciphertext = CipherTextBuilder::new()
             .append_nonce(nonce)
             .append_target_plaintext(plaintext)
-            .accepts_ciphertext_and_tag(|mut ciphertext| {
+            .accepts_ciphertext_and_tag_ok(|mut ciphertext| {
                 ciphertext.copy_from_slice(&[2u8; 10]);
                 ciphertext.extend([3u8; 16]);
-                ciphertext
+                Ok(ciphertext)
             })
-            .build();
+            .build()?;
 
         assert_eq!(ciphertext.0.len(), 38);
         assert_eq!(&ciphertext.0[..12], &[1u8; 12]);
         assert_eq!(&ciphertext.0[12..22], &[2u8; 10]);
         assert_eq!(&ciphertext.0[22..], &[3u8; 16]);
+
+        Ok(())
     }
-/*
+
+    #[test]
+    fn test_ciphertext_reader() -> Result<(), ()> {
+        let nonce = Nonce([1u8; 12]);
+        let plaintext: Protected<Vec<u8>> = Protected::new(vec![0u8; 10]);
+
+        let ciphertext = CipherTextBuilder::new()
+            .append_nonce(nonce)
+            .append_target_plaintext(plaintext)
+            .accepts_ciphertext_and_tag_ok(|mut ciphertext| {
+                ciphertext.copy_from_slice(&[2u8; 10]);
+                ciphertext.extend([3u8; 16]);
+                Ok(ciphertext)
+            })
+            .build()?;
+
+        let (nonce, reader) = ciphertext.into_reader().read_nonce::<12>();
+
+        let plaintext = reader
+            .accepts_plaintext_ok(|mut data| {
+                assert_eq!(data.len(), 26);
+                assert_eq!(&data[..10], [2u8; 10]);
+                assert_eq!(&data[10..], [3u8; 16]);
+                // Write in the same way as AWS-LC/Ring does
+                data[..10].copy_from_slice(&[0u8; 10]);
+                Ok(data)
+            })
+            .read()?;
+
+        assert_eq!(nonce.into_inner(), [1u8; 12]);
+        assert_eq!(plaintext.risky_unwrap()[..10], vec![0u8; 10]);
+
+        Ok(())
+    }
+    /*
     #[test]
     fn test_ciphertext_builder_with_extend() {
         let nonce = Nonce([1u8; 12]);
