@@ -248,6 +248,15 @@ pub trait Controlled: ControlledPrivate {
     ///
     // TODO: Consider feature flagging this method
     fn risky_unwrap(self) -> Self::Inner;
+
+    /// Provides a mutable reference to the inner value.
+    /// This is a risky operation because it bypasses the protections that the [Controlled] type provides.
+    /// **Use with caution!**
+    // TODO: This is an escape hatch until I find a way to work around it
+    // It is needed for the seal_in_place methods for ring and aws-lc
+    fn risky_inner_mut(&mut self) -> &mut Self::Inner {
+        self.inner_mut()
+    }
 }
 
 // TODO: Implement Collect for Protected (or Paranoid) so we can use collect() on iterators

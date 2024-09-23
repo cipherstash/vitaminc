@@ -95,6 +95,18 @@ where
     }
 }
 
+impl<T, A> Extend<A> for Protected<T>
+where
+    T: Extend<A>,
+{
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = A>,
+    {
+        self.0.extend(iter);
+    }
+}
+
 /// Convenience function to flatten an array of [Protected] into a [Protected] array.
 ///
 /// # Example
