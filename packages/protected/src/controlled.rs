@@ -147,16 +147,17 @@ pub trait Controlled: ControlledPrivate {
     /// assert_eq!(z.risky_unwrap(), "hello world");
     /// ```
     ///
-    fn zip_ref<'a, A, Other, Out, F>(self, other: &'a Other, f: F) -> Protected<Out>
+    fn zip_ref<'a, A, Other, Out, F>(self, other: &'a Other, f: F) -> <Self as ReplaceT<Out>>::Output
     where
-        Self: Sized,
         A: ?Sized + 'a,
+        Self: Sized + ReplaceT<Out>,
+        <Self as ReplaceT<Out>>::Output: ControlledPrivate<Inner = Out>,
         Other: AsProtectedRef<'a, A>,
         Out: Zeroize,
         F: FnOnce(Self::Inner, &A) -> Out,
     {
         let arg: ProtectedRef<'a, A> = other.as_protected_ref();
-        Protected::init_from_inner(f(self.risky_unwrap(), arg.inner_ref()))
+        <Self as ReplaceT<Out>>::Output::init_from_inner(f(self.risky_unwrap(), arg.inner_ref()))
     }
 
     /// Similar to `map` but using references to that the inner value is updated in place.
