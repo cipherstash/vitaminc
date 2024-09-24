@@ -9,6 +9,7 @@ members = [
     "packages/random",
     "packages/traits",
     "packages/vitaminc",
+    "packages/aws-lc",
 ]
 
 [workspace.package]

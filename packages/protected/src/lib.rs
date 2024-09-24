@@ -9,6 +9,7 @@ mod ops;
 mod protected;
 mod usage;
 mod zeroed;
+use zeroize::Zeroize;
 
 #[cfg(feature = "bitvec")]
 pub mod bitvec;
@@ -22,10 +23,9 @@ pub use zeroed::Zeroed;
 pub use controlled::Controlled;
 pub use digest::ProtectedDigest;
 pub use equatable::{ConstantTimeEq, Equatable};
-pub use exportable::Exportable;
+pub use exportable::{Exportable, SafeDeserialize, SafeSerialize};
 pub use protected::{flatten_array, Protected};
 pub use usage::{Acceptable, DefaultScope, Scope, Usage};
-use zeroize::Zeroize;
 
 /// ReplaceT is a sealed trait that is used to replace the inner value of a type.
 /// It is only implemented for types that are Controlled.

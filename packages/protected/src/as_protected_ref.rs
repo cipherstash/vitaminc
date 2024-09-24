@@ -17,27 +17,33 @@ use std::borrow::Cow;
 ///
 /// pub struct SensitiveData(Protected<Vec<u8>>);
 ///
-/// impl AsProtectedRef<'_, [u8]> for SensitiveData {
-///    fn as_protected_ref(&self) -> ProtectedRef<[u8]> {
+/// impl AsProtectedRef<'_, Vec<u8>> for SensitiveData {
+///    fn as_protected_ref(&self) -> ProtectedRef<Vec<u8>> {
 ///       self.0.as_protected_ref()
 ///   }
 /// }
 ///
 /// let data = SensitiveData(Protected::new(Vec::new()));
-/// let pref: ProtectedRef<[u8]> = data.as_protected_ref();
+/// let pref: ProtectedRef<Vec<u8>> = data.as_protected_ref();
 /// ```
 ///
 pub trait AsProtectedRef<'a, A: ?Sized> {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, A>;
 }
 
-impl<'a, T, A: ?Sized> AsProtectedRef<'a, A> for T
+impl<'a, T> AsProtectedRef<'a, <T as ControlledPrivate>::Inner> for T
 where
-    <T as ControlledPrivate>::Inner: AsRef<A>,
+    //<T as ControlledPrivate>::Inner: AsRef<A>,
     T: Controlled,
 {
-    fn as_protected_ref(&'a self) -> ProtectedRef<'a, A> {
-        ProtectedRef(self.inner().as_ref())
+    fn as_protected_ref(&'a self) -> ProtectedRef<'a, <T as ControlledPrivate>::Inner> {
+        ProtectedRef(self.inner())
+    }
+}
+
+impl<'a, const N: usize> AsProtectedRef<'a, [u8; N]> for [u8; N] {
+    fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8; N]> {
+        ProtectedRef(&self)
     }
 }
 

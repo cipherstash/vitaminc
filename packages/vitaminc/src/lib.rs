@@ -16,3 +16,6 @@ pub use vitaminc_async_traits as async_traits;
 
 #[cfg(feature = "aws-kms")]
 pub use vitaminc_kms as aws_kms;
+
+#[cfg(feature = "aws-lc")]
+pub use vitaminc_aws_lc as aws_lc;
