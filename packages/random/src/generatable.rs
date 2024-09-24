@@ -14,8 +14,7 @@
 //!
 use crate::{Fill, RandomError, SafeRand};
 use std::num::NonZeroU16;
-use vitaminc_protected::{Controlled, Protected};
-use zeroize::Zeroize;
+use vitaminc_protected::{Controlled, Equatable, Exportable, Protected, Usage};
 
 /// A trait for types that can be generated randomly.
 /// The random number generator is passed as an argument to the `generate` method
@@ -51,41 +50,26 @@ impl<const N: usize> Generatable for [u8; N] {
     }
 }
 
-impl<const N: usize> Generatable for Protected<[u8; N]> {
+impl<T> Generatable for Protected<T> where T: Generatable, Self: Controlled<Inner = T> {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        Protected::generate_ok(|| Generatable::random(rng))
+        Self::generate_ok(|| Generatable::random(rng))
     }
 }
 
-// TODO: Consider implementing for T: Generatable
-impl Generatable for Protected<u16> {
+impl<T> Generatable for Exportable<T> where T: Generatable, Self: Controlled<Inner = T> {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        Protected::generate_ok(|| {
-            let mut buf: [u8; 2] = [0, 0];
-
-            if buf.try_fill(rng).is_ok() {
-                Ok(u16::from_be_bytes(buf))
-            } else {
-                // Make sure we don't leak anything left-over
-                buf.zeroize();
-                Err(RandomError::GenerationFailed)
-            }
-        })
+        Self::generate_ok(|| Generatable::random(rng))
     }
 }
 
-impl Generatable for Protected<u32> {
+impl<T> Generatable for Equatable<T> where T: Generatable, Self: Controlled<Inner = T> {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        Protected::generate_ok(|| {
-            let mut buf: [u8; 4] = [0; 4];
+        Self::generate_ok(|| Generatable::random(rng))
+    }
+}
 
-            if buf.try_fill(rng).is_ok() {
-                Ok(u32::from_be_bytes(buf))
-            } else {
-                // Make sure we don't leak anything left-over
-                buf.zeroize();
-                Err(RandomError::GenerationFailed)
-            }
-        })
+impl<T, S> Generatable for Usage<T, S> where T: Generatable, Self: Controlled<Inner = T> {
+    fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
+        Self::generate_ok(|| Generatable::random(rng))
     }
 }
