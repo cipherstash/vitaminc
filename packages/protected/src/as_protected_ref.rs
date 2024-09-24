@@ -1,4 +1,4 @@
-use crate::{private::ControlledPrivate, Controlled, Protected};
+use crate::{private::ControlledPrivate, Controlled};
 use std::borrow::Cow;
 
 /// Trait for types that can be converted to a `ProtectedRef`.

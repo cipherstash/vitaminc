@@ -1,17 +1,23 @@
 mod ciphertext;
 use rmp_serde::{decode, encode, Deserializer, Serializer};
-use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use thiserror::Error;
-use vitaminc_protected::{Controlled, Protected};
+use vitaminc_protected::{Controlled, Protected, SafeDeserialize, SafeSerialize};
 use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 use zeroize::Zeroize;
 
 pub use ciphertext::{CipherText, CipherTextBuilder};
 
-pub struct Aad<A>(A)
-where
-    A: AsRef<[u8]>;
+/// AAD is an additional authenticated data.
+/// It isn't sensitive but must be provided to decryption if it was provided during encryption.
+pub struct Aad<A>(A);
+
+impl<A> Aad<A>  where A: AsRef<[u8]> {
+    #[inline]
+    pub fn from(input: A) -> Self {
+        Self(input)
+    }
+}
 
 impl<A> AsRef<[u8]> for Aad<A>
 where
@@ -121,12 +127,12 @@ impl<const NONCE_SIZE: usize, CIPHER: AeadCore<NONCE_SIZE>> Aead<NONCE_SIZE, CIP
         aad: Aad<A>,
     ) -> Result<CipherText, AeadError>
     where
-        C: Serialize,
+        C: SafeSerialize,
         A: AsRef<[u8]>,
         <CIPHER as AeadCore<NONCE_SIZE>>::Error: 'static,
     {
         let nonce = self.1.generate();
-        let input = safe_serialize(plaintext);
+        let input = safe_serialize(plaintext)?;
         self.0
             .encrypt_with_aad(input, nonce, aad)
             .map_err(AeadError::from_core_error)
@@ -134,7 +140,7 @@ impl<const NONCE_SIZE: usize, CIPHER: AeadCore<NONCE_SIZE>> Aead<NONCE_SIZE, CIP
 
     pub fn encrypt<C>(&mut self, plaintext: C) -> Result<CipherText, AeadError>
     where
-        C: Serialize,
+        C: SafeSerialize,
         <CIPHER as AeadCore<NONCE_SIZE>>::Error: 'static,
     {
         self.encrypt_with_aad(plaintext, Aad(&[]))
@@ -146,7 +152,7 @@ impl<const NONCE_SIZE: usize, CIPHER: AeadCore<NONCE_SIZE>> Aead<NONCE_SIZE, CIP
         aad: Aad<A>,
     ) -> Result<T, AeadError>
     where
-        T: for<'de> Deserialize<'de>,
+        T: for<'de> SafeDeserialize<'de>,
         A: AsRef<[u8]>,
         <CIPHER as AeadCore<NONCE_SIZE>>::Error: 'static,
     {
@@ -158,7 +164,7 @@ impl<const NONCE_SIZE: usize, CIPHER: AeadCore<NONCE_SIZE>> Aead<NONCE_SIZE, CIP
 
     pub fn decrypt<T>(&self, ciphertext: CipherText) -> Result<T, AeadError>
     where
-        T: for<'de> Deserialize<'de>,
+        T: for<'de> SafeDeserialize<'de>,
         <CIPHER as AeadCore<NONCE_SIZE>>::Error: 'static,
     {
         self.decrypt_with_aad(ciphertext, Aad(&[]))
@@ -187,27 +193,26 @@ impl<const N: usize> NonceGenerator<N> for RandomNonceGenerator<N> {
 }
 
 #[inline]
-fn safe_serialize<T>(input: T) -> Protected<Vec<u8>>
+fn safe_serialize<T>(input: T) -> Result<Protected<Vec<u8>>, AeadError>
 where
-    T: Serialize,
+    T: SafeSerialize,
 {
     // Wrapping in a protected immediately means that the input is zeroized even if the serialization fails
-    Protected::new(Vec::new()).map(|mut wr| {
+    Protected::new(Vec::new()).map_ok(|mut wr| {
         let mut serializer = Serializer::new(&mut wr);
-        // FIXME: map_ok would avoid the unwrap here
-        input.serialize(&mut serializer).map(|_| wr).unwrap()
-    })
+        input.safe_serialize(&mut serializer).map(|_| wr)
+    }).map_err(AeadError::from)
 }
 
 #[inline]
 fn safe_deserialize<T>(input: Protected<Vec<u8>>) -> Result<T, AeadError>
 where
-    T: for<'de> Deserialize<'de>,
+    T: for<'de> SafeDeserialize<'de>,
 {
     // FIXME: If a SafeDeserializer could take a Protected<Vec<u8>> we could avoid the risky_unwrap here
     let mut input = input.risky_unwrap();
     let mut deserializer = Deserializer::new(input.as_slice());
-    let result = T::deserialize(&mut deserializer);
+    let result = T::safe_deserialize(&mut deserializer);
     input.zeroize();
     result.map_err(AeadError::from)
 }

@@ -66,9 +66,9 @@ where
     T: AsRef<[u8]> + Zeroize,
 {
     fn update(&mut self, data: &Protected<T>) {
-        let pref: ProtectedRef<[u8]> = data.as_protected_ref();
+        let pref: ProtectedRef<T> = data.as_protected_ref();
         self.input.update_with_ref(pref, |input, data| {
-            input.extend(data);
+            input.extend(data.as_ref());
         });
     }
 }

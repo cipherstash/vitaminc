@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use aws_lc_rs::{
     aead::{LessSafeKey, UnboundKey, AES_256_GCM},
     error::Unspecified,
@@ -7,22 +9,22 @@ use vitaminc_traits::{
     Aad, AeadCore, CipherText, CipherTextBuilder, KeyInit, Nonce, RandomNonceGenerator,
 };
 
-// TODO: Wrap the key in a Protected first
+// TODO: Wrap the UsafeKey in a Protected
 #[derive(Debug)]
-pub struct AwsLcAeadCore(LessSafeKey);
+pub struct AwsLcAeadCore<KEY = Protected<[u8; 32]>>(LessSafeKey, PhantomData<KEY>);
 
-impl KeyInit<32> for AwsLcAeadCore {
-    type Key = Protected<[u8; 32]>;
+impl<KEY> KeyInit<32> for AwsLcAeadCore<KEY> where KEY: Controlled<Inner = [u8; 32]> {
+    type Key = KEY;
 
     fn new(key: Self::Key) -> Self {
         let key_bytes = key.risky_unwrap();
         let unboundkey = UnboundKey::new(&AES_256_GCM, &key_bytes).unwrap();
         // TODO: make sure to zeroize key_bytes - does LessSafeKey zeroize?
-        Self(LessSafeKey::new(unboundkey))
+        Self(LessSafeKey::new(unboundkey), PhantomData)
     }
 }
 
-impl AeadCore<12> for AwsLcAeadCore {
+impl<KEY> AeadCore<12> for AwsLcAeadCore<KEY> {
     type Error = Unspecified;
     type NonceGen = RandomNonceGenerator<12>;
 
@@ -86,4 +88,84 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_round_trip_with_correct_aad() -> Result<(), Box<dyn std::error::Error>> {
+        let aad = "public-AAD";
+        let input: Exportable<Protected<String>> = Exportable::new("Hello".to_string());
+        let mut aead: Aead<12, AwsLcAeadCore> = Aead::new(Protected::new([0u8; 32]));
+        let ciphertext = aead.encrypt_with_aad(input, Aad::from(aad))?;
+        let pt: Exportable<Equatable<Protected<String>>> = aead.decrypt_with_aad(ciphertext, Aad::from(aad))?;
+
+        assert_eq!(pt, Equatable::<Protected<String>>::new("Hello".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_with_wrong_aad() -> Result<(), Box<dyn std::error::Error>> {
+        let aad = "public-AAD";
+        let input: Exportable<Protected<String>> = Exportable::new("Hello".to_string());
+        let mut aead: Aead<12, AwsLcAeadCore> = Aead::new(Protected::new([0u8; 32]));
+        let ciphertext = aead.encrypt_with_aad(input, Aad::from(aad))?;
+        let pt: Result<Exportable<Equatable<Protected<String>>>, _> = aead.decrypt_with_aad(ciphertext, Aad::from("WRONG"));
+
+        assert!(matches!(pt, Err(_)));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_with_missing_aad() -> Result<(), Box<dyn std::error::Error>> {
+        let aad = "public-AAD";
+        let input: Exportable<Protected<String>> = Exportable::new("Hello".to_string());
+        let mut aead: Aead<12, AwsLcAeadCore> = Aead::new(Protected::new([0u8; 32]));
+        let ciphertext = aead.encrypt_with_aad(input, Aad::from(aad))?;
+        let pt: Result<Exportable<Equatable<Protected<String>>>, _> = aead.decrypt(ciphertext);
+
+        assert!(matches!(pt, Err(_)));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_aead_struct() -> Result<(), Box<dyn std::error::Error>> {
+        let input: Exportable<Protected<String>> = Exportable::new("Hello".to_string());
+        let mut aead = Aead::<12, AwsLcAeadCore>::new(Protected::new([0u8; 32]));
+        let ciphertext = aead.encrypt(input)?;
+        let pt: Exportable<Equatable<Protected<String>>> = aead.decrypt(ciphertext)?;
+
+        assert_eq!(pt, Equatable::<Protected<String>>::new("Hello".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_aead_struct_with_correct_aad() -> Result<(), Box<dyn std::error::Error>> {
+        let aad = "public-AAD";
+        let input: Exportable<Protected<String>> = Exportable::new("Hello".to_string());
+        let mut aead = Aead::<12, AwsLcAeadCore>::new(Protected::new([0u8; 32]));
+        let ciphertext = aead.encrypt_with_aad(input, Aad::from(aad))?;
+        let pt: Exportable<Equatable<Protected<String>>> = aead.decrypt_with_aad(ciphertext, Aad::from(aad))?;
+
+        assert_eq!(pt, Equatable::<Protected<String>>::new("Hello".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_aead_struct_with_wrong_aad() -> Result<(), Box<dyn std::error::Error>> {
+        let aad = "public-AAD";
+        let input: Exportable<Protected<String>> = Exportable::new("Hello".to_string());
+        let mut aead = Aead::<12, AwsLcAeadCore>::new(Protected::new([0u8; 32]));
+        let ciphertext = aead.encrypt_with_aad(input, Aad::from(aad))?;
+        let pt: Result<Exportable<Equatable<Protected<String>>>, _> = aead.decrypt_with_aad(ciphertext, Aad::from("NOPE"));
+
+        assert!(matches!(pt, Err(_)));
+
+        Ok(())
+    }
 }
+
+// TODO: Add tests using the top-level Aead struct, too
+// TODO: Can we use the test vectors from aws-lc?
