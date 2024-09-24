@@ -6,8 +6,11 @@
 //! However, this implementation does not perform any zeroization and the authors of the `rand` crate
 //! have explictly [stepped away](https://github.com/rust-random/rand/issues/1358) from making it a "cryptographically secure" random number generator.
 use rand::{CryptoRng, RngCore, SeedableRng};
+use vitaminc_protected::Controlled;
+use zeroize::Zeroize;
 
 /// A secure random number generator that is safe to use for cryptographic purposes.
+// FIXME: RandChaCha20Rng is not zeroized and the crate doesn't support that feature
 pub struct SafeRand(rand_chacha::ChaCha20Rng);
 
 impl SafeRand {
@@ -27,6 +30,17 @@ impl SafeRand {
             }
             value
         }
+    }
+
+    /// A safer alternative to `from_seed` that the seed is zeroized after use.
+    pub fn from_controlled_seed<C>(seed: C) -> Self
+    where
+        C: Controlled<Inner = [u8; 32]>,
+    {
+        let mut seed = seed.risky_unwrap();   
+        let rng = Self(rand_chacha::ChaCha20Rng::from_seed(seed));
+        seed.zeroize();
+        rng
     }
 }
 
