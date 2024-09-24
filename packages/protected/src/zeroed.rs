@@ -1,4 +1,6 @@
-use crate::{Equatable, Exportable, Protected};
+use std::marker::PhantomData;
+
+use crate::{Equatable, Exportable, Protected, Usage};
 
 /// Similar to `Default`, but doesn't rely on the standard library,
 /// is only implemented for Paranoid types, and covers array sizes up to 1024.
@@ -54,6 +56,15 @@ where
 {
     fn zeroed() -> Self {
         Exportable(T::zeroed())
+    }
+}
+
+impl<T, S> Zeroed for Usage<T, S>
+where
+    T: Zeroed,
+{
+    fn zeroed() -> Self {
+        Usage(T::zeroed(), PhantomData)
     }
 }
 
