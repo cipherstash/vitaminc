@@ -56,24 +56,7 @@ impl<T> Protected<Option<T>> {
 
 impl<T: Zeroize> ZeroizeOnDrop for Protected<T> {}
 
-impl<T> ControlledPrivate for Protected<T>
-where
-    T: Zeroize,
-{
-    type Inner = T;
-
-    fn init_from_inner(x: Self::Inner) -> Self {
-        Self(x)
-    }
-
-    fn inner(&self) -> &T {
-        &self.0
-    }
-
-    fn inner_mut(&mut self) -> &mut Self::Inner {
-        &mut self.0
-    }
-}
+impl<T> ControlledPrivate for Protected<T> {}
 
 impl<T> Controlled for Protected<T>
 where
@@ -81,6 +64,20 @@ where
 {
     fn risky_unwrap(self) -> Self::Inner {
         self.0
+    }
+
+    type Inner = T;
+
+    fn init_from_inner(x: Self::Inner) -> Self {
+        Self(x)
+    }
+
+    fn risky_ref(&self) -> &T {
+        &self.0
+    }
+
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        &mut self.0
     }
 }
 

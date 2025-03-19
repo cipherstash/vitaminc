@@ -65,25 +65,41 @@ impl<const N: usize> Generatable for [u8; N] {
     }
 }
 
-impl<T, G> Generatable for Protected<T> where G: Generatable, Self: Controlled<Inner = G> {
+impl<T, G> Generatable for Protected<T>
+where
+    G: Generatable,
+    Self: Controlled<Inner = G>,
+{
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         Self::generate_ok(|| Generatable::random(rng))
     }
 }
 
-impl<T, G> Generatable for Exportable<T> where G: Generatable, Self: Controlled<Inner = G> {
+impl<T, G> Generatable for Exportable<T>
+where
+    G: Generatable,
+    Self: Controlled<Inner = G>,
+{
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         Self::generate_ok(|| Generatable::random(rng))
     }
 }
 
-impl<T, G> Generatable for Equatable<T> where G: Generatable, Self: Controlled<Inner = G> {
+impl<T, G> Generatable for Equatable<T>
+where
+    G: Generatable,
+    Self: Controlled<Inner = G>,
+{
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         Self::generate_ok(|| Generatable::random(rng))
     }
 }
 
-impl<T, S, G> Generatable for Usage<T, S> where G: Generatable, Self: Controlled<Inner = G> {
+impl<T, S, G> Generatable for Usage<T, S>
+where
+    G: Generatable,
+    Self: Controlled<Inner = G>,
+{
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         Self::generate_ok(|| Generatable::random(rng))
     }
@@ -97,10 +113,13 @@ mod tests {
 
     use super::Generatable;
 
-    fn assert_generatable<T>(rng: &mut SafeRand) -> T where T: super::Generatable {
+    fn assert_generatable<T>(rng: &mut SafeRand) -> T
+    where
+        T: super::Generatable,
+    {
         T::random(rng).unwrap()
     }
-    
+
     fn test_generate_controlled<T: Generatable + Zeroize>(rng: &mut SafeRand) {
         use super::*;
         let _: Protected<T> = assert_generatable(rng);

@@ -1,5 +1,5 @@
 [package]
-name = "vitaminc-aws-lc"
+name = "vitaminc-encrypt"
 documentation.workspace = true
 version.workspace = true
 repository.workspace = true
@@ -12,5 +12,8 @@ categories.workspace = true
 
 [dependencies]
 aws-lc-rs = "1.9.0"
+vitaminc-aead = { path = "../aead" }
 vitaminc-protected = { path = "../protected" }
-vitaminc-traits = { path = "../traits" }
+vitaminc-random = { path = "../random" }
+
+zeroize = { workspace = true }

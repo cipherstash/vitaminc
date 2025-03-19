@@ -22,7 +22,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
         T: Controlled + Acceptable<InputScope>,
         T::Inner: AsRef<[u8]>,
     {
-        Self(D::new_with_prefix(data.inner()), PhantomData)
+        Self(D::new_with_prefix(data.risky_ref()), PhantomData)
     }
 
     pub fn update<T>(&mut self, data: &T)
@@ -30,7 +30,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
         T: Controlled + Acceptable<InputScope>,
         T::Inner: AsRef<[u8]>,
     {
-        self.0.update(data.inner())
+        self.0.update(data.risky_ref())
     }
 
     pub fn finalize<T>(self) -> T

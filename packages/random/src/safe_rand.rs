@@ -37,7 +37,7 @@ impl SafeRand {
     where
         C: Controlled<Inner = [u8; 32]>,
     {
-        let mut seed = seed.risky_unwrap();   
+        let mut seed = seed.risky_unwrap();
         let rng = Self(rand_chacha::ChaCha20Rng::from_seed(seed));
         seed.zeroize();
         rng

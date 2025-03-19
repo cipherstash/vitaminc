@@ -486,9 +486,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.7.2"
+version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "428d9aa8fbc0670b7b8d6030a7fadd0f86151cae55e4dbbece15f3780a3dfaf3"
+checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 dependencies = [
  "serde",
 ]
@@ -1748,12 +1748,22 @@ name = "vitaminc"
 version = "0.1.0-pre2"
 dependencies = [
  "vitaminc-async-traits",
- "vitaminc-aws-lc",
+ "vitaminc-encrypt",
  "vitaminc-kms",
  "vitaminc-permutation",
  "vitaminc-protected",
  "vitaminc-random",
  "vitaminc-traits",
+]
+
+[[package]]
+name = "vitaminc-aead"
+version = "0.1.0-pre2"
+dependencies = [
+ "bytes",
+ "serde",
+ "vitaminc-protected",
+ "vitaminc-random",
 ]
 
 [[package]]
@@ -1765,12 +1775,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "vitaminc-aws-lc"
+name = "vitaminc-encrypt"
 version = "0.1.0-pre2"
 dependencies = [
  "aws-lc-rs",
+ "vitaminc-aead",
  "vitaminc-protected",
- "vitaminc-traits",
+ "vitaminc-random",
+ "zeroize",
 ]
 
 [[package]]
@@ -1838,6 +1850,7 @@ dependencies = [
  "thiserror",
  "vitaminc-protected",
  "vitaminc-random",
+ "zerocopy",
  "zeroize",
 ]
 
@@ -1961,6 +1974,26 @@ name = "xmlparser"
 version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
+
+[[package]]
+name = "zerocopy"
+version = "0.8.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2586fea28e186957ef732a5f8b3be2da217d65c5969d4b1e17f973ebbe876879"
+dependencies = [
+ "zerocopy-derive",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.8.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a996a8f63c5c4448cd959ac1bab0aaa3306ccfd060472f85943ee0750f0169be"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "zeroize"

@@ -95,9 +95,9 @@ pub struct Equatable<T>(pub(crate) T);
 
 impl<T> Equatable<T> {
     /// Create a new `Equatable` from an inner value.
-    pub fn new(x: <Equatable<T> as ControlledPrivate>::Inner) -> Self
+    pub fn new(x: <Equatable<T> as Controlled>::Inner) -> Self
     where
-        Self: ControlledPrivate,
+        Self: Controlled,
     {
         Self::init_from_inner(x)
     }
@@ -112,36 +112,38 @@ where
     }
 }
 
-impl<T: ControlledPrivate> Equatable<T>
+impl<T: Controlled> Equatable<T>
 where
     T::Inner: ConstantTimeEq,
 {
     pub fn constant_time_eq(&self, other: &Self) -> bool {
-        self.inner().constant_time_eq(other.inner())
+        self.risky_ref().constant_time_eq(other.risky_ref())
     }
 }
 
 // TODO: Canwe make a blanket impl for all Paranoid types?
 impl<T: ControlledPrivate> ControlledPrivate for Equatable<T> {
-    type Inner = T::Inner;
-
-    fn init_from_inner(x: Self::Inner) -> Self {
-        Self(T::init_from_inner(x))
-    }
-
-    fn inner(&self) -> &Self::Inner {
-        self.0.inner()
-    }
-
-    fn inner_mut(&mut self) -> &mut Self::Inner {
-        self.0.inner_mut()
-    }
+    
 }
 
 impl<T> Controlled for Equatable<T>
 where
     T: Controlled,
 {
+    type Inner = T::Inner;
+
+    fn init_from_inner(x: Self::Inner) -> Self {
+        Self(T::init_from_inner(x))
+    }
+
+    fn risky_ref(&self) -> &Self::Inner {
+        self.0.risky_ref()
+    }
+
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        self.0.inner_mut()
+    }
+
     fn risky_unwrap(self) -> Self::Inner {
         self.0.risky_unwrap()
     }
@@ -172,23 +174,23 @@ where
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
 impl<T, O> PartialEq<O> for Equatable<T>
 where
-    T: ControlledPrivate,
-    O: ControlledPrivate,
-    <T as ControlledPrivate>::Inner: ConstantTimeEq<O::Inner>,
+    T: Controlled,
+    O: Controlled,
+    <T as Controlled>::Inner: ConstantTimeEq<O::Inner>,
 {
     fn eq(&self, other: &O) -> bool {
-        self.inner().constant_time_eq(other.inner())
+        self.risky_ref().constant_time_eq(other.risky_ref())
     }
 }
 
 impl<T, O> ConstantTimeEq<O> for Equatable<T>
 where
-    T: ControlledPrivate,
-    O: ControlledPrivate,
-    <T as ControlledPrivate>::Inner: ConstantTimeEq<O::Inner>,
+    T: Controlled,
+    O: Controlled,
+    <T as Controlled>::Inner: ConstantTimeEq<O::Inner>,
 {
     fn constant_time_eq(&self, other: &O) -> bool {
-        self.inner().constant_time_eq(other.inner())
+        self.risky_ref().constant_time_eq(other.risky_ref())
     }
 }
 
@@ -284,14 +286,14 @@ impl ConstantTimeEq for String {
 /// Serialize is implemented for any `Equatable` type that has a `SafeSerialize` inner type.
 impl<T> Serialize for Equatable<T>
 where
-    T: ControlledPrivate,
+    T: Controlled,
     T::Inner: SafeSerialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        self.inner().safe_serialize(serializer)
+        self.risky_ref().safe_serialize(serializer)
     }
 }
 

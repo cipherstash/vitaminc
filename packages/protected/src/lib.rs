@@ -68,22 +68,27 @@ where
     type Output = Exportable<Equatable<Protected<K>>>;
 }
 
+// Its reasonable to "restrict" a Usage by replacing it with an unscoped type
+// because any we are not increasing the scope of the type.
+impl<T, K, S> ReplaceT<K> for Usage<Protected<T>, S>
+where
+    Protected<K>: Controlled,
+{
+    type Output = Protected<K>;
+}
+
 mod private {
-    use crate::{Equatable, Exportable, Protected};
+    use crate::{Equatable, Exportable, Protected, Usage};
 
     pub trait Sealed {}
     impl<T> Sealed for Protected<T> {}
     impl<T> Sealed for Equatable<T> {}
     impl<T> Sealed for Exportable<T> {}
+    impl<T, S> Sealed for Usage<T, S> {}
 
     /// Private trait that is used to hide the inner value of a Controlled type
     /// as well as preventing consumers from implementing Controlled themselves.
     pub trait ControlledPrivate {
-        type Inner;
-
-        // FIXME: We shouldn't be able to call these outside of the crate (but I think we can!)
-        fn init_from_inner(x: Self::Inner) -> Self;
-        fn inner(&self) -> &Self::Inner;
-        fn inner_mut(&mut self) -> &mut Self::Inner;
+        
     }
 }

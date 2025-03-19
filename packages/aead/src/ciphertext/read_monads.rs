@@ -33,9 +33,13 @@ impl CiphertextAndTagReader {
     /// The result is kept inside a `Protected` to avoid leaking the plaintext.
     pub fn accepts_plaintext_ok<E>(
         self,
-        f: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, E>,
+        f: impl FnOnce(&mut [u8]) -> Result<usize, E>,
     ) -> Plaintext<E> {
-        Plaintext(self.0.map_ok(f))
+        Plaintext(self.0.map_ok(|mut raw| {
+            let len = f(&mut raw)?;
+            raw.truncate(len);
+            Ok(raw)
+        }))
     }
 }
 

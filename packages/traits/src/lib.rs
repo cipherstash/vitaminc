@@ -1,11 +1,6 @@
+#![deny(clippy::unwrap_used, clippy::todo, unsafe_code, unused_imports)]
 #![doc = include_str!("../README.md")]
 use vitaminc_protected::{Controlled, Zeroed};
-mod aead;
-
-pub use aead::{
-    Aad, Aead, AeadCore, AeadError, CipherText, CipherTextBuilder, KeyInit, Nonce, NonceGenerator,
-    RandomNonceGenerator,
-};
 
 /// Defines the size of the output of a hash function.
 pub trait OutputSize<const N: usize> {

@@ -1,4 +1,4 @@
-use super::CipherText;
+use super::LocalCipherText;
 use crate::Nonce;
 use bytes::BytesMut;
 use vitaminc_protected::{Controlled, Protected};
@@ -19,8 +19,11 @@ impl CipherTextBuilder {
 pub struct NonceWritten<const N: usize>(Nonce<N>);
 
 impl<const N: usize> NonceWritten<N> {
-    pub fn append_target_plaintext(self, plaintext: Protected<Vec<u8>>) -> PlaintextWritten<N> {
-        PlaintextWritten::new(self.0, plaintext)
+    pub fn append_target_plaintext(
+        self,
+        plaintext: impl Into<Protected<Vec<u8>>>,
+    ) -> PlaintextWritten<N> {
+        PlaintextWritten::new(self.0, plaintext.into())
     }
 }
 
@@ -50,12 +53,12 @@ impl<const N: usize, E> EncryptedWithTag<N, E> {
         Self { bytes, nonce }
     }
 
-    pub fn build(self) -> Result<CipherText, E> {
+    pub fn build(self) -> Result<LocalCipherText, E> {
         // The value has been encrypted, so we can unwrap it
         let inner = self.bytes?.risky_unwrap();
         let mut bytes = BytesMut::with_capacity(N + inner.len());
         bytes.extend(self.nonce.into_inner());
         bytes.extend(inner.into_iter());
-        Ok(CipherText(bytes.freeze()))
+        Ok(LocalCipherText(bytes.freeze()))
     }
 }

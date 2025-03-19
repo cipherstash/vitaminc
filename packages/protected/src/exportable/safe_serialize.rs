@@ -5,13 +5,13 @@ use std::num::{
 
 use serde::ser::SerializeTuple;
 use serde::{Serialize, Serializer};
-
-use crate::private::ControlledPrivate;
+use crate::Controlled;
 
 // TODO: Create a serialize method on exportable which maps into the serialized form
 // Exportable should also implement a "safe" version of Hex (serdect)
 // And a reader?
 
+// TODO: SafeSerialize *maybe* should consume self
 pub trait SafeSerialize {
     fn safe_serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -22,13 +22,13 @@ pub trait SafeSerialize {
 impl<T> SafeSerialize for T
 where
     T::Inner: SafeSerialize,
-    T: ControlledPrivate,
+    T: Controlled,
 {
     fn safe_serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        self.inner().safe_serialize(serializer)
+        self.risky_ref().safe_serialize(serializer)
     }
 }
 

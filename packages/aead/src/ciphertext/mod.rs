@@ -7,9 +7,9 @@ pub use write_monads::CipherTextBuilder;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct CipherText(Bytes);
+pub struct LocalCipherText(Bytes);
 
-impl CipherText {
+impl LocalCipherText {
     pub fn into_inner(self) -> Bytes {
         self.0
     }
@@ -19,16 +19,28 @@ impl CipherText {
     }
 }
 
+impl AsRef<[u8]> for LocalCipherText {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl From<Vec<u8>> for LocalCipherText {
+    fn from(bytes: Vec<u8>) -> Self {
+        LocalCipherText(Bytes::from(bytes))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aead::Nonce;
+    use crate::Nonce;
     use vitaminc_protected::{Controlled, Protected};
 
     #[test]
     fn test_ciphertext_builder_with_plaintext_in_place() -> Result<(), ()> {
-        let nonce = Nonce([1u8; 12]);
-        let plaintext: Protected<Vec<u8>> = Protected::new(vec![0u8; 10]);
+        let nonce = Nonce::new([1u8; 12]);
+        let plaintext = vec![0u8; 10];
         let ciphertext = CipherTextBuilder::new()
             .append_nonce(nonce)
             .append_target_plaintext(plaintext)
@@ -49,7 +61,7 @@ mod tests {
 
     #[test]
     fn test_ciphertext_reader() -> Result<(), ()> {
-        let nonce = Nonce([1u8; 12]);
+        let nonce = Nonce::new([1u8; 12]);
         let plaintext: Protected<Vec<u8>> = Protected::new(vec![0u8; 10]);
 
         let ciphertext = CipherTextBuilder::new()
@@ -65,13 +77,13 @@ mod tests {
         let (nonce, reader) = ciphertext.into_reader().read_nonce::<12>();
 
         let plaintext = reader
-            .accepts_plaintext_ok(|mut data| {
+            .accepts_plaintext_ok(|data| {
                 assert_eq!(data.len(), 26);
                 assert_eq!(&data[..10], [2u8; 10]);
                 assert_eq!(&data[10..], [3u8; 16]);
                 // Write in the same way as AWS-LC/Ring does
                 data[..10].copy_from_slice(&[0u8; 10]);
-                Ok(data)
+                Ok(10)
             })
             .read()?;
 

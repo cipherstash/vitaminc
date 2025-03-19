@@ -1,4 +1,4 @@
-use crate::{private::ControlledPrivate, Protected};
+use crate::{Protected, Controlled};
 use zeroize::Zeroize;
 // TODO: Feature flag?
 use digest::generic_array::{ArrayLength, GenericArray};
