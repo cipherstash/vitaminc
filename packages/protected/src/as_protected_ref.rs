@@ -43,7 +43,7 @@ where
 
 impl<'a, const N: usize> AsProtectedRef<'a, [u8; N]> for [u8; N] {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8; N]> {
-        ProtectedRef(&self)
+        ProtectedRef(self)
     }
 }
 
