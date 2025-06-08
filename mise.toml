@@ -1,0 +1,9 @@
+[tools]
+rust = "1.87.0"
+
+[tasks.docs]
+dir = "{{ config_root }}/packages/vitaminc"
+description = "Build and generate the docs"
+run = "cargo doc --all-features --no-deps"
+tools.rust = "nightly"
+env.RUSTDOCFLAGS = "--cfg docsrs"
