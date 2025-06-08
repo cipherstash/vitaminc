@@ -16,9 +16,7 @@ impl<T, S> Usage<T, S> {
     }
 }
 
-impl<T: ControlledPrivate, Scope> ControlledPrivate for Usage<T, Scope> {
-    
-}
+impl<T: ControlledPrivate, Scope> ControlledPrivate for Usage<T, Scope> {}
 
 impl<T, Scope> Controlled for Usage<T, Scope>
 where

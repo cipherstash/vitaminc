@@ -88,8 +88,7 @@ where
     }
 }
 
-impl<T: ControlledPrivate> ControlledPrivate for Exportable<T> {
-    }
+impl<T: ControlledPrivate> ControlledPrivate for Exportable<T> {}
 
 impl<T> Controlled for Exportable<T>
 where

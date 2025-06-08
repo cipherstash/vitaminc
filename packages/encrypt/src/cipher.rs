@@ -1,11 +1,9 @@
-use vitaminc_protected::{Controlled};
-use zeroize::Zeroize;
-use aws_lc_rs::{
-    aead::{Aad as LcAad, LessSafeKey, Nonce as LcNonce, AES_256_GCM, NONCE_LEN},
-};
+use aws_lc_rs::aead::{Aad as LcAad, LessSafeKey, Nonce as LcNonce, AES_256_GCM, NONCE_LEN};
 use vitaminc_aead::{
-    Cipher, CipherTextBuilder, IntoAad, LocalCipherText, NonceGenerator, RandomNonceGenerator
+    Cipher, CipherTextBuilder, IntoAad, LocalCipherText, NonceGenerator, RandomNonceGenerator,
 };
+use vitaminc_protected::Controlled;
+use zeroize::Zeroize;
 
 pub use aws_lc_rs::error::Unspecified;
 
@@ -90,8 +88,7 @@ impl Cipher for Aes256Cipher {
 
         reader
             .accepts_plaintext_ok(|data| {
-                let plaintext = LessSafeKey::new(unboundkey)
-                    .open_in_place(nonce_lc, aad, data)?;
+                let plaintext = LessSafeKey::new(unboundkey).open_in_place(nonce_lc, aad, data)?;
                 Ok(plaintext.len())
             })
             .read()
@@ -160,7 +157,9 @@ mod test {
                 let cipher = Aes256Cipher::new();
                 let key = Key::from([0u8; 32]);
                 let plaintext = vec![1u8; 15];
-                let ciphertext = cipher.encrypt_bytes(plaintext.clone(), &key, "foo").unwrap();
+                let ciphertext = cipher
+                    .encrypt_bytes(plaintext.clone(), &key, "foo")
+                    .unwrap();
                 assert!(cipher.decrypt_bytes(ciphertext, &key, ()).is_err());
             }
 
@@ -168,8 +167,12 @@ mod test {
             fn fails_with_incorrect_key() {
                 let cipher = Aes256Cipher::new();
                 let plaintext = vec![1u8; 15];
-                let ciphertext = cipher.encrypt_bytes(plaintext.clone(), &[0; 32].into(), ()).unwrap();
-                assert!(cipher.decrypt_bytes(ciphertext, &[1; 32].into(), ()).is_err());
+                let ciphertext = cipher
+                    .encrypt_bytes(plaintext.clone(), &[0; 32].into(), ())
+                    .unwrap();
+                assert!(cipher
+                    .decrypt_bytes(ciphertext, &[1; 32].into(), ())
+                    .is_err());
             }
         }
     }
@@ -212,8 +215,12 @@ mod test {
         fn fails_with_incorrect_key() {
             let cipher = Aes256Cipher::new();
             let plaintext: [u8; 15] = [1; 15];
-            let ciphertext = cipher.encrypt_array(plaintext, &Key::from([0; 32]), ()).unwrap();
-            assert!(cipher.decrypt_array::<15, _>(ciphertext, &Key::from([1; 32]), ()).is_err());
+            let ciphertext = cipher
+                .encrypt_array(plaintext, &Key::from([0; 32]), ())
+                .unwrap();
+            assert!(cipher
+                .decrypt_array::<15, _>(ciphertext, &Key::from([1; 32]), ())
+                .is_err());
         }
     }
 

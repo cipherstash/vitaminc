@@ -1,5 +1,5 @@
-use serde::{Deserialize, Deserializer};
 use crate::Controlled;
+use serde::{Deserialize, Deserializer};
 
 pub trait SafeDeserialize<'de>: Sized {
     fn safe_deserialize<D>(deserializer: D) -> Result<Self, D::Error>

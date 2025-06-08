@@ -3,9 +3,9 @@ use std::num::{
     NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize,
 };
 
+use crate::Controlled;
 use serde::ser::SerializeTuple;
 use serde::{Serialize, Serializer};
-use crate::Controlled;
 
 // TODO: Create a serialize method on exportable which maps into the serialized form
 // Exportable should also implement a "safe" version of Hex (serdect)

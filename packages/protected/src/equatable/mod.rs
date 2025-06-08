@@ -122,9 +122,7 @@ where
 }
 
 // TODO: Canwe make a blanket impl for all Paranoid types?
-impl<T: ControlledPrivate> ControlledPrivate for Equatable<T> {
-    
-}
+impl<T: ControlledPrivate> ControlledPrivate for Equatable<T> {}
 
 impl<T> Controlled for Equatable<T>
 where

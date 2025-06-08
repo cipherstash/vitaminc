@@ -88,7 +88,5 @@ mod private {
 
     /// Private trait that is used to hide the inner value of a Controlled type
     /// as well as preventing consumers from implementing Controlled themselves.
-    pub trait ControlledPrivate {
-        
-    }
+    pub trait ControlledPrivate {}
 }
