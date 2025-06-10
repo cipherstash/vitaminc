@@ -6,7 +6,7 @@ pub use cipher::{Aes256Cipher, Unspecified};
 pub use key::{EncryptedKey, Key};
 
 // Re-exports
-pub use vitaminc_aead::{Aad, Decrypt, Encrypt, IntoAad, Nonce};
+pub use vitaminc_aead::{Aad, Cipher, Decrypt, Encrypt, IntoAad, LocalCipherText, Nonce};
 
 /// Encrypt the given plaintext using the provided key.
 /// Any type that implements the [`Encrypt`] trait can be used.
