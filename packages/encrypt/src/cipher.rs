@@ -19,6 +19,12 @@ impl Aes256Cipher {
     }
 }
 
+impl Default for Aes256Cipher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Cipher for Aes256Cipher {
     type Key = Key;
 
