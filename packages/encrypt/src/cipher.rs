@@ -1,10 +1,11 @@
+use crate::Key;
 use aws_lc_rs::aead::{Aad as LcAad, LessSafeKey, Nonce as LcNonce, AES_256_GCM, NONCE_LEN};
 use vitaminc_aead::{
-    Cipher, CipherTextBuilder, IntoAad, LocalCipherText, NonceGenerator, RandomNonceGenerator, Unspecified,
+    Cipher, CipherTextBuilder, IntoAad, LocalCipherText, NonceGenerator, RandomNonceGenerator,
+    Unspecified,
 };
 use vitaminc_protected::Controlled;
 use zeroize::Zeroize;
-use crate::Key;
 
 /// Implements the AES-256-GCM cipher using the `aws-lc-rs` library.
 pub struct Aes256Cipher {
@@ -39,7 +40,8 @@ impl Cipher for Aes256Cipher {
     {
         let unboundkey = key.as_unbound().map_err(|_| Unspecified)?;
         let nonce = self.nonce_generator.generate()?;
-        let nonce_lc = LcNonce::try_assume_unique_for_key(nonce.as_ref()).map_err(|_| Unspecified)?;
+        let nonce_lc =
+            LcNonce::try_assume_unique_for_key(nonce.as_ref()).map_err(|_| Unspecified)?;
         let aad = aad.into_aad();
         let aad = LcAad::from(aad.as_bytes());
 
@@ -139,8 +141,12 @@ mod test {
                 let cipher = Aes256Cipher::new();
                 let key = Key::from([0u8; 32]);
                 let plaintext = vec![1u8; 15];
-                let ciphertext = cipher.encrypt_bytes(plaintext.clone(), &key, ()).expect("Encryption failed");
-                let decrypted = cipher.decrypt_bytes(ciphertext, &key, ()).expect("Decryption failed");
+                let ciphertext = cipher
+                    .encrypt_bytes(plaintext.clone(), &key, ())
+                    .expect("Encryption failed");
+                let decrypted = cipher
+                    .decrypt_bytes(ciphertext, &key, ())
+                    .expect("Decryption failed");
 
                 assert_eq!(plaintext, decrypted);
             }
@@ -151,8 +157,12 @@ mod test {
                 let cipher = Aes256Cipher::new();
                 let key = Key::from([0u8; 32]);
                 let plaintext = vec![1u8; 15];
-                let ciphertext = cipher.encrypt_bytes(plaintext.clone(), &key, aad).expect("Encryption failed");
-                let decrypted = cipher.decrypt_bytes(ciphertext, &key, aad).expect("Decryption failed");
+                let ciphertext = cipher
+                    .encrypt_bytes(plaintext.clone(), &key, aad)
+                    .expect("Encryption failed");
+                let decrypted = cipher
+                    .decrypt_bytes(ciphertext, &key, aad)
+                    .expect("Decryption failed");
 
                 assert_eq!(plaintext, decrypted);
             }
@@ -192,8 +202,12 @@ mod test {
             let cipher = Aes256Cipher::new();
             let key = Key::from([0u8; 32]);
             let plaintext: [u8; 15] = [1; 15];
-            let ciphertext = cipher.encrypt_array(plaintext, &key, ()).expect("Encryption failed");
-            let decrypted = cipher.decrypt_array(ciphertext, &key, ()).expect("Decryption failed");
+            let ciphertext = cipher
+                .encrypt_array(plaintext, &key, ())
+                .expect("Encryption failed");
+            let decrypted = cipher
+                .decrypt_array(ciphertext, &key, ())
+                .expect("Decryption failed");
 
             assert_eq!(plaintext, decrypted);
         }
@@ -203,8 +217,12 @@ mod test {
             let cipher = Aes256Cipher::new();
             let key = Key::from([0u8; 32]);
             let plaintext: [u8; 15] = [1; 15];
-            let ciphertext = cipher.encrypt_array(plaintext, &key, "AAD").expect("Encryption failed");
-            let decrypted = cipher.decrypt_array(ciphertext, &key, "AAD").expect("Decryption failed");
+            let ciphertext = cipher
+                .encrypt_array(plaintext, &key, "AAD")
+                .expect("Encryption failed");
+            let decrypted = cipher
+                .decrypt_array(ciphertext, &key, "AAD")
+                .expect("Decryption failed");
 
             assert_eq!(plaintext, decrypted);
         }
@@ -214,7 +232,9 @@ mod test {
             let cipher = Aes256Cipher::new();
             let key = Key::from([0u8; 32]);
             let plaintext: [u8; 15] = [1; 15];
-            let ciphertext = cipher.encrypt_array(plaintext, &key, "foo").expect("Encryption failed");
+            let ciphertext = cipher
+                .encrypt_array(plaintext, &key, "foo")
+                .expect("Encryption failed");
             assert!(cipher.decrypt_array::<15, _>(ciphertext, &key, ()).is_err());
         }
 
@@ -240,7 +260,8 @@ mod test {
         fn roundtrip_string() {
             let cipher = Aes256Cipher::new();
             let key = Key::from([0u8; 32]);
-            let ciphertext = String::from("Hello").encrypt(&key, &cipher)
+            let ciphertext = String::from("Hello")
+                .encrypt(&key, &cipher)
                 .expect("Encryption failed");
             let decrypted = String::decrypt(ciphertext, &key, &cipher).expect("Decryption failed");
             assert_eq!(decrypted, "Hello");
