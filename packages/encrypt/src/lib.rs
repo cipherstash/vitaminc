@@ -1,4 +1,5 @@
 #![deny(clippy::unwrap_used, clippy::todo, unsafe_code, unused_imports)]
+#![doc = include_str!("../README.md")]
 mod cipher;
 mod key;
 
@@ -49,7 +50,7 @@ pub fn encrypt_with_aad<'a, T, A>(
     aad: A,
 ) -> Result<T::Encrypted, Unspecified>
 where
-    T: Encrypt,
+    T: Encrypt + 'a,
     A: IntoAad<'a>,
 {
     let cipher = Aes256Cipher::new();

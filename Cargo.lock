@@ -1764,6 +1764,7 @@ dependencies = [
  "serde",
  "vitaminc-protected",
  "vitaminc-random",
+ "zeroize",
 ]
 
 [[package]]

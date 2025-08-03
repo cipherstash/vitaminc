@@ -5,7 +5,6 @@ use vitaminc_aead::{
     Unspecified,
 };
 use vitaminc_protected::Controlled;
-use zeroize::Zeroize;
 
 /// Implements the AES-256-GCM cipher using the `aws-lc-rs` library.
 pub struct Aes256Cipher {
@@ -29,7 +28,7 @@ impl Default for Aes256Cipher {
 impl Cipher for Aes256Cipher {
     type Key = Key;
 
-    fn encrypt_bytes<'a, A>(
+    fn encrypt_vec<'a, A>(
         &self,
         plaintext: Vec<u8>,
         key: &<Self as Cipher>::Key,
@@ -57,26 +56,25 @@ impl Cipher for Aes256Cipher {
             .build()
     }
 
-    fn encrypt_array<'a, const N: usize, A>(
+    fn encrypt_slice<'a, A>(
         &self,
-        mut plaintext: [u8; N],
+        plaintext: &'a [u8],
         key: &Self::Key,
         aad: A,
     ) -> Result<LocalCipherText, Unspecified>
     where
         A: IntoAad<'a>,
+        Self: 'a,
     {
         // Copy into a Vec with capacity N + tag_len
-        let mut plaintext_vec = Vec::with_capacity(N + AES_256_GCM.tag_len());
+        let mut plaintext_vec = Vec::with_capacity(plaintext.len() + AES_256_GCM.tag_len());
         plaintext_vec.extend_from_slice(&plaintext);
-        let result = self.encrypt_bytes(plaintext_vec, key, aad);
+        let result = self.encrypt_vec(plaintext_vec, key, aad);
 
-        // Because we copied to a vec, we need to zeroize the original array
-        plaintext.zeroize();
         result
     }
 
-    fn decrypt_bytes<'a, A>(
+    fn decrypt_vec<'a, A>(
         &self,
         ciphertext: LocalCipherText,
         key: &Self::Key,
@@ -101,29 +99,6 @@ impl Cipher for Aes256Cipher {
             .read()
             .map(|data| data.risky_unwrap())
     }
-
-    fn decrypt_array<'a, const N: usize, A>(
-        &self,
-        ciphertext: LocalCipherText,
-        key: &Self::Key,
-        aad: A,
-    ) -> Result<[u8; N], Unspecified>
-    where
-        A: IntoAad<'a>,
-    {
-        let mut output = [0u8; N];
-        let mut result_vec = self.decrypt_bytes(ciphertext, key, aad)?;
-        let result = if result_vec.len() != N {
-            Err(Unspecified)
-        } else {
-            output.copy_from_slice(&result_vec);
-            Ok(output)
-        };
-
-        // Zeroize the result vector
-        result_vec.zeroize();
-        result
-    }
 }
 
 #[cfg(test)]
@@ -142,10 +117,11 @@ mod test {
                 let key = Key::from([0u8; 32]);
                 let plaintext = vec![1u8; 15];
                 let ciphertext = cipher
-                    .encrypt_bytes(plaintext.clone(), &key, ())
+                    .encrypt_vec(plaintext.clone(), &key, ())
                     .expect("Encryption failed");
+
                 let decrypted = cipher
-                    .decrypt_bytes(ciphertext, &key, ())
+                    .decrypt_vec(ciphertext, &key, ())
                     .expect("Decryption failed");
 
                 assert_eq!(plaintext, decrypted);
@@ -158,10 +134,11 @@ mod test {
                 let key = Key::from([0u8; 32]);
                 let plaintext = vec![1u8; 15];
                 let ciphertext = cipher
-                    .encrypt_bytes(plaintext.clone(), &key, aad)
+                    .encrypt_vec(plaintext.clone(), &key, aad)
                     .expect("Encryption failed");
+
                 let decrypted = cipher
-                    .decrypt_bytes(ciphertext, &key, aad)
+                    .decrypt_vec(ciphertext, &key, aad)
                     .expect("Decryption failed");
 
                 assert_eq!(plaintext, decrypted);
@@ -173,10 +150,10 @@ mod test {
                 let key = Key::from([0u8; 32]);
                 let plaintext = vec![1u8; 15];
                 let ciphertext = cipher
-                    .encrypt_bytes(plaintext.clone(), &key, "foo")
+                    .encrypt_vec(plaintext.clone(), &key, "foo")
                     .expect("Encryption failed");
 
-                assert!(cipher.decrypt_bytes(ciphertext, &key, ()).is_err());
+                assert!(cipher.decrypt_vec(ciphertext, &key, ()).is_err());
             }
 
             #[test]
@@ -184,71 +161,13 @@ mod test {
                 let cipher = Aes256Cipher::new();
                 let plaintext = vec![1u8; 15];
                 let ciphertext = cipher
-                    .encrypt_bytes(plaintext.clone(), &[0; 32].into(), ())
+                    .encrypt_vec(plaintext.clone(), &[0; 32].into(), ())
                     .expect("Encryption failed");
 
                 assert!(cipher
-                    .decrypt_bytes(ciphertext, &[1; 32].into(), ())
+                    .decrypt_vec(ciphertext, &[1; 32].into(), ())
                     .is_err());
             }
-        }
-    }
-
-    mod roundtrip_array {
-        use super::*;
-
-        #[test]
-        fn succeeds_with_no_aad() {
-            let cipher = Aes256Cipher::new();
-            let key = Key::from([0u8; 32]);
-            let plaintext: [u8; 15] = [1; 15];
-            let ciphertext = cipher
-                .encrypt_array(plaintext, &key, ())
-                .expect("Encryption failed");
-            let decrypted = cipher
-                .decrypt_array(ciphertext, &key, ())
-                .expect("Decryption failed");
-
-            assert_eq!(plaintext, decrypted);
-        }
-
-        #[test]
-        fn succeeds_with_matching_aad() {
-            let cipher = Aes256Cipher::new();
-            let key = Key::from([0u8; 32]);
-            let plaintext: [u8; 15] = [1; 15];
-            let ciphertext = cipher
-                .encrypt_array(plaintext, &key, "AAD")
-                .expect("Encryption failed");
-            let decrypted = cipher
-                .decrypt_array(ciphertext, &key, "AAD")
-                .expect("Decryption failed");
-
-            assert_eq!(plaintext, decrypted);
-        }
-
-        #[test]
-        fn fails_with_missing_aad() {
-            let cipher = Aes256Cipher::new();
-            let key = Key::from([0u8; 32]);
-            let plaintext: [u8; 15] = [1; 15];
-            let ciphertext = cipher
-                .encrypt_array(plaintext, &key, "foo")
-                .expect("Encryption failed");
-            assert!(cipher.decrypt_array::<15, _>(ciphertext, &key, ()).is_err());
-        }
-
-        #[test]
-        fn fails_with_incorrect_key() {
-            let cipher = Aes256Cipher::new();
-            let plaintext: [u8; 15] = [1; 15];
-            let ciphertext = cipher
-                .encrypt_array(plaintext, &Key::from([0; 32]), ())
-                .expect("Encryption failed");
-
-            assert!(cipher
-                .decrypt_array::<15, _>(ciphertext, &Key::from([1; 32]), ())
-                .is_err());
         }
     }
 
