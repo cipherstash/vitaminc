@@ -5,6 +5,9 @@ use vitaminc_random::{Generatable, RandomError, SafeRand};
 
 /// 256-bit key type for use with symmetric encryption algorithms like AES-256-GCM.
 /// Vitaminc does not support smaller key sizes to ensure quantum security and compatibility with AWS-LC.
+// SAFETY: Safe to implement Debug because the inner type is Protected, which does not leak sensitive data.
+#[derive(Debug)]
+#[cfg_attr(test, derive(Clone))]
 pub struct Key(Protected<[u8; 32]>);
 
 impl Key {
@@ -35,7 +38,6 @@ impl Encrypt for Key {
 
     fn encrypt_with_aad<'a, C, A>(
         self,
-        key: &C::Key,
         cipher: &C,
         aad: A,
     ) -> Result<Self::Encrypted, Unspecified>
@@ -43,7 +45,7 @@ impl Encrypt for Key {
         C: Cipher,
         A: IntoAad<'a>,
     {
-        self.0.encrypt_with_aad(key, cipher, aad).map(EncryptedKey)
+        self.0.encrypt_with_aad(cipher, aad).map(EncryptedKey)
     }
 }
 
@@ -52,7 +54,6 @@ impl Decrypt for Key {
 
     fn decrypt_with_aad<'a, C, A>(
         encrypted: Self::Encrypted,
-        key: &C::Key,
         cipher: &C,
         aad: A,
     ) -> Result<Self, Unspecified>
@@ -60,6 +61,44 @@ impl Decrypt for Key {
         C: Cipher,
         A: IntoAad<'a>,
     {
-        Decrypt::decrypt_with_aad(encrypted.0, key, cipher, aad).map(Self)
+        Decrypt::decrypt_with_aad(encrypted.0, cipher, aad).map(Self)
     }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use quickcheck::Arbitrary;
+
+    fn gen_array(g: &mut quickcheck::Gen) -> [u8; 32] {
+        let mut array = [0u8; 32];
+        for byte in array.iter_mut() {
+            *byte = u8::arbitrary(g);
+        }
+        array
+    }
+
+    impl quickcheck::Arbitrary for Key {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            let key = gen_array(g);
+            Self(Protected::new(key))
+        }
+    }   
+
+    /// A pair of keys that are guaranteed to be different when generated.
+    #[derive(Clone, Debug)]
+    pub(crate) struct DifferingKeyPair(pub Key, pub Key);
+
+    #[cfg(test)]
+    impl quickcheck::Arbitrary for DifferingKeyPair {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            let raw_a = gen_array(g);
+            let mut raw_b = gen_array(g);
+            while raw_a == raw_b {
+                raw_b = gen_array(g);
+            }
+            Self(Key::from(raw_a), Key::from(raw_b))
+        }
+    }
+
 }

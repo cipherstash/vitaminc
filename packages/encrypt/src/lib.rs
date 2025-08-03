@@ -30,8 +30,7 @@ pub fn encrypt<T>(key: &Key, plaintext: T) -> Result<T::Encrypted, Unspecified>
 where
     T: Encrypt,
 {
-    let cipher = Aes256Cipher::new();
-    plaintext.encrypt(key, &cipher)
+    Aes256Cipher::new(key).and_then(|cipher| plaintext.encrypt(&cipher))
 }
 
 /// Encrypt the given plaintext using the provided key and additional authenticated data (AAD).
@@ -53,8 +52,7 @@ where
     T: Encrypt + 'a,
     A: IntoAad<'a>,
 {
-    let cipher = Aes256Cipher::new();
-    plaintext.encrypt_with_aad(key, &cipher, aad)
+    Aes256Cipher::new(key).and_then(|cipher| plaintext.encrypt_with_aad(&cipher, aad))
 }
 
 /// Decrypt the given ciphertext using the provided key.
@@ -68,8 +66,7 @@ pub fn decrypt<T>(key: &Key, ciphertext: T::Encrypted) -> Result<T, Unspecified>
 where
     T: Decrypt,
 {
-    let cipher = Aes256Cipher::new();
-    T::decrypt(ciphertext, key, &cipher)
+    Aes256Cipher::new(key).and_then(|cipher| T::decrypt(ciphertext, &cipher))
 }
 
 /// Decrypt the given ciphertext using the provided key and additional authenticated data (AAD).
@@ -85,6 +82,5 @@ where
     T: Decrypt,
     A: IntoAad<'a>,
 {
-    let cipher = Aes256Cipher::new();
-    T::decrypt_with_aad(ciphertext, key, &cipher, aad)
+    Aes256Cipher::new(key).and_then(|cipher| T::decrypt_with_aad(ciphertext, &cipher, aad))
 }
