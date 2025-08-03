@@ -36,11 +36,7 @@ pub struct EncryptedKey(LocalCipherText);
 impl Encrypt for Key {
     type Encrypted = EncryptedKey;
 
-    fn encrypt_with_aad<'a, C, A>(
-        self,
-        cipher: &C,
-        aad: A,
-    ) -> Result<Self::Encrypted, Unspecified>
+    fn encrypt_with_aad<'a, C, A>(self, cipher: &C, aad: A) -> Result<Self::Encrypted, Unspecified>
     where
         C: Cipher,
         A: IntoAad<'a>,
@@ -83,7 +79,7 @@ pub(crate) mod tests {
             let key = gen_array(g);
             Self(Protected::new(key))
         }
-    }   
+    }
 
     /// A pair of keys that are guaranteed to be different when generated.
     #[derive(Clone, Debug)]
@@ -100,5 +96,4 @@ pub(crate) mod tests {
             Self(Key::from(raw_a), Key::from(raw_b))
         }
     }
-
 }

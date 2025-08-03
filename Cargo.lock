@@ -1855,6 +1855,7 @@ dependencies = [
  "bitvec",
  "digest",
  "opaque-debug",
+ "quickcheck",
  "serde",
  "serde_bytes",
  "serde_json",

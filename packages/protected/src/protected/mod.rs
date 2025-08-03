@@ -104,6 +104,17 @@ where
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<T> quickcheck::Arbitrary for Protected<T>
+where
+    T: quickcheck::Arbitrary + Zeroize,
+{
+    fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+        let inner = T::arbitrary(g);
+        Self::new(inner)
+    }
+}
+
 /// Convenience function to flatten an array of [Protected] into a [Protected] array.
 ///
 /// # Example

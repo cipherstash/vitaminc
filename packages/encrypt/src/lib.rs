@@ -26,16 +26,16 @@ pub use vitaminc_aead::{
 /// which can lead to security vulnerabilities so they are not detailed here.
 ///
 /// See also [`decrypt`].
-/// 
+///
 /// # Example
-/// 
+///
 /// ```rust
 /// use vitaminc_encrypt::Key;
 /// use vitaminc_aead::Encrypt;
 /// let key = Key::from([0u8; 32]);
 /// let encrypted = vitaminc_encrypt::encrypt(&key, "message").unwrap();
 /// ```
-/// 
+///
 pub fn encrypt<T>(key: &Key, plaintext: T) -> Result<T::Encrypted, Unspecified>
 where
     T: Encrypt,
@@ -53,16 +53,16 @@ where
 /// Any type that implements the [`IntoAad`] trait can be used to provide AAD.
 ///
 /// See also [`decrypt_with_aad`] and [`vitaminc_aead::Aad`].
-/// 
+///
 /// # Example
-/// 
+///
 /// ```rust
 /// use vitaminc_encrypt::Key;
 /// use vitaminc_aead::Encrypt;
 /// let key = Key::from([0u8; 32]);
 /// let encrypted = vitaminc_encrypt::encrypt_with_aad(&key, "message", "additional-data").unwrap();
 /// ```
-/// 
+///
 pub fn encrypt_with_aad<'a, T, A>(
     key: &Key,
     plaintext: T,
@@ -83,7 +83,7 @@ where
 /// The type of `ciphertext` must match the `Encrypted` type defined in the [`Decrypt`] trait implementation for `T`.
 ///
 /// # Example
-/// 
+///
 /// ```rust
 /// use vitaminc_encrypt::Key;
 /// use vitaminc_aead::Decrypt;
@@ -103,9 +103,9 @@ where
 /// This is the reversed operation of [`encrypt_with_aad`].
 ///
 /// See also [`encrypt_with_aad`] and [`vitaminc_aead::Aad`].
-/// 
+///
 /// # Example
-/// 
+///
 /// ```rust
 /// use vitaminc_encrypt::Key;
 /// use vitaminc_aead::Decrypt;
@@ -114,11 +114,11 @@ where
 /// let decrypted: String = vitaminc_encrypt::decrypt_with_aad(&key, ciphertext, "additional-data").unwrap();
 /// assert_eq!(decrypted, "message");
 /// ```
-/// 
+///
 /// ## Incorrect AAD will fail
-/// 
+///
 /// If the AAD does not match the one used during encryption, decryption will fail with an [`Unspecified`] error.
-/// 
+///
 /// ```rust
 /// # use vitaminc_encrypt::Key;
 /// # use vitaminc_aead::Decrypt;
@@ -127,7 +127,7 @@ where
 /// let result = vitaminc_encrypt::decrypt_with_aad::<String, _>(&key, ciphertext, "wrong-data");
 /// assert!(result.is_err());
 /// ```
-/// 
+///
 pub fn decrypt_with_aad<'a, T, A>(
     key: &Key,
     ciphertext: T::Encrypted,

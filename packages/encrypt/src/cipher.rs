@@ -1,10 +1,10 @@
+use crate::Key;
 use aws_lc_rs::aead::{Aad as LcAad, LessSafeKey, Nonce as LcNonce, AES_256_GCM, NONCE_LEN};
 use vitaminc_aead::{
     Cipher, CipherTextBuilder, IntoAad, LocalCipherText, NonceGenerator, RandomNonceGenerator,
     Unspecified,
 };
 use vitaminc_protected::Controlled;
-use crate::Key;
 
 /// Implements the AES-256-GCM cipher using the `aws-lc-rs` library.
 pub struct Aes256Cipher {
@@ -14,19 +14,17 @@ pub struct Aes256Cipher {
 
 impl Aes256Cipher {
     pub fn new(key: &Key) -> Result<Self, Unspecified> {
-        key.as_unbound().map_err(|_| Unspecified).map(|unbound_key| Self {
-            nonce_generator: RandomNonceGenerator::init(),
-            key: LessSafeKey::new(unbound_key),
-        })
+        key.as_unbound()
+            .map_err(|_| Unspecified)
+            .map(|unbound_key| Self {
+                nonce_generator: RandomNonceGenerator::init(),
+                key: LessSafeKey::new(unbound_key),
+            })
     }
 }
 
 impl Cipher for Aes256Cipher {
-    fn encrypt_vec<'a, A>(
-        &self,
-        plaintext: Vec<u8>,
-        aad: A,
-    ) -> Result<LocalCipherText, Unspecified>
+    fn encrypt_vec<'a, A>(&self, plaintext: Vec<u8>, aad: A) -> Result<LocalCipherText, Unspecified>
     where
         A: IntoAad<'a>,
     {
@@ -59,10 +57,8 @@ impl Cipher for Aes256Cipher {
     {
         // Copy into a Vec with capacity N + tag_len
         let mut plaintext_vec = Vec::with_capacity(plaintext.len() + AES_256_GCM.tag_len());
-        plaintext_vec.extend_from_slice(&plaintext);
-        let result = self.encrypt_vec(plaintext_vec, aad);
-
-        result
+        plaintext_vec.extend_from_slice(plaintext);
+        self.encrypt_vec(plaintext_vec, aad)
     }
 
     fn decrypt_vec<'a, A>(
@@ -92,16 +88,16 @@ impl Cipher for Aes256Cipher {
 
 #[cfg(test)]
 mod test {
-    use quickcheck_macros::quickcheck;
     use super::*;
+    use quickcheck_macros::quickcheck;
 
     mod cipher {
         use super::*;
 
         mod roundtrip_bytes {
-            use quickcheck::TestResult;
-            use crate::key::tests::DifferingKeyPair;
             use super::*;
+            use crate::key::tests::DifferingKeyPair;
+            use quickcheck::TestResult;
 
             #[quickcheck]
             fn succeeds_with_no_aad(key: Key, plaintext: Vec<u8>) -> bool {
@@ -143,31 +139,31 @@ mod test {
             }
 
             #[quickcheck]
-            fn fails_with_incorrect_key(DifferingKeyPair(key_a, key_b): DifferingKeyPair, plaintext: Vec<u8>) -> TestResult {
+            fn fails_with_incorrect_key(
+                DifferingKeyPair(key_a, key_b): DifferingKeyPair,
+                plaintext: Vec<u8>,
+            ) -> TestResult {
                 let cipher_a = Aes256Cipher::new(&key_a).expect("Failed to create cipher A");
                 let ciphertext = cipher_a
                     .encrypt_vec(plaintext, ())
                     .expect("Encryption failed");
 
                 let cipher_b = Aes256Cipher::new(&key_b).expect("Failed to create cipher B");
-                TestResult::from_bool(cipher_b
-                    .decrypt_vec(ciphertext, ())
-                    .is_err())
+                TestResult::from_bool(cipher_b.decrypt_vec(ciphertext, ()).is_err())
             }
         }
     }
 
-    mod encrypt_traits {
+    mod encryptable_types {
         use super::*;
         use vitaminc_aead::{Decrypt, Encrypt};
+        use vitaminc_protected::Protected;
 
         #[quickcheck]
         fn roundtrip_string(key: Key, plaintext: String) -> bool {
             let check = plaintext.clone();
             let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-            let ciphertext = plaintext
-                .encrypt(&cipher)
-                .expect("Encryption failed");
+            let ciphertext = plaintext.encrypt(&cipher).expect("Encryption failed");
 
             let decrypted = String::decrypt(ciphertext, &cipher).expect("Decryption failed");
             decrypted == check
@@ -176,12 +172,35 @@ mod test {
         #[quickcheck]
         fn roundtrip_str(key: Key, plaintext: String) -> bool {
             let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-            let ciphertext = plaintext.as_str()
+            let ciphertext = plaintext
+                .as_str()
                 .encrypt(&cipher)
                 .expect("Encryption failed");
-            
+
             let decrypted = String::decrypt(ciphertext, &cipher).expect("Decryption failed");
             decrypted == plaintext
+        }
+
+        #[quickcheck]
+        fn roundtrip_protected_string(key: Key, plaintext: Protected<String>) -> bool {
+            let check = plaintext.clone();
+            let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+            let ciphertext = plaintext.encrypt(&cipher).expect("Encryption failed");
+
+            let decrypted: Protected<String> =
+                Protected::decrypt(ciphertext, &cipher).expect("Decryption failed");
+            decrypted.risky_unwrap() == check.risky_unwrap()
+        }
+
+        #[quickcheck]
+        fn roundtrip_protected_vec(key: Key, plaintext: Protected<Vec<u8>>) -> bool {
+            let check = plaintext.clone();
+            let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+            let ciphertext = plaintext.encrypt(&cipher).expect("Encryption failed");
+
+            let decrypted: Protected<Vec<u8>> =
+                Protected::decrypt(ciphertext, &cipher).expect("Decryption failed");
+            decrypted.risky_unwrap() == check.risky_unwrap()
         }
     }
 }

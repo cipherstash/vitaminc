@@ -19,5 +19,6 @@ vitaminc-random = { path = "../random" }
 zeroize = { workspace = true }
 
 [dev-dependencies]
+vitaminc-protected = { path = "../protected", features = ["arbitrary"] }
 quickcheck = "1.0.3"
 quickcheck_macros = "1.1.0"
