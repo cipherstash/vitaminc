@@ -21,11 +21,21 @@ pub use vitaminc_aead::{
 ///
 /// # Errors
 ///
-/// If the encryption fails, an `Unspecified` error is returned.
+/// If the encryption fails, an [`Unspecified`] error is returned.
 /// Specific errors may reveal information about the failure, such as key length issues or nonce generation problems
 /// which can lead to security vulnerabilities so they are not detailed here.
 ///
 /// See also [`decrypt`].
+/// 
+/// # Example
+/// 
+/// ```rust
+/// use vitaminc_encrypt::Key;
+/// use vitaminc_aead::Encrypt;
+/// let key = Key::from([0u8; 32]);
+/// let encrypted = vitaminc_encrypt::encrypt(&key, "message").unwrap();
+/// ```
+/// 
 pub fn encrypt<T>(key: &Key, plaintext: T) -> Result<T::Encrypted, Unspecified>
 where
     T: Encrypt,
@@ -43,6 +53,16 @@ where
 /// Any type that implements the [`IntoAad`] trait can be used to provide AAD.
 ///
 /// See also [`decrypt_with_aad`] and [`vitaminc_aead::Aad`].
+/// 
+/// # Example
+/// 
+/// ```rust
+/// use vitaminc_encrypt::Key;
+/// use vitaminc_aead::Encrypt;
+/// let key = Key::from([0u8; 32]);
+/// let encrypted = vitaminc_encrypt::encrypt_with_aad(&key, "message", "additional-data").unwrap();
+/// ```
+/// 
 pub fn encrypt_with_aad<'a, T, A>(
     key: &Key,
     plaintext: T,
@@ -56,12 +76,22 @@ where
 }
 
 /// Decrypt the given ciphertext using the provided key.
-/// Any type that implements the [`Decrypt`] trait can be used.
+/// Any type that implements the [`Decrypt`] trait can be used so long as the value was encrypted with the same key.
 ///
 /// # CipherText type
 ///
 /// The type of `ciphertext` must match the `Encrypted` type defined in the [`Decrypt`] trait implementation for `T`.
 ///
+/// # Example
+/// 
+/// ```rust
+/// use vitaminc_encrypt::Key;
+/// use vitaminc_aead::Decrypt;
+/// let key = Key::from([0u8; 32]);
+/// let ciphertext = vitaminc_encrypt::encrypt(&key, "message").unwrap();
+/// let decrypted: String = vitaminc_encrypt::decrypt(&key, ciphertext).unwrap();
+/// assert_eq!(decrypted, "message");
+/// ```
 pub fn decrypt<T>(key: &Key, ciphertext: T::Encrypted) -> Result<T, Unspecified>
 where
     T: Decrypt,
@@ -73,6 +103,31 @@ where
 /// This is the reversed operation of [`encrypt_with_aad`].
 ///
 /// See also [`encrypt_with_aad`] and [`vitaminc_aead::Aad`].
+/// 
+/// # Example
+/// 
+/// ```rust
+/// use vitaminc_encrypt::Key;
+/// use vitaminc_aead::Decrypt;
+/// let key = Key::from([0u8; 32]);
+/// let ciphertext = vitaminc_encrypt::encrypt_with_aad(&key, "message", "additional-data").unwrap();
+/// let decrypted: String = vitaminc_encrypt::decrypt_with_aad(&key, ciphertext, "additional-data").unwrap();
+/// assert_eq!(decrypted, "message");
+/// ```
+/// 
+/// ## Incorrect AAD will fail
+/// 
+/// If the AAD does not match the one used during encryption, decryption will fail with an [`Unspecified`] error.
+/// 
+/// ```rust
+/// # use vitaminc_encrypt::Key;
+/// # use vitaminc_aead::Decrypt;
+/// # let key = Key::from([0u8; 32]);
+/// let ciphertext = vitaminc_encrypt::encrypt_with_aad(&key, "message", "additional-data").unwrap();
+/// let result = vitaminc_encrypt::decrypt_with_aad::<String, _>(&key, ciphertext, "wrong-data");
+/// assert!(result.is_err());
+/// ```
+/// 
 pub fn decrypt_with_aad<'a, T, A>(
     key: &Key,
     ciphertext: T::Encrypted,
