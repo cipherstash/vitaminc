@@ -2,11 +2,11 @@
 mod cipher;
 mod key;
 
-pub use cipher::{Aes256Cipher, Unspecified};
+pub use cipher::Aes256Cipher;
 pub use key::{EncryptedKey, Key};
 
 // Re-exports
-pub use vitaminc_aead::{Aad, Cipher, Decrypt, Encrypt, IntoAad, LocalCipherText, Nonce};
+pub use vitaminc_aead::{Aad, Cipher, Decrypt, Encrypt, IntoAad, LocalCipherText, Nonce, Unspecified};
 
 /// Encrypt the given plaintext using the provided key.
 /// Any type that implements the [`Encrypt`] trait can be used.

@@ -1,12 +1,9 @@
 use aws_lc_rs::aead::{Aad as LcAad, LessSafeKey, Nonce as LcNonce, AES_256_GCM, NONCE_LEN};
 use vitaminc_aead::{
-    Cipher, CipherTextBuilder, IntoAad, LocalCipherText, NonceGenerator, RandomNonceGenerator,
+    Cipher, CipherTextBuilder, IntoAad, LocalCipherText, NonceGenerator, RandomNonceGenerator, Unspecified,
 };
 use vitaminc_protected::Controlled;
 use zeroize::Zeroize;
-
-pub use aws_lc_rs::error::Unspecified;
-
 use crate::Key;
 
 /// Implements the AES-256-GCM cipher using the `aws-lc-rs` library.
@@ -23,7 +20,6 @@ impl Aes256Cipher {
 }
 
 impl Cipher for Aes256Cipher {
-    type Error = Unspecified;
     type Key = Key;
 
     fn encrypt_bytes<'a, A>(
@@ -31,13 +27,13 @@ impl Cipher for Aes256Cipher {
         plaintext: Vec<u8>,
         key: &<Self as Cipher>::Key,
         aad: A,
-    ) -> Result<LocalCipherText, Self::Error>
+    ) -> Result<LocalCipherText, Unspecified>
     where
         A: IntoAad<'a>,
     {
-        let unboundkey = key.as_unbound()?;
-        let nonce = self.nonce_generator.generate();
-        let nonce_lc = LcNonce::try_assume_unique_for_key(nonce.as_ref())?;
+        let unboundkey = key.as_unbound().map_err(|_| Unspecified)?;
+        let nonce = self.nonce_generator.generate()?;
+        let nonce_lc = LcNonce::try_assume_unique_for_key(nonce.as_ref()).map_err(|_| Unspecified)?;
         let aad = aad.into_aad();
         let aad = LcAad::from(aad.as_bytes());
 
@@ -48,6 +44,7 @@ impl Cipher for Aes256Cipher {
                 LessSafeKey::new(unboundkey)
                     .seal_in_place_append_tag(nonce_lc, aad, &mut buf)
                     .map(|_| buf)
+                    .map_err(|_| Unspecified)
             })
             .build()
     }
@@ -57,7 +54,7 @@ impl Cipher for Aes256Cipher {
         mut plaintext: [u8; N],
         key: &Self::Key,
         aad: A,
-    ) -> Result<LocalCipherText, Self::Error>
+    ) -> Result<LocalCipherText, Unspecified>
     where
         A: IntoAad<'a>,
     {
@@ -76,11 +73,11 @@ impl Cipher for Aes256Cipher {
         ciphertext: LocalCipherText,
         key: &Self::Key,
         aad: A,
-    ) -> Result<Vec<u8>, Self::Error>
+    ) -> Result<Vec<u8>, Unspecified>
     where
         A: IntoAad<'a>,
     {
-        let unboundkey = key.as_unbound()?;
+        let unboundkey = key.as_unbound().map_err(|_| Unspecified)?;
         let (nonce, reader) = ciphertext.into_reader().read_nonce::<NONCE_LEN>();
         let nonce_lc = LcNonce::assume_unique_for_key(nonce.into_inner());
         let aad = aad.into_aad();
@@ -88,8 +85,10 @@ impl Cipher for Aes256Cipher {
 
         reader
             .accepts_plaintext_ok(|data| {
-                let plaintext = LessSafeKey::new(unboundkey).open_in_place(nonce_lc, aad, data)?;
-                Ok(plaintext.len())
+                LessSafeKey::new(unboundkey)
+                    .open_in_place(nonce_lc, aad, data)
+                    .map_err(|_| Unspecified)
+                    .map(|plaintext| plaintext.len())
             })
             .read()
             .map(|data| data.risky_unwrap())
@@ -100,7 +99,7 @@ impl Cipher for Aes256Cipher {
         ciphertext: LocalCipherText,
         key: &Self::Key,
         aad: A,
-    ) -> Result<[u8; N], Self::Error>
+    ) -> Result<[u8; N], Unspecified>
     where
         A: IntoAad<'a>,
     {
