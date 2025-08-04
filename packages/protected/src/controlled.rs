@@ -5,7 +5,6 @@ use zeroize::Zeroize;
 pub trait Controlled: ControlledPrivate {
     type Inner;
 
-    // TODO: Remove these methods (use new and risky_mut instead)
     fn init_from_inner(x: Self::Inner) -> Self;
     fn inner_mut(&mut self) -> &mut Self::Inner;
 
