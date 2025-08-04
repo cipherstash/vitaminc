@@ -88,5 +88,7 @@ mod private {
 
     /// Private trait that is used to hide the inner value of a Controlled type
     /// as well as preventing consumers from implementing Controlled themselves.
+    /// Marker trait used to seal the `Controlled` trait, preventing external implementations.
+    /// This trait is only implemented within this crate.
     pub trait ControlledPrivate {}
 }
