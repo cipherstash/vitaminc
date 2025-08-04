@@ -22,8 +22,6 @@ impl From<[u8; 32]> for Key {
     }
 }
 
-// TODO: How do we support a key "with ID" (i.e. a committing key)?
-// TODO: Also, cipher keys should implement Usage<Key> to ensure they are used correctly.
 
 impl Generatable for Key {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
