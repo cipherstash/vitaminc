@@ -10,7 +10,6 @@ use vitaminc_protected::Controlled;
 use zeroize::Zeroize;
 
 /// A secure random number generator that is safe to use for cryptographic purposes.
-// FIXME: RandChaCha20Rng is not zeroized and the crate doesn't support that feature
 pub struct SafeRand(rand_chacha::ChaCha20Rng);
 
 impl SafeRand {
