@@ -4,7 +4,7 @@
 pub use vitaminc_protected as protected;
 
 #[cfg(feature = "random")]
-#[cfg_attr(docsrs, doc(cfg(feature = "encrypt")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "random")))]
 #[doc(inline)]
 pub use vitaminc_random::{Generatable, RandomError, SafeRand, SeedableRng};
 
