@@ -22,7 +22,6 @@ impl From<[u8; 32]> for Key {
     }
 }
 
-
 impl Generatable for Key {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         Generatable::random(rng).map(Self)
