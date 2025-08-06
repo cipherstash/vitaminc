@@ -1,0 +1,13 @@
+[tools]
+rust = "1.87.0"
+
+[tasks.clippy]
+description = "Clippy lints (including tests and all features)"
+run = "cargo clippy --no-deps --tests --all-features -- -D warnings"
+
+[tasks.docs]
+dir = "{{ config_root }}/packages/vitaminc"
+description = "Build and generate the docs"
+run = "cargo doc --all-features --no-deps"
+tools.rust = "nightly"
+env.RUSTDOCFLAGS = "--cfg docsrs"

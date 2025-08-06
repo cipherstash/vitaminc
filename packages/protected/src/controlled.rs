@@ -3,6 +3,11 @@ use crate::{private::ControlledPrivate, AsProtectedRef, ProtectedRef, ReplaceT};
 use zeroize::Zeroize;
 
 pub trait Controlled: ControlledPrivate {
+    type Inner;
+
+    fn init_from_inner(x: Self::Inner) -> Self;
+    fn inner_mut(&mut self) -> &mut Self::Inner;
+
     /// Initialize a new instance of the [Controlled] type from the inner value.
     fn new(inner: Self::Inner) -> Self
     where
@@ -77,11 +82,35 @@ pub trait Controlled: ControlledPrivate {
     fn map<B, F>(self, f: F) -> <Self as ReplaceT<B>>::Output
     where
         Self: Sized + ReplaceT<B>,
-        F: FnOnce(<Self as ControlledPrivate>::Inner) -> B,
-        <Self as ReplaceT<B>>::Output: ControlledPrivate<Inner = B>,
+        F: FnOnce(<Self as Controlled>::Inner) -> B,
+        <Self as ReplaceT<B>>::Output: Controlled<Inner = B>,
         B: Zeroize,
     {
         <Self as ReplaceT<B>>::Output::init_from_inner(f(self.risky_unwrap()))
+    }
+
+    /// Similar to `map` but the closure returns a `Result` with the new inner value.
+    /// The result is a `Result` with the new [Controlled] type.
+    ///
+    /// # Example
+    ///
+    /// Map the inner value of a [Protected] to a new value that is wrapped in a `Result`.
+    ///
+    /// ```
+    /// use vitaminc_protected::{Controlled, Protected};
+    /// let x = Protected::new(vec![240, 159, 146, 150]);
+    /// let y = x.map_ok(String::from_utf8);
+    /// assert!(matches!(y, Ok(_)));
+    /// assert_eq!(y.unwrap().risky_unwrap(), "💖");
+    /// ```
+    fn map_ok<B, F, E>(self, f: F) -> Result<<Self as ReplaceT<B>>::Output, E>
+    where
+        Self: Sized + ReplaceT<B>,
+        F: FnOnce(<Self as Controlled>::Inner) -> Result<B, E>,
+        <Self as ReplaceT<B>>::Output: Controlled<Inner = B>,
+        B: Zeroize,
+    {
+        f(self.risky_unwrap()).map(<Self as ReplaceT<B>>::Output::init_from_inner)
     }
 
     /// Zip two [Controlled] values of the same type together with a function that combines them.
@@ -123,16 +152,21 @@ pub trait Controlled: ControlledPrivate {
     /// assert_eq!(z.risky_unwrap(), "hello world");
     /// ```
     ///
-    fn zip_ref<'a, A, Other, Out, F>(self, other: &'a Other, f: F) -> Protected<Out>
+    fn zip_ref<'a, A, Other, Out, F>(
+        self,
+        other: &'a Other,
+        f: F,
+    ) -> <Self as ReplaceT<Out>>::Output
     where
-        Self: Sized,
         A: ?Sized + 'a,
+        Self: Sized + ReplaceT<Out>,
+        <Self as ReplaceT<Out>>::Output: Controlled<Inner = Out>,
         Other: AsProtectedRef<'a, A>,
         Out: Zeroize,
         F: FnOnce(Self::Inner, &A) -> Out,
     {
         let arg: ProtectedRef<'a, A> = other.as_protected_ref();
-        Protected::init_from_inner(f(self.risky_unwrap(), arg.inner_ref()))
+        <Self as ReplaceT<Out>>::Output::init_from_inner(f(self.risky_unwrap(), arg.inner_ref()))
     }
 
     /// Similar to `map` but using references to that the inner value is updated in place.
@@ -214,10 +248,10 @@ pub trait Controlled: ControlledPrivate {
     /// `I` must be `Copy` because [Protected] always takes ownership of the inner value.
     fn iter<'a, I>(&'a self) -> impl Iterator<Item = Protected<I>>
     where
-        <Self as ControlledPrivate>::Inner: AsRef<[I]>,
+        <Self as Controlled>::Inner: AsRef<[I]>,
         I: Copy + 'a,
     {
-        self.inner().as_ref().iter().copied().map(Protected)
+        self.risky_ref().as_ref().iter().copied().map(Protected)
     }
 
     /// Replace the inner value with a new one.
@@ -248,6 +282,20 @@ pub trait Controlled: ControlledPrivate {
     ///
     // TODO: Consider feature flagging this method
     fn risky_unwrap(self) -> Self::Inner;
+
+    /// Provides a reference to the inner value.
+    /// This is a risky operation because it bypasses the protections that the [Controlled] type provides.
+    /// **Use with caution!**
+    fn risky_ref(&self) -> &Self::Inner;
+
+    /// Provides a mutable reference to the inner value.
+    /// This is a risky operation because it bypasses the protections that the [Controlled] type provides.
+    /// **Use with caution!**
+    // TODO: This is an escape hatch until I find a way to work around it
+    // It is needed for the seal_in_place methods for ring and aws-lc
+    fn risky_inner_mut(&mut self) -> &mut Self::Inner {
+        self.inner_mut()
+    }
 }
 
 // TODO: Implement Collect for Protected (or Paranoid) so we can use collect() on iterators

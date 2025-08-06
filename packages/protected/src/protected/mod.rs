@@ -56,24 +56,7 @@ impl<T> Protected<Option<T>> {
 
 impl<T: Zeroize> ZeroizeOnDrop for Protected<T> {}
 
-impl<T> ControlledPrivate for Protected<T>
-where
-    T: Zeroize,
-{
-    type Inner = T;
-
-    fn init_from_inner(x: Self::Inner) -> Self {
-        Self(x)
-    }
-
-    fn inner(&self) -> &T {
-        &self.0
-    }
-
-    fn inner_mut(&mut self) -> &mut Self::Inner {
-        &mut self.0
-    }
-}
+impl<T> ControlledPrivate for Protected<T> {}
 
 impl<T> Controlled for Protected<T>
 where
@@ -81,6 +64,20 @@ where
 {
     fn risky_unwrap(self) -> Self::Inner {
         self.0
+    }
+
+    type Inner = T;
+
+    fn init_from_inner(x: Self::Inner) -> Self {
+        Self(x)
+    }
+
+    fn risky_ref(&self) -> &T {
+        &self.0
+    }
+
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        &mut self.0
     }
 }
 
@@ -92,6 +89,29 @@ where
 {
     fn clone(&self) -> Self {
         Self(self.0.clone())
+    }
+}
+
+impl<T, A> Extend<A> for Protected<T>
+where
+    T: Extend<A>,
+{
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = A>,
+    {
+        self.0.extend(iter);
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<T> quickcheck::Arbitrary for Protected<T>
+where
+    T: quickcheck::Arbitrary + Zeroize,
+{
+    fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+        let inner = T::arbitrary(g);
+        Self::new(inner)
     }
 }
 

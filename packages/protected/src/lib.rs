@@ -9,6 +9,7 @@ mod ops;
 mod protected;
 mod usage;
 mod zeroed;
+use zeroize::Zeroize;
 
 #[cfg(feature = "bitvec")]
 pub mod bitvec;
@@ -22,10 +23,9 @@ pub use zeroed::Zeroed;
 pub use controlled::Controlled;
 pub use digest::ProtectedDigest;
 pub use equatable::{ConstantTimeEq, Equatable};
-pub use exportable::Exportable;
+pub use exportable::{Exportable, SafeDeserialize, SafeSerialize};
 pub use protected::{flatten_array, Protected};
 pub use usage::{Acceptable, DefaultScope, Scope, Usage};
-use zeroize::Zeroize;
 
 /// ReplaceT is a sealed trait that is used to replace the inner value of a type.
 /// It is only implemented for types that are Controlled.
@@ -68,22 +68,27 @@ where
     type Output = Exportable<Equatable<Protected<K>>>;
 }
 
+// Its reasonable to "restrict" a Usage by replacing it with an unscoped type
+// because any we are not increasing the scope of the type.
+impl<T, K, S> ReplaceT<K> for Usage<Protected<T>, S>
+where
+    Protected<K>: Controlled,
+{
+    type Output = Protected<K>;
+}
+
 mod private {
-    use crate::{Equatable, Exportable, Protected};
+    use crate::{Equatable, Exportable, Protected, Usage};
 
     pub trait Sealed {}
     impl<T> Sealed for Protected<T> {}
     impl<T> Sealed for Equatable<T> {}
     impl<T> Sealed for Exportable<T> {}
+    impl<T, S> Sealed for Usage<T, S> {}
 
     /// Private trait that is used to hide the inner value of a Controlled type
     /// as well as preventing consumers from implementing Controlled themselves.
-    pub trait ControlledPrivate {
-        type Inner;
-
-        // FIXME: We shouldn't be able to call these outside of the crate (but I think we can!)
-        fn init_from_inner(x: Self::Inner) -> Self;
-        fn inner(&self) -> &Self::Inner;
-        fn inner_mut(&mut self) -> &mut Self::Inner;
-    }
+    /// Marker trait used to seal the `Controlled` trait, preventing external implementations.
+    /// This trait is only implemented within this crate.
+    pub trait ControlledPrivate {}
 }

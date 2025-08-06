@@ -1,3 +1,4 @@
+#![deny(clippy::unwrap_used, clippy::todo, unsafe_code, unused_imports)]
 #![doc = include_str!("../README.md")]
 use vitaminc_protected::{Controlled, Zeroed};
 
@@ -23,12 +24,6 @@ where
     T: Controlled<Inner = [u8; N]>,
 {
     const SIZE: usize = N;
-}
-
-pub trait KeyInit: KeySize {
-    type Key: Controlled;
-
-    fn new(key: Self::Key) -> Self;
 }
 
 /// Trait for hash functions with fixed-size output.

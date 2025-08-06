@@ -1,6 +1,5 @@
+use crate::Controlled;
 use serde::{Deserialize, Deserializer};
-
-use crate::private::ControlledPrivate;
 
 pub trait SafeDeserialize<'de>: Sized {
     fn safe_deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -12,7 +11,7 @@ pub trait SafeDeserialize<'de>: Sized {
 impl<'de, T> SafeDeserialize<'de> for T
 where
     T::Inner: SafeDeserialize<'de>,
-    T: ControlledPrivate,
+    T: Controlled,
 {
     fn safe_deserialize<S>(deserializer: S) -> Result<Self, S::Error>
     where

@@ -57,7 +57,7 @@ pub struct Exportable<T>(pub(crate) T);
 // But using safe versions
 impl<T> Exportable<T> {
     /// Create a new `Exportable` from an inner value.
-    pub fn new(x: <Exportable<T> as ControlledPrivate>::Inner) -> Self
+    pub fn new(x: <Exportable<T> as Controlled>::Inner) -> Self
     where
         Self: Controlled,
     {
@@ -79,24 +79,33 @@ where
 /// PartialEq is implemented in constant time for any `Equatable` to any (nested) `Equatable`.
 impl<T, O> PartialEq<O> for Exportable<T>
 where
-    T: ControlledPrivate,
-    O: ControlledPrivate,
-    <T as ControlledPrivate>::Inner: ConstantTimeEq<O::Inner>,
+    T: Controlled,
+    O: Controlled,
+    <T as Controlled>::Inner: ConstantTimeEq<O::Inner>,
 {
     fn eq(&self, other: &O) -> bool {
-        self.inner().constant_time_eq(other.inner())
+        self.risky_ref().constant_time_eq(other.risky_ref())
     }
 }
 
-impl<T: ControlledPrivate> ControlledPrivate for Exportable<T> {
+impl<T: ControlledPrivate> ControlledPrivate for Exportable<T> {}
+
+impl<T> Controlled for Exportable<T>
+where
+    T: Controlled,
+{
     type Inner = T::Inner;
+
+    fn risky_unwrap(self) -> Self::Inner {
+        self.0.risky_unwrap()
+    }
 
     fn init_from_inner(x: Self::Inner) -> Self {
         Self(T::init_from_inner(x))
     }
 
-    fn inner(&self) -> &Self::Inner {
-        self.0.inner()
+    fn risky_ref(&self) -> &Self::Inner {
+        self.0.risky_ref()
     }
 
     fn inner_mut(&mut self) -> &mut Self::Inner {
@@ -104,31 +113,34 @@ impl<T: ControlledPrivate> ControlledPrivate for Exportable<T> {
     }
 }
 
-impl<T> Controlled for Exportable<T>
+impl<T, A> Extend<A> for Exportable<T>
 where
-    T: Controlled,
+    T: Extend<A>,
 {
-    fn risky_unwrap(self) -> Self::Inner {
-        self.0.risky_unwrap()
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = A>,
+    {
+        self.0.extend(iter);
     }
 }
 
 impl<T> Serialize for Exportable<T>
 where
-    T: ControlledPrivate,
+    T: Controlled,
     T::Inner: SafeSerialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        self.inner().safe_serialize(serializer)
+        self.risky_ref().safe_serialize(serializer)
     }
 }
 
 impl<'de, T> Deserialize<'de> for Exportable<T>
 where
-    T: ControlledPrivate,
+    T: Controlled,
     T::Inner: SafeDeserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Exportable<T>, D::Error>

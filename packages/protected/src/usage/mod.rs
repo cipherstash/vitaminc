@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 pub struct Usage<T, Scope = DefaultScope>(pub(crate) T, pub(crate) PhantomData<Scope>);
 
 impl<T, S> Usage<T, S> {
-    pub fn new(x: <Usage<T, S> as ControlledPrivate>::Inner) -> Self
+    pub fn new(x: <Usage<T, S> as Controlled>::Inner) -> Self
     where
         Self: Controlled,
         S: Scope,
@@ -16,21 +16,7 @@ impl<T, S> Usage<T, S> {
     }
 }
 
-impl<T: ControlledPrivate, Scope> ControlledPrivate for Usage<T, Scope> {
-    type Inner = T::Inner;
-
-    fn init_from_inner(x: Self::Inner) -> Self {
-        Self(T::init_from_inner(x), PhantomData)
-    }
-
-    fn inner(&self) -> &Self::Inner {
-        self.0.inner()
-    }
-
-    fn inner_mut(&mut self) -> &mut Self::Inner {
-        self.0.inner_mut()
-    }
-}
+impl<T: ControlledPrivate, Scope> ControlledPrivate for Usage<T, Scope> {}
 
 impl<T, Scope> Controlled for Usage<T, Scope>
 where
@@ -38,6 +24,20 @@ where
 {
     fn risky_unwrap(self) -> Self::Inner {
         self.0.risky_unwrap()
+    }
+
+    type Inner = T::Inner;
+
+    fn init_from_inner(x: Self::Inner) -> Self {
+        Self(T::init_from_inner(x), PhantomData)
+    }
+
+    fn risky_ref(&self) -> &Self::Inner {
+        self.0.risky_ref()
+    }
+
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        self.0.inner_mut()
     }
 }
 
@@ -63,14 +63,14 @@ impl<T> Acceptable<DefaultScope> for Protected<T> {}
 /// For example, this allows us to serialize a `Usage<Exportable<Protected<[u8; 32]>>>` type.
 impl<T, A> Serialize for Usage<T, A>
 where
-    T: ControlledPrivate,
+    T: Controlled,
     T::Inner: SafeSerialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        self.inner().safe_serialize(serializer)
+        self.risky_ref().safe_serialize(serializer)
     }
 }
 

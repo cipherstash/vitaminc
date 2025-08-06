@@ -66,9 +66,9 @@ where
     T: AsRef<[u8]> + Zeroize,
 {
     fn update(&mut self, data: &Protected<T>) {
-        let pref: ProtectedRef<[u8]> = data.as_protected_ref();
+        let pref: ProtectedRef<T> = data.as_protected_ref();
         self.input.update_with_ref(pref, |input, data| {
-            input.extend(data);
+            input.extend(data.as_ref());
         });
     }
 }
@@ -120,16 +120,14 @@ where
     }
 }
 
-impl<const N: usize> AsyncFixedOutputReset<N, Protected<[u8; N]>> for AwsKmsHmac<N>
+impl<const N: usize, C> AsyncFixedOutputReset<N, C> for AwsKmsHmac<N>
 where
     Self: private::ValidMacSize<N>,
+    C: Controlled<Inner = [u8; N]>,
 {
     type Error = Error;
 
-    async fn try_finalize_into_reset(
-        &mut self,
-        out: &mut Protected<[u8; N]>,
-    ) -> Result<(), Self::Error> {
+    async fn try_finalize_into_reset(&mut self, out: &mut C) -> Result<(), Self::Error> {
         let output = self.generate_mac().await?;
         let response = Protected::new(output.into_inner());
 

@@ -1,0 +1,24 @@
+[package]
+name = "vitaminc-encrypt"
+documentation.workspace = true
+version.workspace = true
+repository.workspace = true
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+aws-lc-rs = "1.9.0"
+vitaminc-aead = { path = "../aead" }
+vitaminc-protected = { path = "../protected" }
+vitaminc-random = { path = "../random" }
+
+zeroize = { workspace = true }
+
+[dev-dependencies]
+vitaminc-protected = { path = "../protected", features = ["arbitrary"] }
+quickcheck = "1.0.3"
+quickcheck_macros = "1.1.0"

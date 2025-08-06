@@ -1,9 +1,12 @@
+#![cfg_attr(docsrs, feature(doc_auto_cfg, doc_cfg))]
 #![doc = include_str!("../README.md")]
 #[cfg(feature = "protected")]
 pub use vitaminc_protected as protected;
 
 #[cfg(feature = "random")]
-pub use vitaminc_random as random;
+#[cfg_attr(docsrs, doc(cfg(feature = "random")))]
+#[doc(inline)]
+pub use vitaminc_random::{Generatable, RandomError, SafeRand, SeedableRng};
 
 #[cfg(feature = "permutation")]
 pub use vitaminc_permutation as permutation;
@@ -16,3 +19,8 @@ pub use vitaminc_async_traits as async_traits;
 
 #[cfg(feature = "aws-kms")]
 pub use vitaminc_kms as aws_kms;
+
+#[cfg(feature = "encrypt")]
+#[cfg_attr(docsrs, doc(cfg(feature = "encrypt")))]
+#[doc(inline)]
+pub use vitaminc_encrypt::*;
