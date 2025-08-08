@@ -1,5 +1,5 @@
 use crate::{aad::IntoAad, cipher::Unspecified, Cipher, LocalCipherText};
-use vitaminc_protected::{Controlled, Protected};
+use vitaminc_protected::{Controlled, Equatable, Protected};
 use zeroize::Zeroize;
 
 pub trait Decrypt: Sized {
@@ -95,5 +95,26 @@ where
     {
         let inner = <Protected<T> as Controlled>::Inner::decrypt_with_aad(encrypted, cipher, aad)?;
         Ok(Protected::init_from_inner(inner))
+    }
+}
+
+impl<T> Decrypt for Equatable<T>
+where
+    Self: Controlled,
+    <Equatable<T> as Controlled>::Inner: Decrypt,
+{
+    type Encrypted = <<Equatable<T> as Controlled>::Inner as Decrypt>::Encrypted;
+
+    fn decrypt_with_aad<'a, C, A>(
+        encrypted: Self::Encrypted,
+        cipher: &C,
+        aad: A,
+    ) -> Result<Self, Unspecified>
+    where
+        C: Cipher,
+        A: IntoAad<'a>,
+    {
+        let inner = <Equatable<T> as Controlled>::Inner::decrypt_with_aad(encrypted, cipher, aad)?;
+        Ok(Equatable::init_from_inner(inner))
     }
 }

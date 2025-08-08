@@ -3,7 +3,7 @@ use crate::{
     cipher::{Cipher, Unspecified},
     LocalCipherText,
 };
-use vitaminc_protected::{Controlled, Protected};
+use vitaminc_protected::{Controlled, Equatable, Protected};
 use zeroize::Zeroize;
 
 pub trait Encrypt: Sized {
@@ -86,6 +86,23 @@ where
     <Protected<T> as Controlled>::Inner: Encrypt,
 {
     type Encrypted = <<Protected<T> as Controlled>::Inner as Encrypt>::Encrypted;
+
+    fn encrypt_with_aad<'a, C, A>(self, cipher: &C, aad: A) -> Result<Self::Encrypted, Unspecified>
+    where
+        C: Cipher,
+        A: IntoAad<'a>,
+        Self: 'a,
+    {
+        self.risky_unwrap().encrypt_with_aad(cipher, aad)
+    }
+}
+
+impl<T> Encrypt for Equatable<T>
+where
+    Self: Controlled,
+    <Equatable<T> as Controlled>::Inner: Encrypt,
+{
+    type Encrypted = <<Equatable<T> as Controlled>::Inner as Encrypt>::Encrypted;
 
     fn encrypt_with_aad<'a, C, A>(self, cipher: &C, aad: A) -> Result<Self::Encrypted, Unspecified>
     where
