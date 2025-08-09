@@ -6,6 +6,7 @@ mod digest;
 mod equatable;
 mod exportable;
 pub mod debug;
+pub mod timing_safe;
 mod ops;
 mod protected;
 mod usage;
