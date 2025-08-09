@@ -107,11 +107,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use zeroize::Zeroize;
-
-    use crate::{SafeRand, SeedableRng};
-
     use super::Generatable;
+    use crate::{SafeRand, SeedableRng};
+    use zeroize::Zeroize;
 
     fn assert_generatable<T>(rng: &mut SafeRand) -> T
     where

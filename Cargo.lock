@@ -1240,6 +1240,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "random-derives"
+version = "0.1.0-pre2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "regex"
 version = "1.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1882,6 +1891,7 @@ version = "0.1.0-pre2"
 dependencies = [
  "rand",
  "rand_chacha",
+ "random-derives",
  "thiserror",
  "vitaminc-protected",
  "zeroize",

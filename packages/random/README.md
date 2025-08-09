@@ -7,6 +7,34 @@ A carefully designed random number generator that is safe to use for cryptograph
 
 This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) framework to make cryptography code healthy.
 
+## Generatable
+
+Types implementing the [`Generatable`] trait can be generated randomly using [`SafeRand`].
+
+```rust
+use vitaminc_random::{Generatable, SafeRand, SeedableRng};
+
+let mut rng = SafeRand::from_entropy();
+let x: [u8; 32] = Generatable::random(&mut rng).unwrap();
+```
+
+You can implement `Generatable` for your own types using the derive macro:
+
+```rust
+use vitaminc_random::{Generatable, SafeRand, SeedableRng};
+
+#[derive(Generatable)]
+struct MyStruct {
+    id: u32,
+    key: [u8; 16],
+}
+
+// Create a random number generator and generate an instance of MyStruct.
+let mut rng = vitaminc_random::SafeRand::from_entropy();
+let instance: MyStruct = Generatable::random(&mut rng).unwrap();
+println!("Generated id: {}", instance.id);
+```
+
 ## Bounded Random Numbers
 
 The `BoundedRng` trait provides a way to generate random numbers within a specific range.

@@ -5,11 +5,15 @@ mod generatable;
 mod safe_rand;
 
 pub use bounded::BoundedRng;
+#[doc(inline)]
 pub use generatable::Generatable;
 pub use safe_rand::SafeRand;
 
 // Re-exports
 pub use rand::{Fill, RngCore, SeedableRng};
+
+/// Derive macro for `Generatable`
+pub use random_derives::Generatable;
 
 #[derive(Error, Debug)]
 pub enum RandomError {

@@ -1,15 +1,18 @@
 [workspace]
 resolver = "2"
 members = [
+    "packages/aead",
     "packages/async-traits",
+    "packages/encrypt",
     "packages/kms",
     "packages/protected",
+    "packages/protected-derive",
     "packages/password",
     "packages/permutation",
     "packages/random",
+    "packages/random-derives",
     "packages/traits",
     "packages/vitaminc",
-    "packages/encrypt", "packages/aead", "packages/protected-derive",
 ]
 
 [workspace.package]
