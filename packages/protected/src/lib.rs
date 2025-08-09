@@ -5,6 +5,7 @@ mod conversions;
 mod digest;
 mod equatable;
 mod exportable;
+pub mod debug;
 mod ops;
 mod protected;
 mod usage;

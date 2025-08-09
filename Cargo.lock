@@ -1164,6 +1164,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "protected-derive"
+version = "0.1.0-pre2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "quickcheck"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1855,6 +1864,7 @@ dependencies = [
  "bitvec",
  "digest",
  "opaque-debug",
+ "protected-derive",
  "quickcheck",
  "serde",
  "serde_bytes",
