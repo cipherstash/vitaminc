@@ -41,7 +41,7 @@ use zeroize::Zeroize;
 ///
 /// let t = ApiToken([0; 32]);
 /// let out = format!("{t:?}");
-/// assert!(out.contains("ApiToken (***)"));
+/// assert!(out.contains("ApiToken(\"***\")"));
 /// ```
 ///
 /// ### Works with generics
@@ -56,7 +56,7 @@ use zeroize::Zeroize;
 ///
 /// let env = Key::<32>([0u8; 32]);
 /// let out = format!("{env:?}");
-/// assert!(out.contains("Key<32> (***)"));
+/// assert!(out.contains("Key<32>(\"***\")"));
 /// ```
 ///
 /// ### Enums and unit-like types are supported
@@ -75,7 +75,32 @@ use zeroize::Zeroize;
 ///
 /// let s = SecretThing::B { x: 7, y: 9 };
 /// let out = format!("{s:?}");
-/// assert!(out.contains("SecretThing::B { x: ***, y: *** }"));
+/// assert!(out.contains("SecretThing::B {x: \"***\", y: \"***\"}"));
+/// ```
+///
+/// ### Marking non-sensitive fields
+///
+/// You can mark individual fields as non-sensitive using the `#[non_sensitive]` attribute.
+/// This is useful when you actually want to include certain fields in the debug output.
+///
+/// ```rust
+/// use vitaminc_protected::OpaqueDebug;
+///
+/// #[derive(OpaqueDebug)]
+/// struct HasNonSensitiveField {
+///     sensitive: String,
+///     #[non_sensitive]
+///     value: String,
+/// }
+///
+/// let out = format!(
+///     "{:?}",
+///     HasNonSensitiveField {
+///         sensitive: "do-not-print".into(),
+///         value: "ok-to-print".into(),
+///     }
+/// );
+/// assert!(out.contains("HasNonSensitiveField { sensitive: \"***\", value: \"ok-to-print\" }"));
 /// ```
 ///
 /// ### Using with Redacted wrapper (optional)
