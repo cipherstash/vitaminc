@@ -1,3 +1,6 @@
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use zeroize::Zeroize;
+
 /// Opaque `Debug` for secret-bearing types.
 ///
 /// This module provides the [`OpaqueDebug`] marker trait and a `#[derive(OpaqueDebug)]`
@@ -122,6 +125,20 @@ impl<T> Redacted<T> {
     pub const fn new(value: T) -> Self {
         Self(value)
     }
+
+    /// Consume the `Redacted` instance and return the inner value.
+    /// CAUTION: this will remove the opaque redaction if the inner type implements `Debug`.
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T> AsRef<T> for Redacted<T> {
+    /// Get a reference to the inner value.
+    /// CAUTION: this will remove the opaque redaction if the inner type implements `Debug`.
+    fn as_ref(&self) -> &T {
+        &self.0
+    }
 }
 
 impl<T> core::fmt::Debug for Redacted<T> {
@@ -131,6 +148,49 @@ impl<T> core::fmt::Debug for Redacted<T> {
 }
 
 impl<T> OpaqueDebug for Redacted<T> {}
+
+impl<T> Zeroize for Redacted<T>
+where
+    T: Zeroize,
+{
+    fn zeroize(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+impl<T> Clone for Redacted<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Redacted(self.0.clone())
+    }
+}
+
+impl<T> Serialize for Redacted<T>
+where
+    T: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str("Redacted")
+    }
+}
+
+impl<'de, T> Deserialize<'de> for Redacted<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let x = T::deserialize(deserializer)?;
+        Ok(Redacted(x))
+    }
+}
 
 #[cfg(test)]
 mod tests {
