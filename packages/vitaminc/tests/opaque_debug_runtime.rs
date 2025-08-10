@@ -120,10 +120,13 @@ fn non_sensitive_attr_skips_masking() {
         value: String,
     }
 
-    let out = format!("{:?}", HasNonSensitiveField {
-        sensitive: "do-not-print".into(),
-        value: "ok-to-print".into(),
-    });
+    let out = format!(
+        "{:?}",
+        HasNonSensitiveField {
+            sensitive: "do-not-print".into(),
+            value: "ok-to-print".into(),
+        }
+    );
     assert_eq!(out, format!("opaque_debug_runtime::non_sensitive_attr_skips_masking::HasNonSensitiveField {{ sensitive: \"***\", value: \"ok-to-print\" }}"));
 }
 
@@ -137,10 +140,13 @@ fn non_sensitive_attr_fails_to_skip_if_type_is_redacted() {
         value: Redacted<String>,
     }
 
-    let out = format!("{:?}", HasNonSensitiveField {
-        sensitive: "do-not-print".into(),
-        value: Redacted::new("ok-to-print".into()),
-    });
+    let out = format!(
+        "{:?}",
+        HasNonSensitiveField {
+            sensitive: "do-not-print".into(),
+            value: Redacted::new("ok-to-print".into()),
+        }
+    );
     assert_eq!(out, format!("opaque_debug_runtime::non_sensitive_attr_fails_to_skip_if_type_is_redacted::HasNonSensitiveField {{ sensitive: \"***\", value: Redacted<alloc::string::String ***> }}"));
 }
 
@@ -164,6 +170,9 @@ fn non_sensitive_tuple_struct_field() {
     #[derive(OpaqueDebug)]
     struct HasNonSensitiveField(String, #[non_sensitive] String);
 
-    let out = format!("{:?}", HasNonSensitiveField("do-not-print".into(), "ok-to-print".into()));
+    let out = format!(
+        "{:?}",
+        HasNonSensitiveField("do-not-print".into(), "ok-to-print".into())
+    );
     assert_eq!(out, "opaque_debug_runtime::non_sensitive_tuple_struct_field::HasNonSensitiveField(\"***\", \"ok-to-print\")");
 }

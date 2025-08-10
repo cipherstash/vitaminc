@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::{quote, quote_spanned};
-use syn::{Attribute, Data, DataEnum, DataStruct, DeriveInput, Fields, spanned::Spanned};
+use syn::{spanned::Spanned, Attribute, Data, DataEnum, DataStruct, DeriveInput, Fields};
 
 pub fn derive_opaque_debug(input: DeriveInput) -> TokenStream {
     let ident = input.ident.clone();
@@ -87,7 +87,7 @@ fn debug_impl_for_struct(
             // Use DebugStruct and decide per-field based on #[non_sensitive]
             let field_tokens = named.named.iter().map(|f| {
                 let fname = f.ident.as_ref().unwrap();
-                let key   = fname.to_string();
+                let key = fname.to_string();
                 if has_non_sensitive(&f.attrs) {
                     // show actual value
                     quote_spanned! { f.span() =>
@@ -206,7 +206,9 @@ fn debug_impl_for_enum(
             }
 
             syn::Fields::Named(fields) => {
-                let ids: Vec<_> = fields.named.iter()
+                let ids: Vec<_> = fields
+                    .named
+                    .iter()
                     .map(|f| f.ident.as_ref().unwrap().clone())
                     .collect();
 
