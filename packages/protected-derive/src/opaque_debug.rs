@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
-use quote::quote;
-use syn::{Data, DataEnum, DataStruct, DeriveInput, Fields};
+use quote::{quote, quote_spanned};
+use syn::{Attribute, Data, DataEnum, DataStruct, DeriveInput, Fields, spanned::Spanned};
 
 pub fn derive_opaque_debug(input: DeriveInput) -> TokenStream {
     let ident = input.ident.clone();
@@ -47,6 +47,10 @@ pub fn derive_opaque_debug(input: DeriveInput) -> TokenStream {
     quote!(#marker_impl #dbg_impl).into()
 }
 
+fn has_non_sensitive(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|a| a.path().is_ident("non_sensitive"))
+}
+
 /// Parse `#[opaque_debug(mask = "...")]` using syn v2 `parse_nested_meta`.
 fn parse_mask_attr(input: &DeriveInput) -> String {
     let mut mask = "***".to_string();
@@ -80,38 +84,56 @@ fn debug_impl_for_struct(
 ) -> proc_macro2::TokenStream {
     match &ds.fields {
         Fields::Named(named) => {
-            // Type { a: ***, b: *** }
-            let mut parts = Vec::new();
-            for (i, f) in named.named.iter().enumerate() {
-                let name = f.ident.as_ref().unwrap();
-                let comma = if i == 0 { "" } else { ", " };
-                parts.push(format!("{}{}: {}", comma, name, mask));
-            }
-            let fmt_body = format!("{{ {} }}", parts.concat());
+            // Use DebugStruct and decide per-field based on #[non_sensitive]
+            let field_tokens = named.named.iter().map(|f| {
+                let fname = f.ident.as_ref().unwrap();
+                let key   = fname.to_string();
+                if has_non_sensitive(&f.attrs) {
+                    // show actual value
+                    quote_spanned! { f.span() =>
+                        ds.field(#key, &self.#fname);
+                    }
+                } else {
+                    // mask
+                    quote_spanned! { f.span() =>
+                        ds.field(#key, &#mask);
+                    }
+                }
+            });
 
             quote! {
                 impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
                     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                         let tn = ::core::any::type_name::<#ident #ty_generics>();
-                        write!(f, "{} {}", tn, #fmt_body)
+                        let mut ds = f.debug_struct(tn);
+                        #(#field_tokens)*
+                        ds.finish()
                     }
                 }
             }
         }
         Fields::Unnamed(unnamed) => {
-            // Type(***, ***, ...)
-            let mut parts = Vec::new();
-            for i in 0..unnamed.unnamed.len() {
-                let comma = if i == 0 { "" } else { ", " };
-                parts.push(format!("{}{}", comma, mask));
-            }
-            let fmt_body = format!("({})", parts.concat());
+            // Use DebugTuple and decide per-field based on #[non_sensitive]
+            let field_tokens = unnamed.unnamed.iter().enumerate().map(|(i, f)| {
+                let idx = syn::Index::from(i);
+                if has_non_sensitive(&f.attrs) {
+                    quote_spanned! { f.span() =>
+                        dt.field(&self.#idx);
+                    }
+                } else {
+                    quote_spanned! { f.span() =>
+                        dt.field(&#mask);
+                    }
+                }
+            });
 
             quote! {
                 impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
                     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                         let tn = ::core::any::type_name::<#ident #ty_generics>();
-                        write!(f, "{} {}", tn, #fmt_body)
+                        let mut dt = f.debug_tuple(tn);
+                        #(#field_tokens)*
+                        dt.finish()
                     }
                 }
             }
@@ -133,53 +155,81 @@ fn debug_impl_for_struct(
 fn debug_impl_for_enum(
     ident: &syn::Ident,
     de: &DataEnum,
-    impl_generics: &impl quote::ToTokens,
+    _impl_generics: &impl quote::ToTokens,
     ty_generics: &impl quote::ToTokens,
-    where_clause: Option<&syn::WhereClause>,
+    _where_clause: Option<&syn::WhereClause>,
     mask: &str,
 ) -> proc_macro2::TokenStream {
     let mut arms = Vec::new();
 
     for v in &de.variants {
         let v_ident = &v.ident;
+        let variant_ns = has_non_sensitive(&v.attrs);
+
         match &v.fields {
-            Fields::Named(named) => {
-                // Type::Variant { a: ***, b: *** }
-                let mut parts = Vec::new();
-                for (i, f) in named.named.iter().enumerate() {
-                    let fname = f.ident.as_ref().unwrap();
-                    let comma = if i == 0 { "" } else { ", " };
-                    parts.push(format!("{}{}: {}", comma, fname, mask));
-                }
-                let body = format!("{{ {} }}", parts.concat());
-                arms.push(quote! {
-                    Self::#v_ident { .. } => {
-                        let tn = ::core::any::type_name::<#ident #ty_generics>();
-                        write!(f, "{}::{} {}", tn, stringify!(#v_ident), #body)
-                    }
-                });
-            }
-            Fields::Unnamed(unnamed) => {
-                // Type::Variant(***, ***)
-                let mut parts = Vec::new();
-                for i in 0..unnamed.unnamed.len() {
-                    let comma = if i == 0 { "" } else { ", " };
-                    parts.push(format!("{}{}", comma, mask));
-                }
-                let body = format!("({})", parts.concat());
-                arms.push(quote! {
-                    Self::#v_ident(..) => {
-                        let tn = ::core::any::type_name::<#ident #ty_generics>();
-                        write!(f, "{}::{} {}", tn, stringify!(#v_ident), #body)
-                    }
-                });
-            }
-            Fields::Unit => {
-                // Type::Variant
+            syn::Fields::Unit => {
                 arms.push(quote! {
                     Self::#v_ident => {
                         let tn = ::core::any::type_name::<#ident #ty_generics>();
-                        write!(f, "{}::{}", tn, stringify!(#v_ident))
+                        write!(f, "{}::{}", tn, ::core::stringify!(#v_ident))
+                    }
+                });
+            }
+
+            syn::Fields::Unnamed(fields) => {
+                // bind each field by ref
+                let bind_ids: Vec<syn::Ident> = (0..fields.unnamed.len())
+                    .map(|i| syn::Ident::new(&format!("__f{}", i), v.span()))
+                    .collect();
+
+                let pat = quote! { #( ref #bind_ids ),* };
+
+                // per-field write with commas and masking
+                let writes = bind_ids.iter().enumerate().map(|(i, ident_i)| {
+                    let comma = if i == 0 { "" } else { ", " };
+                    let field_attrs = &fields.unnamed[i].attrs;
+                    if variant_ns || has_non_sensitive(field_attrs) {
+                        quote! { write!(f, concat!(#comma, "{:?}"), #ident_i)?; }
+                    } else {
+                        quote! { write!(f, concat!(#comma, "{:?}"), #mask)?; }
+                    }
+                });
+
+                arms.push(quote! {
+                    Self::#v_ident( #pat ) => {
+                        let tn = ::core::any::type_name::<#ident #ty_generics>();
+                        write!(f, "{}::{}(", tn, ::core::stringify!(#v_ident))?;
+                        #(#writes)*
+                        write!(f, ")")
+                    }
+                });
+            }
+
+            syn::Fields::Named(fields) => {
+                let ids: Vec<_> = fields.named.iter()
+                    .map(|f| f.ident.as_ref().unwrap().clone())
+                    .collect();
+
+                let pat_bindings = ids.iter().map(|id| quote!(ref #id));
+
+                // per-field write with key, commas, and masking
+                let writes = fields.named.iter().enumerate().map(|(i, f)| {
+                    let id = f.ident.as_ref().unwrap();
+                    let key = id.to_string();
+                    let prefix = if i == 0 { "" } else { ", " };
+                    if variant_ns || has_non_sensitive(&f.attrs) {
+                        quote! { write!(f, concat!(#prefix, #key, ": {:?}"), #id)?; }
+                    } else {
+                        quote! { write!(f, concat!(#prefix, #key, ": {:?}"), #mask)?; }
+                    }
+                });
+
+                arms.push(quote! {
+                    Self::#v_ident { #( #pat_bindings ),* } => {
+                        let tn = ::core::any::type_name::<#ident #ty_generics>();
+                        write!(f, "{}::{} {{", tn, ::core::stringify!(#v_ident))?;
+                        #(#writes)*
+                        write!(f, "}}")
                     }
                 });
             }
@@ -187,7 +237,7 @@ fn debug_impl_for_enum(
     }
 
     quote! {
-        impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
+        impl ::core::fmt::Debug for #ident #ty_generics {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 match self {
                     #(#arms),*
