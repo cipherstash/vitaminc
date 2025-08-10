@@ -23,7 +23,6 @@ vitaminc-traits = { path = "../traits", version = "0.1.0-pre", optional = true }
 vitaminc-async-traits = { path = "../async-traits", version = "0.1.0-pre", optional = true }
 vitaminc-encrypt = { path = "../encrypt", version = "0.1.0-pre", optional = true }
 
-
 [features]
 protected = ["dep:vitaminc-protected"]
 random = ["dep:vitaminc-random"]
@@ -36,6 +35,11 @@ encrypt = ["traits", "dep:vitaminc-encrypt"]
 [[test]]
 name = "timing_safe_runtime"
 path = "tests/timing_safe_runtime.rs"
+required-features = ["protected"]
+
+[[test]]
+name = "opaque_debug_runtime"
+path = "tests/opaque_debug_runtime.rs"
 required-features = ["protected"]
 
 [dev-dependencies.vitaminc]
