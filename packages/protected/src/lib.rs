@@ -2,10 +2,10 @@
 mod as_protected_ref;
 mod controlled;
 mod conversions;
+pub mod debug;
 mod digest;
 mod equatable;
 mod exportable;
-pub mod debug;
 mod ops;
 mod protected;
 mod usage;
