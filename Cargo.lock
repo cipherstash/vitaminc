@@ -1788,6 +1788,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 name = "vitaminc"
 version = "0.1.0-pre2"
 dependencies = [
+ "vitaminc",
  "vitaminc-async-traits",
  "vitaminc-encrypt",
  "vitaminc-kms",
@@ -1871,6 +1872,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "subtle",
+ "vitaminc",
  "zeroize",
 ]
 

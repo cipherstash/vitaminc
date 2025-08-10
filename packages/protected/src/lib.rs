@@ -2,13 +2,13 @@
 mod as_protected_ref;
 mod controlled;
 mod conversions;
+mod debug;
 mod digest;
 mod equatable;
 mod exportable;
-pub mod debug;
-pub mod timing_safe;
 mod ops;
 mod protected;
+mod timing_safe;
 mod usage;
 mod zeroed;
 use zeroize::Zeroize;
@@ -28,6 +28,10 @@ pub use equatable::{ConstantTimeEq, Equatable};
 pub use exportable::{Exportable, SafeDeserialize, SafeSerialize};
 pub use protected::{flatten_array, Protected};
 pub use usage::{Acceptable, DefaultScope, Scope, Usage};
+
+pub use debug::{OpaqueDebug, Redacted};
+pub use protected_derive::{OpaqueDebug, TimingSafeEq};
+pub use timing_safe::{Choice, TimingSafeEq};
 
 /// ReplaceT is a sealed trait that is used to replace the inner value of a type.
 /// It is only implemented for types that are Controlled.

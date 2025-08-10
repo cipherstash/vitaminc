@@ -1,11 +1,9 @@
 #![allow(dead_code)]
-
-use protected_derive::OpaqueDebug;
-use vitaminc_protected::timing_safe::{TimingSafe, TimingSafeEq};
+use vitaminc::protected::{OpaqueDebug, TimingSafeEq};
 
 #[test]
 fn struct_named_fields_anded() {
-    #[derive(TimingSafe, Debug)]
+    #[derive(TimingSafeEq, Debug)]
     struct Pair {
         a: u8,
         b: u8,
@@ -26,7 +24,7 @@ fn struct_named_fields_anded() {
 
 #[test]
 fn struct_tuple_fields_anded() {
-    #[derive(TimingSafe, Debug)]
+    #[derive(TimingSafeEq, Debug)]
     struct Triple(u8, u8, u8);
 
     let a = Triple(9, 8, 7);
@@ -42,7 +40,7 @@ fn struct_tuple_fields_anded() {
 
 #[test]
 fn struct_unit_is_always_equal() {
-    #[derive(TimingSafe, Debug)]
+    #[derive(TimingSafeEq, Debug)]
     struct Marker;
 
     let m1 = Marker;
@@ -53,7 +51,7 @@ fn struct_unit_is_always_equal() {
 
 #[test]
 fn enum_variants_match_and_fields_anded() {
-    #[derive(TimingSafe, Debug)]
+    #[derive(TimingSafeEq, Debug)]
     enum E {
         Unit,
         Tup(u8, u8),
@@ -92,10 +90,10 @@ fn enum_variants_match_and_fields_anded() {
 
 #[test]
 fn generics_and_const_generics_preserved() {
-    #[derive(TimingSafe, OpaqueDebug)]
+    #[derive(TimingSafeEq, OpaqueDebug)]
     struct Wrap<T>(T);
 
-    #[derive(TimingSafe, OpaqueDebug, Clone, Copy)]
+    #[derive(TimingSafeEq, OpaqueDebug, Clone, Copy)]
     struct Key<const N: usize>([u8; N]);
 
     let k1 = Key::<3>([1, 2, 3]);
@@ -115,7 +113,7 @@ fn generics_and_const_generics_preserved() {
 
 #[test]
 fn partialeq_routes_through_ts_eq() {
-    #[derive(TimingSafe, Debug)]
+    #[derive(TimingSafeEq, Debug)]
     struct Demo(u8);
 
     let a = Demo(7);
@@ -132,7 +130,7 @@ fn partialeq_routes_through_ts_eq() {
 
 #[test]
 fn eq_is_implemented() {
-    #[derive(TimingSafe)]
+    #[derive(TimingSafeEq)]
     struct Demo(u8);
     // If this compiles, `Eq` is implemented. Check reflexivity/symmetry quickly.
     let a = Demo(1);
@@ -142,8 +140,9 @@ fn eq_is_implemented() {
     // reflexive
     assert!(a == a);
 
-    // symmetric
-    assert!(a == b && b == a);
+    // associative
+    assert!(a == b);
+    assert!(b == a);
 
     // distinguish
     assert!(a != c);

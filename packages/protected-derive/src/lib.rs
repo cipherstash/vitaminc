@@ -1,5 +1,5 @@
 use proc_macro::TokenStream;
-use quote::{quote, format_ident};
+use quote::{format_ident, quote};
 use syn::{parse_macro_input, Data, DataEnum, DataStruct, DeriveInput, Fields, Type};
 
 #[proc_macro_derive(OpaqueDebug, attributes(opaque_debug))]
@@ -14,7 +14,7 @@ pub fn derive_opaque_debug(input: TokenStream) -> TokenStream {
     let mask = parse_mask_attr(&input);
 
     let marker_impl = quote! {
-        impl #impl_generics ::vitaminc_protected::debug::OpaqueDebug for #ident #ty_generics #where_clause {}
+        impl #impl_generics OpaqueDebug for #ident #ty_generics #where_clause {}
     };
 
     let dbg_impl = match &input.data {
@@ -200,12 +200,7 @@ fn debug_impl_for_enum(
     }
 }
 
-
-
-
-
-
-#[proc_macro_derive(TimingSafe)]
+#[proc_macro_derive(TimingSafeEq)]
 pub fn derive_timing_safe(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let ident = input.ident.clone();
@@ -218,9 +213,9 @@ pub fn derive_timing_safe(input: TokenStream) -> TokenStream {
     {
         let where_clause = generics.make_where_clause();
         for ty in field_types {
-            where_clause.predicates.push(
-                syn::parse_quote!(#ty: ::vitaminc_protected::timing_safe::TimingSafeEq)
-            );
+            where_clause
+                .predicates
+                .push(syn::parse_quote!(#ty: ::vitaminc::protected::TimingSafeEq));
         }
     }
 
@@ -229,16 +224,17 @@ pub fn derive_timing_safe(input: TokenStream) -> TokenStream {
     // --- impl TimingSafeEq ---
     let ts_impl = match &input.data {
         Data::Struct(ds) => ts_impl_struct(&ident, ds, &impl_generics, &ty_generics, where_clause),
-        Data::Enum(de)   => ts_impl_enum  (&ident, de, &impl_generics, &ty_generics, where_clause),
-        Data::Union(_)   => {
+        Data::Enum(de) => ts_impl_enum(&ident, de, &impl_generics, &ty_generics, where_clause),
+        Data::Union(_) => {
             // For unions, provide a conservative implementation: only equal by reference identity is impossible here;
             // so we treat unions as unequal unless the type has no fields (which unions don't). Safer to refuse:
             // But to keep it compiling, return false (0). Adjust if you decide to support unions later.
             quote! {
-                impl #impl_generics ::vitaminc_protected::timing_safe::TimingSafeEq for #ident #ty_generics #where_clause {
+                #[automatically_derived]
+                impl #impl_generics TimingSafeEq for #ident #ty_generics #where_clause {
                     #[inline]
-                    fn ts_eq(&self, _other: &Self) -> ::subtle::Choice {
-                        ::subtle::Choice::from(0u8)
+                    fn ts_eq(&self, _other: &Self) -> ::vitaminc::protected::Choice {
+                        ::vitaminc::protected::Choice::from(0u8)
                     }
                 }
             }
@@ -247,6 +243,7 @@ pub fn derive_timing_safe(input: TokenStream) -> TokenStream {
 
     // --- impl PartialEq / Eq based on ts_eq ---
     let pe_impl = quote! {
+        #[automatically_derived]
         impl #impl_generics ::core::cmp::PartialEq for #ident #ty_generics #where_clause {
             #[inline]
             fn eq(&self, other: &Self) -> bool {
@@ -260,8 +257,8 @@ pub fn derive_timing_safe(input: TokenStream) -> TokenStream {
 }
 
 fn collect_field_types(data: &syn::Data) -> Vec<Type> {
-    use std::collections::BTreeSet;
     use quote::ToTokens;
+    use std::collections::BTreeSet;
 
     let mut set: BTreeSet<String> = BTreeSet::new();
     let mut out: Vec<Type> = Vec::new();
@@ -276,15 +273,31 @@ fn collect_field_types(data: &syn::Data) -> Vec<Type> {
 
     match data {
         Data::Struct(ds) => match &ds.fields {
-            Fields::Named(named)   => for f in &named.named   { push_ty(&f.ty); }
-            Fields::Unnamed(unnamed)=> for f in &unnamed.unnamed { push_ty(&f.ty); }
+            Fields::Named(named) => {
+                for f in &named.named {
+                    push_ty(&f.ty);
+                }
+            }
+            Fields::Unnamed(unnamed) => {
+                for f in &unnamed.unnamed {
+                    push_ty(&f.ty);
+                }
+            }
             Fields::Unit => {}
         },
         Data::Enum(de) => {
             for v in &de.variants {
                 match &v.fields {
-                    Fields::Named(named)   => for f in &named.named   { push_ty(&f.ty); }
-                    Fields::Unnamed(unnamed)=> for f in &unnamed.unnamed { push_ty(&f.ty); }
+                    Fields::Named(named) => {
+                        for f in &named.named {
+                            push_ty(&f.ty);
+                        }
+                    }
+                    Fields::Unnamed(unnamed) => {
+                        for f in &unnamed.unnamed {
+                            push_ty(&f.ty);
+                        }
+                    }
                     Fields::Unit => {}
                 }
             }
@@ -318,19 +331,20 @@ fn ts_impl_struct(
                 let r = format_ident!("__ts_rhs_{}", name);
                 lhs_bind.push(quote!( #name: ref #l ));
                 rhs_bind.push(quote!( #name: ref #r ));
-                compares.push(quote!( acc = acc & ::vitaminc_protected::timing_safe::TimingSafeEq::ts_eq(#l, #r); ));
+                compares.push(quote!( acc &= ::vitaminc::protected::TimingSafeEq::ts_eq(#l, #r); ));
             }
 
             quote! {
-                impl #impl_generics ::vitaminc_protected::timing_safe::TimingSafeEq for #ident #ty_generics #where_clause {
+                #[automatically_derived]
+                impl #impl_generics TimingSafeEq for #ident #ty_generics #where_clause {
                     #[inline]
-                    fn ts_eq(&self, other: &Self) -> ::subtle::Choice {
+                    fn ts_eq(&self, other: &Self) -> ::vitaminc::protected::Choice {
                         match (self, other) {
                             (
                                 Self { #(#lhs_bind,)* },
                                 Self { #(#rhs_bind,)* },
                             ) => {
-                                let mut acc = ::subtle::Choice::from(1u8);
+                                let mut acc = ::vitaminc::protected::Choice::from(1u8);
                                 #(#compares)*
                                 acc
                             }
@@ -345,17 +359,20 @@ fn ts_impl_struct(
             let lhs: Vec<_> = (0..n).map(|i| format_ident!("__ts_lhs_{}", i)).collect();
             let rhs: Vec<_> = (0..n).map(|i| format_ident!("__ts_rhs_{}", i)).collect();
 
-            let compares: Vec<_> = lhs.iter().zip(rhs.iter())
-                .map(|(l, r)| quote!( acc = acc & ::vitaminc_protected::timing_safe::TimingSafeEq::ts_eq(#l, #r); ))
+            let compares: Vec<_> = lhs
+                .iter()
+                .zip(rhs.iter())
+                .map(|(l, r)| quote!( acc &= ::vitaminc::protected::TimingSafeEq::ts_eq(#l, #r); ))
                 .collect();
 
             quote! {
-                impl #impl_generics ::vitaminc_protected::timing_safe::TimingSafeEq for #ident #ty_generics #where_clause {
+                #[automatically_derived]
+                impl #impl_generics TimingSafeEq for #ident #ty_generics #where_clause {
                     #[inline]
-                    fn ts_eq(&self, other: &Self) -> ::subtle::Choice {
+                    fn ts_eq(&self, other: &Self) -> ::vitaminc::protected::Choice {
                         let Self( #(ref #lhs),* ) = self;
                         let Self( #(ref #rhs),* ) = other;
-                        let mut acc = ::subtle::Choice::from(1u8);
+                        let mut acc = ::vitaminc::protected::Choice::from(1u8);
                         #(#compares)*
                         acc
                     }
@@ -365,10 +382,11 @@ fn ts_impl_struct(
         Fields::Unit => {
             // Always equal (no secret-bearing fields)
             quote! {
-                impl #impl_generics ::vitaminc_protected::timing_safe::TimingSafeEq for #ident #ty_generics #where_clause {
+                #[automatically_derived]
+                impl #impl_generics TimingSafeEq for #ident #ty_generics #where_clause {
                     #[inline]
-                    fn ts_eq(&self, _other: &Self) -> ::subtle::Choice {
-                        ::subtle::Choice::from(1u8)
+                    fn ts_eq(&self, _other: &Self) -> ::vitaminc::protected::Choice {
+                        ::vitaminc::protected::Choice::from(1u8)
                     }
                 }
             }
@@ -393,17 +411,19 @@ fn ts_impl_enum(
                 let mut lbind = Vec::new();
                 let mut rbind = Vec::new();
                 let mut compares = Vec::new();
+
                 for f in &named.named {
                     let fname = f.ident.as_ref().unwrap();
                     let l = format_ident!("__ts_lhs_{}_{}", vi, fname);
                     let r = format_ident!("__ts_rhs_{}_{}", vi, fname);
                     lbind.push(quote!( #fname: ref #l ));
                     rbind.push(quote!( #fname: ref #r ));
-                    compares.push(quote!( acc = acc & ::vitaminc_protected::timing_safe::TimingSafeEq::ts_eq(#l, #r); ));
+                    compares
+                        .push(quote!( acc &= ::vitaminc::protected::TimingSafeEq::ts_eq(#l, #r); ));
                 }
                 arms.push(quote! {
                     (Self::#v_ident { #(#lbind,)* }, Self::#v_ident { #(#rbind,)* }) => {
-                        let mut acc = ::subtle::Choice::from(1u8);
+                        let mut acc = ::vitaminc::protected::Choice::from(1u8);
                         #(#compares)*
                         acc
                     }
@@ -411,14 +431,18 @@ fn ts_impl_enum(
             }
             Fields::Unnamed(unnamed) => {
                 let n = unnamed.unnamed.len();
-                let lhs: Vec<_> = (0..n).map(|fi| format_ident!("__ts_lhs_{}_{}", vi, fi)).collect();
-                let rhs: Vec<_> = (0..n).map(|fi| format_ident!("__ts_rhs_{}_{}", vi, fi)).collect();
+                let lhs: Vec<_> = (0..n)
+                    .map(|fi| format_ident!("__ts_lhs_{}_{}", vi, fi))
+                    .collect();
+                let rhs: Vec<_> = (0..n)
+                    .map(|fi| format_ident!("__ts_rhs_{}_{}", vi, fi))
+                    .collect();
                 let compares: Vec<_> = lhs.iter().zip(rhs.iter())
-                    .map(|(l, r)| quote!( acc = acc & ::vitaminc_protected::timing_safe::TimingSafeEq::ts_eq(#l, #r); ))
+                    .map(|(l, r)| quote!( acc &= ::vitaminc::protected::TimingSafeEq::ts_eq(#l, #r); ))
                     .collect();
                 arms.push(quote! {
                     (Self::#v_ident( #(ref #lhs),* ), Self::#v_ident( #(ref #rhs),* )) => {
-                        let mut acc = ::subtle::Choice::from(1u8);
+                        let mut acc = ::vitaminc::protected::Choice::from(1u8);
                         #(#compares)*
                         acc
                     }
@@ -426,19 +450,20 @@ fn ts_impl_enum(
             }
             Fields::Unit => {
                 arms.push(quote! {
-                    (Self::#v_ident, Self::#v_ident) => ::subtle::Choice::from(1u8)
+                    (Self::#v_ident, Self::#v_ident) => ::vitaminc::protected::Choice::from(1u8)
                 });
             }
         }
     }
 
     // Non-matching variants are not equal.
-    arms.push(quote! { _ => ::subtle::Choice::from(0u8) });
+    arms.push(quote! { _ => ::vitaminc::protected::Choice::from(0u8) });
 
     quote! {
-        impl #impl_generics ::vitaminc_protected::timing_safe::TimingSafeEq for #ident #ty_generics #where_clause {
+        #[automatically_derived]
+        impl #impl_generics TimingSafeEq for #ident #ty_generics #where_clause {
             #[inline]
-            fn ts_eq(&self, other: &Self) -> ::subtle::Choice {
+            fn ts_eq(&self, other: &Self) -> ::vitaminc::protected::Choice {
                 match (self, other) {
                     #(#arms),*
                 }

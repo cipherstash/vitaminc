@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use vitaminc_protected::debug::OpaqueDebug;
+use vitaminc::protected::OpaqueDebug;
 
 #[test]
 fn no_plaintext_leak_in_debug() {
