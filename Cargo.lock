@@ -1164,6 +1164,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "protected-derive"
+version = "0.1.0-pre2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "quickcheck"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1779,6 +1788,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 name = "vitaminc"
 version = "0.1.0-pre2"
 dependencies = [
+ "vitaminc",
  "vitaminc-async-traits",
  "vitaminc-encrypt",
  "vitaminc-kms",
@@ -1855,12 +1865,14 @@ dependencies = [
  "bitvec",
  "digest",
  "opaque-debug",
+ "protected-derive",
  "quickcheck",
  "serde",
  "serde_bytes",
  "serde_json",
  "sha2",
  "subtle",
+ "vitaminc",
  "zeroize",
 ]
 

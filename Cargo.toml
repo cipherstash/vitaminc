@@ -9,7 +9,7 @@ members = [
     "packages/random",
     "packages/traits",
     "packages/vitaminc",
-    "packages/encrypt", "packages/aead",
+    "packages/encrypt", "packages/aead", "packages/protected-derive",
 ]
 
 [workspace.package]

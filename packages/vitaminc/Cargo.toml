@@ -31,3 +31,18 @@ traits = ["dep:vitaminc-traits"]
 async-traits = ["dep:vitaminc-async-traits", "traits"]
 aws-kms = ["traits", "dep:vitaminc-kms"]
 encrypt = ["traits", "dep:vitaminc-encrypt"]
+
+[[test]]
+name = "timing_safe_runtime"
+path = "tests/timing_safe_runtime.rs"
+required-features = ["protected"]
+
+[[test]]
+name = "opaque_debug_runtime"
+path = "tests/opaque_debug_runtime.rs"
+required-features = ["protected"]
+
+[dev-dependencies.vitaminc]
+path = "./"
+features = ["protected"]
+default-features = false
