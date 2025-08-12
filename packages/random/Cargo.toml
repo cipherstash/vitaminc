@@ -19,4 +19,5 @@ rand = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { workspace = true }
 
+random-derives = { path = "../random-derives" }
 vitaminc-protected = { version = "0.1.0-pre", path = "../protected" }
