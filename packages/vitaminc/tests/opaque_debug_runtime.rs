@@ -12,7 +12,7 @@ fn no_plaintext_leak_in_debug() {
     let s = S {
         secret: "do-not-leak".into(),
     };
-    let out = format!("{:?}", s);
+    let out = format!("{s:?}");
     assert!(!out.contains("do-not-leak"));
     assert!(out.contains("***"));
 }
@@ -29,7 +29,7 @@ fn struct_named_fields_are_masked() {
         user: "u".into(),
         pass: "p".into(),
     };
-    let out = format!("{:?}", c);
+    let out = format!("{c:?}");
     let tn = core::any::type_name::<Credentials>();
 
     assert!(
@@ -54,7 +54,7 @@ fn struct_unit_prints_type_name_only() {
     #[derive(OpaqueDebug)]
     struct Marker;
 
-    let out = format!("{:?}", Marker);
+    let out = format!("{Marker:?}");
     assert_eq!(out, core::any::type_name::<Marker>());
 }
 
@@ -70,16 +70,16 @@ fn enum_variants_masked() {
     let tn = core::any::type_name::<SecretThing>();
 
     let a = SecretThing::A(42);
-    assert_eq!(format!("{:?}", a), format!("{tn}::A(\"***\")"));
+    assert_eq!(format!("{a:?}"), format!("{tn}::A(\"***\")"));
 
     let b = SecretThing::B { x: 7, y: 9 };
     assert!(
-        format!("{:?}", b) == format!("{tn}::B {{x: \"***\", y: \"***\"}}")
-            || format!("{:?}", b) == format!("{tn}::B {{y: \"***\", x: \"***\"}}")
+        format!("{b:?}") == format!("{tn}::B {{x: \"***\", y: \"***\"}}")
+            || format!("{b:?}") == format!("{tn}::B {{y: \"***\", x: \"***\"}}")
     );
 
     let c = SecretThing::C;
-    assert_eq!(format!("{:?}", c), format!("{tn}::C"));
+    assert_eq!(format!("{c:?}"), format!("{tn}::C"));
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn generics_and_const_generics_show_in_type_name() {
     struct Key<const N: usize>([u8; N]);
 
     let w = Wrapper(Key::<32>([0u8; 32]));
-    let out = format!("{:?}", w);
+    let out = format!("{w:?}");
 
     assert!(out.starts_with("")); // cheap guard
     assert!(out.contains("Wrapper"));

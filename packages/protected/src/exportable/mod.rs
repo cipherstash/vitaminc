@@ -162,7 +162,7 @@ mod tests {
     fn test_opaque_debug() {
         let x: Exportable<Protected<[u8; 32]>> = Exportable::new([0u8; 32]);
         assert_eq!(
-            format!("{:?}", x),
+            format!("{x:?}"),
             "Exportable(Protected<[u8; 32]> { ... })"
         );
     }
