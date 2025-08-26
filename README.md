@@ -34,6 +34,18 @@ Or, if you only need a specific capability, you can install a crate directly:
 cargo add vitaminc-protected
 ```
 
+## Testing
+
+Prerequisites:
+
+* [localstack](https://github.com/localstack/localstack) is installed
+
+To run the tests:
+
+* Start localstack (typically done by running `localstack start` from the shell)
+* `cargo test`
+
+
 # Features and sub-crates
 
 | Feature      | Source            | Crates.io                                                                                              | Documentation |
