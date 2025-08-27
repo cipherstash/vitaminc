@@ -179,7 +179,7 @@ fn debug_impl_for_enum(
             syn::Fields::Unnamed(fields) => {
                 // bind each field by ref
                 let bind_ids: Vec<syn::Ident> = (0..fields.unnamed.len())
-                    .map(|i| syn::Ident::new(&format!("__f{}", i), v.span()))
+                    .map(|i| syn::Ident::new(&format!("__f{i}"), v.span()))
                     .collect();
 
                 let pat = quote! { #( ref #bind_ids ),* };

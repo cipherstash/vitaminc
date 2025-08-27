@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     use aws_config::{BehaviorVersion, Region};
 
     let config = aws_sdk_kms::config::Builder::default()
-        .behavior_version(BehaviorVersion::v2024_03_28())
+        .behavior_version(BehaviorVersion::v2025_08_07())
         .region(Region::new("us-east-1"))
     #   .credentials_provider(creds)
         .endpoint_url(endpoint_url)

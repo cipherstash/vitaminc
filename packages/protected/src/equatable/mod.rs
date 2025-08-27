@@ -330,7 +330,7 @@ mod tests {
     #[test]
     fn test_opaque_debug() {
         let x: Equatable<Protected<[u8; 32]>> = Equatable::new([0u8; 32]);
-        assert_eq!(format!("{:?}", x), "Equatable(Protected<[u8; 32]> { ... })");
+        assert_eq!(format!("{x:?}"), "Equatable(Protected<[u8; 32]> { ... })");
     }
 
     #[test]

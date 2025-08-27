@@ -224,6 +224,6 @@ mod tests {
     #[test]
     fn test_redacted_debug() {
         let redacted = Redacted(42);
-        assert_eq!(format!("{:?}", redacted), "Redacted<i32 ***>");
+        assert_eq!(format!("{redacted:?}"), "Redacted<i32 ***>");
     }
 }

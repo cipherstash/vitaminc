@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn test_opaque_debug() {
         let x = Protected::new([0u8; 32]);
-        assert_eq!(format!("{:?}", x), "Protected<[u8; 32]> { ... }");
+        assert_eq!(format!("{x:?}"), "Protected<[u8; 32]> { ... }");
     }
 
     #[test]
