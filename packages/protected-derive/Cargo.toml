@@ -1,5 +1,5 @@
 [package]
-name = "protected-derive"
+name = "vitaminc-protected-derive"
 documentation.workspace = true
 version.workspace = true
 repository.workspace = true

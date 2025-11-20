@@ -1,5 +1,5 @@
 [package]
-name = "random-derives"
+name = "vitaminc-random-derives"
 documentation.workspace = true
 version.workspace = true
 repository.workspace = true

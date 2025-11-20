@@ -1418,15 +1418,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "protected-derive"
-version = "0.1.0-pre3"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "quickcheck"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1497,15 +1488,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.16",
-]
-
-[[package]]
-name = "random-derives"
-version = "0.1.0-pre3"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -2240,7 +2222,6 @@ dependencies = [
  "bitvec",
  "digest",
  "opaque-debug",
- "protected-derive",
  "quickcheck",
  "serde",
  "serde_bytes",
@@ -2248,7 +2229,17 @@ dependencies = [
  "sha2",
  "subtle",
  "vitaminc",
+ "vitaminc-protected-derive",
  "zeroize",
+]
+
+[[package]]
+name = "vitaminc-protected-derive"
+version = "0.1.0-pre3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2257,10 +2248,19 @@ version = "0.1.0-pre3"
 dependencies = [
  "rand",
  "rand_chacha",
- "random-derives",
  "thiserror",
  "vitaminc-protected",
+ "vitaminc-random-derives",
  "zeroize",
+]
+
+[[package]]
+name = "vitaminc-random-derives"
+version = "0.1.0-pre3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -30,8 +30,8 @@ pub use protected::{flatten_array, Protected};
 pub use usage::{Acceptable, DefaultScope, Scope, Usage};
 
 pub use debug::{OpaqueDebug, Redacted};
-pub use protected_derive::{OpaqueDebug, TimingSafeEq};
 pub use timing_safe::{Choice, TimingSafeEq};
+pub use vitaminc_protected_derive::{OpaqueDebug, TimingSafeEq};
 
 /// ReplaceT is a sealed trait that is used to replace the inner value of a type.
 /// It is only implemented for types that are Controlled.

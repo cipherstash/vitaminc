@@ -13,7 +13,7 @@ pub use safe_rand::SafeRand;
 pub use rand::{Fill, RngCore, SeedableRng};
 
 /// Derive macro for `Generatable`
-pub use random_derives::Generatable;
+pub use vitaminc_random_derives::Generatable;
 
 #[derive(Error, Debug)]
 pub enum RandomError {
