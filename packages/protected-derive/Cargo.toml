@@ -1,5 +1,6 @@
 [package]
 name = "vitaminc-protected-derive"
+description = "Derive macros for vitaminc-protected. Part of the VitaminC cryptographic suite."
 documentation.workspace = true
 version.workspace = true
 repository.workspace = true
