@@ -1,5 +1,5 @@
 [tools]
-rust = "1.87.0"
+rust = "stable"
 
 [tasks.clippy]
 description = "Clippy lints (including tests and all features)"
