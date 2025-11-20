@@ -1,6 +1,7 @@
 [package]
 name = "vitaminc-encrypt"
-documentation.workspace = true
+description = "Secure, flexible and fast encryption for Rust types. Part of the Vitamin-C cryptographic suite."
+documentation = "https://docs.rs/vitaminc-encrypt"
 version.workspace = true
 repository.workspace = true
 authors.workspace = true
