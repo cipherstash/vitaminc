@@ -1,5 +1,6 @@
 [package]
 name = "vitaminc-random-derives"
+description = "Derive macros for vitaminc-random. Part of the Vitamin-C cryptographic suite."
 documentation.workspace = true
 version.workspace = true
 repository.workspace = true
