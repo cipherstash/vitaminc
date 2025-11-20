@@ -1344,7 +1344,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "password"
-version = "0.1.0-pre2"
+version = "0.1.0-pre3"
 dependencies = [
  "vitaminc-protected",
  "vitaminc-random",
@@ -1419,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "protected-derive"
-version = "0.1.0-pre2"
+version = "0.1.0-pre3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1501,7 +1501,7 @@ dependencies = [
 
 [[package]]
 name = "random-derives"
-version = "0.1.0-pre2"
+version = "0.1.0-pre3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2161,7 +2161,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vitaminc"
-version = "0.1.0-pre2"
+version = "0.1.0-pre3"
 dependencies = [
  "vitaminc",
  "vitaminc-async-traits",
@@ -2175,7 +2175,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-aead"
-version = "0.1.0-pre2"
+version = "0.1.0-pre3"
 dependencies = [
  "bytes",
  "serde",
@@ -2186,7 +2186,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-async-traits"
-version = "0.1.0-pre2"
+version = "0.1.0-pre3"
 dependencies = [
  "vitaminc-protected",
  "vitaminc-traits",
@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-encrypt"
-version = "0.1.0-pre2"
+version = "0.1.0-pre3"
 dependencies = [
  "aws-lc-rs",
  "quickcheck",
@@ -2207,7 +2207,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-kms"
-version = "0.1.0-pre2"
+version = "0.1.0-pre3"
 dependencies = [
  "aws-config",
  "aws-sdk-kms",
@@ -2221,7 +2221,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-permutation"
-version = "0.1.0-pre2"
+version = "0.1.0-pre3"
 dependencies = [
  "bitvec",
  "paste",
@@ -2234,7 +2234,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-protected"
-version = "0.1.0-pre2"
+version = "0.1.0-pre3"
 dependencies = [
  "bincode",
  "bitvec",
@@ -2253,7 +2253,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-random"
-version = "0.1.0-pre2"
+version = "0.1.0-pre3"
 dependencies = [
  "rand",
  "rand_chacha",
@@ -2265,7 +2265,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-traits"
-version = "0.1.0-pre2"
+version = "0.1.0-pre3"
 dependencies = [
  "anyhow",
  "bytes",
