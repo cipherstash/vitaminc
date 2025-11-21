@@ -10,7 +10,7 @@ This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) f
 
 # Example
 
-```rust
+```no_run
 use aws_sdk_kms::Client;
 use vitaminc_protected::Protected;
 use vitaminc_traits::Update;
@@ -44,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .chain(Info("account_id"))
         .try_finalize_fixed()
         .await?;
-    
+
     Ok(())
 }
 ```
