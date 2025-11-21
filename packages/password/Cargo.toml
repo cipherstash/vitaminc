@@ -1,5 +1,5 @@
 [package]
-name = "password"
+name = "vitaminc-password"
 description = "Secure password generator. Part of the Vitamin-C cryptographic suite."
 documentation = "https://docs.rs/vitaminc-password"
 version.workspace = true
