@@ -81,17 +81,20 @@ The [`encrypt`] function can encrypt any type that implements the [`Encrypt`] tr
 
 ```rust
 use vitaminc_encrypt::{encrypt, Key};
+use vitaminc_random::{SafeRand, SeedableRng, Generatable};
+
+let key = Key::random(&mut SafeRand::from_entropy()).expect("Failed to generate key");
 
 // Encrypt a string
-let ciphertext = encrypt(&key, "secret message")?;
+let ciphertext = encrypt(&key, "secret message").expect("encryption failed");
 
 // Encrypt bytes
 let data = vec![1, 2, 3, 4, 5];
-let ciphertext = encrypt(&key, data)?;
+let ciphertext = encrypt(&key, data).expect("encryption failed");
 
 // Encrypt a fixed-size array
 let array = [0u8; 32];
-let ciphertext = encrypt(&key, array)?;
+let ciphertext = encrypt(&key, array).expect("encryption failed");
 ```
 
 ### Decrypting Data
@@ -99,16 +102,21 @@ let ciphertext = encrypt(&key, array)?;
 The [`decrypt`] function requires you to specify the expected type:
 
 ```rust
-use vitaminc_encrypt::{decrypt, Key, LocalCipherText};
+# use vitaminc_encrypt::{encrypt, decrypt, Key, LocalCipherText};
+# use vitaminc_random::{SafeRand, SeedableRng, Generatable};
+# let key = Key::random(&mut SafeRand::from_entropy()).expect("Failed to generate key");
 
 // Decrypt to String
-let plaintext: String = decrypt(&key, ciphertext)?;
+let ciphertext = encrypt(&key, "secret message").expect("encryption failed");
+let plaintext: String = decrypt(&key, ciphertext).expect("decryption failed");
 
 // Decrypt to Vec<u8>
-let bytes: Vec<u8> = decrypt(&key, ciphertext)?;
+let ciphertext = encrypt(&key, vec![1, 2, 3, 4, 5]).expect("encryption failed");
+let bytes: Vec<u8> = decrypt(&key, ciphertext).expect("decryption failed");
 
 // Decrypt to fixed-size array
-let array: [u8; 32] = decrypt(&key, ciphertext)?;
+let ciphertext = encrypt(&key, [0u8; 32]).expect("encryption failed");
+let array: [u8; 32] = decrypt(&key, ciphertext).expect("decryption failed");
 ```
 
 ### Additional Authenticated Data (AAD)
@@ -122,10 +130,10 @@ let key = Key::from([0u8; 32]);
 
 // Encrypt with context
 let user_id = "user_123";
-let ciphertext = encrypt_with_aad(&key, "secret message", user_id)?;
+let ciphertext = encrypt_with_aad(&key, "secret message", user_id).expect("encryption failed");
 
 // Decrypt with the same context
-let plaintext: String = decrypt_with_aad(&key, ciphertext, user_id)?;
+let plaintext: String = decrypt_with_aad(&key, ciphertext, user_id).expect("decryption failed");
 assert_eq!(plaintext, "secret message");
 ```
 
@@ -134,8 +142,13 @@ assert_eq!(plaintext, "secret message");
 Decryption will fail if the AAD doesn't match:
 
 ```rust
+# use vitaminc_random::{SafeRand, SeedableRng, Generatable};
+# use vitaminc_encrypt::Key;
+# let key = Key::random(&mut SafeRand::from_entropy()).expect("Failed to generate key");
+use vitaminc_encrypt::{encrypt_with_aad, decrypt_with_aad};
+
 // Encrypt with one context
-let ciphertext = encrypt_with_aad(&key, "secret", "context_1")?;
+let ciphertext = encrypt_with_aad(&key, "secret", "context_1").expect("encryption failed");
 
 // Try to decrypt with different context - this will fail!
 let result: Result<String, _> = decrypt_with_aad(&key, ciphertext, "context_2");
@@ -149,13 +162,16 @@ Vitamin C Encrypt integrates with `vitaminc-protected` to ensure sensitive data 
 ```rust
 use vitaminc_protected::Protected;
 use vitaminc_encrypt::{encrypt, decrypt, Key};
+use vitaminc_random::{SafeRand, SeedableRng, Generatable};
+
+let key = Key::random(&mut SafeRand::from_entropy()).expect("Failed to generate key");
 
 // Encrypt protected data
 let sensitive = Protected::new("password123".to_string());
-let ciphertext = encrypt(&key, sensitive)?;
+let ciphertext = encrypt(&key, sensitive).expect("encryption failed");
 
 // Decrypt back to protected data
-let decrypted: Protected<String> = decrypt(&key, ciphertext)?;
+let decrypted: Protected<String> = decrypt(&key, ciphertext).expect("decryption failed");
 ```
 
 ### Encrypting Keys (Key Wrapping)
@@ -169,16 +185,16 @@ use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 let mut rng = SafeRand::from_entropy();
 
 // Generate a key encryption key (KEK)
-let kek = Key::random(&mut rng)?;
+let kek = Key::random(&mut rng).expect("key generation failed");
 
 // Generate a data encryption key (DEK)
-let dek = Key::random(&mut rng)?;
+let dek = Key::random(&mut rng).expect("key generation failed");
 
 // Wrap the DEK with the KEK
-let wrapped_dek = encrypt(&kek, dek)?;
+let wrapped_dek = encrypt(&kek, dek).expect("encryption failed");
 
 // Later, unwrap the DEK
-let unwrapped_dek: Key = decrypt(&kek, wrapped_dek)?;
+let unwrapped_dek: Key = decrypt(&kek, wrapped_dek).expect("decryption failed");
 ```
 
 ### Convenience Functions vs Traits
@@ -202,10 +218,10 @@ Example using traits directly:
 use vitaminc_encrypt::{Encrypt, Decrypt, Aes256Cipher, Key};
 
 let key = Key::from([0u8; 32]);
-let cipher = Aes256Cipher::new(&key)?;
+let cipher = Aes256Cipher::new(&key).expect("cipher creation failed");
 
-let ciphertext = "secret".encrypt(&cipher)?;
-let plaintext: String = String::decrypt(ciphertext, &cipher)?;
+let ciphertext = "secret".encrypt(&cipher).expect("encryption failed");
+let plaintext: String = String::decrypt(ciphertext, &cipher).expect("decryption failed");
 ```
 
 ### Custom Encryptable Types
@@ -242,7 +258,7 @@ impl Encrypt for User {
         Ok(EncryptedUser {
             id: self.id,
             email: self.email,
-            ssn: self.ssn.encrypt_with_aad(cipher, aad)?,
+            ssn: self.ssn.encrypt_with_aad(cipher, aad).expect("encryption failed"),
         })
     }
 }
@@ -262,7 +278,7 @@ impl Decrypt for User {
         Ok(User {
             id: encrypted.id,
             email: encrypted.email,
-            ssn: String::decrypt_with_aad(encrypted.ssn, cipher, aad)?,
+            ssn: String::decrypt_with_aad(encrypted.ssn, cipher, aad).expect("decryption failed"),
         })
     }
 }
@@ -320,7 +336,10 @@ Vitamin C Encrypt is designed for both security and performance:
 All encryption operations return `Result<T, Unspecified>` where [`Unspecified`] is an opaque error type that reveals no details about the failure. This is intentional to prevent side-channel attacks.
 
 ```rust
-use vitaminc_encrypt::{encrypt, Unspecified};
+use vitaminc_encrypt::{Key, encrypt, Unspecified};
+use vitaminc_random::{SafeRand, SeedableRng, Generatable};
+
+let key = Key::random(&mut SafeRand::from_entropy()).expect("Failed to generate key");
 
 match encrypt(&key, "message") {
     Ok(ciphertext) => println!("Encrypted successfully"),
