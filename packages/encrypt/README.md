@@ -22,8 +22,8 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vitaminc-encrypt = "0.1.0-pre3"
-vitaminc-random = "0.1.0-pre3"  # For key generation
+vitaminc-encrypt = "0.1.0-pre4"
+vitaminc-random = "0.1.0-pre4"  # For key generation
 ```
 
 ## Quick Start
