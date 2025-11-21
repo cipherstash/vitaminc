@@ -2153,6 +2153,7 @@ version = "0.1.0-pre3"
 dependencies = [
  "bytes",
  "serde",
+ "vitaminc-encrypt",
  "vitaminc-protected",
  "vitaminc-random",
  "zeroize",
