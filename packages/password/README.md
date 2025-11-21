@@ -21,8 +21,8 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vitaminc-password = "0.1.0-pre3"
-vitaminc-random = "0.1.0-pre3"
+vitaminc-password = "0.1.0-pre4"
+vitaminc-random = "0.1.0-pre4"
 ```
 
 ## Quick Start
