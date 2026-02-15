@@ -101,7 +101,7 @@ mod tests {
     use crate::{AlphaNumericPassword, AlphaPassword};
 
     use super::Password;
-    use vitaminc_random::{Generatable, SafeRand, SeedableRng};
+    use vitaminc_random::{Generatable, SafeRand};
 
     #[ignore = "wip"]
     #[test]

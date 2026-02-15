@@ -10,7 +10,7 @@ license.workspace = true
 authors.workspace = true
 keywords.workspace = true
 categories.workspace = true
-rust-version = "1.75.0"
+rust-version.workspace = true
 
 [dependencies]
 vitaminc-protected = { version = "0.1.0-pre", path = "../protected" }

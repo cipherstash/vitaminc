@@ -78,7 +78,6 @@ mod tests {
     use super::*;
     use crate::tests;
     use crate::{Depermute, PermutationKey, Permute};
-    use rand::SeedableRng;
     use vitaminc_random::{Generatable, SafeRand};
 
     fn test_permute<const N: usize>()

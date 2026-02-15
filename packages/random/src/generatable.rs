@@ -12,7 +12,7 @@
 //! let value: NonZeroU16 = Generatable::random(&mut rng).unwrap();
 //! ```
 //!
-use crate::{Fill, RandomError, SafeRand};
+use crate::{RandomError, SafeRand};
 use std::num::NonZeroU16;
 use vitaminc_protected::{Controlled, Equatable, Exportable, Protected, Usage};
 
@@ -26,9 +26,8 @@ pub trait Generatable: Sized {
 impl Generatable for NonZeroU16 {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let mut buf: [u8; 2] = [0, 0];
-
-        buf.try_fill(rng)
-            .map_err(|_| RandomError::GenerationFailed)?;
+        use rand::Rng;
+        rng.fill(&mut buf);
         if let Some(value) = NonZeroU16::new(u16::from_be_bytes(buf)) {
             Ok(value)
         } else {
@@ -44,7 +43,7 @@ macro_rules! impl_generatable_for_int {
             impl Generatable for $t {
                 fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
                     use rand::Rng;
-                    Ok(rng.gen())
+                    Ok(rng.random())
                 }
             }
         )*
@@ -57,10 +56,8 @@ impl<const N: usize> Generatable for [u8; N] {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         // TODO: Consider using MaybeUninit or array::from_fn
         let mut buf: [u8; N] = [0; N];
-
-        buf.try_fill(rng)
-            .map_err(|_| RandomError::GenerationFailed)?;
-
+        use rand::Rng;
+        rng.fill(&mut buf);
         Ok(buf)
     }
 }
@@ -108,7 +105,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::Generatable;
-    use crate::{SafeRand, SeedableRng};
+    use crate::SafeRand;
     use zeroize::Zeroize;
 
     fn assert_generatable<T>(rng: &mut SafeRand) -> T
