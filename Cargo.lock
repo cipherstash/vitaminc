@@ -1980,6 +1980,8 @@ name = "vitaminc-aead"
 version = "0.1.0-pre4"
 dependencies = [
  "bytes",
+ "quickcheck",
+ "quickcheck_macros",
  "serde",
  "vitaminc-encrypt",
  "vitaminc-protected",

@@ -30,10 +30,10 @@ impl Generatable for Key {
 
 pub struct EncryptedKey(LocalCipherText);
 
-impl Encrypt for Key {
+impl<'a> Encrypt<'a> for Key {
     type Encrypted = EncryptedKey;
 
-    fn encrypt_with_aad<'a, C, A>(self, cipher: &C, aad: A) -> Result<Self::Encrypted, Unspecified>
+    fn encrypt_with_aad<C, A>(self, cipher: &C, aad: A) -> Result<Self::Encrypted, Unspecified>
     where
         C: Cipher,
         A: IntoAad<'a>,

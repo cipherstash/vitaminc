@@ -1,3 +1,5 @@
+mod pae;
+
 use std::borrow::Cow;
 
 pub struct Aad<'a>(Cow<'a, [u8]>);
@@ -36,11 +38,9 @@ impl<'a> Aad<'a> {
             Cow::Owned(_) => self,
         }
     }
-}
 
-impl<'a> Extend<u8> for Aad<'a> {
-    fn extend<T: IntoIterator<Item = u8>>(&mut self, iter: T) {
-        self.0.to_mut().extend(iter);
+    pub(crate) fn pae(pieces: &[&[u8]]) -> Self {
+        pae::encode(pieces)
     }
 }
 
@@ -107,8 +107,8 @@ where
 {
     fn into_aad(self) -> Aad<'a> {
         match self {
-            Some(value) => value.into_aad(),
-            None => Aad::empty(),
+            Some(value) => Aad::pae(&[value.into_aad().as_bytes()]),
+            None => Aad::pae(&[]),
         }
     }
 }
@@ -120,11 +120,9 @@ where
 {
     fn into_aad(self) -> Aad<'a> {
         let (a, b) = self;
-        let mut a = a.into_aad();
+        let a = a.into_aad();
         let b = b.into_aad();
-        let iter = b.0.iter().cloned();
-        a.extend(iter);
-        a
+        Aad::pae(&[a.as_bytes(), b.as_bytes()])
     }
 }
 
@@ -167,7 +165,42 @@ mod tests {
     #[test]
     fn test_tuple_aad() {
         let aad = ("foo", "bar").into_aad();
-        assert_eq!(aad.as_bytes(), b"foobar");
+        let expected = Aad::pae(&[b"foo", b"bar"]);
+        assert_eq!(aad.as_bytes(), expected.as_bytes());
         assert!(!aad.is_empty());
+    }
+
+    #[test]
+    fn test_option_none_differs_from_some_empty() {
+        let none_aad = Option::<&str>::None.into_aad();
+        let some_empty_aad = Some("").into_aad();
+        assert_ne!(none_aad.as_bytes(), some_empty_aad.as_bytes());
+    }
+
+    #[test]
+    fn test_option_none_differs_from_unit() {
+        let none_aad = Option::<&str>::None.into_aad();
+        let unit_aad = ().into_aad();
+        assert_ne!(none_aad.as_bytes(), unit_aad.as_bytes());
+    }
+
+    #[test]
+    fn test_option_some_roundtrips_value() {
+        let some_aad = Some("hello").into_aad();
+        let expected = Aad::pae(&[b"hello"]);
+        assert_eq!(some_aad.as_bytes(), expected.as_bytes());
+    }
+
+    #[test]
+    fn test_tuple_aad_is_injective() {
+        // ("ab", "cd") != ("a", "bcd")
+        let aad1 = ("ab", "cd").into_aad();
+        let aad2 = ("a", "bcd").into_aad();
+        assert_ne!(aad1.as_bytes(), aad2.as_bytes());
+
+        // ("foobar", ()) != ("foo", "bar")
+        let aad3 = ("foobar", ()).into_aad();
+        let aad4 = ("foo", "bar").into_aad();
+        assert_ne!(aad3.as_bytes(), aad4.as_bytes());
     }
 }

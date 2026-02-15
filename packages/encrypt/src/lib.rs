@@ -36,9 +36,9 @@ pub use vitaminc_aead::{
 /// let encrypted = vitaminc_encrypt::encrypt(&key, "message").unwrap();
 /// ```
 ///
-pub fn encrypt<T>(key: &Key, plaintext: T) -> Result<T::Encrypted, Unspecified>
+pub fn encrypt<'a, T>(key: &Key, plaintext: T) -> Result<T::Encrypted, Unspecified>
 where
-    T: Encrypt,
+    T: Encrypt<'a>,
 {
     Aes256Cipher::new(key).and_then(|cipher| plaintext.encrypt(&cipher))
 }
@@ -69,7 +69,7 @@ pub fn encrypt_with_aad<'a, T, A>(
     aad: A,
 ) -> Result<T::Encrypted, Unspecified>
 where
-    T: Encrypt + 'a,
+    T: Encrypt<'a>,
     A: IntoAad<'a>,
 {
     Aes256Cipher::new(key).and_then(|cipher| plaintext.encrypt_with_aad(&cipher, aad))

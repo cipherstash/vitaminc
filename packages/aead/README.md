@@ -138,7 +138,7 @@ let cipher = Aes256Cipher::new(&key)?;
 // Use a u64 as AAD
 "my-secret".encrypt_with_aad(&cipher, 42u64)?;
 
-// Use a tuple to combine multiple AAD values
+// Use a tuple to combine multiple AAD values (PAE-encoded to prevent canonicalization attacks)
 "my-secret".encrypt_with_aad(&cipher, ("user_id", "session_token"))?;
 
 // Use no AAD
@@ -187,10 +187,10 @@ struct EncryptedUser {
     password_hash: LocalCipherText,  // Only encrypt the password hash
 }
 
-impl Encrypt for User {
+impl<'a> Encrypt<'a> for User {
     type Encrypted = EncryptedUser;
 
-    fn encrypt_with_aad<'a, C, A>(
+    fn encrypt_with_aad<C, A>(
         self,
         cipher: &C,
         aad: A,
