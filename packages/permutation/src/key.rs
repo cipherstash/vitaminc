@@ -107,7 +107,7 @@ mod tests {
         PermutationKey,
     };
     use vitaminc_protected::{Controlled, Zeroed};
-    use vitaminc_random::{Generatable, SafeRand, SeedableRng};
+    use vitaminc_random::{Generatable, SafeRand};
 
     use crate::tests;
 

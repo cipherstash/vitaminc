@@ -47,8 +47,7 @@ mod private {
 mod tests {
     use super::private::IsPermutable;
     use crate::PermutationKey;
-    use rand::SeedableRng;
-    use vitaminc_random::{Generatable, SafeRand};
+    use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 
     pub fn gen_rand_key<const N: usize>() -> PermutationKey<N>
     where

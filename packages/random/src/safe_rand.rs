@@ -31,6 +31,11 @@ impl SafeRand {
         }
     }
 
+    /// Creates a new `SafeRand` seeded from the OS random number generator.
+    pub fn from_entropy() -> Self {
+        Self::from_os_rng()
+    }
+
     /// A safer alternative to `from_seed` that the seed is zeroized after use.
     pub fn from_controlled_seed<C>(seed: C) -> Self
     where
@@ -59,10 +64,6 @@ impl RngCore for SafeRand {
     fn fill_bytes(&mut self, bytes: &mut [u8]) {
         self.0.fill_bytes(bytes)
     }
-    #[inline]
-    fn try_fill_bytes(&mut self, bytes: &mut [u8]) -> Result<(), rand::Error> {
-        self.0.try_fill_bytes(bytes)
-    }
 }
 
 impl SeedableRng for SafeRand {
@@ -77,7 +78,6 @@ impl SeedableRng for SafeRand {
 #[cfg(test)]
 mod tests {
     use super::SafeRand;
-    use crate::SeedableRng;
 
     #[test]
     fn test_next_bounded_u32() {

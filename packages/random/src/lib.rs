@@ -23,7 +23,7 @@ pub enum RandomError {
 
 #[cfg(test)]
 mod tests {
-    use super::{Generatable, SafeRand, SeedableRng};
+    use super::{Generatable, SafeRand};
     use std::num::NonZeroU16;
 
     #[test]

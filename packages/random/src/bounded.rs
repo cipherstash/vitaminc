@@ -58,10 +58,6 @@ mod test {
         fn fill_bytes(&mut self, _dest: &mut [u8]) {
             unimplemented!()
         }
-
-        fn try_fill_bytes(&mut self, _dest: &mut [u8]) -> Result<(), rand::Error> {
-            unimplemented!()
-        }
     }
     impl CryptoRng for TestBoundedRand {}
 

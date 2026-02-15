@@ -14,7 +14,7 @@ categories.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rand_chacha = "0.3.1"
+rand_chacha = "0.9"
 rand = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { workspace = true }
