@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+// Verify that generated code does not trigger unused_results
+#![deny(unused_results)]
 use vitaminc::protected::OpaqueDebug;
 use vitaminc_protected::Redacted;
 

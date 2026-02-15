@@ -91,12 +91,12 @@ fn debug_impl_for_struct(
                 if has_non_sensitive(&f.attrs) {
                     // show actual value
                     quote_spanned! { f.span() =>
-                        ds.field(#key, &self.#fname);
+                        let _ = ds.field(#key, &self.#fname);
                     }
                 } else {
                     // mask
                     quote_spanned! { f.span() =>
-                        ds.field(#key, &#mask);
+                        let _ = ds.field(#key, &#mask);
                     }
                 }
             });
@@ -118,11 +118,11 @@ fn debug_impl_for_struct(
                 let idx = syn::Index::from(i);
                 if has_non_sensitive(&f.attrs) {
                     quote_spanned! { f.span() =>
-                        dt.field(&self.#idx);
+                        let _ = dt.field(&self.#idx);
                     }
                 } else {
                     quote_spanned! { f.span() =>
-                        dt.field(&#mask);
+                        let _ = dt.field(&#mask);
                     }
                 }
             });

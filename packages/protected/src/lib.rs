@@ -1,4 +1,6 @@
 #![doc = include_str!("../README.md")]
+#![warn(unused_results)]
+#![cfg_attr(test, allow(unused_results))]
 mod as_protected_ref;
 mod controlled;
 mod conversions;
