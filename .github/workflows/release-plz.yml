@@ -30,7 +30,6 @@ jobs:
   release-plz-release:
     name: "Release"
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v6
         with:

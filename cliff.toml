@@ -19,7 +19,7 @@ filter_unconventional = false
 commit_parsers = [
     { message = "^feat", group = "Features" },
     { message = "^fix", group = "Fixes" },
-    { message = "^doc", group = "Documentation" },
+    { message = "^docs", group = "Documentation" },
     { message = "^perf", group = "Performance" },
     { message = "^refactor", group = "Refactoring" },
     { message = "^test", group = "Testing" },
