@@ -431,12 +431,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bincode"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd6a120d2e16b3e1b4a24bd70f23b12d3e16b81f113364a26935f8db7245452d"
-
-[[package]]
 name = "bitflags"
 version = "2.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2044,11 +2038,11 @@ dependencies = [
 name = "vitaminc-protected"
 version = "0.1.0-pre4"
 dependencies = [
- "bincode",
  "bitvec",
  "digest",
  "opaque-debug",
  "quickcheck",
+ "rmp-serde",
  "serde",
  "serde_bytes",
  "serde_json",
