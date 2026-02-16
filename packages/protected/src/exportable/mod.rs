@@ -170,8 +170,8 @@ mod tests {
             input: T,
         ) {
             let x: Exportable<Protected<T>> = Exportable::init_from_inner(input);
-            let y = bincode::serialize(&x).unwrap();
-            let z: Exportable<Protected<T>> = bincode::deserialize(&y).unwrap();
+            let y = rmp_serde::to_vec(&x).unwrap();
+            let z: Exportable<Protected<T>> = rmp_serde::from_slice(&y).unwrap();
             assert_eq!(z.risky_unwrap(), x.risky_unwrap());
         }
 
@@ -198,8 +198,8 @@ mod tests {
             input: T,
         ) {
             let x: Exportable<Equatable<Protected<T>>> = Exportable::init_from_inner(input);
-            let y = bincode::serialize(&x).unwrap();
-            let z: Exportable<Equatable<Protected<T>>> = bincode::deserialize(&y).unwrap();
+            let y = rmp_serde::to_vec(&x).unwrap();
+            let z: Exportable<Equatable<Protected<T>>> = rmp_serde::from_slice(&y).unwrap();
             assert_eq!(z, x);
         }
 
@@ -240,8 +240,8 @@ mod tests {
             input: T,
         ) {
             let x: Equatable<Exportable<Protected<T>>> = Equatable::new(input);
-            let y = bincode::serialize(&x).unwrap();
-            let z: Exportable<Equatable<Protected<T>>> = bincode::deserialize(&y).unwrap();
+            let y = rmp_serde::to_vec(&x).unwrap();
+            let z: Exportable<Equatable<Protected<T>>> = rmp_serde::from_slice(&y).unwrap();
             assert_eq!(z, x);
         }
 
