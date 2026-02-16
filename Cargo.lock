@@ -2016,6 +2016,7 @@ name = "vitaminc"
 version = "0.1.0-pre4.1"
 dependencies = [
  "vitaminc",
+ "vitaminc-aead",
  "vitaminc-async-traits",
  "vitaminc-encrypt",
  "vitaminc-kms",
