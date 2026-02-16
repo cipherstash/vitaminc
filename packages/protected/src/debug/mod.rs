@@ -8,7 +8,7 @@ use zeroize::Zeroize;
 /// **never** reveals internal data.
 ///
 /// By default, the generated `Debug` implementation prints a placeholder that includes
-/// the type’s fully-qualified name via [`core::any::type_name`]:
+/// the type's fully-qualified name via [`core::any::type_name`]:
 ///
 /// You can override this placeholder with an attribute on the type.
 ///
@@ -34,7 +34,8 @@ use zeroize::Zeroize;
 /// ### Basic: default placeholder uses the fully-qualified type name
 ///
 /// ```rust
-/// use vitaminc_protected::OpaqueDebug;
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::OpaqueDebug;
 ///
 /// #[derive(OpaqueDebug)]
 /// struct ApiToken([u8; 32]);
@@ -49,7 +50,8 @@ use zeroize::Zeroize;
 /// The `Debug` impl includes the instantiated type parameters in the placeholder.
 ///
 /// ```rust
-/// use vitaminc_protected::OpaqueDebug;
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::OpaqueDebug;
 ///
 /// #[derive(OpaqueDebug)]
 /// struct Key<const N: usize>([u8; N]);
@@ -64,7 +66,8 @@ use zeroize::Zeroize;
 /// The internal representation is still hidden.
 ///
 /// ```rust
-/// use vitaminc_protected::OpaqueDebug;
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::OpaqueDebug;
 ///
 /// #[derive(OpaqueDebug)]
 /// enum SecretThing {
@@ -84,7 +87,8 @@ use zeroize::Zeroize;
 /// This is useful when you actually want to include certain fields in the debug output.
 ///
 /// ```rust
-/// use vitaminc_protected::OpaqueDebug;
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::OpaqueDebug;
 ///
 /// #[derive(OpaqueDebug)]
 /// struct HasNonSensitiveField {
@@ -108,8 +112,9 @@ use zeroize::Zeroize;
 /// This is useful to manage external types.
 ///
 /// ```rust
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
 /// use core::fmt;
-/// use vitaminc_protected::{OpaqueDebug, Redacted};
+/// use vitaminc::protected::{OpaqueDebug, Redacted};
 ///
 /// let safe = Redacted::new([0u8; 32]);
 /// assert_eq!(format!("{:?}", safe), "Redacted<[u8; 32] ***>");
@@ -136,7 +141,8 @@ pub trait OpaqueDebug {}
 /// # Example
 ///
 /// ```
-/// use vitaminc_protected::Redacted;
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::Redacted;
 ///
 /// let redacted = Redacted::new([0u8; 32]);
 /// assert_eq!(format!("{:?}", redacted), "Redacted<[u8; 32] ***>");

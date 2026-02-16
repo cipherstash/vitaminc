@@ -13,7 +13,8 @@ use std::borrow::Cow;
 /// because `ProtectedRef` cannot be constructed from the inner type directly.
 ///
 /// ```
-/// use vitaminc_protected::{AsProtectedRef, Protected, ProtectedRef};
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{AsProtectedRef, Protected, ProtectedRef};
 ///
 /// pub struct SensitiveData(Protected<Vec<u8>>);
 ///

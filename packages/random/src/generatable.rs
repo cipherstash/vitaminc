@@ -5,7 +5,8 @@
 //! ## Example
 //!
 //! ```rust
-//! use vitaminc_random::{Generatable, SafeRand, SeedableRng};
+//! # mod vitaminc { pub mod random { pub use vitaminc_random::*; } }
+//! use vitaminc::random::{Generatable, SafeRand, SeedableRng};
 //! use std::num::NonZeroU16;
 //!
 //! let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");

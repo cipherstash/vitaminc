@@ -21,7 +21,8 @@ pub use safe_serialize::SafeSerialize;
 /// # Example
 ///
 /// ```
-/// use vitaminc_protected::{Controlled, Exportable, Protected};
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{Controlled, Exportable, Protected};
 /// use serde::{Serialize, Deserialize};
 ///
 /// pub type Secret = Exportable<Protected<[u8; 32]>>;
@@ -37,7 +38,8 @@ pub use safe_serialize::SafeSerialize;
 /// Note that the order of the nesting does not matter.
 ///
 /// ```
-/// use vitaminc_protected::{Controlled, Exportable, Equatable, Protected};
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{Controlled, Exportable, Equatable, Protected};
 /// use serde::{Serialize, Deserialize};
 ///
 /// // Nesting order does not matter

@@ -23,7 +23,8 @@ use subtle::ConstantTimeEq;
 /// ### Implementing `TimingSafeEq` manually
 ///
 /// ```
-/// use vitaminc_protected::{TimingSafeEq, Choice};
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{TimingSafeEq, Choice};
 ///
 /// #[derive(Clone, Copy)]
 /// struct CtU8(u8);
@@ -40,7 +41,8 @@ use subtle::ConstantTimeEq;
 /// ### Using `#[derive(TimingSafeEq)]`
 ///
 /// ```
-/// use vitaminc_protected::{TimingSafeEq, Choice};
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{TimingSafeEq, Choice};
 ///
 /// #[derive(TimingSafeEq)]
 /// struct Key<const N: usize>([u8; N]);
