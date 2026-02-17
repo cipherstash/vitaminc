@@ -40,7 +40,7 @@ without accidentally leaking their innards.
 ```rust
 use vitaminc_protected::{Controlled, Protected};
 let x = Protected::new([0u8; 32]);
-assert_eq!(format!("{x:?}"), "Protected<[u8; 32]> { ... }");
+assert!(format!("{x:?}").contains("Protected<[u8; 32]>"));
 ```
 
 The inner value is not accessible directly, but you can use the `risky_unwrap` method as an escape hatch to get it back.

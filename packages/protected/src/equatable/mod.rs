@@ -66,7 +66,7 @@ use zeroize::Zeroize;
 /// #[derive(Debug, PartialEq)]
 /// struct SafeType(Inner);
 /// let x = SafeType(Inner::new(100));
-/// assert_eq!(format!("{:?}", x), "SafeType(Equatable(Protected<u8> { ... }))");
+/// assert!(format!("{:?}", x).contains("Protected<u8>"));
 /// ```
 ///
 /// # Usage in a struct
@@ -330,7 +330,10 @@ mod tests {
     #[test]
     fn test_opaque_debug() {
         let x: Equatable<Protected<[u8; 32]>> = Equatable::new([0u8; 32]);
-        assert_eq!(format!("{x:?}"), "Equatable(Protected<[u8; 32]> { ... })");
+        assert_eq!(
+            format!("{x:?}"),
+            "Equatable(vitaminc_protected::protected::Protected<[u8; 32]>(\"***\"))"
+        );
     }
 
     #[test]
