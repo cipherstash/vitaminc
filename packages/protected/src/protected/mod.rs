@@ -1,13 +1,12 @@
 use super::Controlled;
 use crate::private::ControlledPrivate;
+use crate::OpaqueDebug;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// The most basic controlled type.
 /// It ensures inner types are `Zeroize` and implements `Debug` and `Display` safely (i.e. inner sensitive values are redacted).
-#[derive(Zeroize)]
+#[derive(Zeroize, OpaqueDebug)]
 pub struct Protected<T>(pub(crate) T);
-
-opaque_debug::implement!(Protected<T>);
 
 impl<T> Protected<T> {
     /// Create a new [Protected] from an inner value.
@@ -153,7 +152,10 @@ mod tests {
     #[test]
     fn test_opaque_debug() {
         let x = Protected::new([0u8; 32]);
-        assert_eq!(format!("{x:?}"), "Protected<[u8; 32]> { ... }");
+        assert_eq!(
+            format!("{x:?}"),
+            "vitaminc_protected::protected::Protected<[u8; 32]>(\"***\")"
+        );
     }
 
     #[test]
