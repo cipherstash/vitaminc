@@ -19,7 +19,7 @@ serde_bytes = { workspace = true }
 zeroize = { workspace = true }
 
 digest = "0.10.7"
-opaque-debug = "0.3.1"
+opaque-debug = "0.4.0"
 subtle = "2.6.1"
 
 quickcheck = { version = "1.1.0", optional = true }
