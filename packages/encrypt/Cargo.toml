@@ -22,4 +22,4 @@ zeroize = { workspace = true }
 [dev-dependencies]
 vitaminc-protected = { path = "../protected", version = "0.1.0-pre", features = ["arbitrary"] }
 quickcheck = "1.1.0"
-quickcheck_macros = "1.1.0"
+quickcheck_macros = "1.2.0"
