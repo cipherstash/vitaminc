@@ -32,7 +32,7 @@ use vitaminc_password::Password;
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
 // Generate a 16-character password with all printable characters
-let mut rng = SafeRand::from_entropy();
+let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
 let password: Password<16> = Generatable::random(&mut rng)?;
 ```
 
@@ -58,7 +58,7 @@ Includes uppercase, lowercase, numbers, and special characters:
 use vitaminc_password::Password;
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
-let mut rng = SafeRand::from_entropy();
+let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
 
 // Generate a 20-character password
 let password: Password<20> = Generatable::random(&mut rng)?;
@@ -77,7 +77,7 @@ For systems that don't accept special characters:
 use vitaminc_password::AlphaNumericPassword;
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
-let mut rng = SafeRand::from_entropy();
+let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
 
 // Generate a 16-character alphanumeric password
 let password: AlphaNumericPassword<16> = Generatable::random(&mut rng)?;
@@ -93,7 +93,7 @@ For maximum compatibility or readability:
 use vitaminc_password::AlphaPassword;
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
-let mut rng = SafeRand::from_entropy();
+let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
 
 // Generate a 24-character alphabetic password
 let password: AlphaPassword<24> = Generatable::random(&mut rng)?;
@@ -199,7 +199,7 @@ use vitaminc_password::Password;
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
 fn generate_user_password(length: usize) -> Result<String, RandomError> {
-    let mut rng = SafeRand::from_entropy();
+    let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
     match length {
         16 => {
             let password: Password<16> = Generatable::random(&mut rng)?;
@@ -227,7 +227,7 @@ use vitaminc_password::AlphaNumericPassword;
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
 fn generate_api_key() -> Result<String, RandomError> {
-    let mut rng = SafeRand::from_entropy();
+    let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
     let key: AlphaNumericPassword<32> = Generatable::random(&mut rng)?;
     Ok(key.into_unprotected_string())
 }
@@ -242,7 +242,7 @@ use vitaminc_password::AlphaPassword;
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
 fn generate_temp_password() -> Result<String, RandomError> {
-    let mut rng = SafeRand::from_entropy();
+    let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
     let password: AlphaPassword<12> = Generatable::random(&mut rng)?;
     Ok(password.into_unprotected_string())
 }

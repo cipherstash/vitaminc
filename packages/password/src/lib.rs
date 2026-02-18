@@ -106,7 +106,7 @@ mod tests {
     #[ignore = "wip"]
     #[test]
     fn test_generate_password() -> Result<(), crate::RandomError> {
-        let mut rng = SafeRand::from_entropy();
+        let mut rng = SafeRand::from_entropy()?;
         let value: Password<16> = Generatable::random(&mut rng)?;
         dbg!(value.into_unprotected_string());
 
@@ -116,7 +116,7 @@ mod tests {
     #[ignore = "wip"]
     #[test]
     fn test_generate_alphanumeric_password() -> Result<(), crate::RandomError> {
-        let mut rng = SafeRand::from_entropy();
+        let mut rng = SafeRand::from_entropy()?;
         let value: AlphaNumericPassword<16> = Generatable::random(&mut rng)?;
         dbg!(value.into_unprotected_string());
 
@@ -126,7 +126,7 @@ mod tests {
     #[ignore = "wip"]
     #[test]
     fn test_generate_alpha_password() -> Result<(), crate::RandomError> {
-        let mut rng = SafeRand::from_entropy();
+        let mut rng = SafeRand::from_entropy()?;
         let value: AlphaPassword<16> = Generatable::random(&mut rng)?;
         dbg!(value.into_unprotected_string());
 

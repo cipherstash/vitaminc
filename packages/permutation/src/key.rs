@@ -49,7 +49,7 @@ impl<const N: usize> PermutationKey<N> {
     /// ```
     /// use vitaminc_permutation::{Permute, PermutationKey};
     /// use vitaminc_random::{Generatable, SafeRand, SeedableRng};
-    /// let mut rng = SafeRand::from_entropy();
+    /// let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
     /// let key = PermutationKey::random(&mut rng).expect("Random error");
     /// let target = PermutationKey::random(&mut rng).expect("Random error");
     /// let complement = key.complement(&target);
@@ -111,11 +111,11 @@ mod tests {
 
     use crate::tests;
 
-    fn test_key_invert<const N: usize>()
+    fn test_key_invert<const N: usize>() -> Result<(), Box<dyn std::error::Error>>
     where
         [u8; N]: IsPermutable + Zeroed,
     {
-        let key: PermutationKey<N> = tests::gen_rand_key();
+        let key: PermutationKey<N> = tests::gen_rand_key()?;
         let inverted = key.invert();
 
         // p(p^-1(x)) = x
@@ -124,18 +124,19 @@ mod tests {
             KeyInner::<N>::generate(identity).risky_unwrap(),
             "Failed to invert key of size {N}"
         );
+        Ok(())
     }
 
-    fn test_key_complement<const N: usize>()
+    fn test_key_complement<const N: usize>() -> Result<(), Box<dyn std::error::Error>>
     where
         [u8; N]: IsPermutable + Zeroed,
     {
-        let key: PermutationKey<N> = tests::gen_rand_key();
-        let target: PermutationKey<N> = tests::gen_rand_key();
+        let key: PermutationKey<N> = tests::gen_rand_key()?;
+        let target: PermutationKey<N> = tests::gen_rand_key()?;
         let complement = key.complement(&target);
 
-        let mut rng = SafeRand::from_entropy();
-        let input: [u8; N] = Generatable::random(&mut rng).unwrap();
+        let mut rng = SafeRand::from_entropy()?;
+        let input: [u8; N] = Generatable::random(&mut rng)?;
 
         // c(t)(x) = p(x)
         assert_eq!(
@@ -143,21 +144,24 @@ mod tests {
             key.permute(input),
             "Failed to complement key of size {N}"
         );
+        Ok(())
     }
 
     #[test]
-    fn key_inversion_case() {
-        test_key_invert::<8>();
-        test_key_invert::<16>();
-        test_key_invert::<32>();
-        test_key_invert::<64>();
+    fn key_inversion_case() -> Result<(), Box<dyn std::error::Error>> {
+        test_key_invert::<8>()?;
+        test_key_invert::<16>()?;
+        test_key_invert::<32>()?;
+        test_key_invert::<64>()?;
+        Ok(())
     }
 
     #[test]
-    fn key_complement_case() {
-        test_key_complement::<8>();
-        test_key_complement::<16>();
-        test_key_complement::<32>();
-        test_key_complement::<64>();
+    fn key_complement_case() -> Result<(), Box<dyn std::error::Error>> {
+        test_key_complement::<8>()?;
+        test_key_complement::<16>()?;
+        test_key_complement::<32>()?;
+        test_key_complement::<64>()?;
+        Ok(())
     }
 }

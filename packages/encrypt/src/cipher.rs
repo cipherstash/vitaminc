@@ -14,12 +14,11 @@ pub struct Aes256Cipher {
 
 impl Aes256Cipher {
     pub fn new(key: &Key) -> Result<Self, Unspecified> {
-        key.as_unbound()
-            .map_err(|_| Unspecified)
-            .map(|unbound_key| Self {
-                nonce_generator: RandomNonceGenerator::init(),
-                key: LessSafeKey::new(unbound_key),
-            })
+        let unbound_key = key.as_unbound().map_err(|_| Unspecified)?;
+        Ok(Self {
+            nonce_generator: RandomNonceGenerator::init()?,
+            key: LessSafeKey::new(unbound_key),
+        })
     }
 }
 

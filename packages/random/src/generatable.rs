@@ -8,7 +8,7 @@
 //! use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 //! use std::num::NonZeroU16;
 //!
-//! let mut rng = SafeRand::from_entropy();
+//! let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
 //! let value: NonZeroU16 = Generatable::random(&mut rng).unwrap();
 //! ```
 //!
@@ -26,7 +26,7 @@ pub trait Generatable: Sized {
 impl Generatable for NonZeroU16 {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let mut buf: [u8; 2] = [0, 0];
-        use rand::Rng;
+        use rand::RngExt;
         rng.fill(&mut buf);
         if let Some(value) = NonZeroU16::new(u16::from_be_bytes(buf)) {
             Ok(value)
@@ -42,7 +42,7 @@ macro_rules! impl_generatable_for_int {
         $(
             impl Generatable for $t {
                 fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-                    use rand::Rng;
+                    use rand::RngExt;
                     Ok(rng.random())
                 }
             }
@@ -56,7 +56,7 @@ impl<const N: usize> Generatable for [u8; N] {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         // TODO: Consider using MaybeUninit or array::from_fn
         let mut buf: [u8; N] = [0; N];
-        use rand::Rng;
+        use rand::RngExt;
         rng.fill(&mut buf);
         Ok(buf)
     }
@@ -126,8 +126,8 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_array() {
-        let mut rng = SafeRand::from_entropy();
+    fn test_generate_array() -> Result<(), crate::RandomError> {
+        let mut rng = SafeRand::from_entropy()?;
         let _: [u8; 4] = assert_generatable(&mut rng);
         let _: [u8; 8] = assert_generatable(&mut rng);
         let _: [u8; 16] = assert_generatable(&mut rng);
@@ -142,11 +142,12 @@ mod tests {
         test_generate_controlled::<[u8; 64]>(&mut rng);
         test_generate_controlled::<[u8; 128]>(&mut rng);
         test_generate_controlled::<[u8; 256]>(&mut rng);
+        Ok(())
     }
 
     #[test]
-    fn test_numeric_primitives() {
-        let mut rng = SafeRand::from_entropy();
+    fn test_numeric_primitives() -> Result<(), crate::RandomError> {
+        let mut rng = SafeRand::from_entropy()?;
         let _: u8 = assert_generatable(&mut rng);
         let _: u16 = assert_generatable(&mut rng);
         let _: u32 = assert_generatable(&mut rng);
@@ -167,5 +168,6 @@ mod tests {
         test_generate_controlled::<i32>(&mut rng);
         test_generate_controlled::<i64>(&mut rng);
         test_generate_controlled::<i128>(&mut rng);
+        Ok(())
     }
 }

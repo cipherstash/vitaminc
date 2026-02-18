@@ -1,5 +1,5 @@
 use crate::SafeRand;
-use rand::{CryptoRng, RngCore};
+use rand::CryptoRng;
 use vitaminc_protected::{Controlled, Protected};
 
 /// A trait for generating random numbers within a specific range.
@@ -25,7 +25,7 @@ impl BoundedRng<usize> for SafeRand {
     }
 }
 
-fn next_bounded_u32<R: CryptoRng + RngCore>(rng: &mut R, max: u32) -> u32 {
+fn next_bounded_u32<R: CryptoRng>(rng: &mut R, max: u32) -> u32 {
     if max.is_power_of_two() {
         rng.next_u32() & (max - 1)
     } else {
@@ -41,25 +41,29 @@ fn next_bounded_u32<R: CryptoRng + RngCore>(rng: &mut R, max: u32) -> u32 {
 
 #[cfg(test)]
 mod test {
-    use rand::CryptoRng;
+    use std::convert::Infallible;
+
+    use rand::TryCryptoRng;
 
     use super::{next_bounded_u32, BoundedRng};
 
     struct TestBoundedRand(u32);
-    impl rand::RngCore for TestBoundedRand {
-        fn next_u32(&mut self) -> u32 {
-            self.0
+    impl rand::TryRng for TestBoundedRand {
+        type Error = Infallible;
+
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            Ok(self.0)
         }
 
-        fn next_u64(&mut self) -> u64 {
-            self.0 as u64
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            Ok(self.0 as u64)
         }
 
-        fn fill_bytes(&mut self, _dest: &mut [u8]) {
+        fn try_fill_bytes(&mut self, _dest: &mut [u8]) -> Result<(), Self::Error> {
             unimplemented!()
         }
     }
-    impl CryptoRng for TestBoundedRand {}
+    impl TryCryptoRng for TestBoundedRand {}
 
     impl BoundedRng<u32> for TestBoundedRand {
         fn next_bounded(&mut self, max: u32) -> u32 {
