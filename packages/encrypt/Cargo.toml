@@ -13,13 +13,13 @@ categories.workspace = true
 
 [dependencies]
 aws-lc-rs = "1.15.4"
-vitaminc-aead = { version = "0.1.0-pre", path = "../aead" }
-vitaminc-protected = { version = "0.1.0-pre", path = "../protected" }
-vitaminc-random = { version = "0.1.0-pre", path = "../random" }
+vitaminc-aead = { version = "0.1.0-pre4.1", path = "../aead" }
+vitaminc-protected = { version = "0.1.0-pre4.1", path = "../protected" }
+vitaminc-random = { version = "0.1.0-pre4.1", path = "../random" }
 
 zeroize = { workspace = true }
 
 [dev-dependencies]
-vitaminc-protected = { path = "../protected", version = "0.1.0-pre", features = ["arbitrary"] }
+vitaminc-protected = { path = "../protected", version = "0.1.0-pre4.1", features = ["arbitrary"] }
 quickcheck = "1.1.0"
 quickcheck_macros = "1.2.0"
