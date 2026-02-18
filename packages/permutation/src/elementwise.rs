@@ -80,38 +80,40 @@ mod tests {
     use crate::{Depermute, PermutationKey, Permute};
     use vitaminc_random::{Generatable, SafeRand};
 
-    fn test_permute<const N: usize>()
+    fn test_permute<const N: usize>() -> Result<(), Box<dyn std::error::Error>>
     where
         [u8; N]: IsPermutable + Zeroed,
     {
-        let mut rng = SafeRand::from_entropy();
-        let input: [u8; N] = Generatable::random(&mut rng).unwrap();
-        let key: PermutationKey<N> = tests::gen_rand_key();
+        let mut rng = SafeRand::from_entropy()?;
+        let input: [u8; N] = Generatable::random(&mut rng)?;
+        let key: PermutationKey<N> = tests::gen_rand_key()?;
         let output = key.permute(input);
         // Note that this may fail for some inputs
         assert_ne!(output, input);
+        Ok(())
     }
 
-    fn test_depermute<const N: usize>()
+    fn test_depermute<const N: usize>() -> Result<(), Box<dyn std::error::Error>>
     where
         [u8; N]: IsPermutable + Zeroed,
     {
-        let mut rng = SafeRand::from_entropy();
-        let input: [u8; N] = Generatable::random(&mut rng).unwrap();
-        let key: PermutationKey<N> = tests::gen_rand_key();
+        let mut rng = SafeRand::from_entropy()?;
+        let input: [u8; N] = Generatable::random(&mut rng)?;
+        let key: PermutationKey<N> = tests::gen_rand_key()?;
         let output = key.permute(input);
         let depermuted = key.depermute(output);
         assert_eq!(depermuted, input);
+        Ok(())
     }
 
-    fn test_associativity<const N: usize>()
+    fn test_associativity<const N: usize>() -> Result<(), Box<dyn std::error::Error>>
     where
         [u8; N]: IsPermutable,
     {
-        let mut rng = SafeRand::from_entropy();
+        let mut rng = SafeRand::from_entropy()?;
         let key_1 = tests::gen_key([0; 32]);
         let key_2 = tests::gen_key([1; 32]);
-        let input: [u8; N] = Generatable::random(&mut rng).unwrap();
+        let input: [u8; N] = Generatable::random(&mut rng)?;
 
         // p_2(p_1(input))
         let output_1 = key_2.permute(key_1.permute(input));
@@ -120,29 +122,33 @@ mod tests {
         let output_2 = key_2.permute(key_1).permute(input);
 
         assert_eq!(output_1, output_2);
+        Ok(())
     }
 
     #[test]
-    fn permute_case() {
-        test_permute::<8>();
-        test_permute::<16>();
-        test_permute::<32>();
-        test_permute::<64>();
+    fn permute_case() -> Result<(), Box<dyn std::error::Error>> {
+        test_permute::<8>()?;
+        test_permute::<16>()?;
+        test_permute::<32>()?;
+        test_permute::<64>()?;
+        Ok(())
     }
 
     #[test]
-    fn depermutation_case() {
-        test_depermute::<8>();
-        test_depermute::<16>();
-        test_depermute::<32>();
-        test_depermute::<64>();
+    fn depermutation_case() -> Result<(), Box<dyn std::error::Error>> {
+        test_depermute::<8>()?;
+        test_depermute::<16>()?;
+        test_depermute::<32>()?;
+        test_depermute::<64>()?;
+        Ok(())
     }
 
     #[test]
-    fn associativity_case() {
-        test_associativity::<8>();
-        test_associativity::<16>();
-        test_associativity::<32>();
-        test_associativity::<64>();
+    fn associativity_case() -> Result<(), Box<dyn std::error::Error>> {
+        test_associativity::<8>()?;
+        test_associativity::<16>()?;
+        test_associativity::<32>()?;
+        test_associativity::<64>()?;
+        Ok(())
     }
 }

@@ -49,12 +49,12 @@ mod tests {
     use crate::PermutationKey;
     use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 
-    pub fn gen_rand_key<const N: usize>() -> PermutationKey<N>
+    pub fn gen_rand_key<const N: usize>() -> Result<PermutationKey<N>, Box<dyn std::error::Error>>
     where
         [u8; N]: IsPermutable,
     {
-        let mut rng = SafeRand::from_entropy();
-        PermutationKey::random(&mut rng).expect("Failed to generate key")
+        let mut rng = SafeRand::from_entropy()?;
+        Ok(PermutationKey::random(&mut rng)?)
     }
 
     pub fn gen_key<const N: usize>(seed: [u8; 32]) -> PermutationKey<N>

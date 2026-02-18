@@ -33,7 +33,7 @@ use vitaminc_encrypt::Key;
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
 // Generate a key
-let mut rng = SafeRand::from_entropy();
+let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
 let key = Key::random(&mut rng).expect("Failed to generate key");
 
 // Encrypt a message
@@ -56,7 +56,7 @@ The [`Key`] type represents a 256-bit encryption key. Vitamin C only supports 25
 use vitaminc_encrypt::Key;
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
-let mut rng = SafeRand::from_entropy();
+let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
 let key = Key::random(&mut rng).expect("Failed to generate key");
 ```
 
@@ -83,7 +83,7 @@ The [`encrypt`] function can encrypt any type that implements the [`Encrypt`] tr
 use vitaminc_encrypt::{encrypt, Key};
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
-let key = Key::random(&mut SafeRand::from_entropy()).expect("Failed to generate key");
+let key = Key::random(&mut SafeRand::from_entropy().expect("Failed to seed RNG")).expect("Failed to generate key");
 
 // Encrypt a string
 let ciphertext = encrypt(&key, "secret message").expect("encryption failed");
@@ -104,7 +104,7 @@ The [`decrypt`] function requires you to specify the expected type:
 ```rust
 # use vitaminc_encrypt::{encrypt, decrypt, Key, LocalCipherText};
 # use vitaminc_random::{SafeRand, SeedableRng, Generatable};
-# let key = Key::random(&mut SafeRand::from_entropy()).expect("Failed to generate key");
+# let key = Key::random(&mut SafeRand::from_entropy().expect("Failed to seed RNG")).expect("Failed to generate key");
 
 // Decrypt to String
 let ciphertext = encrypt(&key, "secret message").expect("encryption failed");
@@ -144,7 +144,7 @@ Decryption will fail if the AAD doesn't match:
 ```rust
 # use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 # use vitaminc_encrypt::Key;
-# let key = Key::random(&mut SafeRand::from_entropy()).expect("Failed to generate key");
+# let key = Key::random(&mut SafeRand::from_entropy().expect("Failed to seed RNG")).expect("Failed to generate key");
 use vitaminc_encrypt::{encrypt_with_aad, decrypt_with_aad};
 
 // Encrypt with one context
@@ -164,7 +164,7 @@ use vitaminc_protected::Protected;
 use vitaminc_encrypt::{encrypt, decrypt, Key};
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
-let key = Key::random(&mut SafeRand::from_entropy()).expect("Failed to generate key");
+let key = Key::random(&mut SafeRand::from_entropy().expect("Failed to seed RNG")).expect("Failed to generate key");
 
 // Encrypt protected data
 let sensitive = Protected::new("password123".to_string());
@@ -182,7 +182,7 @@ Keys can be encrypted with other keys, enabling key hierarchy and key wrapping:
 use vitaminc_encrypt::{Key, encrypt, decrypt};
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
-let mut rng = SafeRand::from_entropy();
+let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
 
 // Generate a key encryption key (KEK)
 let kek = Key::random(&mut rng).expect("key generation failed");
@@ -339,7 +339,7 @@ All encryption operations return `Result<T, Unspecified>` where [`Unspecified`] 
 use vitaminc_encrypt::{Key, encrypt, Unspecified};
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
-let key = Key::random(&mut SafeRand::from_entropy()).expect("Failed to generate key");
+let key = Key::random(&mut SafeRand::from_entropy().expect("Failed to seed RNG")).expect("Failed to generate key");
 
 match encrypt(&key, "message") {
     Ok(ciphertext) => println!("Encrypted successfully"),

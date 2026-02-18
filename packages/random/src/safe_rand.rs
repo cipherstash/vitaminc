@@ -2,15 +2,15 @@
 //! It is intentionally opinionated so that developers don't have to think about what Rng they should use
 //! for cryptographic purposes.
 //!
-//! Internally it uses `rand_chacha` but this will be replaced with <https://crates.io/crates/chacha20> in the future.
-//! However, this implementation does not perform any zeroization and the authors of the `rand` crate
-//! have explictly [stepped away](https://github.com/rust-random/rand/issues/1358) from making it a "cryptographically secure" random number generator.
-use rand::{CryptoRng, RngCore, SeedableRng};
+//! Internally it uses `ChaCha20Rng` from the RustCrypto `chacha20` crate (via `rand`), which supports zeroization.
+use std::convert::Infallible;
+
+use rand::{rngs::SysRng, Rng, SeedableRng, TryCryptoRng, TryRng};
 use vitaminc_protected::Controlled;
 use zeroize::Zeroize;
 
 /// A secure random number generator that is safe to use for cryptographic purposes.
-pub struct SafeRand(rand_chacha::ChaCha20Rng);
+pub struct SafeRand(rand::rngs::ChaCha20Rng);
 
 impl SafeRand {
     // TODO: Kani proof, tests, and possible paranoid argument
@@ -32,8 +32,8 @@ impl SafeRand {
     }
 
     /// Creates a new `SafeRand` seeded from the OS random number generator.
-    pub fn from_entropy() -> Self {
-        Self::from_os_rng()
+    pub fn from_entropy() -> Result<Self, crate::RandomError> {
+        Ok(Self::try_from_rng(&mut SysRng)?)
     }
 
     /// A safer alternative to `from_seed` that the seed is zeroized after use.
@@ -42,27 +42,31 @@ impl SafeRand {
         C: Controlled<Inner = [u8; 32]>,
     {
         let mut seed = seed.risky_unwrap();
-        let rng = Self(rand_chacha::ChaCha20Rng::from_seed(seed));
+        let rng = Self(rand::rngs::ChaCha20Rng::from_seed(seed));
         seed.zeroize();
         rng
     }
 }
 
-impl CryptoRng for SafeRand {}
+impl TryCryptoRng for SafeRand {}
 
-impl RngCore for SafeRand {
+impl TryRng for SafeRand {
+    type Error = Infallible;
+
     #[inline]
-    fn next_u32(&mut self) -> u32 {
-        self.0.next_u32()
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        Ok(self.0.next_u32())
     }
 
     #[inline]
-    fn next_u64(&mut self) -> u64 {
-        self.0.next_u64()
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        Ok(self.0.next_u64())
     }
+
     #[inline]
-    fn fill_bytes(&mut self, bytes: &mut [u8]) {
-        self.0.fill_bytes(bytes)
+    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+        self.0.fill_bytes(dst);
+        Ok(())
     }
 }
 
@@ -71,7 +75,7 @@ impl SeedableRng for SafeRand {
     type Seed = [u8; 32];
 
     fn from_seed(seed: Self::Seed) -> Self {
-        Self(rand_chacha::ChaCha20Rng::from_seed(seed))
+        Self(rand::rngs::ChaCha20Rng::from_seed(seed))
     }
 }
 
@@ -80,16 +84,18 @@ mod tests {
     use super::SafeRand;
 
     #[test]
-    fn test_next_bounded_u32() {
-        let mut rng = SafeRand::from_entropy();
+    fn test_next_bounded_u32() -> Result<(), crate::RandomError> {
+        let mut rng = SafeRand::from_entropy()?;
         let value = rng.next_bounded_u32(4);
         assert!(value < 4);
+        Ok(())
     }
 
     #[test]
-    fn test_next_bounded_u32_non_power_of_two() {
-        let mut rng = SafeRand::from_entropy();
+    fn test_next_bounded_u32_non_power_of_two() -> Result<(), crate::RandomError> {
+        let mut rng = SafeRand::from_entropy()?;
         let value = rng.next_bounded_u32(5);
         assert!(value <= 5);
+        Ok(())
     }
 }

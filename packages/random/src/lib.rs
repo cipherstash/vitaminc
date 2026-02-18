@@ -10,7 +10,7 @@ pub use generatable::Generatable;
 pub use safe_rand::SafeRand;
 
 // Re-exports
-pub use rand::{Fill, RngCore, SeedableRng};
+pub use rand::{Fill, Rng, SeedableRng};
 
 /// Derive macro for `Generatable`
 pub use vitaminc_random_derives::Generatable;
@@ -19,6 +19,8 @@ pub use vitaminc_random_derives::Generatable;
 pub enum RandomError {
     #[error("Generation failed")]
     GenerationFailed,
+    #[error("Seeding from OS RNG failed: {0}")]
+    SeedingFailed(#[from] rand::rngs::SysError),
 }
 
 #[cfg(test)]
@@ -28,7 +30,7 @@ mod tests {
 
     #[test]
     fn test_generate_nonzerou16() -> Result<(), crate::RandomError> {
-        let mut rng = SafeRand::from_entropy();
+        let mut rng = SafeRand::from_entropy()?;
         let value: NonZeroU16 = Generatable::random(&mut rng)?;
         assert_ne!(value.get(), 0);
         Ok(())

@@ -14,7 +14,7 @@ Types implementing the [`Generatable`] trait can be generated randomly using [`S
 ```rust
 use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 
-let mut rng = SafeRand::from_entropy();
+let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
 let x: [u8; 32] = Generatable::random(&mut rng).unwrap();
 ```
 
@@ -30,7 +30,7 @@ struct MyStruct {
 }
 
 // Create a random number generator and generate an instance of MyStruct.
-let mut rng = vitaminc_random::SafeRand::from_entropy();
+let mut rng = vitaminc_random::SafeRand::from_entropy().expect("Failed to seed RNG");
 let instance: MyStruct = Generatable::random(&mut rng).unwrap();
 println!("Generated id: {}", instance.id);
 ```
@@ -42,7 +42,7 @@ The `BoundedRng` trait provides a way to generate random numbers within a specif
 ```rust
 use vitaminc_random::{BoundedRng, SafeRand, SeedableRng};
 
-let mut rng = SafeRand::from_entropy();
+let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
 let value: u32 = rng.next_bounded(10);
 assert!(value <= 10);
 ```
@@ -53,7 +53,7 @@ Or using a `Protected` value:
 use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::{BoundedRng, SafeRand, SeedableRng};
 
-let mut rng = SafeRand::from_entropy();
+let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
 let value: Protected<u32> = rng.next_bounded(Protected::new(10));
 assert!(value.risky_unwrap() <= 10);
 ```
