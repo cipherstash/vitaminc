@@ -1,0 +1,55 @@
+[workspace]
+changelog_config = "cliff.toml"
+git_tag_enable = true
+git_release_enable = true
+publish = true
+semver_check = true
+
+# All packages release together as a single version group.
+[[package]]
+name = "vitaminc"
+version_group = "vitaminc"
+
+[[package]]
+name = "vitaminc-aead"
+version_group = "vitaminc"
+
+[[package]]
+name = "vitaminc-async-traits"
+version_group = "vitaminc"
+
+[[package]]
+name = "vitaminc-encrypt"
+version_group = "vitaminc"
+
+[[package]]
+name = "vitaminc-kms"
+version_group = "vitaminc"
+
+[[package]]
+name = "vitaminc-password"
+version_group = "vitaminc"
+
+[[package]]
+name = "vitaminc-permutation"
+version_group = "vitaminc"
+
+[[package]]
+name = "vitaminc-protected"
+version_group = "vitaminc"
+
+[[package]]
+name = "vitaminc-protected-derive"
+version_group = "vitaminc"
+
+[[package]]
+name = "vitaminc-random"
+version_group = "vitaminc"
+
+[[package]]
+name = "vitaminc-random-derives"
+version_group = "vitaminc"
+
+[[package]]
+name = "vitaminc-traits"
+version_group = "vitaminc"
