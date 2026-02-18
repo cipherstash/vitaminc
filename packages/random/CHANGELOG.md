@@ -11,6 +11,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - update codebase for rand 0.9 breaking changes
 
+### Miscellaneous
+
+- release v0.1.0-pre4.1
+
+
+### Fixes
+
+- update codebase for rand 0.9 breaking changes
+
 ### Changed
 
 - Upgraded `rand` from 0.8 to 0.9 and `rand_chacha` from 0.3 to 0.9.
