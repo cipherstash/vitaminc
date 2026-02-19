@@ -24,7 +24,8 @@ impl<T> Protected<Protected<T>> {
     /// Similar to `Option::flatten`.
     ///
     /// ```
-    /// use vitaminc_protected::{Controlled, Protected};
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{Controlled, Protected};
     /// let x = Protected::new(Protected::new([0u8; 32]));
     /// let y = x.flatten();
     /// assert_eq!(y.risky_unwrap(), [0u8; 32]);
@@ -43,7 +44,8 @@ impl<T> Protected<Option<T>> {
     /// Similar to `Option::transpose`.
     ///
     /// ```
-    /// use vitaminc_protected::Protected;
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::Protected;
     /// let x = Protected::new(Some([0u8; 32]));
     /// let y = x.transpose();
     /// assert!(y.is_some())
@@ -119,7 +121,8 @@ where
 /// # Example
 ///
 /// ```
-/// use vitaminc_protected::{flatten_array, Controlled, Protected};
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{flatten_array, Controlled, Protected};
 /// let x = Protected::new(1);
 /// let y = Protected::new(2);
 /// let z = Protected::new(3);

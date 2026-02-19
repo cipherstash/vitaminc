@@ -47,8 +47,9 @@ impl<const N: usize> PermutationKey<N> {
     /// # Example
     ///
     /// ```
-    /// use vitaminc_permutation::{Permute, PermutationKey};
-    /// use vitaminc_random::{Generatable, SafeRand, SeedableRng};
+    /// # mod vitaminc { pub mod permutation { pub use vitaminc_permutation::*; } pub mod random { pub use vitaminc_random::*; } }
+    /// use vitaminc::permutation::{Permute, PermutationKey};
+    /// use vitaminc::random::{Generatable, SafeRand, SeedableRng};
     /// let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
     /// let key = PermutationKey::random(&mut rng).expect("Random error");
     /// let target = PermutationKey::random(&mut rng).expect("Random error");

@@ -12,7 +12,8 @@ use zeroize::Zeroize;
 /// Initializing an [Equatable]:
 ///
 /// ```
-/// use vitaminc_protected::{Equatable, Controlled, Protected};
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{Equatable, Controlled, Protected};
 /// let x: Equatable<Protected<u8>> = 42.into();
 /// let y: Equatable<Protected<u8>> = Equatable::<Protected<u8>>::new(42);
 /// ```
@@ -22,7 +23,8 @@ use zeroize::Zeroize;
 /// [Equatable] requires that types are equatable in constant time.
 ///
 /// ```
-/// use vitaminc_protected::{Equatable, Protected};
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{Equatable, Protected};
 /// let x: Equatable<Protected<u8>> = 112.into();
 /// let y: Equatable<Protected<u8>> = 112.into();
 ///
@@ -32,7 +34,8 @@ use zeroize::Zeroize;
 /// The [Equatable] type also implements `PartialEq` and `Eq` for easy comparison using the constant time implementation.
 ///
 /// ```
-/// use vitaminc_protected::{Equatable, Protected};
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{Equatable, Protected};
 /// let x: Equatable<Protected<u8>> = 112.into();
 /// let y: Equatable<Protected<u8>> = 112.into();
 /// assert_eq!(x, y);
@@ -46,7 +49,8 @@ use zeroize::Zeroize;
 /// See also [crate::Exportable].
 ///
 /// ```
-/// use vitaminc_protected::{Exportable, Equatable, Protected};
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{Exportable, Equatable, Protected};
 /// let x: Equatable<Protected<[u8; 16]>> = [0u8; 16].into();
 /// let y: Exportable<Equatable<Protected<[u8; 16]>>> = Exportable::new([0u8; 16]);
 ///
@@ -59,7 +63,8 @@ use zeroize::Zeroize;
 /// It's therefore safe to use it in debug output and in custom types.
 ///
 /// ```
-/// use vitaminc_protected::{Equatable, Controlled, Protected};
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{Equatable, Controlled, Protected};
 ///
 /// type Inner = Equatable<Protected<u8>>;
 ///
@@ -72,7 +77,8 @@ use zeroize::Zeroize;
 /// # Usage in a struct
 ///
 /// ```
-/// use vitaminc_protected::{Equatable, Protected};
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{Equatable, Protected};
 ///
 /// #[derive(Debug, PartialEq)]
 /// struct AuthenticatedString {

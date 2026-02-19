@@ -23,7 +23,8 @@ pub trait Controlled: ControlledPrivate {
     /// Generate a new [Protected] from a function that returns an array.
     ///
     /// ```
-    /// use vitaminc_protected::{Controlled, Protected};
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{Controlled, Protected};
     /// fn array_gen<const N: usize>() -> [u8; N] {
     ///     let mut input: [u8; N] = [0; N];
     ///     input.iter_mut().enumerate().for_each(|(i, x)| {
@@ -50,7 +51,8 @@ pub trait Controlled: ControlledPrivate {
     /// Generate a new [Protected] from a function that returns a `Result` with the inner value.
     ///
     /// ```
-    /// use vitaminc_protected::{Controlled, Protected};
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{Controlled, Protected};
     /// use std::string::FromUtf8Error;
     ///
     /// let input: Result<Protected<String>, FromUtf8Error> = Protected::generate_ok(|| {
@@ -74,7 +76,8 @@ pub trait Controlled: ControlledPrivate {
     /// Map the inner value of a [Protected] to a new value.
     ///
     /// ```
-    /// use vitaminc_protected::{Controlled, Protected};
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{Controlled, Protected};
     /// let x = Protected::new(100u8);
     /// let y = x.map(|x| x + 10);
     /// assert_eq!(y.risky_unwrap(), 110);
@@ -97,7 +100,8 @@ pub trait Controlled: ControlledPrivate {
     /// Map the inner value of a [Protected] to a new value that is wrapped in a `Result`.
     ///
     /// ```
-    /// use vitaminc_protected::{Controlled, Protected};
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{Controlled, Protected};
     /// let x = Protected::new(vec![240, 159, 146, 150]);
     /// let y = x.map_ok(String::from_utf8);
     /// assert!(matches!(y, Ok(_)));
@@ -120,7 +124,8 @@ pub trait Controlled: ControlledPrivate {
     /// Add two [Protected] values together.
     ///
     /// ```
-    /// use vitaminc_protected::{Controlled, Protected};
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{Controlled, Protected};
     /// let x = Protected::new(1);
     /// let y = Protected::new(2);
     /// let z = x.zip(y, |x, y| x + y);
@@ -145,7 +150,8 @@ pub trait Controlled: ControlledPrivate {
     /// # Example
     ///
     /// ```
-    /// use vitaminc_protected::{Controlled, Protected};
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{Controlled, Protected};
     /// let x = Protected::new(String::from("hello "));
     /// let y = Protected::new(String::from("world"));
     /// let z = x.zip_ref(&y, |x, y| x + y);
@@ -174,7 +180,8 @@ pub trait Controlled: ControlledPrivate {
     /// # Example
     ///
     /// ```
-    /// # use vitaminc_protected::{Controlled, Protected};
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// # use vitaminc::protected::{Controlled, Protected};
     /// let mut x = Protected::new([0u8; 4]);
     /// x.update(|x| {
     ///   x.iter_mut().for_each(|x| {
@@ -197,7 +204,8 @@ pub trait Controlled: ControlledPrivate {
     /// # Example
     ///
     /// ```
-    /// use vitaminc_protected::{Controlled, Protected};
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{Controlled, Protected};
     /// let mut x = Protected::new([0u8; 32]);
     /// let y = Protected::new([1u8; 32]);
     /// x.update_with(y, |x, y| {
@@ -225,8 +233,9 @@ pub trait Controlled: ControlledPrivate {
     /// # Example
     ///
     /// ```
-    /// # use vitaminc_protected::{Controlled, Protected};
-    /// use vitaminc_protected::AsProtectedRef;
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// # use vitaminc::protected::{Controlled, Protected};
+    /// use vitaminc::protected::AsProtectedRef;
     ///
     /// let mut x = Protected::new([0u8; 32]);
     /// let y = Protected::new([1u8; 32]);
@@ -260,7 +269,8 @@ pub trait Controlled: ControlledPrivate {
     /// # Example
     ///
     /// ```
-    /// use vitaminc_protected::{Controlled, Protected};
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{Controlled, Protected};
     /// let mut x = Protected::new([0u8; 32]);
     /// let y = Protected::new([1u8; 32]);
     /// x.replace(y);

@@ -30,10 +30,11 @@ pub use vitaminc_aead::{
 /// # Example
 ///
 /// ```rust
-/// use vitaminc_encrypt::Key;
-/// use vitaminc_aead::Encrypt;
+/// # mod vitaminc { pub mod encrypt { pub use vitaminc_encrypt::*; } pub mod aead { pub use vitaminc_aead::*; } }
+/// use vitaminc::encrypt::Key;
+/// use vitaminc::aead::Encrypt;
 /// let key = Key::from([0u8; 32]);
-/// let encrypted = vitaminc_encrypt::encrypt(&key, "message").unwrap();
+/// let encrypted = vitaminc::encrypt::encrypt(&key, "message").unwrap();
 /// ```
 ///
 pub fn encrypt<'a, T>(key: &Key, plaintext: T) -> Result<T::Encrypted, Unspecified>
@@ -57,10 +58,11 @@ where
 /// # Example
 ///
 /// ```rust
-/// use vitaminc_encrypt::Key;
-/// use vitaminc_aead::Encrypt;
+/// # mod vitaminc { pub mod encrypt { pub use vitaminc_encrypt::*; } pub mod aead { pub use vitaminc_aead::*; } }
+/// use vitaminc::encrypt::Key;
+/// use vitaminc::aead::Encrypt;
 /// let key = Key::from([0u8; 32]);
-/// let encrypted = vitaminc_encrypt::encrypt_with_aad(&key, "message", "additional-data").unwrap();
+/// let encrypted = vitaminc::encrypt::encrypt_with_aad(&key, "message", "additional-data").unwrap();
 /// ```
 ///
 pub fn encrypt_with_aad<'a, T, A>(
@@ -85,11 +87,12 @@ where
 /// # Example
 ///
 /// ```rust
-/// use vitaminc_encrypt::Key;
-/// use vitaminc_aead::Decrypt;
+/// # mod vitaminc { pub mod encrypt { pub use vitaminc_encrypt::*; } pub mod aead { pub use vitaminc_aead::*; } }
+/// use vitaminc::encrypt::Key;
+/// use vitaminc::aead::Decrypt;
 /// let key = Key::from([0u8; 32]);
-/// let ciphertext = vitaminc_encrypt::encrypt(&key, "message").unwrap();
-/// let decrypted: String = vitaminc_encrypt::decrypt(&key, ciphertext).unwrap();
+/// let ciphertext = vitaminc::encrypt::encrypt(&key, "message").unwrap();
+/// let decrypted: String = vitaminc::encrypt::decrypt(&key, ciphertext).unwrap();
 /// assert_eq!(decrypted, "message");
 /// ```
 pub fn decrypt<T>(key: &Key, ciphertext: T::Encrypted) -> Result<T, Unspecified>
@@ -107,11 +110,12 @@ where
 /// # Example
 ///
 /// ```rust
-/// use vitaminc_encrypt::Key;
-/// use vitaminc_aead::Decrypt;
+/// # mod vitaminc { pub mod encrypt { pub use vitaminc_encrypt::*; } pub mod aead { pub use vitaminc_aead::*; } }
+/// use vitaminc::encrypt::Key;
+/// use vitaminc::aead::Decrypt;
 /// let key = Key::from([0u8; 32]);
-/// let ciphertext = vitaminc_encrypt::encrypt_with_aad(&key, "message", "additional-data").unwrap();
-/// let decrypted: String = vitaminc_encrypt::decrypt_with_aad(&key, ciphertext, "additional-data").unwrap();
+/// let ciphertext = vitaminc::encrypt::encrypt_with_aad(&key, "message", "additional-data").unwrap();
+/// let decrypted: String = vitaminc::encrypt::decrypt_with_aad(&key, ciphertext, "additional-data").unwrap();
 /// assert_eq!(decrypted, "message");
 /// ```
 ///
@@ -120,11 +124,12 @@ where
 /// If the AAD does not match the one used during encryption, decryption will fail with an [`Unspecified`] error.
 ///
 /// ```rust
-/// # use vitaminc_encrypt::Key;
-/// # use vitaminc_aead::Decrypt;
+/// # mod vitaminc { pub mod encrypt { pub use vitaminc_encrypt::*; } pub mod aead { pub use vitaminc_aead::*; } }
+/// # use vitaminc::encrypt::Key;
+/// # use vitaminc::aead::Decrypt;
 /// # let key = Key::from([0u8; 32]);
-/// let ciphertext = vitaminc_encrypt::encrypt_with_aad(&key, "message", "additional-data").unwrap();
-/// let result = vitaminc_encrypt::decrypt_with_aad::<String, _>(&key, ciphertext, "wrong-data");
+/// let ciphertext = vitaminc::encrypt::encrypt_with_aad(&key, "message", "additional-data").unwrap();
+/// let result = vitaminc::encrypt::decrypt_with_aad::<String, _>(&key, ciphertext, "wrong-data");
 /// assert!(result.is_err());
 /// ```
 ///
