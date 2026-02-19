@@ -2033,7 +2033,7 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "serde",
- "vitaminc-encrypt",
+ "vitaminc-aead",
  "vitaminc-protected",
  "vitaminc-random",
  "zeroize",
@@ -2108,7 +2108,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "subtle",
- "vitaminc",
  "vitaminc-protected-derive",
  "zeroize",
 ]
