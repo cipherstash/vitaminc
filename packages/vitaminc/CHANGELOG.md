@@ -1,5 +1,10 @@
 
 
+### Refactoring
+
+- normalize vitaminc re-exports to module aliases
+
+
 ### Fixes
 
 - suppress unused_results lint in OpaqueDebug generated code

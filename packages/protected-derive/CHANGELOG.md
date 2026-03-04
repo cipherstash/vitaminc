@@ -2,6 +2,11 @@
 
 ### Fixes
 
+- remove circular dev-dependency between vitaminc-protected and vitaminc
+
+
+### Fixes
+
 - suppress unused_results lint in OpaqueDebug generated code
 
 ### Miscellaneous

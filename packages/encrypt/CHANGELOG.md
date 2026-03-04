@@ -1,5 +1,10 @@
 
 
+### Documentation
+
+- update doctests to show vitaminc::* import paths
+
+
 ### Miscellaneous
 
 - bump aws-lc-rs from 1.14.1 to 1.15.0
