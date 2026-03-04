@@ -192,7 +192,7 @@ mod tests {
         let creds = aws_sdk_kms::config::Credentials::new("fake", "fake", None, None, "test");
 
         aws_sdk_kms::config::Builder::default()
-            .behavior_version(BehaviorVersion::v2025_08_07())
+            .behavior_version(BehaviorVersion::v2026_01_12())
             .region(Region::new("us-east-1"))
             .credentials_provider(creds)
             .endpoint_url(endpoint_url)
