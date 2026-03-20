@@ -1,5 +1,10 @@
 
 
+### Documentation
+
+- update doctests to show vitaminc::* import paths
+
+
 ### Fixes
 
 - replace bincode with rmp-serde in tests

@@ -1,5 +1,10 @@
 
 
+### Fixes
+
+- update deprecated BehaviorVersion to v2026_01_12
+
+
 ### Miscellaneous
 
 - bump aws-config from 1.8.6 to 1.8.7
