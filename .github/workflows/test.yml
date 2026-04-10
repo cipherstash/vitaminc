@@ -40,6 +40,8 @@ jobs:
         with:
           image-tag: 'latest'
           install-awslocal: 'true'
+        env:
+          LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
 
       - name: clippy
         run: cargo clippy --no-deps --all-targets --all-features  -- -D warnings
