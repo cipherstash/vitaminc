@@ -31,7 +31,7 @@ categories = ["cryptography"]
 
 [workspace.dependencies]
 bitvec = "1.0.1"
-rand = { version = "0.10.0", features = ["chacha"] }
+rand = { version = "0.10.1", features = ["chacha"] }
 thiserror = "2.0.18"
 zeroize = { version = "1", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
