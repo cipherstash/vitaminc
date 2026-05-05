@@ -12,7 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-aws-lc-rs = "1.16.2"
+aws-lc-rs = "1.16.3"
 vitaminc-aead = { version = "0.1.0-pre4.2", path = "../aead" }
 vitaminc-protected = { version = "0.1.0-pre4.2", path = "../protected" }
 vitaminc-random = { version = "0.1.0-pre4.2", path = "../random" }
