@@ -1,7 +1,7 @@
 use crate::{Controlled, Protected};
 use zeroize::Zeroize;
 // TODO: Feature flag?
-use digest::generic_array::{ArrayLength, GenericArray};
+use digest::array::{Array, ArraySize};
 
 impl<T: Zeroize> From<T> for Protected<T> {
     fn from(x: T) -> Self {
@@ -15,12 +15,12 @@ impl<const N: usize> From<[char; N]> for Protected<String> {
     }
 }
 
-impl<const N: usize, U> From<GenericArray<u8, U>> for Protected<[u8; N]>
+impl<const N: usize, U> From<Array<u8, U>> for Protected<[u8; N]>
 where
-    U: ArrayLength<u8>,
-    [u8; N]: From<GenericArray<u8, U>>,
+    U: ArraySize,
+    [u8; N]: From<Array<u8, U>>,
 {
-    fn from(x: GenericArray<u8, U>) -> Self {
+    fn from(x: Array<u8, U>) -> Self {
         Self::init_from_inner(x.into())
     }
 }
@@ -90,15 +90,14 @@ mod tests {
 
     #[test]
     fn test_from_generic_array() {
-        let x: GenericArray<u8, digest::generic_array::typenum::U3> =
-            digest::generic_array::arr![u8; 1, 2, 3];
+        let x: Array<u8, digest::typenum::U3> = [1u8, 2, 3].into();
         let y: Protected<[u8; 3]> = x.into();
         assert_eq!(y.risky_unwrap(), [1, 2, 3]);
     }
 
     #[test]
     fn test_from_generic_array_48() {
-        let x: GenericArray<u8, U48> = digest::generic_array::arr![u8; 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48];
+        let x: Array<u8, U48> = [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48].into();
         let y: Protected<[u8; 48]> = x.into();
         assert_eq!(
             y.risky_unwrap(),
