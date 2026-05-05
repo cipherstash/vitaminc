@@ -2169,7 +2169,7 @@ name = "vitaminc-protected"
 version = "0.1.0-pre4.2"
 dependencies = [
  "bitvec",
- "digest 0.10.7",
+ "digest 0.11.2",
  "quickcheck",
  "rmp-serde",
  "serde",
