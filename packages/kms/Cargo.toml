@@ -16,7 +16,7 @@ vitaminc-async-traits = { version = "0.1.0-pre4.2", path = "../async-traits" }
 vitaminc-traits = { version = "0.1.0-pre4.2", path = "../traits" }
 vitaminc-protected = { version = "0.1.0-pre4.2", path = "../protected" }
 aws-sdk-kms = "1.88.0"
-aws-config = "1.8.15"
+aws-config = "1.8.16"
 
 thiserror = { workspace = true }
 zeroize = { workspace = true }
