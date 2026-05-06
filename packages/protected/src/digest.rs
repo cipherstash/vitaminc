@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::{Acceptable, Controlled, DefaultScope, Scope};
-use digest::generic_array::GenericArray;
+use digest::array::Array;
 use digest::Digest;
 use digest::FixedOutputReset;
 use digest::Output;
@@ -35,7 +35,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
 
     pub fn finalize<T>(self) -> T
     where
-        T: Controlled + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
+        T: Controlled + From<Array<u8, <D as OutputSizeUser>::OutputSize>>,
     {
         let result = self.0.finalize();
         result.into()
@@ -44,7 +44,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
     pub fn finalize_into<'m, T>(self, out: &'m mut T)
     where
         T: Controlled,
-        &'m mut GenericArray<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T::Inner>,
+        &'m mut Array<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T::Inner>,
     {
         let target: &mut Output<D> = out.inner_mut().into();
         self.0.finalize_into(target);
@@ -53,7 +53,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
     pub fn finalize_reset<T>(&mut self) -> T
     where
         D: FixedOutputReset,
-        T: Controlled + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
+        T: Controlled + From<Array<u8, <D as OutputSizeUser>::OutputSize>>,
     {
         let result = self.0.finalize_reset();
         result.into()
@@ -63,7 +63,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
     where
         D: FixedOutputReset,
         T: Controlled,
-        &'m mut GenericArray<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T::Inner>,
+        &'m mut Array<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T::Inner>,
     {
         let target: &mut Output<D> = out.inner_mut().into();
         Digest::finalize_into_reset(&mut self.0, target);
@@ -84,7 +84,7 @@ impl<D: Digest, InputScope: Scope> ProtectedDigest<D, InputScope> {
     where
         T: Controlled + Acceptable<InputScope>,
         T::Inner: AsRef<[u8]>,
-        O: Controlled + From<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>,
+        O: Controlled + From<Array<u8, <D as OutputSizeUser>::OutputSize>>,
     {
         let mut hasher = Self::new();
         hasher.update(data);
