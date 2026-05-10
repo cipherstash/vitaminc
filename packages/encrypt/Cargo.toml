@@ -19,13 +19,25 @@ vitaminc-random = { version = "0.1.0-pre4.2", path = "../random" }
 zeroize = { workspace = true }
 
 # Native: aws-lc-rs (FIPS-validated, AES-NI accelerated).
+# `aes-gcm` is normally only used on wasm32, but is exposed here as an
+# optional dep so the `_test-rust-crypto-backend` feature can pull it in for
+# CI testing of the wasm32 backend on a native runner.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 aws-lc-rs = "1.16.3"
+aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"], optional = true }
 
 # Wasm32: pure-Rust AES-256-GCM. aws-lc-rs has C deps (aws-lc-sys) that
 # don't compile on wasm32-unknown-unknown.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
+
+[features]
+# Internal/test-only. Forces the RustCrypto (`aes-gcm`) backend on native
+# targets so CI can run the same test suite against both backends without
+# wasm tooling. Wasm32 always uses RustCrypto regardless of this feature.
+# Underscore prefix marks it as not part of the public API — do not enable
+# from production deps.
+_test-rust-crypto-backend = ["dep:aes-gcm"]
 
 [dev-dependencies]
 vitaminc-protected = { path = "../protected", version = "0.1.0-pre4.2", features = ["arbitrary"] }

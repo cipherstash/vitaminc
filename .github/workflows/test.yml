@@ -34,6 +34,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
 
       - name: Start LocalStack
         uses: LocalStack/setup-localstack@v0.3.2
@@ -43,11 +44,28 @@ jobs:
         env:
           LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
 
-      - name: clippy
-        run: cargo clippy --no-deps --all-targets --all-features  -- -D warnings
+      - name: clippy (all features)
+        # `--all-features` enables `_test-rust-crypto-backend`, which selects
+        # the RustCrypto encrypt backend on native. The step below covers the
+        # aws-lc-rs path that this configuration leaves unchecked.
+        run: cargo clippy --no-deps --all-targets --all-features -- -D warnings
+
+      - name: clippy (vitaminc-encrypt, aws-lc-rs backend)
+        run: cargo clippy --no-deps -p vitaminc-encrypt --all-targets -- -D warnings
+
+      - name: clippy (vitaminc-encrypt, wasm32)
+        run: cargo clippy --no-deps --target wasm32-unknown-unknown -p vitaminc-encrypt --tests -- -D warnings
 
       - name: format
         run: cargo fmt -- --check
 
-      - name: test
+      - name: test (default — aws-lc-rs backend)
         run: cargo test
+
+      - name: test (vitaminc-encrypt, RustCrypto backend on native)
+        # Forces the RustCrypto path that wasm32 uses, so the same property
+        # tests run against both backends in CI.
+        run: cargo test -p vitaminc-encrypt --features _test-rust-crypto-backend
+
+      - name: build check (vitaminc-encrypt, wasm32)
+        run: cargo check --target wasm32-unknown-unknown -p vitaminc-encrypt
