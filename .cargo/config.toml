@@ -1,0 +1,6 @@
+# `getrandom 0.3+` requires this rustflag to select the browser/Deno backend
+# when building for wasm32-unknown-unknown. Without it, the crate fails to
+# compile because no backend is selected.
+# See: https://docs.rs/getrandom/latest/getrandom/#opt-in-backends
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

@@ -20,3 +20,10 @@ zeroize = { workspace = true }
 
 vitaminc-random-derives = { version = "0.1.0-pre4.2", path = "../random-derives" }
 vitaminc-protected = { version = "0.1.0-pre4.2", path = "../protected" }
+
+# Wasm32: route `getrandom` to the browser/Deno crypto API. Pulled in
+# transitively via `rand` -> `getrandom 0.4`. Must be paired with the
+# `--cfg getrandom_backend="wasm_js"` rustflag (set via `.cargo/config.toml`
+# in any workspace consuming this crate for wasm32 builds).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }

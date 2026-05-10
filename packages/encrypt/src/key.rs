@@ -1,4 +1,4 @@
-use aws_lc_rs::aead::UnboundKey;
+use crate::backend::CipherKey;
 use vitaminc_aead::{Cipher, Decrypt, Encrypt, IntoAad, LocalCipherText, Unspecified};
 use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::{Generatable, RandomError, SafeRand};
@@ -11,8 +11,8 @@ use vitaminc_random::{Generatable, RandomError, SafeRand};
 pub struct Key(Protected<[u8; 32]>);
 
 impl Key {
-    pub(crate) fn as_unbound(&self) -> Result<UnboundKey, Unspecified> {
-        UnboundKey::new(&aws_lc_rs::aead::AES_256_GCM, self.0.risky_ref()).map_err(|_| Unspecified)
+    pub(crate) fn cipher_key(&self) -> Result<CipherKey, Unspecified> {
+        CipherKey::new(self.0.risky_ref())
     }
 }
 
