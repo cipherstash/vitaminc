@@ -30,14 +30,13 @@ impl Cipher for Aes256Cipher {
         let nonce = self.nonce_generator.generate()?;
         let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
         let aad = aad.into_aad();
-        let aad_bytes = aad.as_bytes().to_vec();
 
         CipherTextBuilder::new()
             .append_nonce(nonce)
             .append_target_plaintext(plaintext)
             .accepts_ciphertext_and_tag_ok(|mut buf| {
                 self.key
-                    .seal_in_place_append_tag(&nonce_bytes, &aad_bytes, &mut buf)
+                    .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
                     .map(|()| buf)
             })
             .build()
@@ -69,10 +68,9 @@ impl Cipher for Aes256Cipher {
         let (nonce, reader) = ciphertext.into_reader().read_nonce::<NONCE_LEN>();
         let nonce_bytes = nonce.into_inner();
         let aad = aad.into_aad();
-        let aad_bytes = aad.as_bytes().to_vec();
 
         reader
-            .accepts_plaintext_ok(|data| self.key.open_in_place(&nonce_bytes, &aad_bytes, data))
+            .accepts_plaintext_ok(|data| self.key.open(&nonce_bytes, aad.as_bytes(), data))
             .read()
             .map(|data| data.risky_unwrap())
     }

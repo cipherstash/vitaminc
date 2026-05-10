@@ -12,40 +12,39 @@ impl CipherKey {
         Ok(Self(Aes256Gcm::new(key)))
     }
 
-    /// Encrypts `in_out` in place and appends the 16-byte tag.
-    pub(crate) fn seal_in_place_append_tag(
+    /// Encrypts `in_out` in place and appends the authentication tag.
+    pub(crate) fn seal(
         &self,
-        nonce: &[u8; super::NONCE_LEN],
+        nonce: &[u8],
         aad: &[u8],
         in_out: &mut Vec<u8>,
     ) -> Result<(), Unspecified> {
+        let nonce: &[u8; super::NONCE_LEN] = nonce.try_into().map_err(|_| Unspecified)?;
         let nonce = Nonce::from_slice(nonce);
-        let tag = self
-            .0
-            .encrypt_in_place_detached(nonce, aad, in_out)
-            .map_err(|_| Unspecified)?;
-        in_out.extend_from_slice(tag.as_slice());
-        Ok(())
+        self.0
+            .encrypt_in_place(nonce, aad, in_out)
+            .map_err(|_| Unspecified)
     }
 
     /// Decrypts `in_out` (ciphertext || tag) in place. Returns the plaintext
     /// length — `in_out[..len]` is the plaintext after the call. The tag bytes
-    /// at the tail are not zeroed but are not part of the returned length.
-    pub(crate) fn open_in_place(
+    /// at the tail are left untouched.
+    pub(crate) fn open(
         &self,
-        nonce: &[u8; super::NONCE_LEN],
+        nonce: &[u8],
         aad: &[u8],
         in_out: &mut [u8],
     ) -> Result<usize, Unspecified> {
-        if in_out.len() < super::TAG_LEN {
-            return Err(Unspecified);
-        }
-        let plaintext_len = in_out.len() - super::TAG_LEN;
-        let (ciphertext, tag_bytes) = in_out.split_at_mut(plaintext_len);
-        let tag = Tag::<Aes256Gcm>::clone_from_slice(tag_bytes);
+        let plaintext_len = in_out
+            .len()
+            .checked_sub(super::TAG_LEN)
+            .ok_or(Unspecified)?;
+        let nonce: &[u8; super::NONCE_LEN] = nonce.try_into().map_err(|_| Unspecified)?;
         let nonce = Nonce::from_slice(nonce);
+        let (ciphertext, tag_bytes) = in_out.split_at_mut(plaintext_len);
+        let tag = Tag::<Aes256Gcm>::from_slice(tag_bytes);
         self.0
-            .decrypt_in_place_detached(nonce, aad, ciphertext, &tag)
+            .decrypt_in_place_detached(nonce, aad, ciphertext, tag)
             .map_err(|_| Unspecified)?;
         Ok(plaintext_len)
     }
