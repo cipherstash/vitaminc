@@ -2148,6 +2148,7 @@ dependencies = [
  "paste",
  "rand",
  "serde",
+ "subtle",
  "vitaminc-protected",
  "vitaminc-random",
  "zeroize",

@@ -1,4 +1,5 @@
 use crate::{private::IsPermutable, PermutationKey};
+use subtle::{ConditionallySelectable, ConstantTimeEq};
 use vitaminc_protected::{Controlled, Zeroed};
 use zeroize::Zeroize;
 
@@ -15,7 +16,7 @@ pub trait Depermute<T> {
 /// Implement permutation for Protected type containing a permutable array.
 impl<const N: usize, T> Permute<[T; N]> for PermutationKey<N>
 where
-    T: Zeroize + Default + Copy,
+    T: Zeroize + Default + Copy + ConditionallySelectable,
     [T; N]: IsPermutable + Zeroed,
 {
     fn permute(&self, input: [T; N]) -> [T; N] {
@@ -25,7 +26,7 @@ where
 
 impl<const N: usize, T> Depermute<[T; N]> for PermutationKey<N>
 where
-    T: Zeroize + Default + Copy,
+    T: Zeroize + Default + Copy + ConditionallySelectable,
     [T; N]: IsPermutable + Zeroed,
 {
     fn depermute(&self, input: [T; N]) -> [T; N] {
@@ -37,16 +38,23 @@ where
 pub fn permute_array<const N: usize, T>(key: &PermutationKey<N>, mut input: [T; N]) -> [T; N]
 where
     [T; N]: IsPermutable + Zeroed,
-    T: Zeroize + Copy,
+    T: Zeroize + Copy + ConditionallySelectable,
 {
-    let out: [T; N] = key
-        .iter()
-        .enumerate()
-        // TODO: Use MaybeUninit or array::from_fn
-        .fold(Zeroed::zeroed(), |mut out, (i, k)| {
-            out[i] = input[k.map(|x| x as usize)];
-            out
-        });
+    // Constant-time scan: for each output position `i`, the key byte `kv`
+    // selects which input element to copy. We scan all `j` in 0..N and use
+    // `ConditionallySelectable` so the access pattern is independent of `kv`,
+    // preventing cache-line timing leaks of the secret key bytes.
+    let mut out: [T; N] = Zeroed::zeroed();
+    for (i, k) in key.iter().enumerate() {
+        let mut kv: u8 = k.risky_unwrap();
+        let mut selected: T = input[0];
+        for (j, src) in input.iter().enumerate().skip(1) {
+            let mask = (j as u8).ct_eq(&kv);
+            selected.conditional_assign(src, mask);
+        }
+        out[i] = selected;
+        kv.zeroize();
+    }
 
     // We copied all elements to the output so we should zeroize the input
     input.zeroize();
@@ -57,16 +65,20 @@ where
 pub fn depermute_array<const N: usize, T>(key: &PermutationKey<N>, mut input: [T; N]) -> [T; N]
 where
     [T; N]: IsPermutable + Zeroed,
-    T: Zeroize + Copy,
+    T: Zeroize + Copy + ConditionallySelectable,
 {
-    // TODO: Use MaybeUninit
-    let out: [T; N] = key
-        .iter()
-        .enumerate()
-        .fold(Zeroed::zeroed(), |mut out, (i, k)| {
-            out[k.map(|x| x as usize)] = input[i];
-            out
-        });
+    // Constant-time scatter: for each (i, kv), write `input[i]` to `out[kv]`
+    // by scanning every output slot and conditionally assigning when `j == kv`.
+    let mut out: [T; N] = Zeroed::zeroed();
+    for (i, k) in key.iter().enumerate() {
+        let mut kv: u8 = k.risky_unwrap();
+        let src = input[i];
+        for (j, dst) in out.iter_mut().enumerate() {
+            let mask = (j as u8).ct_eq(&kv);
+            dst.conditional_assign(&src, mask);
+        }
+        kv.zeroize();
+    }
 
     // We copied all elements to the output so we should zeroize the input
     input.zeroize();
