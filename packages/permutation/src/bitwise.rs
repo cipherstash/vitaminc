@@ -1,7 +1,6 @@
-use crate::PermutationKey;
-use bitvec::{array::BitArray, order::Msb0};
+use crate::{elementwise::permute_array, PermutationKey};
 use std::num::{NonZeroU128, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 // TODO: Make this a private trait
 // FIXME: This trait is backwards - self should be T and the argument should be a key
@@ -13,19 +12,25 @@ macro_rules! impl_bitwise_permutable {
     ($N:literal, $int_type:ty, $array_size:expr) => {
         impl BitwisePermute<$N, $int_type> for PermutationKey<$N> {
             fn bitwise_permute(&self, mut input: $int_type) -> $int_type {
-                let bytes = input.to_be_bytes();
-                let arr: BitArray<[u8; $array_size], Msb0> = BitArray::new(bytes);
-                let out: BitArray<[u8; $array_size], Msb0> = self.iter().enumerate().fold(
-                    BitArray::new([0; $array_size]),
-                    |mut out, (i, k)| {
-                        out.set(i, *unsafe { arr.get_unchecked(k) });
-                        out
-                    },
-                );
-
+                // Unpack the input into one byte per bit (MSB-first), permute
+                // the bit-vector through the constant-time `permute_array`
+                // primitive, then re-pack. The previous implementation used
+                // `bitvec::get_unchecked(secret_index)` which performs a
+                // secret-dependent bit load; even though the bit array fits in
+                // a single cache line, this defends against intra-cache-line
+                // microarchitectural leaks (port pressure, etc.).
+                let bytes = Zeroizing::new(input.to_be_bytes());
+                let mut bits: Zeroizing<[u8; $N]> = Zeroizing::new([0u8; $N]);
+                for j in 0..$N {
+                    bits[j] = (bytes[j / 8] >> (7 - (j % 8))) & 1;
+                }
+                let permuted = Zeroizing::new(permute_array(self, *bits));
+                let mut out = [0u8; $array_size];
+                for j in 0..$N {
+                    out[j / 8] |= (permuted[j] & 1) << (7 - (j % 8));
+                }
                 input.zeroize();
-
-                <$int_type>::from_be_bytes(out.into_inner())
+                <$int_type>::from_be_bytes(out)
             }
         }
     };
