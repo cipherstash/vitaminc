@@ -1,7 +1,7 @@
 use crate::{private::IsPermutable, PermutationKey};
 use subtle::{ConditionallySelectable, ConstantTimeEq};
 use vitaminc_protected::{Controlled, Zeroed};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 // TODO: Make this a private trait
 // FIXME: This trait is backwards - self should be T and the argument should be a key
@@ -35,7 +35,7 @@ where
 }
 
 #[inline]
-pub fn permute_array<const N: usize, T>(key: &PermutationKey<N>, mut input: [T; N]) -> [T; N]
+pub fn permute_array<const N: usize, T>(key: &PermutationKey<N>, input: [T; N]) -> [T; N]
 where
     [T; N]: IsPermutable + Zeroed,
     T: Zeroize + Copy + ConditionallySelectable,
@@ -43,45 +43,41 @@ where
     // Constant-time scan: for each output position `i`, the key byte `kv`
     // selects which input element to copy. We scan all `j` in 0..N and use
     // `ConditionallySelectable` so the access pattern is independent of `kv`,
-    // preventing cache-line timing leaks of the secret key bytes.
+    // preventing cache-line timing leaks of the secret key bytes. Secret
+    // locals are wrapped in `Zeroizing` so they are wiped on any unwind path.
+    let input = Zeroizing::new(input);
     let mut out: [T; N] = Zeroed::zeroed();
     for (i, k) in key.iter().enumerate() {
-        let mut kv: u8 = k.risky_unwrap();
-        let mut selected: T = input[0];
+        let kv = Zeroizing::new(k.risky_unwrap());
+        let mut selected = Zeroizing::new(input[0]);
         for (j, src) in input.iter().enumerate().skip(1) {
-            let mask = (j as u8).ct_eq(&kv);
+            let mask = (j as u8).ct_eq(&*kv);
             selected.conditional_assign(src, mask);
         }
-        out[i] = selected;
-        kv.zeroize();
+        out[i] = *selected;
     }
-
-    // We copied all elements to the output so we should zeroize the input
-    input.zeroize();
     out
 }
 
 #[inline]
-pub fn depermute_array<const N: usize, T>(key: &PermutationKey<N>, mut input: [T; N]) -> [T; N]
+pub fn depermute_array<const N: usize, T>(key: &PermutationKey<N>, input: [T; N]) -> [T; N]
 where
     [T; N]: IsPermutable + Zeroed,
     T: Zeroize + Copy + ConditionallySelectable,
 {
     // Constant-time scatter: for each (i, kv), write `input[i]` to `out[kv]`
     // by scanning every output slot and conditionally assigning when `j == kv`.
+    // Secret locals are wrapped in `Zeroizing` for unwind safety.
+    let input = Zeroizing::new(input);
     let mut out: [T; N] = Zeroed::zeroed();
     for (i, k) in key.iter().enumerate() {
-        let mut kv: u8 = k.risky_unwrap();
-        let src = input[i];
+        let kv = Zeroizing::new(k.risky_unwrap());
+        let src = Zeroizing::new(input[i]);
         for (j, dst) in out.iter_mut().enumerate() {
-            let mask = (j as u8).ct_eq(&kv);
-            dst.conditional_assign(&src, mask);
+            let mask = (j as u8).ct_eq(&*kv);
+            dst.conditional_assign(&*src, mask);
         }
-        kv.zeroize();
     }
-
-    // We copied all elements to the output so we should zeroize the input
-    input.zeroize();
     out
 }
 
