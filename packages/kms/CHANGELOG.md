@@ -1,5 +1,13 @@
 
 
+### Miscellaneous
+
+- bump aws-config from 1.8.14 to 1.8.15
+- bump tokio from 1.50.0 to 1.52.2
+- bump aws-sdk-kms from 1.102.0 to 1.106.0
+- bump tokio from 1.52.2 to 1.52.3
+
+
 ### Fixes
 
 - update deprecated BehaviorVersion to v2026_01_12
