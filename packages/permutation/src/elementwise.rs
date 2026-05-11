@@ -40,13 +40,19 @@ where
     [T; N]: IsPermutable + Zeroed,
     T: Zeroize + Copy + ConditionallySelectable,
 {
+    // Key bytes are u8, so an `N > 256` permutation could never be expressed by
+    // the key — and `(j as u8)` below would silently wrap, breaking the
+    // ct_eq comparison. Surface the limit at compile time.
+    const { assert!(N <= 256, "permutation length must fit in u8") };
+
     // Constant-time scan: for each output position `i`, the key byte `kv`
     // selects which input element to copy. We scan all `j` in 0..N and use
     // `ConditionallySelectable` so the access pattern is independent of `kv`,
     // preventing cache-line timing leaks of the secret key bytes. Secret
-    // locals are wrapped in `Zeroizing` so they are wiped on any unwind path.
+    // locals — including the partially-populated `out` — are wrapped in
+    // `Zeroizing` so they are wiped on any unwind path.
     let input = Zeroizing::new(input);
-    let mut out: [T; N] = Zeroed::zeroed();
+    let mut out: Zeroizing<[T; N]> = Zeroizing::new(Zeroed::zeroed());
     for (i, k) in key.iter().enumerate() {
         let kv = Zeroizing::new(k.risky_unwrap());
         let mut selected = Zeroizing::new(input[0]);
@@ -56,7 +62,9 @@ where
         }
         out[i] = *selected;
     }
-    out
+    // Move the populated array out, leaving a fresh zeroed array for the
+    // `Zeroizing` Drop to clean (a no-op wipe in the success path).
+    core::mem::replace(&mut *out, Zeroed::zeroed())
 }
 
 #[inline]
@@ -65,11 +73,15 @@ where
     [T; N]: IsPermutable + Zeroed,
     T: Zeroize + Copy + ConditionallySelectable,
 {
+    // See `permute_array` — same u8-fit constraint applies here.
+    const { assert!(N <= 256, "permutation length must fit in u8") };
+
     // Constant-time scatter: for each (i, kv), write `input[i]` to `out[kv]`
     // by scanning every output slot and conditionally assigning when `j == kv`.
-    // Secret locals are wrapped in `Zeroizing` for unwind safety.
+    // Secret locals — including the partially-populated `out` — are wrapped
+    // in `Zeroizing` for unwind safety.
     let input = Zeroizing::new(input);
-    let mut out: [T; N] = Zeroed::zeroed();
+    let mut out: Zeroizing<[T; N]> = Zeroizing::new(Zeroed::zeroed());
     for (i, k) in key.iter().enumerate() {
         let kv = Zeroizing::new(k.risky_unwrap());
         let src = Zeroizing::new(input[i]);
@@ -78,7 +90,7 @@ where
             dst.conditional_assign(&*src, mask);
         }
     }
-    out
+    core::mem::replace(&mut *out, Zeroed::zeroed())
 }
 
 #[cfg(test)]
