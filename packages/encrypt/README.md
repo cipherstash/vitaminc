@@ -10,7 +10,8 @@ This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) f
 ## Features
 
 - **Type-safe encryption**: Encrypt and decrypt Rust types with compile-time safety
-- **AES-256-GCM**: Uses AES-256-GCM authenticated encryption via AWS-LC
+- **AES-256-GCM**: Hardware-accelerated authenticated encryption — `aws-lc-rs` on native targets, RustCrypto's `aes-gcm` on `wasm32`. Both produce byte-identical ciphertext, so a value sealed in one environment opens cleanly in the other.
+- **`wasm32-unknown-unknown` support**: Builds and runs in browsers, Node.js, and edge runtimes (e.g. Supabase Edge Functions, Cloudflare Workers) with no C toolchain or feature flags
 - **256-bit keys only**: Enforces quantum-resistant key sizes for future security
 - **Protected types integration**: Works seamlessly with `vitaminc-protected` for sensitive data handling
 - **Additional Authenticated Data (AAD)**: Support for authenticated but unencrypted data
@@ -48,7 +49,7 @@ assert_eq!(plaintext, "secret message");
 
 ### Key Management
 
-The [`Key`] type represents a 256-bit encryption key. Vitamin C only supports 256-bit keys to ensure quantum security and compatibility with AWS-LC.
+The [`Key`] type represents a 256-bit encryption key. Vitamin C only supports 256-bit keys to ensure quantum security and consistent behaviour across both backends.
 
 #### Generating a Key
 
@@ -294,16 +295,25 @@ This crate uses AES-256-GCM (Galois/Counter Mode) which provides:
 - **Authenticity**: Built-in authentication prevents tampering
 - **Performance**: Hardware-accelerated on most modern CPUs
 
-### AWS-LC
+### Cryptographic Backends
 
-Encryption is powered by [AWS-LC](https://github.com/aws/aws-lc-rs), a FIPS-validated cryptographic library maintained by Amazon Web Services.
+The AES-256-GCM implementation is selected at compile time based on the target architecture — there is no feature flag to choose between them, and downstream code uses the same `Aes256Cipher` API regardless.
+
+| Target                                | Backend                                                                                    | Notes                                                                                  |
+| ------------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `cfg(not(target_arch = "wasm32"))`    | [AWS-LC](https://github.com/aws/aws-lc-rs)                                                 | FIPS-validated, AES-NI accelerated. Maintained by Amazon Web Services.                 |
+| `cfg(target_arch = "wasm32")`         | [RustCrypto `aes-gcm`](https://github.com/RustCrypto/AEADs/tree/master/aes-gcm) | Pure Rust, no C toolchain. Required because `aws-lc-rs`'s C deps don't cross-compile to wasm. |
+
+Both backends conform to RFC 5116 AES-256-GCM and produce byte-identical ciphertext for the same inputs. CI gates this with a Known-Answer Test that runs against all three configurations on every PR — native `aws-lc-rs`, native RustCrypto, and RustCrypto compiled to `wasm32-unknown-unknown` and executed in Node via `wasm-pack test --node`.
+
+This means ciphertext written from a native server can be opened in a browser or edge runtime (and vice versa) without any compatibility shim.
 
 ### 256-bit Keys Only
 
 Vitamin C enforces 256-bit keys to ensure:
 
 - Resistance to quantum computer attacks (via AES-256)
-- Compatibility with AWS-LC's recommended parameters
+- Consistent parameters across both the AWS-LC and RustCrypto backends
 - No risk of accidentally using weaker key sizes
 
 ### Automatic Nonce Generation
@@ -328,8 +338,10 @@ Encryption and decryption operations return an [`Unspecified`] error type that r
 Vitamin C Encrypt is designed for both security and performance:
 
 - **Zero-copy operations** where possible
-- **Hardware acceleration** via AWS-LC's AES-NI support
+- **Hardware acceleration** via AWS-LC's AES-NI support on native targets
 - **Minimal allocations** during encryption/decryption
+
+On `wasm32-unknown-unknown` the RustCrypto backend takes over and runs as pure Rust — slower than AES-NI but still constant-time and substantially faster than a JavaScript polyfill.
 
 ## Error Handling
 
