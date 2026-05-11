@@ -76,7 +76,12 @@ impl Cipher for Aes256Cipher {
     }
 }
 
-#[cfg(test)]
+// quickcheck doesn't run under `wasm-pack test --node` (it shells out to
+// std::thread, which isn't available on wasm32-unknown-unknown). These property
+// tests already cover both backends on native via the
+// `_test-rust-crypto-backend` feature; the wasm32 codegen path is gated by the
+// KAT in `crate::backend::tests`.
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod test {
     use super::*;
     use quickcheck_macros::quickcheck;

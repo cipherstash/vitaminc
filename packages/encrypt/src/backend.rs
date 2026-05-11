@@ -33,19 +33,25 @@ pub(crate) const TAG_LEN: usize = 16;
 mod tests {
     use super::CipherKey;
 
+    // wasm-pack invokes Node by default — no `wasm_bindgen_test_configure!` needed.
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::wasm_bindgen_test;
+
     /// Cross-backend byte-parity check.
     ///
-    /// CI runs this same test against both backends:
-    /// - `cargo test -p vitaminc-encrypt` exercises `aws-lc-rs`
+    /// CI runs this same test against all three configurations:
+    /// - `cargo test -p vitaminc-encrypt` — `aws-lc-rs` on native
     /// - `cargo test -p vitaminc-encrypt --features _test-rust-crypto-backend`
-    ///   exercises RustCrypto's `aes-gcm`
+    ///   — RustCrypto on native
+    /// - `wasm-pack test --node packages/encrypt` — RustCrypto compiled to
+    ///   wasm32-unknown-unknown and run in Node
     ///
-    /// Both must produce the byte string in `EXPECTED`. If they agree, the two
-    /// backends are byte-identical for this input — which, with their
-    /// RFC 5116 conformance, is what guarantees ciphertexts written under one
-    /// backend decrypt cleanly under the other (the whole point of supporting
-    /// wasm32 alongside native).
-    #[test]
+    /// All three must produce the byte string in `EXPECTED`. The third gates
+    /// the actual wasm codegen path (not just the proxied native build) — so a
+    /// regression that only surfaces under wasm32 (e.g. SIMD intrinsic fallback,
+    /// 32-bit pointer arithmetic) would still be caught.
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn cross_backend_byte_parity() {
         // Fixed inputs — chosen to exercise: non-empty plaintext, non-empty AAD,
         // a plaintext length that's not a block boundary (so we cover GCM's

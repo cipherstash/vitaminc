@@ -58,7 +58,9 @@ impl Decrypt for Key {
     }
 }
 
-#[cfg(test)]
+// Quickcheck `Arbitrary` impls for the property tests in `cipher::test` —
+// gated to non-wasm32 alongside their consumers (see comment in `cipher.rs`).
+#[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) mod tests {
     use super::*;
     use quickcheck::Arbitrary;

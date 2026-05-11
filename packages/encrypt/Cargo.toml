@@ -24,12 +24,14 @@ zeroize = { workspace = true }
 # CI testing of the wasm32 backend on a native runner.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 aws-lc-rs = "1.16.3"
-aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"], optional = true }
+aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc", "zeroize"], optional = true }
 
 # Wasm32: pure-Rust AES-256-GCM. aws-lc-rs has C deps (aws-lc-sys) that
-# don't compile on wasm32-unknown-unknown.
+# don't compile on wasm32-unknown-unknown. `zeroize` clears the AES round-key
+# schedule and GHASH state on drop — matches the defence-in-depth posture the
+# rest of the vitaminc stack already takes via `vitaminc-protected`.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
+aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc", "zeroize"] }
 
 [features]
 # Internal/test-only. Forces the RustCrypto (`aes-gcm`) backend on native
@@ -43,3 +45,9 @@ _test-rust-crypto-backend = ["dep:aes-gcm"]
 vitaminc-protected = { path = "../protected", version = "0.1.0-pre4.2", features = ["arbitrary"] }
 quickcheck = "1.1.0"
 quickcheck_macros = "1.2.0"
+
+# wasm-bindgen-test drives `wasm-pack test --node`, which compiles the crate
+# to wasm32-unknown-unknown and runs tests inside Node — exercising the same
+# codegen that downstream wasm consumers will see, not the proxied native path.
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

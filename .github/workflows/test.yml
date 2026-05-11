@@ -69,3 +69,14 @@ jobs:
 
       - name: build check (vitaminc-encrypt, wasm32)
         run: cargo check --target wasm32-unknown-unknown -p vitaminc-encrypt
+
+      - name: install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: 'latest'
+
+      - name: test (vitaminc-encrypt, wasm32 in Node)
+        # Compiles to wasm32-unknown-unknown and runs tests inside Node — this
+        # is what gates the *actual* wasm codegen path (the native
+        # `_test-rust-crypto-backend` step above is just a proxy).
+        run: wasm-pack test --node packages/encrypt
