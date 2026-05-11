@@ -13,5 +13,5 @@ categories.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-vitaminc-random = { version = "0.1.0-pre4.3", path = "../random" }
-vitaminc-protected = { version = "0.1.0-pre4.3", path = "../protected" }
+vitaminc-random = { version = "0.2.0-pre", path = "../random" }
+vitaminc-protected = { version = "0.2.0-pre", path = "../protected" }

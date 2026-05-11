@@ -18,8 +18,8 @@ rand = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { workspace = true }
 
-vitaminc-random-derives = { version = "0.1.0-pre4.3", path = "../random-derives" }
-vitaminc-protected = { version = "0.1.0-pre4.3", path = "../protected" }
+vitaminc-random-derives = { version = "0.2.0-pre", path = "../random-derives" }
+vitaminc-protected = { version = "0.2.0-pre", path = "../protected" }
 
 # Wasm32: route `getrandom` to the browser/Deno crypto API. Pulled in
 # transitively via `rand` -> `getrandom 0.4`. Must be paired with the
