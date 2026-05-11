@@ -1,5 +1,14 @@
 
 
+### Miscellaneous
+
+- bump digest to 0.11 and sha2 to 0.11
+
+### Style
+
+- apply rustfmt to long array literal in conversions test
+
+
 ### Documentation
 
 - update doctests to show vitaminc::* import paths

@@ -2233,7 +2233,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vitaminc"
-version = "0.1.0-pre4.2"
+version = "0.1.0-pre4.3"
 dependencies = [
  "vitaminc",
  "vitaminc-aead",
@@ -2248,7 +2248,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-aead"
-version = "0.1.0-pre4.2"
+version = "0.1.0-pre4.3"
 dependencies = [
  "bytes",
  "quickcheck",
@@ -2262,7 +2262,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-async-traits"
-version = "0.1.0-pre4.2"
+version = "0.1.0-pre4.3"
 dependencies = [
  "vitaminc-protected",
  "vitaminc-traits",
@@ -2270,7 +2270,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-encrypt"
-version = "0.1.0-pre4.2"
+version = "0.1.0-pre4.3"
 dependencies = [
  "aes-gcm",
  "aws-lc-rs",
@@ -2285,7 +2285,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-kms"
-version = "0.1.0-pre4.2"
+version = "0.1.0-pre4.3"
 dependencies = [
  "aws-config",
  "aws-sdk-kms",
@@ -2299,7 +2299,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-password"
-version = "0.1.0-pre4.2"
+version = "0.1.0-pre4.3"
 dependencies = [
  "vitaminc-protected",
  "vitaminc-random",
@@ -2307,7 +2307,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-permutation"
-version = "0.1.0-pre4.2"
+version = "0.1.0-pre4.3"
 dependencies = [
  "bitvec",
  "paste",
@@ -2321,7 +2321,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-protected"
-version = "0.1.0-pre4.2"
+version = "0.1.0-pre4.3"
 dependencies = [
  "bitvec",
  "digest 0.11.2",
@@ -2338,7 +2338,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-protected-derive"
-version = "0.1.0-pre4.2"
+version = "0.1.0-pre4.3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2347,7 +2347,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-random"
-version = "0.1.0-pre4.2"
+version = "0.1.0-pre4.3"
 dependencies = [
  "getrandom 0.4.2",
  "rand",
@@ -2359,7 +2359,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-random-derives"
-version = "0.1.0-pre4.2"
+version = "0.1.0-pre4.3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2368,7 +2368,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-traits"
-version = "0.1.0-pre4.2"
+version = "0.1.0-pre4.3"
 dependencies = [
  "anyhow",
  "bytes",
