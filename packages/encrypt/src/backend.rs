@@ -96,4 +96,123 @@ mod tests {
             "round-trip plaintext mismatch"
         );
     }
+
+    // Deterministic counterparts to the quickcheck round-trip tests in
+    // `cipher::test`. Those property tests can't run under wasm-bindgen-test
+    // because quickcheck's runner uses `std::thread`, which isn't available on
+    // wasm32-unknown-unknown — so the cases below carry the same `#[cfg_attr]`
+    // attribute swap as the KAT and gate all three configurations (native
+    // aws-lc-rs, native RustCrypto, wasm32 RustCrypto in Node) on the same
+    // round-trip and failure-path behaviour.
+
+    fn fixed_key() -> [u8; 32] {
+        [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+            0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
+            0x1c, 0x1d, 0x1e, 0x1f,
+        ]
+    }
+
+    fn fixed_nonce() -> [u8; 12] {
+        [
+            0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab,
+        ]
+    }
+
+    fn roundtrip(plaintext: &[u8], aad: &[u8]) {
+        let key = fixed_key();
+        let nonce = fixed_nonce();
+        let cipher = CipherKey::new(&key).expect("key");
+
+        let mut buf = plaintext.to_vec();
+        cipher.seal(&nonce, aad, &mut buf).expect("seal");
+
+        let pt_len = cipher.open(&nonce, aad, &mut buf).expect("open");
+        assert_eq!(&buf[..pt_len], plaintext);
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn roundtrip_no_aad() {
+        roundtrip(b"hello world", b"");
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn roundtrip_with_aad() {
+        roundtrip(b"hello world", b"associated data");
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn roundtrip_empty_plaintext() {
+        roundtrip(b"", b"some aad");
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn roundtrip_multi_block_plaintext() {
+        // 200 bytes — spans multiple AES blocks (16B each) plus a partial tail,
+        // catching any block-boundary handling regression.
+        let pt: Vec<u8> = (0..200u8).collect();
+        roundtrip(&pt, b"multi-block aad");
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn open_fails_with_wrong_aad() {
+        let key = fixed_key();
+        let nonce = fixed_nonce();
+        let cipher = CipherKey::new(&key).expect("key");
+
+        let mut buf = b"payload".to_vec();
+        cipher.seal(&nonce, b"correct-aad", &mut buf).expect("seal");
+
+        let mut tampered = buf.clone();
+        assert!(
+            cipher.open(&nonce, b"wrong-aad", &mut tampered).is_err(),
+            "open must reject mismatched AAD"
+        );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn open_fails_with_wrong_key() {
+        let nonce = fixed_nonce();
+
+        let key_a = fixed_key();
+        let mut key_b = fixed_key();
+        key_b[0] ^= 0xff;
+
+        let cipher_a = CipherKey::new(&key_a).expect("key a");
+        let cipher_b = CipherKey::new(&key_b).expect("key b");
+
+        let mut buf = b"payload".to_vec();
+        cipher_a.seal(&nonce, b"", &mut buf).expect("seal");
+
+        assert!(
+            cipher_b.open(&nonce, b"", &mut buf).is_err(),
+            "open must reject ciphertext sealed under a different key"
+        );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn open_fails_with_tampered_ciphertext() {
+        let key = fixed_key();
+        let nonce = fixed_nonce();
+        let cipher = CipherKey::new(&key).expect("key");
+
+        let mut buf = b"payload".to_vec();
+        cipher.seal(&nonce, b"", &mut buf).expect("seal");
+
+        // Flip a bit in the ciphertext (not the tag) — GCM authentication
+        // must catch this.
+        buf[0] ^= 0x01;
+
+        assert!(
+            cipher.open(&nonce, b"", &mut buf).is_err(),
+            "open must reject ciphertext whose bytes have been modified"
+        );
+    }
 }
