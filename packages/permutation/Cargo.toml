@@ -18,6 +18,7 @@ vitaminc-random = { version = "0.1.0-pre4.2", path = "../random" }
 bitvec = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
+subtle = "2.6.1"
 zeroize = { workspace = true }
 paste = "1.0.15"
 
