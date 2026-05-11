@@ -83,9 +83,11 @@ mod tests {
         );
 
         let mut to_open = sealed.clone();
-        let pt_len = cipher
-            .open(&nonce, aad, &mut to_open)
-            .expect("open failed");
-        assert_eq!(&to_open[..pt_len], plaintext, "round-trip plaintext mismatch");
+        let pt_len = cipher.open(&nonce, aad, &mut to_open).expect("open failed");
+        assert_eq!(
+            &to_open[..pt_len],
+            plaintext,
+            "round-trip plaintext mismatch"
+        );
     }
 }
