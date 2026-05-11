@@ -97,4 +97,85 @@ mod tests {
         test_permute::<64, _>(NonZeroU64::new(7178231783183).unwrap());
         test_permute::<128, _>(NonZeroU128::new(29472929298731313).unwrap());
     }
+
+    // Zero in -> zero out, for every supported width.
+    // Catches sign/endian bugs in the unpack/repack glue: any path that
+    // accidentally introduces a stray bit would fail here.
+    #[test]
+    fn bitwise_permute_zero_in_zero_out() {
+        assert_eq!(tests::gen_key::<8>([0; 32]).bitwise_permute(0u8), 0);
+        assert_eq!(tests::gen_key::<16>([0; 32]).bitwise_permute(0u16), 0);
+        assert_eq!(tests::gen_key::<32>([0; 32]).bitwise_permute(0u32), 0);
+        assert_eq!(tests::gen_key::<64>([0; 32]).bitwise_permute(0u64), 0);
+        assert_eq!(tests::gen_key::<128>([0; 32]).bitwise_permute(0u128), 0);
+    }
+
+    // All-ones is a fixed point of every bit permutation (every bit position
+    // already holds a 1, so permuting positions can't change anything).
+    // Catches missing-bit bugs at the high or low boundary of each width.
+    #[test]
+    fn bitwise_permute_all_ones_invariant() {
+        assert_eq!(
+            tests::gen_key::<8>([0; 32]).bitwise_permute(u8::MAX),
+            u8::MAX
+        );
+        assert_eq!(
+            tests::gen_key::<16>([0; 32]).bitwise_permute(u16::MAX),
+            u16::MAX
+        );
+        assert_eq!(
+            tests::gen_key::<32>([0; 32]).bitwise_permute(u32::MAX),
+            u32::MAX
+        );
+        assert_eq!(
+            tests::gen_key::<64>([0; 32]).bitwise_permute(u64::MAX),
+            u64::MAX
+        );
+        assert_eq!(
+            tests::gen_key::<128>([0; 32]).bitwise_permute(u128::MAX),
+            u128::MAX
+        );
+    }
+
+    // Hamming weight (popcount) must be preserved — a permutation moves bits
+    // but neither creates nor destroys them. This is the strongest single
+    // property check available for the bit-shuffle glue: any bug that drops,
+    // duplicates, or mis-positions a bit will change the count. As a
+    // corollary, this is also what justifies the `unsafe new_unchecked` in
+    // the NonZero impls: popcount > 0 in -> popcount > 0 out.
+    #[test]
+    fn bitwise_permute_preserves_hamming_weight() {
+        let key8 = tests::gen_key::<8>([0; 32]);
+        for n in [0u8, 1, 0x80, 0x55, 0xaa, 0xff] {
+            assert_eq!(key8.bitwise_permute(n).count_ones(), n.count_ones());
+        }
+
+        let key32 = tests::gen_key::<32>([0; 32]);
+        for n in [0u32, 1, 0x8000_0000, 0xcafe_babe, 0x1234_5678, u32::MAX] {
+            assert_eq!(key32.bitwise_permute(n).count_ones(), n.count_ones());
+        }
+
+        let key128 = tests::gen_key::<128>([0; 32]);
+        for n in [
+            0u128,
+            1,
+            1 << 127,
+            0x0123_4567_89ab_cdef_fedc_ba98_7654_3210,
+            u128::MAX,
+        ] {
+            assert_eq!(key128.bitwise_permute(n).count_ones(), n.count_ones());
+        }
+    }
+
+    // Same key + same input must produce the same output. Cheap guard against
+    // any future change that accidentally introduces nondeterminism (e.g. a
+    // hash-seed in the permute path, or branching on uninitialised memory
+    // that happens to read consistent values in test but not in production).
+    #[test]
+    fn bitwise_permute_is_deterministic() {
+        let key_a = tests::gen_key::<64>([7; 32]);
+        let key_b = tests::gen_key::<64>([7; 32]);
+        let input = 0xcafe_babe_dead_beefu64;
+        assert_eq!(key_a.bitwise_permute(input), key_b.bitwise_permute(input));
+    }
 }
