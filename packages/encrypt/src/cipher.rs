@@ -7,10 +7,20 @@ use vitaminc_aead::{
 };
 use vitaminc_protected::Controlled;
 
+/// The recursive ciphertext container produced by [`Aes256Cipher`].
+///
+/// The shape mirrors the structure of the plaintext that was encrypted: a
+/// single value yields [`Single`](AesCipherText::Single), a `Vec` yields
+/// [`Sequence`](AesCipherText::Sequence), a `HashMap` yields
+/// [`Map`](AesCipherText::Map). Nested structures are represented recursively.
 #[derive(Debug)]
 pub enum AesCipherText {
+    /// A single sealed value (nonce + ciphertext + tag).
     Single(LocalCipherText),
+    /// A sequence of ciphertexts produced from a `Vec`-shaped plaintext.
     Sequence(Vec<AesCipherText>),
+    /// A map of (cleartext key, ciphertext value) pairs produced from a
+    /// `HashMap`-shaped plaintext. Keys are not encrypted.
     Map(Vec<(String, AesCipherText)>),
 }
 
@@ -22,6 +32,11 @@ pub struct Aes256Cipher {
 }
 
 impl Aes256Cipher {
+    /// Construct a new AES-256-GCM cipher bound to the given [`Key`].
+    ///
+    /// A fresh random nonce generator is initialised for each cipher instance.
+    /// Returns an error if the platform RNG cannot be seeded or the key cannot
+    /// be loaded into the backend.
     pub fn new(key: &Key) -> Result<Self, Unspecified> {
         Ok(Self {
             nonce_generator: RandomNonceGenerator::init()?,
@@ -71,11 +86,14 @@ impl<'c> Cipher for &'c Aes256Cipher {
         }
     }
 
-    // TODO: Implement encrypt_none and passthrough
+    // Tracked: https://github.com/cipherstash/vitaminc/issues/172
     // fn encrypt_none(self) -> Result<Self::Ok, Self::Error> { }
     // fn passthrough<T: 'static>(self, data: T) -> Result<Self::Ok, Self::Error> { }
 }
 
+/// [`SeqCipher`] driver for [`Aes256Cipher`]. Encrypts each element under its
+/// own fresh nonce and accumulates the results into an
+/// [`AesCipherText::Sequence`].
 pub struct AesSeqCipher<'c> {
     cipher: &'c Aes256Cipher,
     items: Vec<AesCipherText>,
@@ -100,6 +118,9 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
     }
 }
 
+/// [`MapCipher`] driver for [`Aes256Cipher`]. Keys are stored in the clear;
+/// values are encrypted under their own fresh nonce and accumulated into an
+/// [`AesCipherText::Map`].
 pub struct AesMapCipher<'c> {
     cipher: &'c Aes256Cipher,
     entries: Vec<(String, AesCipherText)>,
@@ -132,6 +153,8 @@ impl<'c> MapCipher for AesMapCipher<'c> {
 }
 
 impl Aes256Cipher {
+    /// Decrypt an [`AesCipherText`] into `T` with no associated data.
+    /// `T` is inferred from the call site.
     pub fn decrypt<'c, T: Decrypt<'c> + 'c>(
         &'c self,
         ciphertext: AesCipherText,
@@ -139,6 +162,10 @@ impl Aes256Cipher {
         self.decrypt_with_aad(ciphertext, ())
     }
 
+    /// Decrypt an [`AesCipherText`] into `T` using the supplied associated data.
+    /// Returns [`Unspecified`] if the AAD does not match the value used at
+    /// encryption time, or if the structural shape of the ciphertext does not
+    /// match what `T` expects.
     pub fn decrypt_with_aad<'c, 'a, T, A>(
         &'c self,
         ciphertext: AesCipherText,
