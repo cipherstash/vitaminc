@@ -27,6 +27,7 @@ pub(crate) use aws_lc::CipherKey;
 pub(crate) const NONCE_LEN: usize = 12;
 
 /// AES-256-GCM authentication tag length, in bytes.
+#[allow(dead_code)]
 pub(crate) const TAG_LEN: usize = 16;
 
 #[cfg(test)]
