@@ -41,6 +41,10 @@ aes-gcm = { version = "0.10", default-features = false, features = ["aes", "allo
 # from production deps.
 _test-rust-crypto-backend = ["dep:aes-gcm"]
 
+# Opt-in HList-based static ciphertext shape. See
+# `vitaminc-aead`'s `hlist` feature for the rationale.
+hlist = ["vitaminc-aead/hlist"]
+
 [dev-dependencies]
 vitaminc-protected = { path = "../protected", version = "0.2.0-pre", features = ["arbitrary"] }
 quickcheck = "1.1.0"
