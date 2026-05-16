@@ -1,5 +1,6 @@
 use crate::backend::{CipherKey, NONCE_LEN};
 use crate::Key;
+use std::any::Any;
 use vitaminc_aead::{
     Cipher, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt, IntoAad,
     LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator, SeqAccess,
@@ -22,6 +23,15 @@ pub enum AesCipherText {
     /// A map of (cleartext key, ciphertext value) pairs produced from a
     /// `HashMap`-shaped plaintext. Keys are not encrypted.
     Map(Vec<(String, AesCipherText)>),
+    /// The authenticated absent marker produced by [`Cipher::encrypt_none`].
+    /// Stores a sealed empty plaintext whose tag binds the supplied AAD.
+    None(LocalCipherText),
+    /// A typed value passed through unencrypted via [`Cipher::passthrough`].
+    /// Not serializable to bytes — see
+    /// `packages/aead/src/cipher.rs` for the API-level type bound and the
+    /// runtime downcast performed by
+    /// [`Decipher::decrypt_passthrough`](vitaminc_aead::Decipher::decrypt_passthrough).
+    Passthrough(Box<dyn Any + Send + 'static>),
 }
 
 /// Implements AES-256-GCM. Backend is selected at compile time:
@@ -86,9 +96,32 @@ impl<'c> Cipher for &'c Aes256Cipher {
         }
     }
 
-    // Tracked: https://github.com/cipherstash/vitaminc/issues/172
-    // fn encrypt_none(self) -> Result<Self::Ok, Self::Error> { }
-    // fn passthrough<T: 'static>(self, data: T) -> Result<Self::Ok, Self::Error> { }
+    fn encrypt_none<'a, A>(self, aad: A) -> Result<Self::Ok, Self::Error>
+    where
+        A: IntoAad<'a>,
+    {
+        let nonce = self.nonce_generator.generate()?;
+        let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
+        let aad = aad.into_aad();
+
+        CipherTextBuilder::new()
+            .append_nonce(nonce)
+            .append_target_plaintext(Vec::<u8>::new())
+            .accepts_ciphertext_and_tag_ok(|mut buf| {
+                self.key
+                    .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
+                    .map(|()| buf)
+            })
+            .build()
+            .map(AesCipherText::None)
+    }
+
+    fn passthrough<T>(self, value: T) -> Result<Self::Ok, Self::Error>
+    where
+        T: Any + Send + 'static,
+    {
+        Ok(AesCipherText::Passthrough(Box::new(value)))
+    }
 }
 
 /// [`SeqCipher`] driver for [`Aes256Cipher`]. Encrypts each element under its
@@ -110,6 +143,14 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
     {
         let encrypted = data.encrypt_with_aad(self.cipher, aad)?;
         self.items.push(encrypted);
+        Ok(self)
+    }
+
+    fn passthrough_next<T>(mut self, value: T) -> Result<Self, Self::Error>
+    where
+        T: Any + Send + 'static,
+    {
+        self.items.push(AesCipherText::Passthrough(Box::new(value)));
         Ok(self)
     }
 
@@ -150,6 +191,15 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         let key = self.current_key.take().ok_or(Unspecified)?;
         let encrypted = value.encrypt_with_aad(self.cipher, aad)?;
         self.entries.push((key.to_string(), encrypted));
+        Ok(self)
+    }
+
+    fn passthrough_entry<T>(mut self, key: &'static str, value: T) -> Result<Self, Self::Error>
+    where
+        T: Any + Send + 'static,
+    {
+        self.entries
+            .push((key.to_string(), AesCipherText::Passthrough(Box::new(value))));
         Ok(self)
     }
 
@@ -262,6 +312,41 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
                 visitor.visit_map(map_access)
             }
             _ => Err(Unspecified),
+        }
+    }
+
+    fn decrypt_passthrough<T>(self) -> Self::Ok<T>
+    where
+        T: Any + Send + 'static,
+    {
+        match self.ciphertext {
+            AesCipherText::Passthrough(boxed) => {
+                boxed.downcast::<T>().map(|b| *b).map_err(|_| Unspecified)
+            }
+            _ => Err(Unspecified),
+        }
+    }
+
+    fn decrypt_option<T>(self) -> Self::Ok<Option<T>>
+    where
+        T: Decrypt<'c> + 'c,
+    {
+        match self.ciphertext {
+            AesCipherText::None(ct) => {
+                // Verify the AAD-bound tag over the empty plaintext.
+                Self::decrypt_local_ciphertext(self.cipher, ct, &self.aad)?;
+                Ok(None)
+            }
+            // Passthrough must never be decoded as an Option payload.
+            AesCipherText::Passthrough(_) => Err(Unspecified),
+            other => {
+                let inner = AesDecipher {
+                    cipher: self.cipher,
+                    ciphertext: other,
+                    aad: self.aad,
+                };
+                T::decrypt(inner).map(Some)
+            }
         }
     }
 }
@@ -477,5 +562,136 @@ mod test {
         let ciphertext = protected.encrypt(&cipher).expect("Encryption failed");
         let decrypted: Protected<String> = cipher.decrypt(ciphertext).expect("Decryption failed");
         decrypted.risky_unwrap() == plaintext
+    }
+
+    #[quickcheck]
+    fn roundtrip_option_some_string(key: Key, plaintext: String) -> bool {
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let value = Some(plaintext.clone());
+        let ciphertext = value.encrypt(&cipher).expect("Encryption failed");
+        let decrypted: Option<String> = cipher.decrypt(ciphertext).expect("Decryption failed");
+        decrypted == Some(plaintext)
+    }
+
+    #[test]
+    fn roundtrip_option_none_string() {
+        let key = Key::from([7u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let value: Option<String> = None;
+        let ciphertext = value.encrypt(&cipher).expect("Encryption failed");
+        let decrypted: Option<String> = cipher.decrypt(ciphertext).expect("Decryption failed");
+        assert_eq!(decrypted, None);
+    }
+
+    #[quickcheck]
+    fn roundtrip_option_some_with_aad(key: Key, plaintext: String) -> bool {
+        let aad = "opt-aad";
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ciphertext = Some(plaintext.clone())
+            .encrypt_with_aad(&cipher, aad)
+            .expect("Encryption failed");
+        let decrypted: Option<String> = cipher
+            .decrypt_with_aad(ciphertext, aad)
+            .expect("Decryption failed");
+        decrypted == Some(plaintext)
+    }
+
+    #[quickcheck]
+    fn roundtrip_option_none_with_aad(key: Key) -> bool {
+        let aad = "opt-none-aad";
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ciphertext = None::<String>
+            .encrypt_with_aad(&cipher, aad)
+            .expect("Encryption failed");
+        let decrypted: Option<String> = cipher
+            .decrypt_with_aad(ciphertext, aad)
+            .expect("Decryption failed");
+        decrypted.is_none()
+    }
+
+    #[quickcheck]
+    fn decrypt_option_none_fails_with_wrong_aad(key: Key) -> bool {
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ciphertext = None::<String>
+            .encrypt_with_aad(&cipher, "correct")
+            .expect("Encryption failed");
+        cipher
+            .decrypt_with_aad::<Option<String>, _>(ciphertext, "wrong")
+            .is_err()
+    }
+
+    #[test]
+    fn decrypt_string_rejects_none_ciphertext() {
+        // Closes the empty-plaintext masking concern: an authenticated `None`
+        // marker must not be decodable as `String("")`.
+        let key = Key::from([9u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ciphertext = None::<String>.encrypt(&cipher).expect("Encryption failed");
+        assert!(cipher.decrypt::<String>(ciphertext).is_err());
+    }
+
+    #[test]
+    fn decrypt_option_rejects_passthrough_ciphertext() {
+        // Type-laundering guard: a passthrough must not satisfy Option<T>.
+        let key = Key::from([11u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ciphertext = (&cipher).passthrough(42u32).expect("passthrough failed");
+        assert!(cipher.decrypt::<Option<u32>>(ciphertext).is_err());
+    }
+
+    #[test]
+    fn roundtrip_passthrough_u32() {
+        let key = Key::from([1u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ciphertext = (&cipher).passthrough(12345u32).expect("passthrough failed");
+        let decrypted: u32 = decrypt_passthrough_via(&cipher, ciphertext).expect("decode failed");
+        assert_eq!(decrypted, 12345u32);
+    }
+
+    #[test]
+    fn roundtrip_passthrough_string() {
+        let key = Key::from([2u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ciphertext = (&cipher)
+            .passthrough(String::from("version-tag"))
+            .expect("passthrough failed");
+        let decrypted: String = decrypt_passthrough_via(&cipher, ciphertext).expect("decode failed");
+        assert_eq!(decrypted, "version-tag");
+    }
+
+    #[test]
+    fn passthrough_type_mismatch_returns_err() {
+        let key = Key::from([3u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ciphertext = (&cipher).passthrough(42u32).expect("passthrough failed");
+        let result: Result<String, _> = decrypt_passthrough_via(&cipher, ciphertext);
+        assert!(result.is_err());
+    }
+
+    // Convenience: drive `Decipher::decrypt_passthrough` from a known
+    // ciphertext. Mirrors what a derive-generated `Decrypt` impl would do
+    // for a `#[encrypt(passthrough)]` field.
+    fn decrypt_passthrough_via<T>(
+        cipher: &Aes256Cipher,
+        ciphertext: AesCipherText,
+    ) -> Result<T, Unspecified>
+    where
+        T: Any + Send + 'static,
+    {
+        let decipher = AesDecipher {
+            cipher,
+            ciphertext,
+            aad: Vec::new(),
+        };
+        decipher.decrypt_passthrough::<T>()
+    }
+
+    #[quickcheck]
+    fn roundtrip_vec_of_option_string(key: Key, items: Vec<Option<String>>) -> bool {
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ciphertext = items.clone().encrypt(&cipher).expect("Encryption failed");
+        let decrypted: Vec<Option<String>> =
+            cipher.decrypt(ciphertext).expect("Decryption failed");
+        decrypted == items
     }
 }
