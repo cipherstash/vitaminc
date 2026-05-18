@@ -23,7 +23,7 @@ zeroize = { workspace = true }
 # optional dep so the `_test-rust-crypto-backend` feature can pull it in for
 # CI testing of the wasm32 backend on a native runner.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-aws-lc-rs = "1.16.3"
+aws-lc-rs = "1.17.0"
 aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc", "zeroize"], optional = true }
 
 # Wasm32: pure-Rust AES-256-GCM. aws-lc-rs has C deps (aws-lc-sys) that
