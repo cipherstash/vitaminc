@@ -124,7 +124,7 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
 pub struct AesMapCipher<'c> {
     cipher: &'c Aes256Cipher,
     entries: Vec<(String, AesCipherText)>,
-    current_key: Option<String>,
+    current_key: Option<&'static str>,
 }
 
 impl<'c> MapCipher for AesMapCipher<'c> {
@@ -132,7 +132,13 @@ impl<'c> MapCipher for AesMapCipher<'c> {
     type Error = Unspecified;
 
     fn encrypt_key(mut self, key: &'static str) -> Result<Self, Self::Error> {
-        self.current_key = Some(key.to_string());
+        // A key already pending means `encrypt_key` was called twice with no
+        // intervening `encrypt_value` — a trait-contract violation. Fail rather
+        // than silently drop the first key.
+        if self.current_key.is_some() {
+            return Err(Unspecified);
+        }
+        self.current_key = Some(key);
         Ok(self)
     }
 
@@ -143,7 +149,7 @@ impl<'c> MapCipher for AesMapCipher<'c> {
     {
         let key = self.current_key.take().ok_or(Unspecified)?;
         let encrypted = value.encrypt_with_aad(self.cipher, aad)?;
-        self.entries.push((key, encrypted));
+        self.entries.push((key.to_string(), encrypted));
         Ok(self)
     }
 
@@ -211,7 +217,6 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         = Result<T, Unspecified>
     where
         T: Send + 'c;
-    type Error = Unspecified;
 
     fn map_ok<T, U, F>(ok: Self::Ok<T>, f: F) -> Self::Ok<U>
     where
@@ -317,6 +322,7 @@ impl<'c> MapAccess<'c> for AesMapAccess<'c> {
 #[allow(clippy::unwrap_used)]
 mod test {
     use super::*;
+    use crate::key::tests::DifferingKeyPair;
     use quickcheck_macros::quickcheck;
     use std::collections::HashMap;
     use vitaminc_aead::Encrypt;
@@ -396,11 +402,13 @@ mod test {
     }
 
     #[quickcheck]
-    fn decrypt_fails_with_wrong_key(key_a: Key, key_b: Key, plaintext: String) -> bool {
+    fn decrypt_fails_with_wrong_key(keys: DifferingKeyPair, plaintext: String) -> bool {
+        // `DifferingKeyPair` guarantees the two keys are distinct, so this test
+        // is deterministic — a key collision cannot make it spuriously fail.
+        let DifferingKeyPair(key_a, key_b) = keys;
         let cipher_a = Aes256Cipher::new(&key_a).expect("Failed to create cipher A");
         let cipher_b = Aes256Cipher::new(&key_b).expect("Failed to create cipher B");
         let ciphertext = plaintext.encrypt(&cipher_a).expect("Encryption failed");
-        // Different keys will almost certainly differ; if they happen to match, decrypt succeeds which is fine
         cipher_b.decrypt::<String>(ciphertext).is_err()
     }
 
@@ -420,6 +428,44 @@ mod test {
         assert_eq!(decrypted.len(), 2);
         assert_eq!(decrypted.get("name").unwrap(), "Alice");
         assert_eq!(decrypted.get("city").unwrap(), "Sydney");
+    }
+
+    #[test]
+    fn roundtrip_hashmap_with_aad() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let aad = "map-context";
+
+        let mut plaintext = HashMap::new();
+        plaintext.insert("name", "Alice");
+        plaintext.insert("city", "Sydney");
+
+        let ciphertext = plaintext
+            .encrypt_with_aad(&cipher, aad)
+            .expect("Encryption failed");
+        let decrypted: HashMap<String, String> = cipher
+            .decrypt_with_aad(ciphertext, aad)
+            .expect("Decryption failed");
+
+        assert_eq!(decrypted.len(), 2);
+        assert_eq!(decrypted.get("name").unwrap(), "Alice");
+        assert_eq!(decrypted.get("city").unwrap(), "Sydney");
+    }
+
+    #[test]
+    fn decrypt_hashmap_fails_with_wrong_aad() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+
+        let mut plaintext = HashMap::new();
+        plaintext.insert("name", "Alice");
+
+        let ciphertext = plaintext
+            .encrypt_with_aad(&cipher, "correct-aad")
+            .expect("Encryption failed");
+        assert!(cipher
+            .decrypt_with_aad::<HashMap<String, String>, _>(ciphertext, "wrong-aad")
+            .is_err());
     }
 
     #[quickcheck]

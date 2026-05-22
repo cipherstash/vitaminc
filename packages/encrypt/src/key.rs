@@ -58,4 +58,22 @@ pub(crate) mod tests {
             Key::from(gen_array(g))
         }
     }
+
+    /// A pair of keys guaranteed to be distinct at generation time. Property
+    /// tests that depend on the keys differing (e.g. wrong-key rejection) use
+    /// this so they cannot be flaky on the astronomically unlikely event that
+    /// two independently random keys collide.
+    #[derive(Clone, Debug)]
+    pub(crate) struct DifferingKeyPair(pub Key, pub Key);
+
+    impl quickcheck::Arbitrary for DifferingKeyPair {
+        fn arbitrary(g: &mut quickcheck::Gen) -> Self {
+            let raw_a = gen_array(g);
+            let mut raw_b = gen_array(g);
+            while raw_a == raw_b {
+                raw_b = gen_array(g);
+            }
+            Self(Key::from(raw_a), Key::from(raw_b))
+        }
+    }
 }
