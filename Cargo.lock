@@ -2256,7 +2256,6 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "serde",
- "vitaminc-aead",
  "vitaminc-protected",
  "vitaminc-random",
  "zeroize",

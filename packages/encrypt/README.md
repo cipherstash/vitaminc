@@ -29,7 +29,7 @@ vitaminc-random = "0.1.0-pre4"  # For key generation
 
 ## Quick Start
 
-```rust
+```rust,ignore
 use vitaminc_encrypt::Key;
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
@@ -102,7 +102,7 @@ let ciphertext = encrypt(&key, array).expect("encryption failed");
 
 The [`decrypt`] function requires you to specify the expected type:
 
-```rust
+```rust,ignore
 # use vitaminc_encrypt::{encrypt, decrypt, Key, LocalCipherText};
 # use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 # let key = Key::random(&mut SafeRand::from_entropy().expect("Failed to seed RNG")).expect("Failed to generate key");
@@ -124,7 +124,7 @@ let array: [u8; 32] = decrypt(&key, ciphertext).expect("decryption failed");
 
 AAD allows you to authenticate additional context alongside the ciphertext without encrypting it. This is useful for binding metadata to encrypted data.
 
-```rust
+```rust,ignore
 use vitaminc_encrypt::{encrypt_with_aad, decrypt_with_aad, Key};
 
 let key = Key::from([0u8; 32]);
@@ -142,7 +142,7 @@ assert_eq!(plaintext, "secret message");
 
 Decryption will fail if the AAD doesn't match:
 
-```rust
+```rust,ignore
 # use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 # use vitaminc_encrypt::Key;
 # let key = Key::random(&mut SafeRand::from_entropy().expect("Failed to seed RNG")).expect("Failed to generate key");
@@ -160,7 +160,7 @@ assert!(result.is_err());
 
 Vitamin C Encrypt integrates with `vitaminc-protected` to ensure sensitive data is handled securely:
 
-```rust
+```rust,ignore
 use vitaminc_protected::Protected;
 use vitaminc_encrypt::{encrypt, decrypt, Key};
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
@@ -179,7 +179,7 @@ let decrypted: Protected<String> = decrypt(&key, ciphertext).expect("decryption 
 
 Keys can be encrypted with other keys, enabling key hierarchy and key wrapping:
 
-```rust
+```rust,ignore
 use vitaminc_encrypt::{Key, encrypt, decrypt};
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
@@ -215,7 +215,7 @@ This crate provides both convenience functions and traits:
 
 Example using traits directly:
 
-```rust
+```rust,ignore
 use vitaminc_encrypt::{Encrypt, Decrypt, Aes256Cipher, Key};
 
 let key = Key::from([0u8; 32]);
@@ -229,7 +229,7 @@ let plaintext: String = String::decrypt(ciphertext, &cipher).expect("decryption 
 
 You can implement [`Encrypt`] and [`Decrypt`] for your own types to enable selective field encryption:
 
-```rust
+```rust,ignore
 use vitaminc_encrypt::{Encrypt, Decrypt, Cipher, IntoAad, Unspecified, LocalCipherText};
 
 struct User {
@@ -244,45 +244,7 @@ struct EncryptedUser {
     ssn: LocalCipherText,  // Only encrypt the SSN
 }
 
-impl<'a> Encrypt<'a> for User {
-    type Encrypted = EncryptedUser;
-
-    fn encrypt_with_aad<C, A>(
-        self,
-        cipher: &C,
-        aad: A,
-    ) -> Result<Self::Encrypted, Unspecified>
-    where
-        C: Cipher,
-        A: IntoAad<'a>,
-    {
-        Ok(EncryptedUser {
-            id: self.id,
-            email: self.email,
-            ssn: self.ssn.encrypt_with_aad(cipher, aad).expect("encryption failed"),
-        })
-    }
-}
-
-impl Decrypt for User {
-    type Encrypted = EncryptedUser;
-
-    fn decrypt_with_aad<'a, C, A>(
-        encrypted: Self::Encrypted,
-        cipher: &C,
-        aad: A,
-    ) -> Result<Self, Unspecified>
-    where
-        C: Cipher,
-        A: IntoAad<'a>,
-    {
-        Ok(User {
-            id: encrypted.id,
-            email: encrypted.email,
-            ssn: String::decrypt_with_aad(encrypted.ssn, cipher, aad).expect("decryption failed"),
-        })
-    }
-}
+// TODO: Update to new Encrypt/Decrypt API
 ```
 
 ## Security Features

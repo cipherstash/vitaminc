@@ -27,6 +27,11 @@ pub(crate) use aws_lc::CipherKey;
 pub(crate) const NONCE_LEN: usize = 12;
 
 /// AES-256-GCM authentication tag length, in bytes.
+///
+/// Only the RustCrypto backend needs this — it sizes the plaintext buffer when
+/// opening. `aws-lc-rs` manages tag layout internally, so the constant is gated
+/// to the same `cfg` as the `rust_crypto` module to avoid a dead-code warning.
+#[cfg(any(target_arch = "wasm32", feature = "_test-rust-crypto-backend"))]
 pub(crate) const TAG_LEN: usize = 16;
 
 #[cfg(test)]
