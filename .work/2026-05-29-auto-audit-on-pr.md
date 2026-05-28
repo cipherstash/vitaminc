@@ -137,6 +137,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  id-token: write
 
 concurrency:
   group: coverage-review-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
@@ -162,11 +163,30 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          model: claude-sonnet-4-6
-          prompt_file: .github/audit-prompts/coverage-review.md
-          mode: review
-          allowed_tools: "Read,Grep,Glob,Bash"
+          claude_args: "--model claude-sonnet-4-6"
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+
+            Your full review instructions are in the file:
+            `.github/audit-prompts/coverage-review.md`
+
+            Read that file first using the Read tool, then follow its
+            workflow exactly. The PR branch is already checked out in
+            the current working directory.
+
+            For inline comments on specific lines, use the
+            `mcp__github_inline_comment__create_inline_comment` tool
+            with `confirmed: true`. For the top-level review body,
+            use `gh pr comment` via Bash.
 ```
+
+**Why this shape (not `prompt_file` / `model` / `mode` / `allowed_tools`):**
+`anthropics/claude-code-action@v1` does not accept those as input keys —
+they were v0.x names that v1 removed. The v1 idiom is `prompt` (inline
+multi-line string referencing the prompt file by path so Claude reads
+it at runtime via the Read tool), `claude_args` for model + CLI flags,
+and the action auto-detects the review mode from the event.
 
 **Step 2: Validate YAML with actionlint**
 
@@ -175,9 +195,10 @@ Run:
 actionlint .github/workflows/pr-coverage-review.yml
 ```
 
-Expected: no output (exit 0).
-
-If actionlint complains about `anthropics/claude-code-action@v1` not being on the known-actions list, that's an info-level warning — safe to ignore for this action.
+Expected: no output (exit 0). actionlint resolves the upstream
+`action.yml` and knows the real v1 input schema; if it reports
+"input X is not defined", that's a real error, not a stale-metadata
+warning — fix the YAML, do not commit through.
 
 **Step 3: Commit**
 
@@ -239,7 +260,7 @@ with concrete test sketches the author can adopt.
 
 ## Output rules
 
-- One PR review (`mode: review`).
+- One PR review submitted via the action's review-posting mechanism (top-level body via `gh pr comment`; inline comments via `mcp__github_inline_comment__create_inline_comment` with `confirmed: true`).
 - Each inline comment self-contained: gap description + test sketch.
 - **Hard cap: 8 inline comments.** If more gaps exist, list the
   overflow items as a bullet list in the review body under
@@ -325,6 +346,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  id-token: write
 
 concurrency:
   group: crypto-audit-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
@@ -350,11 +372,27 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          model: claude-opus-4-7
-          prompt_file: .github/audit-prompts/crypto-audit.md
-          mode: review
-          allowed_tools: "Read,Grep,Glob,Bash"
+          claude_args: "--model claude-opus-4-7"
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+
+            Your full audit instructions are in the file:
+            `.github/audit-prompts/crypto-audit.md`
+
+            Read that file first using the Read tool, then follow its
+            three-phase workflow exactly. The PR branch is already
+            checked out in the current working directory.
+
+            For inline comments on specific lines, use the
+            `mcp__github_inline_comment__create_inline_comment` tool
+            with `confirmed: true`. For the top-level review body,
+            use `gh pr comment` via Bash.
 ```
+
+**Why this shape:** same rationale as Task 2 Step 1 — v1 input schema
+is `prompt` + `claude_args`, not `prompt_file` / `model` / `mode` /
+`allowed_tools`.
 
 **Step 2: Validate YAML with actionlint**
 
@@ -362,7 +400,9 @@ jobs:
 actionlint .github/workflows/pr-crypto-audit.yml
 ```
 
-Expected: no output (exit 0).
+Expected: no output (exit 0). actionlint resolves the upstream
+`action.yml` and knows the real v1 input schema; "input X is not
+defined" errors are real, not stale-metadata warnings.
 
 **Step 3: Commit**
 
@@ -467,7 +507,7 @@ Categories beyond Tier 1's general set (crypto-specific):
 
 ## Output rules
 
-- One PR review (`mode: review`).
+- One PR review submitted via the action's review-posting mechanism (top-level body via `gh pr comment`; inline comments via `mcp__github_inline_comment__create_inline_comment` with `confirmed: true`).
 - Inline comments tagged: `[Finding M-XX]`, `[Finding L-XX]`,
   `[Finding H-XX]`, `[Finding C-XX]` (Crit), `[Coverage CG-XX]`.
 - **Hard cap: 10 inline comments.** Overflow goes into the review
@@ -667,7 +707,7 @@ If the review body looks like a generic Claude reply rather than a calibrated co
 **Step 1: Compare the review output against expected behaviour**
 
 Expected behaviour from the prompt's "Output rules":
-- One PR review (`mode: review`).
+- One PR review submitted via the action's review-posting mechanism (top-level body via `gh pr comment`; inline comments via `mcp__github_inline_comment__create_inline_comment` with `confirmed: true`).
 - For a CI/doc-only PR: one-line body, zero inline comments.
 
 If the actual output diverges (e.g. Claude found "gaps" in YAML files, posted >0 inline comments, or wrote a long review body when it shouldn't), the prompt needs tightening.
