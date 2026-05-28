@@ -6,7 +6,7 @@ use vitaminc_aead::{
     LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator, SeqAccess,
     SeqCipher, Unspecified,
 };
-use vitaminc_protected::Controlled;
+use vitaminc_protected::Protected;
 
 /// The recursive ciphertext container produced by [`Aes256Cipher`].
 ///
@@ -61,7 +61,11 @@ impl<'c> Cipher for &'c Aes256Cipher {
     type SeqCipher = AesSeqCipher<'c>;
     type MapCipher = AesMapCipher<'c>;
 
-    fn encrypt_bytes_vec<'a, A>(self, data: Vec<u8>, aad: A) -> Result<Self::Ok, Self::Error>
+    fn encrypt_bytes_vec<'a, A>(
+        self,
+        data: Protected<Vec<u8>>,
+        aad: A,
+    ) -> Result<Self::Ok, Self::Error>
     where
         A: IntoAad<'a>,
     {
@@ -251,14 +255,13 @@ impl AesDecipher<'_> {
         cipher: &Aes256Cipher,
         ct: LocalCipherText,
         aad: &[u8],
-    ) -> Result<Vec<u8>, Unspecified> {
+    ) -> Result<Protected<Vec<u8>>, Unspecified> {
         let (nonce, reader) = ct.into_reader().read_nonce::<NONCE_LEN>();
         let nonce_bytes = nonce.into_inner();
 
         reader
             .accepts_plaintext_ok(|data| cipher.key.open(&nonce_bytes, aad, data))
             .read()
-            .map(|data| data.risky_unwrap())
     }
 }
 

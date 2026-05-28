@@ -34,7 +34,9 @@ impl Encrypt for Key {
         C: Cipher,
         A: IntoAad<'a>,
     {
-        cipher.encrypt_bytes_array(self.0.risky_unwrap(), aad)
+        // The 32-byte key material stays inside `Protected` all the way to
+        // the cipher boundary — it is never exposed as a bare `[u8; 32]`.
+        cipher.encrypt_bytes_array(self.0, aad)
     }
 }
 
