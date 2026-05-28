@@ -708,4 +708,64 @@ mod test {
         let decrypted: Vec<Option<String>> = cipher.decrypt(ciphertext).expect("Decryption failed");
         decrypted == items
     }
+
+    // --- MapCipher state-machine contract ---
+    //
+    // `AesMapCipher` enforces a strict key→value pairing: every `encrypt_key`
+    // must be followed by exactly one `encrypt_value` (or `passthrough_entry`
+    // for the unencrypted variant) before the next key or `end`. The four
+    // tests below pin down each branch where the contract can be violated.
+
+    #[test]
+    fn encrypt_key_twice_without_value_fails() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let map = (&cipher).encrypt_map().encrypt_key("first").unwrap();
+        assert!(map.encrypt_key("second").is_err());
+    }
+
+    #[test]
+    fn encrypt_value_without_pending_key_fails() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let map = (&cipher).encrypt_map();
+        assert!(map.encrypt_value("orphan-value", ()).is_err());
+    }
+
+    #[test]
+    fn passthrough_entry_with_pending_key_fails() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let map = (&cipher).encrypt_map().encrypt_key("pending").unwrap();
+        // Adopting the new key here would silently drop "pending".
+        assert!(map.passthrough_entry("other", 42u32).is_err());
+    }
+
+    #[test]
+    fn end_with_pending_key_fails() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let map = (&cipher).encrypt_map().encrypt_key("pending").unwrap();
+        assert!(map.end().is_err());
+    }
+
+    #[test]
+    fn passthrough_entry_succeeds_with_no_pending_key() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        // Sanity: the new guard does not break the happy path.
+        let ciphertext = (&cipher)
+            .encrypt_map()
+            .passthrough_entry("version", 1u32)
+            .and_then(|m| m.end())
+            .expect("passthrough_entry should succeed without a pending key");
+        match ciphertext {
+            AesCipherText::Map(entries) => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0].0, "version");
+                assert!(matches!(entries[0].1, AesCipherText::Passthrough(_)));
+            }
+            _ => panic!("expected Map ciphertext"),
+        }
+    }
 }
