@@ -202,12 +202,23 @@ impl<'c> MapCipher for AesMapCipher<'c> {
     where
         T: Any + Send + 'static,
     {
+        // A key already pending means `encrypt_key` ran without a matching
+        // `encrypt_value` — adopting it here would silently drop the pending
+        // key, which is the same trait-contract violation `encrypt_key`
+        // rejects.
+        if self.current_key.is_some() {
+            return Err(Unspecified);
+        }
         self.entries
             .push((key.to_string(), AesCipherText::Passthrough(Box::new(value))));
         Ok(self)
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
+        // Finalising with a pending key would silently drop the entry.
+        if self.current_key.is_some() {
+            return Err(Unspecified);
+        }
         Ok(AesCipherText::Map(self.entries))
     }
 }
