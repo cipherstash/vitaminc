@@ -658,7 +658,8 @@ mod test {
         let ciphertext = (&cipher)
             .passthrough(String::from("version-tag"))
             .expect("passthrough failed");
-        let decrypted: String = decrypt_passthrough_via(&cipher, ciphertext).expect("decode failed");
+        let decrypted: String =
+            decrypt_passthrough_via(&cipher, ciphertext).expect("decode failed");
         assert_eq!(decrypted, "version-tag");
     }
 
@@ -693,8 +694,7 @@ mod test {
     fn roundtrip_vec_of_option_string(key: Key, items: Vec<Option<String>>) -> bool {
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let ciphertext = items.clone().encrypt(&cipher).expect("Encryption failed");
-        let decrypted: Vec<Option<String>> =
-            cipher.decrypt(ciphertext).expect("Decryption failed");
+        let decrypted: Vec<Option<String>> = cipher.decrypt(ciphertext).expect("Decryption failed");
         decrypted == items
     }
 }
