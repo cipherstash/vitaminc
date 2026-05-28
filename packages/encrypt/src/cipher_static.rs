@@ -6,12 +6,16 @@ use crate::backend::NONCE_LEN;
 use crate::Aes256Cipher;
 use vitaminc_aead::hlist::{Absent, Encrypted, StaticCipher};
 use vitaminc_aead::{CipherTextBuilder, IntoAad, NonceGenerator, Unspecified};
-use vitaminc_protected::Controlled;
+use vitaminc_protected::Protected;
 
 impl StaticCipher for &Aes256Cipher {
     type Error = Unspecified;
 
-    fn encrypt_bytes<'a, A>(self, data: Vec<u8>, aad: A) -> Result<Encrypted, Self::Error>
+    fn encrypt_bytes<'a, A>(
+        self,
+        data: Protected<Vec<u8>>,
+        aad: A,
+    ) -> Result<Encrypted, Self::Error>
     where
         A: IntoAad<'a>,
     {
@@ -23,7 +27,7 @@ impl StaticCipher for &Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        let local = seal_into_local(self, Vec::new(), aad)?;
+        let local = seal_into_local(self, Protected::new(Vec::new()), aad)?;
         Ok(Absent(local))
     }
 }
@@ -31,7 +35,11 @@ impl StaticCipher for &Aes256Cipher {
 impl Aes256Cipher {
     /// Open an [`Encrypted`] leaf under the supplied AAD. Counterpart to
     /// [`StaticCipher::encrypt_bytes`].
-    pub fn open<'a, A>(&self, ct: Encrypted, aad: A) -> Result<Vec<u8>, Unspecified>
+    ///
+    /// The plaintext is returned inside `Protected` so the zeroize-on-drop
+    /// guarantee survives the call boundary, matching
+    /// [`Aes256Cipher::decrypt_with_aad`].
+    pub fn open<'a, A>(&self, ct: Encrypted, aad: A) -> Result<Protected<Vec<u8>>, Unspecified>
     where
         A: IntoAad<'a>,
     {
@@ -45,14 +53,15 @@ impl Aes256Cipher {
         A: IntoAad<'a>,
     {
         // Sealed plaintext is empty by construction; we only care about the
-        // tag verification.
-        open_local(self, ct.0, aad).map(|pt| debug_assert!(pt.is_empty()))
+        // tag verification. The returned `Protected<Vec<u8>>` drops at the
+        // end of this expression.
+        open_local(self, ct.0, aad).map(|_| ())
     }
 }
 
 fn seal_into_local<'a, A>(
     cipher: &Aes256Cipher,
-    data: Vec<u8>,
+    data: Protected<Vec<u8>>,
     aad: A,
 ) -> Result<vitaminc_aead::LocalCipherText, Unspecified>
 where
@@ -78,7 +87,7 @@ fn open_local<'a, A>(
     cipher: &Aes256Cipher,
     ct: vitaminc_aead::LocalCipherText,
     aad: A,
-) -> Result<Vec<u8>, Unspecified>
+) -> Result<Protected<Vec<u8>>, Unspecified>
 where
     A: IntoAad<'a>,
 {
@@ -89,7 +98,6 @@ where
     reader
         .accepts_plaintext_ok(|data| cipher.key.open(&nonce_bytes, aad.as_bytes(), data))
         .read()
-        .map(|data| data.risky_unwrap())
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -98,6 +106,7 @@ mod test {
     use super::*;
     use crate::Key;
     use vitaminc_aead::hlist::{Entry, HCons, HNil, Map, Passthrough, StaticCipher};
+    use vitaminc_protected::Controlled;
 
     // A worked example. In production this type alias would be generated
     // by a derive macro from the user's struct definition.
@@ -127,13 +136,17 @@ mod test {
 
         let prefs = (&cipher)
             .encrypt_map()
-            .encrypt_entry("theme", b"midnight".to_vec(), INNER_AAD)
+            .encrypt_entry("theme", Protected::new(b"midnight".to_vec()), INNER_AAD)
             .expect("encrypt prefs")
             .end();
 
         let user_ct: UserCiphertext = (&cipher)
             .encrypt_map()
-            .encrypt_entry("password_hash", b"argon2id$hash".to_vec(), AAD)
+            .encrypt_entry(
+                "password_hash",
+                Protected::new(b"argon2id$hash".to_vec()),
+                AAD,
+            )
             .expect("encrypt pw")
             .passthrough_entry("version", 3u8)
             .none_entry("nickname", AAD)
@@ -144,15 +157,26 @@ mod test {
         // Decryption is destructuring. No downcast, no shape check, no Box.
         let Map(HCons(prefs_e, HCons(nickname_e, HCons(version_e, HCons(pw_e, HNil))))) = user_ct;
 
-        let pw = String::from_utf8(cipher.open(pw_e.value, AAD).expect("open pw")).unwrap();
+        let pw = String::from_utf8(
+            cipher
+                .open(pw_e.value, AAD)
+                .expect("open pw")
+                .risky_unwrap(),
+        )
+        .unwrap();
         let version: u8 = version_e.value.0; // typed access, no fallibility
         cipher
             .verify_absent(nickname_e.value, AAD)
             .expect("verify none");
 
         let Map(HCons(theme_e, HNil)) = prefs_e.value;
-        let theme =
-            String::from_utf8(cipher.open(theme_e.value, INNER_AAD).expect("open theme")).unwrap();
+        let theme = String::from_utf8(
+            cipher
+                .open(theme_e.value, INNER_AAD)
+                .expect("open theme")
+                .risky_unwrap(),
+        )
+        .unwrap();
 
         assert_eq!(pw, "argon2id$hash");
         assert_eq!(version, 3u8);
@@ -168,7 +192,7 @@ mod test {
         let key = Key::from([3u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("cipher init");
         let leaf = (&cipher)
-            .encrypt_bytes(b"hello".to_vec(), b"right".as_slice())
+            .encrypt_bytes(Protected::new(b"hello".to_vec()), b"right".as_slice())
             .expect("encrypt");
         assert!(cipher.open(leaf, b"wrong".as_slice()).is_err());
     }
