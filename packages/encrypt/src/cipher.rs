@@ -279,7 +279,7 @@ impl AesDecipher<'_> {
         ct: LocalCipherText,
         aad: &[u8],
     ) -> Result<Protected<Vec<u8>>, Unspecified> {
-        let (nonce, reader) = ct.into_reader().read_nonce::<NONCE_LEN>();
+        let (nonce, reader) = ct.into_reader().read_nonce::<NONCE_LEN>()?;
         let nonce_bytes = nonce.into_inner();
 
         reader

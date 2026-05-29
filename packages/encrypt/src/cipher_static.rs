@@ -20,30 +20,44 @@ impl StaticCipher for &Aes256Cipher {
         A: IntoAad<'a>,
     {
         let local = seal_into_local(self, data, aad)?;
-        Ok(Encrypted(local))
+        Ok(Encrypted::from_local(local))
     }
 
     fn encrypt_none<'a, A>(self, aad: A) -> Result<Absent, Self::Error>
     where
         A: IntoAad<'a>,
     {
-        let local = seal_into_local(self, Protected::new(Vec::new()), aad)?;
-        Ok(Absent(local))
+        let local = seal_into_local(self, Protected::new(Vec::new()), absent_aad(aad))?;
+        Ok(Absent::from_local(local))
     }
+}
+
+/// Domain-separate the absence marker from an empty [`Encrypted`].
+///
+/// Both seal an empty plaintext, so without this their `LocalCipherText` bytes
+/// would be identical under the same `(key, AAD)` and an `Absent` slot could be
+/// swapped for an empty `Encrypted` one (and vice versa) without tripping tag
+/// verification. Prefixing a fixed label binds the "absent" role into the tag
+/// (PAE-encoded via the tuple `IntoAad` impl), so the two no longer
+/// cross-validate. `verify_absent` re-derives the same wrapped AAD.
+fn absent_aad<'a, A: IntoAad<'a>>(aad: A) -> (&'a [u8], A) {
+    (b"vitaminc:absent", aad)
 }
 
 impl Aes256Cipher {
     /// Open an [`Encrypted`] leaf under the supplied AAD. Counterpart to
     /// [`StaticCipher::encrypt_bytes`].
     ///
-    /// The plaintext is returned inside `Protected` so the zeroize-on-drop
-    /// guarantee survives the call boundary, matching
-    /// [`Aes256Cipher::decrypt_with_aad`].
+    /// The plaintext is returned inside `Protected` to thread the chain of
+    /// custody across the call boundary, matching
+    /// [`Aes256Cipher::decrypt_with_aad`]. Note the zeroize-on-drop guarantee
+    /// is not yet in effect — `Protected<T>` has no `Drop` impl today; that is
+    /// tracked in #181.
     pub fn open<'a, A>(&self, ct: Encrypted, aad: A) -> Result<Protected<Vec<u8>>, Unspecified>
     where
         A: IntoAad<'a>,
     {
-        open_local(self, ct.0, aad)
+        open_local(self, ct.into_local(), aad)
     }
 
     /// Verify an [`Absent`] marker under the supplied AAD. Returns
@@ -54,8 +68,8 @@ impl Aes256Cipher {
     {
         // Sealed plaintext is empty by construction; we only care about the
         // tag verification. The returned `Protected<Vec<u8>>` drops at the
-        // end of this expression.
-        open_local(self, ct.0, aad).map(|_| ())
+        // end of this expression. The AAD is wrapped to match `encrypt_none`.
+        open_local(self, ct.into_local(), absent_aad(aad)).map(|_| ())
     }
 }
 
@@ -92,7 +106,7 @@ where
     A: IntoAad<'a>,
 {
     let aad = aad.into_aad();
-    let (nonce, reader) = ct.into_reader().read_nonce::<NONCE_LEN>();
+    let (nonce, reader) = ct.into_reader().read_nonce::<NONCE_LEN>()?;
     let nonce_bytes = nonce.into_inner();
 
     reader
@@ -104,8 +118,11 @@ where
 #[allow(clippy::unwrap_used)]
 mod test {
     use super::*;
+    use crate::key::tests::DifferingKeyPair;
     use crate::Key;
+    use quickcheck_macros::quickcheck;
     use vitaminc_aead::hlist::{Entry, HCons, HNil, Map, Passthrough, StaticCipher};
+    use vitaminc_aead::LocalCipherText;
     use vitaminc_protected::Controlled;
 
     // A worked example. In production this type alias would be generated
@@ -221,5 +238,127 @@ mod test {
     fn _proof_send() {
         fn assert_send<T: Send>() {}
         assert_send::<UserCiphertext>();
+    }
+
+    // Arbitrary bytes that weren't produced by a real seal must return an
+    // error, never panic — `open` and `verify_absent` are the entry points a
+    // future deserializer would feed untrusted input to. Quickcheck shrinks to
+    // the empty buffer if the under-length nonce guard ever regresses.
+
+    #[quickcheck]
+    fn open_rejects_arbitrary_bytes(key: Key, bytes: Vec<u8>) -> bool {
+        let cipher = Aes256Cipher::new(&key).unwrap();
+        let leaf = Encrypted::from_local(LocalCipherText::from(bytes));
+        cipher.open(leaf, b"aad".as_slice()).is_err()
+    }
+
+    #[quickcheck]
+    fn verify_absent_rejects_arbitrary_bytes(key: Key, bytes: Vec<u8>) -> bool {
+        let cipher = Aes256Cipher::new(&key).unwrap();
+        let leaf = Absent::from_local(LocalCipherText::from(bytes));
+        cipher.verify_absent(leaf, b"aad".as_slice()).is_err()
+    }
+
+    // An empty `Encrypted` and an `Absent` seal the same empty plaintext; the
+    // domain separator on `encrypt_none` is what keeps their tags from
+    // cross-validating under the same (key, AAD). Single representative case
+    // each — the property is structural, not value-dependent.
+
+    #[test]
+    fn absent_does_not_validate_as_encrypted_empty() {
+        let cipher = Aes256Cipher::new(&Key::from([2u8; 32])).unwrap();
+        let aad = b"shared-aad".as_slice();
+        let absent = (&cipher).encrypt_none(aad).unwrap();
+        // Reinterpret the Absent's bytes as an Encrypted leaf under the same AAD.
+        let as_encrypted = Encrypted::from_local(absent.into_local());
+        assert!(cipher.open(as_encrypted, aad).is_err());
+    }
+
+    #[test]
+    fn encrypted_empty_does_not_validate_as_absent() {
+        let cipher = Aes256Cipher::new(&Key::from([2u8; 32])).unwrap();
+        let aad = b"shared-aad".as_slice();
+        let encrypted_empty = (&cipher)
+            .encrypt_bytes(Protected::new(Vec::new()), aad)
+            .unwrap();
+        let as_absent = Absent::from_local(encrypted_empty.into_local());
+        assert!(cipher.verify_absent(as_absent, aad).is_err());
+    }
+
+    // A ciphertext sealed under one key must not open under a different key.
+
+    #[quickcheck]
+    fn open_with_wrong_key_fails(keys: DifferingKeyPair, plaintext: Vec<u8>) -> bool {
+        let DifferingKeyPair(key_a, key_b) = keys;
+        let cipher_a = Aes256Cipher::new(&key_a).unwrap();
+        let cipher_b = Aes256Cipher::new(&key_b).unwrap();
+        let aad = b"aad".as_slice();
+        let ct = (&cipher_a)
+            .encrypt_bytes(Protected::new(plaintext), aad)
+            .unwrap();
+        cipher_b.open(ct, aad).is_err()
+    }
+
+    #[quickcheck]
+    fn verify_absent_with_wrong_key_fails(keys: DifferingKeyPair) -> bool {
+        let DifferingKeyPair(key_a, key_b) = keys;
+        let cipher_a = Aes256Cipher::new(&key_a).unwrap();
+        let cipher_b = Aes256Cipher::new(&key_b).unwrap();
+        let aad = b"aad".as_slice();
+        let absent = (&cipher_a).encrypt_none(aad).unwrap();
+        cipher_b.verify_absent(absent, aad).is_err()
+    }
+
+    // Flipping any single byte — across the nonce, ciphertext body, or tag —
+    // must fail verification. Exhaustive sweep over the whole ciphertext.
+
+    #[test]
+    fn open_fails_on_tampering_any_byte() {
+        let cipher = Aes256Cipher::new(&Key::from([3u8; 32])).unwrap();
+        let aad = b"aad".as_slice();
+        let ct = (&cipher)
+            .encrypt_bytes(Protected::new(b"hello".to_vec()), aad)
+            .unwrap();
+        let bytes = ct.into_local().as_ref().to_vec();
+        for idx in 0..bytes.len() {
+            let mut tampered = bytes.clone();
+            tampered[idx] ^= 1;
+            let leaf = Encrypted::from_local(LocalCipherText::from(tampered));
+            assert!(cipher.open(leaf, aad).is_err(), "tamper at byte {idx}");
+        }
+    }
+
+    // AES-GCM is non-deterministic: a fresh nonce per call means two seals of
+    // the same plaintext under the same (key, AAD) must differ. Running these
+    // as properties samples many nonce pairs, catching an RNG regression a
+    // single fixed case could miss.
+
+    #[quickcheck]
+    fn encrypt_bytes_is_nondeterministic(key: Key, plaintext: Vec<u8>) -> bool {
+        let cipher = Aes256Cipher::new(&key).unwrap();
+        let aad = b"aad".as_slice();
+        let b1 = (&cipher)
+            .encrypt_bytes(Protected::new(plaintext.clone()), aad)
+            .unwrap()
+            .into_local()
+            .as_ref()
+            .to_vec();
+        let b2 = (&cipher)
+            .encrypt_bytes(Protected::new(plaintext), aad)
+            .unwrap()
+            .into_local()
+            .as_ref()
+            .to_vec();
+        // Distinct ciphertexts, and specifically distinct nonce prefixes.
+        b1 != b2 && b1[..NONCE_LEN] != b2[..NONCE_LEN]
+    }
+
+    #[quickcheck]
+    fn encrypt_none_is_nondeterministic(key: Key) -> bool {
+        let cipher = Aes256Cipher::new(&key).unwrap();
+        let aad = b"aad".as_slice();
+        let a1 = (&cipher).encrypt_none(aad).unwrap().into_local();
+        let a2 = (&cipher).encrypt_none(aad).unwrap().into_local();
+        a1.as_ref() != a2.as_ref()
     }
 }
