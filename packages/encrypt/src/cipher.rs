@@ -166,6 +166,18 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
 /// [`MapCipher`] driver for [`Aes256Cipher`]. Keys are stored in the clear;
 /// values are encrypted under their own fresh nonce and accumulated into an
 /// [`AesCipherText::Map`].
+///
+/// This driver is intended for encrypting sources that already enforce key
+/// uniqueness themselves — `HashMap`s and structs (whose field names are
+/// unique by construction). It therefore stores `entries` as a *positional
+/// list* and performs **no duplicate-key checks** of its own.
+///
+/// Implementors should be aware: if the same key is pushed by two completed
+/// `encrypt_value` / `passthrough_entry` calls, both are kept, and on decrypt
+/// the `HashMap`-shaped visitor is **last-wins**. The built-in
+/// `Encrypt for HashMap` impl never does this (the source map already dedups),
+/// so it is unreachable today; a custom encoder driving this trait directly is
+/// responsible for not emitting duplicate keys.
 pub struct AesMapCipher<'c> {
     cipher: &'c Aes256Cipher,
     entries: Vec<(String, AesCipherText)>,
@@ -353,6 +365,18 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
             }
             // Passthrough must never be decoded as an Option payload.
             AesCipherText::Passthrough(_) => Err(Unspecified),
+            // Any other variant is the `Some` payload: recurse into `T`. This is
+            // what lets `Option<Vec<T>>`, `Option<HashMap<K, V>>`,
+            // `Option<Protected<T>>` compose naturally.
+            //
+            // Note: there is no depth tag in the ciphertext, so the *shape* of
+            // nested options is decided by `T` at the call site, not by the
+            // bytes — `Some(Some(x))` and `Some(x)` seal to identical
+            // `Single(_)` ciphertexts. Decoding the same ciphertext as
+            // `Option<String>` yields `Some("x")` and as `Option<Option<String>>`
+            // yields `Some(Some("x"))`; both succeed. This mirrors serde's
+            // treatment of `Option` and is intentional — every caller fixes a
+            // concrete type at the call site. See `nested_option_shape_is_caller_decided`.
             other => {
                 let inner = AesDecipher {
                     cipher: self.cipher,

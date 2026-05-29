@@ -12,6 +12,10 @@ pub struct Key(Protected<[u8; 32]>);
 
 impl Key {
     pub(crate) fn cipher_key(&self) -> Result<CipherKey, Unspecified> {
+        // SAFETY: the borrowed `&[u8; 32]` is consumed by `CipherKey::new` only
+        // for the duration of the constructor; the backend cipher-key handle
+        // holds an opaque copy thereafter, so no bare key material outlives this
+        // call. `self.0` stays owned by `Protected` and is wiped on drop.
         CipherKey::new(self.0.risky_ref())
     }
 }
