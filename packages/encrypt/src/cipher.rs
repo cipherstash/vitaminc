@@ -792,4 +792,319 @@ mod test {
             _ => panic!("expected Map ciphertext"),
         }
     }
+
+    // --- Nonce uniqueness (fundamental AEAD property) ---
+
+    #[quickcheck]
+    fn nonce_is_unique_across_encryptions(key: Key, plaintext: String) -> bool {
+        // Two encryptions of the same plaintext under the same cipher must
+        // produce different ciphertexts — each `encrypt_*` call draws a fresh
+        // nonce. The plaintext is incidental (the nonce is drawn independently),
+        // but running this as a property samples a fresh nonce pair per case,
+        // exercising many more of the generator's outputs than a single fixed
+        // run would. Catches a future RNG / nonce-reuse regression before it
+        // becomes a catastrophic AEAD failure.
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ct1 = plaintext
+            .clone()
+            .encrypt(&cipher)
+            .expect("Encryption failed");
+        let ct2 = plaintext.encrypt(&cipher).expect("Encryption failed");
+        match (ct1, ct2) {
+            (AesCipherText::Single(a), AesCipherText::Single(b)) => a.as_ref() != b.as_ref(),
+            _ => panic!("expected Single ciphertexts"),
+        }
+    }
+
+    // --- Variant-rejection catch-alls (FC.1 cluster) ---
+    //
+    // Each `decrypt_*` method accepts exactly one `AesCipherText` variant and
+    // routes every other variant to `Err(Unspecified)`. These are the
+    // structural type-laundering guards the design relies on. The four tests
+    // below pin every catch-all sub-path (the `None`/`Passthrough` cases
+    // already pinned individually above are re-asserted here for completeness).
+    // `AesCipherText` is not `Clone`, so each rejected variant is rebuilt fresh.
+
+    fn single_ct(cipher: &Aes256Cipher) -> AesCipherText {
+        "single".to_string().encrypt(cipher).expect("encrypt")
+    }
+    fn sequence_ct(cipher: &Aes256Cipher) -> AesCipherText {
+        vec!["a".to_string(), "b".to_string()]
+            .encrypt(cipher)
+            .expect("encrypt")
+    }
+    fn map_ct(cipher: &Aes256Cipher) -> AesCipherText {
+        let mut m = HashMap::new();
+        m.insert("k", "v");
+        m.encrypt(cipher).expect("encrypt")
+    }
+    fn none_ct(cipher: &Aes256Cipher) -> AesCipherText {
+        None::<String>.encrypt(cipher).expect("encrypt")
+    }
+    fn passthrough_ct(cipher: &Aes256Cipher) -> AesCipherText {
+        cipher.passthrough(7u32).expect("passthrough")
+    }
+
+    #[test]
+    fn decrypt_bytes_rejects_non_single_variants() {
+        let cipher = Aes256Cipher::new(&Key::from([20u8; 32])).expect("Failed to create cipher");
+        // `decrypt_bytes` (driving e.g. `String`) accepts only `Single`.
+        assert!(
+            cipher.decrypt::<String>(sequence_ct(&cipher)).is_err(),
+            "Sequence"
+        );
+        assert!(cipher.decrypt::<String>(map_ct(&cipher)).is_err(), "Map");
+        assert!(cipher.decrypt::<String>(none_ct(&cipher)).is_err(), "None");
+        assert!(
+            cipher.decrypt::<String>(passthrough_ct(&cipher)).is_err(),
+            "Passthrough"
+        );
+    }
+
+    #[test]
+    fn decrypt_seq_rejects_non_sequence_variants() {
+        let cipher = Aes256Cipher::new(&Key::from([21u8; 32])).expect("Failed to create cipher");
+        // `decrypt_seq` (driving `Vec<T>`) accepts only `Sequence`.
+        assert!(
+            cipher.decrypt::<Vec<String>>(single_ct(&cipher)).is_err(),
+            "Single"
+        );
+        assert!(
+            cipher.decrypt::<Vec<String>>(map_ct(&cipher)).is_err(),
+            "Map"
+        );
+        assert!(
+            cipher.decrypt::<Vec<String>>(none_ct(&cipher)).is_err(),
+            "None"
+        );
+        assert!(
+            cipher
+                .decrypt::<Vec<String>>(passthrough_ct(&cipher))
+                .is_err(),
+            "Passthrough"
+        );
+    }
+
+    #[test]
+    fn decrypt_map_rejects_non_map_variants() {
+        let cipher = Aes256Cipher::new(&Key::from([22u8; 32])).expect("Failed to create cipher");
+        // `decrypt_map` (driving `HashMap<String, T>`) accepts only `Map`.
+        assert!(
+            cipher
+                .decrypt::<HashMap<String, String>>(single_ct(&cipher))
+                .is_err(),
+            "Single"
+        );
+        assert!(
+            cipher
+                .decrypt::<HashMap<String, String>>(sequence_ct(&cipher))
+                .is_err(),
+            "Sequence"
+        );
+        assert!(
+            cipher
+                .decrypt::<HashMap<String, String>>(none_ct(&cipher))
+                .is_err(),
+            "None"
+        );
+        assert!(
+            cipher
+                .decrypt::<HashMap<String, String>>(passthrough_ct(&cipher))
+                .is_err(),
+            "Passthrough"
+        );
+    }
+
+    #[test]
+    fn decrypt_passthrough_rejects_non_passthrough_variants() {
+        let cipher = Aes256Cipher::new(&Key::from([23u8; 32])).expect("Failed to create cipher");
+        // `decrypt_passthrough` accepts only `Passthrough`.
+        assert!(
+            decrypt_passthrough_via::<u32>(&cipher, single_ct(&cipher)).is_err(),
+            "Single"
+        );
+        assert!(
+            decrypt_passthrough_via::<u32>(&cipher, sequence_ct(&cipher)).is_err(),
+            "Sequence"
+        );
+        assert!(
+            decrypt_passthrough_via::<u32>(&cipher, map_ct(&cipher)).is_err(),
+            "Map"
+        );
+        assert!(
+            decrypt_passthrough_via::<u32>(&cipher, none_ct(&cipher)).is_err(),
+            "None"
+        );
+    }
+
+    // --- Option<T> type variation: exercise the `other`-arm sub-paths ---
+    //
+    // `roundtrip_option_some_string` only lands the `Single` sub-path with a
+    // `String` leaf. These cover a non-String `Single` leaf (u32), the
+    // `Sequence` sub-path (Vec), the `Map` sub-path (HashMap), and the
+    // `Protected`-rewrap path.
+
+    #[quickcheck]
+    fn roundtrip_option_some_u32(key: Key, value: u32) -> bool {
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ct = Some(value).encrypt(&cipher).expect("Encryption failed");
+        cipher
+            .decrypt::<Option<u32>>(ct)
+            .expect("Decryption failed")
+            == Some(value)
+    }
+
+    #[quickcheck]
+    fn roundtrip_option_some_vec_of_strings(items: Vec<String>) -> bool {
+        let cipher = Aes256Cipher::new(&Key::from([31u8; 32])).expect("Failed to create cipher");
+        let ct = Some(items.clone())
+            .encrypt(&cipher)
+            .expect("Encryption failed");
+        cipher
+            .decrypt::<Option<Vec<String>>>(ct)
+            .expect("Decryption failed")
+            == Some(items)
+    }
+
+    #[test]
+    fn roundtrip_option_some_hashmap() {
+        let cipher = Aes256Cipher::new(&Key::from([32u8; 32])).expect("Failed to create cipher");
+        let mut m = HashMap::new();
+        m.insert("name", "Alice");
+        let ct = Some(m).encrypt(&cipher).expect("Encryption failed");
+        let decoded: Option<HashMap<String, String>> =
+            cipher.decrypt(ct).expect("Decryption failed");
+        assert_eq!(
+            decoded.unwrap().get("name").map(String::as_str),
+            Some("Alice")
+        );
+    }
+
+    #[quickcheck]
+    fn roundtrip_option_some_protected_string(plaintext: String) -> bool {
+        use vitaminc_protected::{Controlled, Protected};
+        let cipher = Aes256Cipher::new(&Key::from([33u8; 32])).expect("Failed to create cipher");
+        let ct = Some(Protected::new(plaintext.clone()))
+            .encrypt(&cipher)
+            .expect("Encryption failed");
+        let decoded: Option<Protected<String>> = cipher.decrypt(ct).expect("Decryption failed");
+        decoded.map(Controlled::risky_unwrap) == Some(plaintext)
+    }
+
+    #[quickcheck]
+    fn decrypt_option_some_fails_with_wrong_aad(plaintext: String) -> bool {
+        // Wrong-AAD rejection threaded through the `Option` type itself (not just
+        // the inner leaf).
+        let cipher = Aes256Cipher::new(&Key::from([34u8; 32])).expect("Failed to create cipher");
+        let ct = Some(plaintext)
+            .encrypt_with_aad(&cipher, "correct")
+            .expect("Encryption failed");
+        cipher
+            .decrypt_with_aad::<Option<String>, _>(ct, "wrong")
+            .is_err()
+    }
+
+    #[test]
+    fn nested_option_shape_is_caller_decided() {
+        // `Some(Some(x))` seals to the same `Single(_)` as `Some(x)`; the
+        // call-site type decides the decoded shape. Pins the documented
+        // serde-style property so an accidental future "fix" can't close the
+        // recursion door. See the note on `decrypt_option`.
+        let cipher = Aes256Cipher::new(&Key::from([35u8; 32])).expect("Failed to create cipher");
+        let outer: Option<Option<String>> = Some(Some("x".into()));
+        let ct = outer.encrypt(&cipher).expect("Encryption failed");
+        let decoded: Option<String> = cipher.decrypt(ct).expect("Decryption failed");
+        assert_eq!(decoded, Some("x".into()));
+    }
+
+    // --- Mixed encrypted / passthrough entries + Any-TypeId ---
+
+    #[test]
+    fn seq_cipher_accepts_mixed_encrypt_next_and_passthrough_next() {
+        let cipher = Aes256Cipher::new(&Key::from([40u8; 32])).expect("Failed to create cipher");
+        let ct = (&cipher)
+            .encrypt_seq(Some(3))
+            .encrypt_next("first", ())
+            .unwrap()
+            .passthrough_next(99u32)
+            .unwrap()
+            .encrypt_next("third", ())
+            .unwrap()
+            .end()
+            .unwrap();
+        match ct {
+            AesCipherText::Sequence(items) => {
+                assert_eq!(items.len(), 3);
+                assert!(matches!(items[0], AesCipherText::Single(_)));
+                assert!(matches!(items[1], AesCipherText::Passthrough(_)));
+                assert!(matches!(items[2], AesCipherText::Single(_)));
+            }
+            _ => panic!("expected Sequence"),
+        }
+    }
+
+    #[test]
+    fn map_with_mixed_entries_cannot_decode_as_uniform_hashmap() {
+        // A passthrough value in a map cannot satisfy a uniform `HashMap<_, T>`
+        // decode: `T`'s bytes visitor hits the FC.1 catch-all on the
+        // Passthrough variant, failing the whole decode.
+        let cipher = Aes256Cipher::new(&Key::from([41u8; 32])).expect("Failed to create cipher");
+        let ct = (&cipher)
+            .encrypt_map()
+            .encrypt_key("name")
+            .unwrap()
+            .encrypt_value("Alice".to_string(), ())
+            .unwrap()
+            .passthrough_entry("schema_version", 1u32)
+            .unwrap()
+            .end()
+            .unwrap();
+        assert!(cipher.decrypt::<HashMap<String, String>>(ct).is_err());
+    }
+
+    #[test]
+    fn roundtrip_hashmap_of_option_values() {
+        // The companion happy case: mixed Some/None values decode correctly iff
+        // the decode type explicitly accepts the variation (`Option<T>`).
+        let cipher = Aes256Cipher::new(&Key::from([42u8; 32])).expect("Failed to create cipher");
+        let mut m: HashMap<&'static str, Option<String>> = HashMap::new();
+        m.insert("present", Some("Alice".to_string()));
+        m.insert("absent", None);
+        let ct = m.encrypt(&cipher).expect("Encryption failed");
+        let decoded: HashMap<String, Option<String>> =
+            cipher.decrypt(ct).expect("Decryption failed");
+        assert_eq!(decoded.get("present"), Some(&Some("Alice".to_string())));
+        assert_eq!(decoded.get("absent"), Some(&None));
+    }
+
+    #[test]
+    fn passthrough_option_is_distinct_type_from_inner() {
+        // `Any`/`TypeId` pin: `Option<u32>` and `u32` are distinct types even
+        // when the value is `Some(n)`. A passthrough sealed as `Option<u32>`
+        // must only downcast back to `Option<u32>`.
+        let cipher = Aes256Cipher::new(&Key::from([43u8; 32])).expect("Failed to create cipher");
+        let ct = cipher.passthrough(Some(42u32)).expect("passthrough failed");
+        let decoded: Option<u32> =
+            decrypt_passthrough_via(&cipher, ct).expect("decode as Option<u32> should succeed");
+        assert_eq!(decoded, Some(42u32));
+
+        let ct2 = cipher.passthrough(Some(42u32)).expect("passthrough failed");
+        assert!(
+            decrypt_passthrough_via::<u32>(&cipher, ct2).is_err(),
+            "Option<u32> passthrough must not downcast to u32"
+        );
+    }
+
+    #[quickcheck]
+    fn decrypt_byte_array_ciphertext_as_vec_u8(key: Key, bytes: [u8; 16]) -> bool {
+        // `Decrypt for Vec<u8>` reads the bytes pipeline (`Single`), not a
+        // `Sequence`. There is no `Encrypt for Vec<u8>` (no `Encrypt for u8`),
+        // so a `[u8; N]` ciphertext is the canonical `Single` producer
+        // decodable as `Vec<u8>`. Pins the otherwise-unexercised impl across
+        // arbitrary byte payloads.
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ct = bytes.encrypt(&cipher).expect("Encryption failed");
+        let decoded: Vec<u8> = cipher.decrypt(ct).expect("Decryption failed");
+        decoded == bytes.to_vec()
+    }
 }
