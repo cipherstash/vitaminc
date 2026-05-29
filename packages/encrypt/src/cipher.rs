@@ -37,8 +37,8 @@ pub enum AesCipherText {
 /// Implements AES-256-GCM. Backend is selected at compile time:
 /// `aws-lc-rs` on native targets, `aes-gcm` (RustCrypto) on `wasm32`.
 pub struct Aes256Cipher {
-    nonce_generator: RandomNonceGenerator<NONCE_LEN>,
-    key: CipherKey,
+    pub(crate) nonce_generator: RandomNonceGenerator<NONCE_LEN>,
+    pub(crate) key: CipherKey,
 }
 
 impl Aes256Cipher {
@@ -279,7 +279,7 @@ impl AesDecipher<'_> {
         ct: LocalCipherText,
         aad: &[u8],
     ) -> Result<Protected<Vec<u8>>, Unspecified> {
-        let (nonce, reader) = ct.into_reader().read_nonce::<NONCE_LEN>();
+        let (nonce, reader) = ct.into_reader().read_nonce::<NONCE_LEN>()?;
         let nonce_bytes = nonce.into_inner();
 
         reader

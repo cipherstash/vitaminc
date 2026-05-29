@@ -2,6 +2,8 @@
 #![doc = include_str!("../README.md")]
 mod backend;
 mod cipher;
+#[cfg(feature = "hlist")]
+mod cipher_static;
 mod key;
 
 pub use cipher::{Aes256Cipher, AesCipherText};
