@@ -11,7 +11,10 @@ use crate::{
 
 pub(crate) type KeyInner<const N: usize> = Exportable<Protected<[u8; N]>>;
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, Zeroize)]
+// NOTE: no `Copy` — `PermutationKey` wraps a `Protected` secret that zeroizes
+// on drop, and `Copy`/`Drop` are mutually exclusive. A bitwise copy would also
+// leave un-zeroized duplicates of the key. Use `Clone` where a copy is needed.
+#[derive(Clone, Debug, Serialize, Deserialize, Zeroize)]
 pub struct PermutationKey<const N: usize>(KeyInner<N>);
 
 impl<const N: usize> PermutationKey<N> {
@@ -64,7 +67,15 @@ impl<const N: usize> PermutationKey<N> {
     where
         [u8; N]: IsPermutable + Zeroed,
     {
-        Self(target.invert().0.map(|arr| permute_array(self, arr)))
+        // `invert` consumes the key; clone the borrowed `target` (the clone
+        // zeroizes on drop like any other `PermutationKey`).
+        Self(
+            target
+                .clone()
+                .invert()
+                .0
+                .map(|arr| permute_array(self, arr)),
+        )
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = Protected<u8>> + '_ {
@@ -117,7 +128,7 @@ mod tests {
         [u8; N]: IsPermutable + Zeroed,
     {
         let key: PermutationKey<N> = tests::gen_rand_key()?;
-        let inverted = key.invert();
+        let inverted = key.clone().invert();
 
         // p(p^-1(x)) = x
         assert_eq!(
