@@ -2,7 +2,7 @@ pub use crate::Protected;
 use crate::{private::ControlledPrivate, AsProtectedRef, ProtectedRef, ReplaceT};
 use zeroize::Zeroize;
 
-pub trait Controlled: ControlledPrivate {
+pub trait Controlled: ControlledPrivate + Zeroize {
     type Inner;
 
     fn init_from_inner(x: Self::Inner) -> Self;
@@ -258,9 +258,13 @@ pub trait Controlled: ControlledPrivate {
     fn iter<'a, I>(&'a self) -> impl Iterator<Item = Protected<I>>
     where
         <Self as Controlled>::Inner: AsRef<[I]>,
-        I: Copy + 'a,
+        I: Copy + Zeroize + 'a,
     {
-        self.risky_ref().as_ref().iter().copied().map(Protected)
+        self.risky_ref()
+            .as_ref()
+            .iter()
+            .copied()
+            .map(Protected::new)
     }
 
     /// Replace the inner value with a new one.

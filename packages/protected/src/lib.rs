@@ -43,6 +43,8 @@ pub trait ReplaceT<K>: private::Sealed {
 
 impl<T, K> ReplaceT<K> for Protected<T>
 where
+    T: Zeroize,
+    K: Zeroize,
     Protected<K>: Controlled,
 {
     type Output = Protected<K>;
@@ -50,6 +52,8 @@ where
 
 impl<T, K> ReplaceT<K> for Equatable<Protected<T>>
 where
+    T: Zeroize,
+    K: Zeroize,
     Equatable<Protected<K>>: Controlled,
 {
     type Output = Equatable<Protected<K>>;
@@ -57,6 +61,8 @@ where
 
 impl<T, K> ReplaceT<K> for Equatable<Exportable<Protected<T>>>
 where
+    T: Zeroize,
+    K: Zeroize,
     Equatable<Exportable<Protected<K>>>: Controlled,
 {
     type Output = Equatable<Exportable<Protected<K>>>;
@@ -64,6 +70,7 @@ where
 
 impl<T, K> ReplaceT<K> for Exportable<Protected<T>>
 where
+    T: Zeroize,
     K: Zeroize,
 {
     type Output = Exportable<Protected<K>>;
@@ -71,6 +78,7 @@ where
 
 impl<T, K> ReplaceT<K> for Exportable<Equatable<Protected<T>>>
 where
+    T: Zeroize,
     K: Zeroize,
 {
     type Output = Exportable<Equatable<Protected<K>>>;
@@ -80,6 +88,8 @@ where
 // because any we are not increasing the scope of the type.
 impl<T, K, S> ReplaceT<K> for Usage<Protected<T>, S>
 where
+    T: Zeroize,
+    K: Zeroize,
     Protected<K>: Controlled,
 {
     type Output = Protected<K>;
@@ -87,11 +97,12 @@ where
 
 mod private {
     use crate::{Equatable, Exportable, Protected, Usage};
+    use zeroize::Zeroize;
 
     pub trait Sealed {}
-    impl<T> Sealed for Protected<T> {}
-    impl<T> Sealed for Equatable<T> {}
-    impl<T> Sealed for Exportable<T> {}
+    impl<T: Zeroize> Sealed for Protected<T> {}
+    impl<T: Zeroize> Sealed for Equatable<T> {}
+    impl<T: Zeroize> Sealed for Exportable<T> {}
     impl<T, S> Sealed for Usage<T, S> {}
 
     /// Private trait that is used to hide the inner value of a Controlled type

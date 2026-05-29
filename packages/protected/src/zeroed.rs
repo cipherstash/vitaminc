@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::{Equatable, Exportable, Protected, Usage};
+use zeroize::Zeroize;
 
 /// Similar to `Default`, but doesn't rely on the standard library,
 /// is only implemented for Paranoid types, and covers array sizes up to 1024.
@@ -34,7 +35,7 @@ macro_rules! impl_zeroed_for_literal {
 
 impl<T> Zeroed for Protected<T>
 where
-    T: Zeroed,
+    T: Zeroed + Zeroize,
 {
     fn zeroed() -> Self {
         Protected(T::zeroed())
@@ -43,7 +44,7 @@ where
 
 impl<T> Zeroed for Equatable<T>
 where
-    T: Zeroed,
+    T: Zeroed + Zeroize,
 {
     fn zeroed() -> Self {
         Equatable(T::zeroed())
@@ -52,7 +53,7 @@ where
 
 impl<T> Zeroed for Exportable<T>
 where
-    T: Zeroed,
+    T: Zeroed + Zeroize,
 {
     fn zeroed() -> Self {
         Exportable(T::zeroed())

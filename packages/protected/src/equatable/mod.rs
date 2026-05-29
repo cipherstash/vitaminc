@@ -2,7 +2,7 @@ use crate::{exportable::SafeSerialize, private::ControlledPrivate, Controlled, P
 use core::num::NonZeroU16;
 use serde::{Serialize, Serializer};
 use subtle::ConstantTimeEq as SubtleCtEq;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A _controlled_ wrapper type that allows for constant time equality checks of a [Controlled] type.
 /// The immediate inner type must also be [Controlled] (typically [Protected]).
@@ -96,10 +96,10 @@ use zeroize::Zeroize;
 /// let b = AuthenticatedString::new([0u8; 32], "Hello, world!".to_string());
 /// assert_eq!(a, b);
 /// ```
-#[derive(Debug, Zeroize)]
-pub struct Equatable<T>(pub(crate) T);
+#[derive(Debug, Zeroize, ZeroizeOnDrop)]
+pub struct Equatable<T: Zeroize>(pub(crate) T);
 
-impl<T> Equatable<T> {
+impl<T: Zeroize> Equatable<T> {
     /// Create a new `Equatable` from an inner value.
     pub fn new(x: <Equatable<T> as Controlled>::Inner) -> Self
     where
@@ -107,11 +107,21 @@ impl<T> Equatable<T> {
     {
         Self::init_from_inner(x)
     }
+
+    /// Move the inner value out without running the zeroizing `Drop`.
+    /// See [`Protected::into_inner_unchecked`](crate::Protected) for the rationale.
+    fn into_inner_unchecked(self) -> T {
+        // SAFETY: `self.0` is read once, then `self` is forgotten so its `Drop`
+        // does not also wipe the moved-out value.
+        let inner = unsafe { core::ptr::read(&self.0) };
+        core::mem::forget(self);
+        inner
+    }
 }
 
 impl<T> From<T> for Equatable<T>
 where
-    T: ControlledPrivate,
+    T: ControlledPrivate + Zeroize,
 {
     fn from(x: T) -> Self {
         Self(x)
@@ -128,7 +138,7 @@ where
 }
 
 // TODO: Canwe make a blanket impl for all Paranoid types?
-impl<T: ControlledPrivate> ControlledPrivate for Equatable<T> {}
+impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Equatable<T> {}
 
 impl<T> Controlled for Equatable<T>
 where
@@ -149,13 +159,13 @@ where
     }
 
     fn risky_unwrap(self) -> Self::Inner {
-        self.0.risky_unwrap()
+        self.into_inner_unchecked().risky_unwrap()
     }
 }
 
 impl<T, A> Extend<A> for Equatable<T>
 where
-    T: Extend<A>,
+    T: Extend<A> + Zeroize,
 {
     fn extend<I>(&mut self, iter: I)
     where
@@ -309,7 +319,7 @@ mod private {
     /// Private marker trait.
     pub trait SupportsConstantTimeEq {}
 
-    impl<T> SupportsConstantTimeEq for Equatable<T> {}
+    impl<T: zeroize::Zeroize> SupportsConstantTimeEq for Equatable<T> {}
     impl<const N: usize, T> SupportsConstantTimeEq for [T; N] {}
     impl SupportsConstantTimeEq for u8 {}
     impl SupportsConstantTimeEq for u16 {}

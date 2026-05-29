@@ -2,6 +2,7 @@ use serde::{Serialize, Serializer};
 
 use crate::{exportable::SafeSerialize, private::ControlledPrivate, Controlled, Protected};
 use std::marker::PhantomData;
+use zeroize::Zeroize;
 
 // TODO: Docs, explain compile time
 pub struct Usage<T, Scope = DefaultScope>(pub(crate) T, pub(crate) PhantomData<Scope>);
@@ -13,6 +14,15 @@ impl<T, S> Usage<T, S> {
         S: Scope,
     {
         Self::init_from_inner(x)
+    }
+}
+
+// `Usage` is a compile-time scope wrapper; it is not in #181's drop scope, but
+// `Controlled: Zeroize` requires it to be zeroizable. Delegates to the inner
+// controlled type (whose own `Drop` performs the wipe). `PhantomData` is a ZST.
+impl<T: Zeroize, Scope> Zeroize for Usage<T, Scope> {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
     }
 }
 
@@ -56,7 +66,7 @@ impl<T, S> Acceptable<S> for Usage<T, S> where S: Scope {}
 // TODO: Move this to all of the other modules
 pub struct DefaultScope;
 impl Scope for DefaultScope {}
-impl<T> Acceptable<DefaultScope> for Protected<T> {}
+impl<T: Zeroize> Acceptable<DefaultScope> for Protected<T> {}
 
 /// Serialize implementation for Usage if it is controlled and the inner type is safe serializable.
 ///
