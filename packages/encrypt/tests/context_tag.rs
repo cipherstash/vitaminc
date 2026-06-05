@@ -108,7 +108,10 @@ fn context_tag_binds_owned_and_integer_tags() {
         .expect("encryption failed");
 
     let plaintext: String = cipher
-        .decrypt_with_aad(ciphertext, ContextTag::aad_with(7u64, String::from("session")))
+        .decrypt_with_aad(
+            ciphertext,
+            ContextTag::aad_with(7u64, String::from("session")),
+        )
         .expect("decryption failed");
 
     assert_eq!(plaintext, "secret");
