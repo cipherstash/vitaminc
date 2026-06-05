@@ -15,14 +15,14 @@ categories.workspace = true
 all-features = true
 
 [dependencies]
-vitaminc-kms = { path = "../kms", version = "0.2.0-pre", optional = true }
-vitaminc-permutation = { path = "../permutation", version = "0.2.0-pre", optional = true }
-vitaminc-protected = { path = "../protected", version = "0.2.0-pre", optional = true }
-vitaminc-random = { path = "../random", version = "0.2.0-pre", optional = true }
-vitaminc-traits = { path = "../traits", version = "0.2.0-pre", optional = true }
-vitaminc-async-traits = { path = "../async-traits", version = "0.2.0-pre", optional = true }
-vitaminc-encrypt = { path = "../encrypt", version = "0.2.0-pre", optional = true }
-vitaminc-aead = { path = "../aead", version = "0.2.0-pre", optional = true }
+vitaminc-kms = { path = "../kms", version = "0.2.0-pre.1", optional = true }
+vitaminc-permutation = { path = "../permutation", version = "0.2.0-pre.1", optional = true }
+vitaminc-protected = { path = "../protected", version = "0.2.0-pre.1", optional = true }
+vitaminc-random = { path = "../random", version = "0.2.0-pre.1", optional = true }
+vitaminc-traits = { path = "../traits", version = "0.2.0-pre.1", optional = true }
+vitaminc-async-traits = { path = "../async-traits", version = "0.2.0-pre.1", optional = true }
+vitaminc-encrypt = { path = "../encrypt", version = "0.2.0-pre.1", optional = true }
+vitaminc-aead = { path = "../aead", version = "0.2.0-pre.1", optional = true }
 
 [features]
 protected = ["dep:vitaminc-protected"]
