@@ -2,7 +2,7 @@ use crate::backend::{CipherKey, NONCE_LEN};
 use crate::Key;
 use std::any::Any;
 use vitaminc_aead::{
-    Cipher, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt, IntoAad,
+    Aad, Cipher, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt, IntoAad,
     LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator, SeqAccess,
     SeqCipher, Unspecified,
 };
@@ -331,7 +331,7 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
                 let seq_access = AesSeqAccess {
                     cipher: self.cipher,
                     items: items.into_iter(),
-                    aad: aad.into_aad().as_bytes().to_vec(),
+                    aad: aad.into_aad(),
                 };
                 visitor.visit_seq(seq_access)
             }
@@ -349,7 +349,7 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
                 let map_access = AesMapAccess {
                     cipher: self.cipher,
                     entries: entries.into_iter(),
-                    aad: aad.into_aad().as_bytes().to_vec(),
+                    aad: aad.into_aad(),
                 };
                 visitor.visit_map(map_access)
             }
@@ -406,13 +406,16 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
     }
 }
 
-struct AesSeqAccess<'c> {
+struct AesSeqAccess<'c, 'a> {
     cipher: &'c Aes256Cipher,
     items: std::vec::IntoIter<AesCipherText>,
-    aad: Vec<u8>,
+    // Held as `Aad` (copy-on-write) rather than an owned `Vec<u8>` so a borrowed
+    // AAD stays borrowed; the per-element `clone` below is then cheap for the
+    // common `&str`/`&[u8]` case.
+    aad: Aad<'a>,
 }
 
-impl<'c> SeqAccess<'c> for AesSeqAccess<'c> {
+impl<'c, 'a> SeqAccess<'c> for AesSeqAccess<'c, 'a> {
     type Error = Unspecified;
 
     fn next_element<T: Decrypt<'c> + 'c>(&mut self) -> Result<Option<T>, Self::Error> {
@@ -430,13 +433,13 @@ impl<'c> SeqAccess<'c> for AesSeqAccess<'c> {
     }
 }
 
-struct AesMapAccess<'c> {
+struct AesMapAccess<'c, 'a> {
     cipher: &'c Aes256Cipher,
     entries: std::vec::IntoIter<(String, AesCipherText)>,
-    aad: Vec<u8>,
+    aad: Aad<'a>,
 }
 
-impl<'c> MapAccess<'c> for AesMapAccess<'c> {
+impl<'c, 'a> MapAccess<'c> for AesMapAccess<'c, 'a> {
     type Error = Unspecified;
 
     fn next_entry<T: Decrypt<'c> + 'c>(&mut self) -> Result<Option<(String, T)>, Self::Error> {
