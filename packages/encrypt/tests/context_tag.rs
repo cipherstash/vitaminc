@@ -2,8 +2,9 @@
 //!
 //! The `vitaminc-aead` unit tests prove that `ContextTag` binds the right AAD bytes at encrypt
 //! time using a mock cipher. These tests close the loop with a concrete AEAD: a value sealed
-//! through `ContextTag` must decrypt only when the same context is supplied via
-//! `ContextTag::aad` / `ContextTag::aad_with`, and must fail otherwise.
+//! through `ContextTag` must decrypt only when the same context is supplied — via the
+//! `ContextTag::context(..).decrypt[_with_aad]` helper or the lower-level
+//! `ContextTag::aad` / `ContextTag::aad_with` builders — and must fail otherwise.
 
 use vitaminc_aead::{ContextTag, Encrypt};
 use vitaminc_encrypt::{Aes256Cipher, Key};
@@ -115,4 +116,69 @@ fn context_tag_binds_owned_and_integer_tags() {
         .expect("decryption failed");
 
     assert_eq!(plaintext, "secret");
+}
+
+// --- The `ContextTag::context(..).decrypt[_with_aad]` helper (symmetric with the
+// --- encrypt side, driving a `Decipher` from `cipher.decipher(ciphertext)`). ---
+
+#[test]
+fn context_helper_roundtrip() {
+    let cipher = cipher();
+
+    let ciphertext = ContextTag::new("secret message", "user:42")
+        .encrypt(&cipher)
+        .expect("encryption failed");
+
+    let plaintext: String = ContextTag::context("user:42")
+        .decrypt(cipher.decipher(ciphertext))
+        .expect("decryption failed");
+
+    assert_eq!(plaintext, "secret message");
+}
+
+#[test]
+fn context_helper_roundtrip_with_extra_aad() {
+    let cipher = cipher();
+
+    let ciphertext = ContextTag::new("secret", "table:users")
+        .encrypt_with_aad(&cipher, "row:99")
+        .expect("encryption failed");
+
+    let plaintext: String = ContextTag::context("table:users")
+        .decrypt_with_aad(cipher.decipher(ciphertext), "row:99")
+        .expect("decryption failed");
+
+    assert_eq!(plaintext, "secret");
+}
+
+#[test]
+fn context_helper_refine_rebuilds_nested_tag() {
+    let cipher = cipher();
+
+    let ciphertext = ContextTag::new("secret", "table:users")
+        .refine("column:email")
+        .encrypt(&cipher)
+        .expect("encryption failed");
+
+    // The decrypt context is built with the SAME refine chain — no hand-written
+    // nested tuple to get wrong.
+    let plaintext: String = ContextTag::context("table:users")
+        .refine("column:email")
+        .decrypt(cipher.decipher(ciphertext))
+        .expect("decryption failed");
+
+    assert_eq!(plaintext, "secret");
+}
+
+#[test]
+fn context_helper_wrong_tag_fails() {
+    let cipher = cipher();
+
+    let ciphertext = ContextTag::new("secret", "user:42")
+        .encrypt(&cipher)
+        .expect("encryption failed");
+
+    let result: Result<String, _> =
+        ContextTag::context("user:99").decrypt(cipher.decipher(ciphertext));
+    assert!(result.is_err(), "wrong context must not decrypt");
 }
