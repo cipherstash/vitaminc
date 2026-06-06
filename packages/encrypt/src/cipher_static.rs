@@ -50,9 +50,8 @@ impl Aes256Cipher {
     ///
     /// The plaintext is returned inside `Protected` to thread the chain of
     /// custody across the call boundary, matching
-    /// [`Aes256Cipher::decrypt_with_aad`]. Note the zeroize-on-drop guarantee
-    /// is not yet in effect — `Protected<T>` has no `Drop` impl today; that is
-    /// tracked in #181.
+    /// [`Aes256Cipher::decrypt_with_aad`]. The returned `Protected<Vec<u8>>` is
+    /// zeroized on drop (`Protected` is `ZeroizeOnDrop`).
     pub fn open<'a, A>(&self, ct: Encrypted, aad: A) -> Result<Protected<Vec<u8>>, Unspecified>
     where
         A: IntoAad<'a>,
