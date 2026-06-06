@@ -14,6 +14,14 @@ pub(crate) type KeyInner<const N: usize> = Exportable<Protected<[u8; N]>>;
 // NOTE: no `Copy` — `PermutationKey` wraps a `Protected` secret that zeroizes
 // on drop, and `Copy`/`Drop` are mutually exclusive. A bitwise copy would also
 // leave un-zeroized duplicates of the key. Use `Clone` where a copy is needed.
+//
+// The key IS wiped on drop: `KeyInner` is `Exportable<Protected<[u8; N]>>`, both
+// of which are `ZeroizeOnDrop`, so the field's drop glue zeroizes the bytes. We
+// deliberately do NOT derive `ZeroizeOnDrop` on `PermutationKey` itself: a `Drop`
+// impl would forbid the `.0` field moves in `complement` / `Permute::permute`
+// (E0509), and recovering them would mean duplicating `protected`'s
+// `ptr::read`+`forget` move-out primitive into this crate. The drop-glue
+// guarantee holds as long as `KeyInner` stays `ZeroizeOnDrop`.
 #[derive(Clone, Debug, Serialize, Deserialize, Zeroize)]
 pub struct PermutationKey<const N: usize>(KeyInner<N>);
 

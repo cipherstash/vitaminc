@@ -20,15 +20,14 @@ impl<T: Zeroize> Protected<T> {
     /// Move the inner value out without running the zeroizing `Drop`.
     ///
     /// Ownership of the (still sensitive) value transfers to the caller, which
-    /// becomes responsible for its lifecycle; the wrapper is forgotten so its
-    /// `Drop` does not also wipe — and thereby invalidate — the moved-out value.
+    /// becomes responsible for its lifecycle. See [`crate::move_inner_out`] for
+    /// the shared primitive and the rationale (including why the source slot is
+    /// not scrubbed).
     fn into_inner_unchecked(self) -> T {
-        // SAFETY: `self.0` is read exactly once, then `self` is forgotten so its
-        // `Drop` never runs against the now-moved-out field (no double-free, no
-        // use-after-zeroize).
-        let inner = unsafe { core::ptr::read(&self.0) };
-        core::mem::forget(self);
-        inner
+        let field: *const T = &self.0;
+        // SAFETY: `field` points to `self`'s live owned inner; `Protected`'s
+        // `Drop` only zeroizes.
+        unsafe { crate::move_inner_out(self, field) }
     }
 }
 

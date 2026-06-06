@@ -17,9 +17,17 @@ impl<T, S> Usage<T, S> {
     }
 }
 
-// `Usage` is a compile-time scope wrapper; it is not in #181's drop scope, but
-// `Controlled: Zeroize` requires it to be zeroizable. Delegates to the inner
-// controlled type (whose own `Drop` performs the wipe). `PhantomData` is a ZST.
+// `Usage` is a compile-time scope wrapper; this `Zeroize` impl exists only to
+// satisfy the `Controlled: Zeroize` supertrait and delegates to the inner type
+// (`PhantomData` is a ZST with nothing to wipe).
+//
+// `Usage` intentionally does NOT derive `ZeroizeOnDrop`. Its secret is still
+// wiped on drop: `Usage::new` requires `Self: Controlled`, so the inner `T` is
+// always a controlled type (`Protected`/`Equatable`/`Exportable`), each of which
+// is `ZeroizeOnDrop` — dropping `Usage` runs the field's drop glue and wipes the
+// bytes. Giving `Usage` its own `Drop` would require a viral `T: Zeroize` bound
+// on the struct (E0367: a conditional `Drop` must match the struct bounds),
+// which would cascade through every `Usage<T, S>` use for no behavioural gain.
 impl<T: Zeroize, Scope> Zeroize for Usage<T, Scope> {
     fn zeroize(&mut self) {
         self.0.zeroize();

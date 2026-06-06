@@ -67,13 +67,12 @@ impl<T: Zeroize> Exportable<T> {
     }
 
     /// Move the inner value out without running the zeroizing `Drop`.
-    /// See [`Protected::into_inner_unchecked`](crate::Protected) for the rationale.
+    /// See [`crate::move_inner_out`] for the shared primitive and rationale.
     fn into_inner_unchecked(self) -> T {
-        // SAFETY: `self.0` is read once, then `self` is forgotten so its `Drop`
-        // does not also wipe the moved-out value.
-        let inner = unsafe { core::ptr::read(&self.0) };
-        core::mem::forget(self);
-        inner
+        let field: *const T = &self.0;
+        // SAFETY: `field` points to `self`'s live owned inner; `Exportable`'s
+        // `Drop` only zeroizes.
+        unsafe { crate::move_inner_out(self, field) }
     }
 }
 
