@@ -182,3 +182,23 @@ fn context_helper_wrong_tag_fails() {
         ContextTag::context("user:99").decrypt(cipher.decipher(ciphertext));
     assert!(result.is_err(), "wrong context must not decrypt");
 }
+
+#[test]
+fn context_helper_roundtrips_composite_value() {
+    let cipher = cipher();
+
+    // A composite inner type (Vec): the (extra, tag) AAD must be distributed to every
+    // element identically on encrypt and decrypt for this to round-trip.
+    let items = vec![String::from("a"), String::from("b"), String::from("c")];
+    let ciphertext = ContextTag::new(items.clone(), "table:users")
+        .refine("column:tags")
+        .encrypt_with_aad(&cipher, "row:99")
+        .expect("encryption failed");
+
+    let plaintext: Vec<String> = ContextTag::context("table:users")
+        .refine("column:tags")
+        .decrypt_with_aad(cipher.decipher(ciphertext), "row:99")
+        .expect("decryption failed");
+
+    assert_eq!(plaintext, items);
+}
