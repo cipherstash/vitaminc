@@ -261,17 +261,30 @@ impl Aes256Cipher {
         // AAD is threaded through the `Decrypt`/`Decipher` call chain (mirroring how
         // `Encrypt::encrypt_with_aad` threads it on the encrypt side), not baked into the
         // decipher up front.
-        T::decrypt_with_aad(
-            AesDecipher {
-                cipher: self,
-                ciphertext,
-            },
-            aad,
-        )
+        T::decrypt_with_aad(self.decipher(ciphertext), aad)
+    }
+
+    /// Construct a [`Decipher`] over `ciphertext` bound to this cipher.
+    ///
+    /// This is the decrypt-side counterpart to passing `&cipher` (a [`Cipher`])
+    /// on the encrypt side: it hands callers a concrete [`Decipher`] they can
+    /// drive directly via [`Decrypt::decrypt_with_aad`], which is what generic
+    /// decrypt-side helpers (e.g. `ContextTag`) build on. The ergonomic
+    /// [`decrypt`](Aes256Cipher::decrypt) /
+    /// [`decrypt_with_aad`](Aes256Cipher::decrypt_with_aad) methods are thin
+    /// wrappers around it.
+    pub fn decipher(&self, ciphertext: AesCipherText) -> AesDecipher<'_> {
+        AesDecipher {
+            cipher: self,
+            ciphertext,
+        }
     }
 }
 
-struct AesDecipher<'c> {
+/// A [`Decipher`] over a single [`AesCipherText`], produced by
+/// [`Aes256Cipher::decipher`]. Carries the cipher and ciphertext; the AAD is
+/// supplied per call by [`Decrypt::decrypt_with_aad`].
+pub struct AesDecipher<'c> {
     cipher: &'c Aes256Cipher,
     ciphertext: AesCipherText,
 }
