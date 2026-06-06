@@ -147,13 +147,12 @@ where
 /// ```
 pub fn flatten_array<const N: usize, T>(array: [Protected<T>; N]) -> Protected<[T; N]>
 where
-    T: Zeroize + Default + Copy, // TODO: Default won't be needed if we use MaybeUninit
+    T: Zeroize,
 {
-    let mut out: [T; N] = [Default::default(); N];
-    array.iter().enumerate().for_each(|(i, x)| {
-        out[i] = *x.risky_ref();
-    });
-    Protected::new(out)
+    // `[_; N]::map` moves each `Protected<T>` into the closure; `risky_unwrap`
+    // moves the inner secret straight through — no copy, and no `T: Copy` /
+    // `Default` bound (the secret is never duplicated).
+    Protected::new(array.map(|p| p.risky_unwrap()))
 }
 
 #[cfg(test)]
