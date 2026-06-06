@@ -36,12 +36,15 @@ impl<const N: usize> PermutationKey<N> {
         Generatable::random(&mut rng)
     }
 
-    /// Consumes the key and returns its inverse.
-    pub fn invert(self) -> Self
+    /// Returns the inverse of this key.
+    ///
+    /// Borrows `self` — inversion builds a fresh key from the borrowed
+    /// permutation, so there is no need to consume (or clone) the original.
+    pub fn invert(&self) -> Self
     where
         [u8; N]: IsPermutable,
     {
-        Self(KeyInner::new(depermute_array(&self, identity())))
+        Self(KeyInner::new(depermute_array(self, identity())))
     }
 
     /// Returns the complement of the key with respect to the target key.
@@ -67,15 +70,9 @@ impl<const N: usize> PermutationKey<N> {
     where
         [u8; N]: IsPermutable + Zeroed,
     {
-        // `invert` consumes the key; clone the borrowed `target` (the clone
-        // zeroizes on drop like any other `PermutationKey`).
-        Self(
-            target
-                .clone()
-                .invert()
-                .0
-                .map(|arr| permute_array(self, arr)),
-        )
+        // `invert` borrows, so we map the inverse of the borrowed `target`
+        // through `permute_array` without ever copying the key.
+        Self(target.invert().0.map(|arr| permute_array(self, arr)))
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = Protected<u8>> + '_ {
@@ -128,7 +125,7 @@ mod tests {
         [u8; N]: IsPermutable + Zeroed,
     {
         let key: PermutationKey<N> = tests::gen_rand_key()?;
-        let inverted = key.clone().invert();
+        let inverted = key.invert();
 
         // p(p^-1(x)) = x
         assert_eq!(
