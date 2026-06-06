@@ -258,19 +258,22 @@ impl Aes256Cipher {
         T: Decrypt<'c> + 'c,
         A: IntoAad<'a>,
     {
-        let aad = aad.into_aad();
-        T::decrypt(AesDecipher {
-            cipher: self,
-            ciphertext,
-            aad: aad.as_bytes().to_vec(),
-        })
+        // AAD is threaded through the `Decrypt`/`Decipher` call chain (mirroring how
+        // `Encrypt::encrypt_with_aad` threads it on the encrypt side), not baked into the
+        // decipher up front.
+        T::decrypt_with_aad(
+            AesDecipher {
+                cipher: self,
+                ciphertext,
+            },
+            aad,
+        )
     }
 }
 
 struct AesDecipher<'c> {
     cipher: &'c Aes256Cipher,
     ciphertext: AesCipherText,
-    aad: Vec<u8>,
 }
 
 impl AesDecipher<'_> {
@@ -303,23 +306,32 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         ok.map(f)
     }
 
-    fn decrypt_bytes<V: DecipherVisitor<'c> + Send + 'c>(self, visitor: V) -> Self::Ok<V::Value> {
+    fn decrypt_bytes<'a, V, A>(self, visitor: V, aad: A) -> Self::Ok<V::Value>
+    where
+        V: DecipherVisitor<'c> + Send + 'c,
+        A: IntoAad<'a>,
+    {
         match self.ciphertext {
             AesCipherText::Single(ct) => {
-                let bytes = Self::decrypt_local_ciphertext(self.cipher, ct, &self.aad)?;
+                let aad = aad.into_aad();
+                let bytes = Self::decrypt_local_ciphertext(self.cipher, ct, aad.as_bytes())?;
                 visitor.visit_bytes_vec(bytes)
             }
             _ => Err(Unspecified),
         }
     }
 
-    fn decrypt_seq<V: DecipherVisitor<'c> + Send + 'c>(self, visitor: V) -> Self::Ok<V::Value> {
+    fn decrypt_seq<'a, V, A>(self, visitor: V, aad: A) -> Self::Ok<V::Value>
+    where
+        V: DecipherVisitor<'c> + Send + 'c,
+        A: IntoAad<'a>,
+    {
         match self.ciphertext {
             AesCipherText::Sequence(items) => {
                 let seq_access = AesSeqAccess {
                     cipher: self.cipher,
                     items: items.into_iter(),
-                    aad: self.aad,
+                    aad: aad.into_aad().as_bytes().to_vec(),
                 };
                 visitor.visit_seq(seq_access)
             }
@@ -327,13 +339,17 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         }
     }
 
-    fn decrypt_map<V: DecipherVisitor<'c> + Send + 'c>(self, visitor: V) -> Self::Ok<V::Value> {
+    fn decrypt_map<'a, V, A>(self, visitor: V, aad: A) -> Self::Ok<V::Value>
+    where
+        V: DecipherVisitor<'c> + Send + 'c,
+        A: IntoAad<'a>,
+    {
         match self.ciphertext {
             AesCipherText::Map(entries) => {
                 let map_access = AesMapAccess {
                     cipher: self.cipher,
                     entries: entries.into_iter(),
-                    aad: self.aad,
+                    aad: aad.into_aad().as_bytes().to_vec(),
                 };
                 visitor.visit_map(map_access)
             }
@@ -353,14 +369,16 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         }
     }
 
-    fn decrypt_option<T>(self) -> Self::Ok<Option<T>>
+    fn decrypt_option<'a, T, A>(self, aad: A) -> Self::Ok<Option<T>>
     where
         T: Decrypt<'c> + 'c,
+        A: IntoAad<'a>,
     {
         match self.ciphertext {
             AesCipherText::None(ct) => {
                 // Verify the AAD-bound tag over the empty plaintext.
-                Self::decrypt_local_ciphertext(self.cipher, ct, &self.aad)?;
+                let aad = aad.into_aad();
+                Self::decrypt_local_ciphertext(self.cipher, ct, aad.as_bytes())?;
                 Ok(None)
             }
             // Passthrough must never be decoded as an Option payload.
@@ -381,9 +399,8 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
                 let inner = AesDecipher {
                     cipher: self.cipher,
                     ciphertext: other,
-                    aad: self.aad,
                 };
-                T::decrypt(inner).map(Some)
+                T::decrypt_with_aad(inner, aad).map(Some)
             }
         }
     }
@@ -406,9 +423,10 @@ impl<'c> SeqAccess<'c> for AesSeqAccess<'c> {
         let decipher = AesDecipher {
             cipher: self.cipher,
             ciphertext: ct,
-            aad: self.aad.clone(),
         };
-        T::decrypt(decipher).map(Some)
+        // Each element was sealed with the same AAD; re-supply it per element
+        // (mirrors `SeqCipher::encrypt_next` cloning the AAD into each element).
+        T::decrypt_with_aad(decipher, self.aad.clone()).map(Some)
     }
 }
 
@@ -429,9 +447,8 @@ impl<'c> MapAccess<'c> for AesMapAccess<'c> {
         let decipher = AesDecipher {
             cipher: self.cipher,
             ciphertext: ct,
-            aad: self.aad.clone(),
         };
-        let value = T::decrypt(decipher)?;
+        let value = T::decrypt_with_aad(decipher, self.aad.clone())?;
         Ok(Some((key, value)))
     }
 }
@@ -717,11 +734,7 @@ mod test {
     where
         T: Any + Send + 'static,
     {
-        let decipher = AesDecipher {
-            cipher,
-            ciphertext,
-            aad: Vec::new(),
-        };
+        let decipher = AesDecipher { cipher, ciphertext };
         decipher.decrypt_passthrough::<T>()
     }
 
