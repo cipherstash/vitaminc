@@ -427,9 +427,10 @@ impl<'c, 'a> SeqAccess<'c> for AesSeqAccess<'c, 'a> {
             cipher: self.cipher,
             ciphertext: ct,
         };
-        // Each element was sealed with the same AAD; re-supply it per element
-        // (mirrors `SeqCipher::encrypt_next` cloning the AAD into each element).
-        T::decrypt_with_aad(decipher, self.aad.clone()).map(Some)
+        // Each element was sealed with the same AAD; re-supply it per element by
+        // *borrowing* the stored bytes — no per-element allocation, even when the
+        // AAD is owned. Mirrors `SeqCipher::encrypt_next` binding AAD per element.
+        T::decrypt_with_aad(decipher, self.aad.as_bytes()).map(Some)
     }
 }
 
@@ -451,7 +452,8 @@ impl<'c, 'a> MapAccess<'c> for AesMapAccess<'c, 'a> {
             cipher: self.cipher,
             ciphertext: ct,
         };
-        let value = T::decrypt_with_aad(decipher, self.aad.clone())?;
+        // Borrow the stored AAD bytes per entry — see `AesSeqAccess::next_element`.
+        let value = T::decrypt_with_aad(decipher, self.aad.as_bytes())?;
         Ok(Some((key, value)))
     }
 }
