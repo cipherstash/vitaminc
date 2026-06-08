@@ -2,9 +2,9 @@ use crate::backend::{CipherKey, NONCE_LEN};
 use crate::Key;
 use std::any::Any;
 use vitaminc_aead::{
-    Cipher, CipherTextBuilder, CipherTree, Decrypt, IntoAad, LeafOpener, LeafSealer,
-    LocalCipherText, NonceGenerator, RandomNonceGenerator, TreeCipher, TreeDecipher, TreeMap,
-    TreeSeq, Unspecified,
+    Cipher, CipherTextBuilder, CipherTree, Decrypt, IntoAad, LeafOpener, LocalCipherText,
+    MapCipher, NonceGenerator, PendingLeaf, RandomNonceGenerator, SeqCipher, TreeCipher,
+    TreeDecipher, TreeMap, TreeSeq, Unspecified,
 };
 use vitaminc_protected::Protected;
 
@@ -15,8 +15,7 @@ use vitaminc_protected::Protected;
 /// [`Single`](CipherTree::Single), a `Vec` yields
 /// [`Sequence`](CipherTree::Sequence), a `HashMap` yields
 /// [`Map`](CipherTree::Map). The structural drive/walk is shared with any other
-/// cipher built on [`CipherTree`]; only the per-leaf sealing differs (see
-/// [`AesSealer`] / [`AesOpener`]).
+/// cipher built on [`CipherTree`]; only the per-leaf sealing differs.
 pub type AesCipherText = CipherTree<LocalCipherText>;
 
 /// Implements AES-256-GCM. Backend is selected at compile time:
@@ -38,37 +37,40 @@ impl Aes256Cipher {
             key: key.cipher_key()?,
         })
     }
-}
 
-/// The per-leaf sealing step for [`Aes256Cipher`]: seal a leaf under a fresh
-/// random nonce. A `Copy` wrapper over the cipher so the generic [`TreeCipher`]
-/// machinery can thread it through nested structures.
-#[derive(Clone, Copy)]
-pub struct AesSealer<'c>(&'c Aes256Cipher);
-
-impl LeafSealer for AesSealer<'_> {
-    type Leaf = LocalCipherText;
-
-    fn seal(
-        self,
-        plaintext: Protected<Vec<u8>>,
-        aad: &[u8],
-    ) -> Result<LocalCipherText, Unspecified> {
-        let nonce = self.0.nonce_generator.generate()?;
-        let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
+    /// Seal a single [`PendingLeaf`] under a fresh random nonce. This is the AES
+    /// per-leaf step the generic [`TreeCipher`] codec leaves to the cipher.
+    fn seal_leaf(&self, leaf: PendingLeaf) -> Result<LocalCipherText, Unspecified> {
+        let nonce = self.nonce_generator.generate()?;
+        // Copy the nonce bytes out without consuming the nonce (it is still
+        // appended to the ciphertext below) and without a fallible slice
+        // conversion — `Nonce<NONCE_LEN>` already wraps `[u8; NONCE_LEN]`.
+        let nonce_bytes = *nonce.as_array();
 
         CipherTextBuilder::new()
             .append_nonce(nonce)
-            .append_target_plaintext(plaintext)
+            .append_target_plaintext(leaf.plaintext)
             .accepts_ciphertext_and_tag_ok(|mut buf| {
-                self.0.key.seal(&nonce_bytes, aad, &mut buf).map(|()| buf)
+                self.key
+                    .seal(&nonce_bytes, &leaf.aad, &mut buf)
+                    .map(|()| buf)
             })
             .build()
+    }
+
+    /// Seal every leaf of a pending tree, preserving structure. AES seals
+    /// eagerly leaf-by-leaf; a batching cipher would instead size a key request
+    /// with [`CipherTree::leaf_count`] and pull keys here. Leaves are sealed in
+    /// [`CipherTree::for_each_leaf`] order (see the `vitaminc_aead::tree`
+    /// module's "Leaf ordering contract").
+    fn seal_tree(&self, tree: CipherTree<PendingLeaf>) -> Result<AesCipherText, Unspecified> {
+        tree.try_map_leaves(&mut |leaf| self.seal_leaf(leaf))
     }
 }
 
 /// The per-leaf opening step for [`Aes256Cipher`]: decrypt a leaf with the
-/// cipher's key and the nonce stored in the leaf.
+/// cipher's key and the nonce stored in the leaf. A `Copy` lookup wrapper so the
+/// generic [`TreeDecipher`] can thread it through every leaf of the structure.
 #[derive(Clone, Copy)]
 pub struct AesOpener<'c>(&'c Aes256Cipher);
 
@@ -89,11 +91,17 @@ impl LeafOpener for AesOpener<'_> {
 /// [`AesOpener`] supplies the per-leaf decryption.
 pub type AesDecipher<'c> = TreeDecipher<AesOpener<'c>>;
 
+/// `&Aes256Cipher` is the [`Cipher`] so values can be encrypted ergonomically as
+/// `value.encrypt(&cipher)`. The structural traversal is delegated to the generic
+/// [`TreeCipher`] codec (which only *collects* leaves); this impl adds the AES
+/// seal step, sealing the collected tree before handing it back. A coherence
+/// blanket impl is impossible (it would conflict with every direct `Cipher`
+/// impl), so a future backend repeats this thin collect-then-seal shape.
 impl<'c> Cipher for &'c Aes256Cipher {
     type Ok = AesCipherText;
     type Error = Unspecified;
-    type SeqCipher = TreeSeq<AesSealer<'c>>;
-    type MapCipher = TreeMap<AesSealer<'c>>;
+    type SeqCipher = AesSeq<'c>;
+    type MapCipher = AesMap<'c>;
 
     fn encrypt_bytes_vec<'a, A>(
         self,
@@ -103,29 +111,107 @@ impl<'c> Cipher for &'c Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        TreeCipher(AesSealer(self)).encrypt_bytes_vec(data, aad)
+        self.seal_tree(TreeCipher.encrypt_bytes_vec(data, aad)?)
     }
 
     fn encrypt_seq(self, size_hint: Option<usize>) -> Self::SeqCipher {
-        TreeCipher(AesSealer(self)).encrypt_seq(size_hint)
+        AesSeq {
+            inner: TreeCipher.encrypt_seq(size_hint),
+            cipher: self,
+        }
     }
 
     fn encrypt_map(self) -> Self::MapCipher {
-        TreeCipher(AesSealer(self)).encrypt_map()
+        AesMap {
+            inner: TreeCipher.encrypt_map(),
+            cipher: self,
+        }
     }
 
     fn encrypt_none<'a, A>(self, aad: A) -> Result<Self::Ok, Self::Error>
     where
         A: IntoAad<'a>,
     {
-        TreeCipher(AesSealer(self)).encrypt_none(aad)
+        self.seal_tree(TreeCipher.encrypt_none(aad)?)
     }
 
     fn passthrough<T>(self, value: T) -> Result<Self::Ok, Self::Error>
     where
         T: Any + Send + 'static,
     {
-        TreeCipher(AesSealer(self)).passthrough(value)
+        self.seal_tree(TreeCipher.passthrough(value)?)
+    }
+}
+
+/// [`SeqCipher`] for `&Aes256Cipher`: accumulates a pending tree via the generic
+/// [`TreeSeq`], then seals the whole sequence in one pass at [`end`](SeqCipher::end).
+pub struct AesSeq<'c> {
+    inner: TreeSeq,
+    cipher: &'c Aes256Cipher,
+}
+
+impl SeqCipher for AesSeq<'_> {
+    type Ok = AesCipherText;
+    type Error = Unspecified;
+
+    fn encrypt_next<'a, T, A>(mut self, data: T, aad: A) -> Result<Self, Self::Error>
+    where
+        T: vitaminc_aead::Encrypt,
+        A: IntoAad<'a>,
+    {
+        self.inner = self.inner.encrypt_next(data, aad)?;
+        Ok(self)
+    }
+
+    fn passthrough_next<T>(mut self, value: T) -> Result<Self, Self::Error>
+    where
+        T: Any + Send + 'static,
+    {
+        self.inner = self.inner.passthrough_next(value)?;
+        Ok(self)
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        self.cipher.seal_tree(self.inner.end()?)
+    }
+}
+
+/// [`MapCipher`] for `&Aes256Cipher`: accumulates a pending tree via the generic
+/// [`TreeMap`] (which enforces the key→value contract), then seals at
+/// [`end`](MapCipher::end).
+pub struct AesMap<'c> {
+    inner: TreeMap,
+    cipher: &'c Aes256Cipher,
+}
+
+impl MapCipher for AesMap<'_> {
+    type Ok = AesCipherText;
+    type Error = Unspecified;
+
+    fn encrypt_key(mut self, key: &'static str) -> Result<Self, Self::Error> {
+        self.inner = self.inner.encrypt_key(key)?;
+        Ok(self)
+    }
+
+    fn encrypt_value<'a, T, A>(mut self, value: T, aad: A) -> Result<Self, Self::Error>
+    where
+        T: vitaminc_aead::Encrypt,
+        A: IntoAad<'a>,
+    {
+        self.inner = self.inner.encrypt_value(value, aad)?;
+        Ok(self)
+    }
+
+    fn passthrough_entry<T>(mut self, key: &'static str, value: T) -> Result<Self, Self::Error>
+    where
+        T: Any + Send + 'static,
+    {
+        self.inner = self.inner.passthrough_entry(key, value)?;
+        Ok(self)
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        self.cipher.seal_tree(self.inner.end()?)
     }
 }
 

@@ -27,6 +27,6 @@ pub use encrypt::Encrypt;
 pub use nonce::{Nonce, NonceGenerator, RandomNonceGenerator};
 #[doc(inline)]
 pub use tree::{
-    CipherTree, LeafOpener, LeafSealer, TreeCipher, TreeDecipher, TreeMap, TreeMapAccess, TreeSeq,
+    CipherTree, LeafOpener, PendingLeaf, TreeCipher, TreeDecipher, TreeMap, TreeMapAccess, TreeSeq,
     TreeSeqAccess,
 };
