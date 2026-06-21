@@ -120,3 +120,25 @@ macro_rules! impl_timing_safe_eq {
 }
 
 impl_timing_safe_eq!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+
+#[cfg(test)]
+mod tests {
+    use super::TimingSafeEq;
+
+    // `ts_ne` is the negation of `ts_eq`; without this, deleting the `!` in the
+    // default impl (so `ts_ne` == `ts_eq`) goes unnoticed. See issue #207.
+    #[test]
+    fn ts_ne_negates_ts_eq() {
+        let a: u8 = 5;
+        let equal: u8 = 5;
+        let different: u8 = 6;
+
+        // Equal values: ts_eq true, ts_ne false.
+        assert!(bool::from(a.ts_eq(&equal)));
+        assert!(!bool::from(a.ts_ne(&equal)));
+
+        // Different values: ts_eq false, ts_ne true.
+        assert!(!bool::from(a.ts_eq(&different)));
+        assert!(bool::from(a.ts_ne(&different)));
+    }
+}

@@ -232,4 +232,13 @@ mod tests {
         let redacted = Redacted(42);
         assert_eq!(format!("{redacted:?}"), "Redacted<i32 ***>");
     }
+
+    // Zeroizing a `Redacted` must actually wipe the inner value. Without this,
+    // making `zeroize` a no-op goes unnoticed. See issue #208.
+    #[test]
+    fn zeroize_wipes_inner() {
+        let mut redacted = Redacted(vec![1u8, 2, 3, 4]);
+        redacted.zeroize();
+        assert!(redacted.as_ref().is_empty());
+    }
 }

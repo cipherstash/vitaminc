@@ -67,6 +67,15 @@ jobs:
         # tests run against both backends in CI.
         run: cargo test -p vitaminc-encrypt --features _test-rust-crypto-backend
 
+      - name: test (hlist static-ciphertext feature)
+        # The `hlist` feature gates the static-ciphertext API (encrypt's
+        # `cipher_static` and aead's `hlist` module) and is NOT in the default
+        # set, so plain `cargo test` above never runs those suites — including
+        # the `cipher_static` round-trip / wrong-key / tamper tests. Enable the
+        # feature so they're actually exercised in CI (encrypt/hlist pulls in
+        # aead/hlist transitively).
+        run: cargo test -p vitaminc-aead -p vitaminc-encrypt --features vitaminc-encrypt/hlist
+
       - name: build check (vitaminc-encrypt, wasm32)
         run: cargo check --target wasm32-unknown-unknown -p vitaminc-encrypt
 
