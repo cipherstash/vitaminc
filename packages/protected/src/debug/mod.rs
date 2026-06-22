@@ -232,4 +232,16 @@ mod tests {
         let redacted = Redacted(42);
         assert_eq!(format!("{redacted:?}"), "Redacted<i32 ***>");
     }
+
+    // `Redacted::zeroize` must delegate to the inner value's `zeroize`. `Vec`'s
+    // impl zeroes its elements then clears, so `is_empty()` distinguishes a real
+    // delegation from a no-op (the #208 mutant). This intentionally checks
+    // delegation, not that the backing bytes were scrubbed — byte-level wipe
+    // verification is covered by a separate zeroization test. See issue #208.
+    #[test]
+    fn zeroize_delegates_to_inner() {
+        let mut redacted = Redacted(vec![1u8, 2, 3, 4]);
+        redacted.zeroize();
+        assert!(redacted.as_ref().is_empty());
+    }
 }

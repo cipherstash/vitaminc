@@ -63,3 +63,44 @@ impl<E> Plaintext<E> {
         self.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::CipherTextReader;
+    use bytes::Bytes;
+    use vitaminc_protected::Controlled;
+
+    // `read_nonce` works on attacker-controlled bytes, so two things must hold:
+    // the `len() < N` guard at the exact boundary (tested at `N-1`/`N`/`N+1`),
+    // and the split — the first N bytes become the nonce and the rest carry
+    // through untouched. Both are asserted so a wrong-but-in-bounds read or a
+    // mis-split can't survive. See #209.
+    const N: usize = 4;
+
+    #[test]
+    fn read_nonce_fewer_than_n_bytes_errors() {
+        let reader = CipherTextReader::new(Bytes::from_static(&[1, 2, 3]));
+        assert!(reader.read_nonce::<N>().is_err());
+    }
+
+    #[test]
+    fn read_nonce_exactly_n_bytes_succeeds() {
+        // Exactly N bytes: the nonce is all of them and nothing is left over.
+        // Also kills `<` -> `<=` and `<` -> `==`, which would reject this case.
+        let reader = CipherTextReader::new(Bytes::from_static(&[1, 2, 3, 4]));
+        let (nonce, rest) = reader.read_nonce::<N>().expect("N bytes available");
+        assert_eq!(nonce.into_inner(), [1, 2, 3, 4]);
+        assert!(rest.0.risky_ref().is_empty());
+    }
+
+    #[test]
+    fn read_nonce_more_than_n_bytes_succeeds() {
+        // The nonce is the first N bytes; the remainder carries through intact.
+        let reader = CipherTextReader::new(Bytes::from_static(&[1, 2, 3, 4, 5, 6]));
+        let (nonce, rest) = reader
+            .read_nonce::<N>()
+            .expect("more than N bytes available");
+        assert_eq!(nonce.into_inner(), [1, 2, 3, 4]);
+        assert_eq!(rest.0.risky_ref(), &vec![5, 6]);
+    }
+}

@@ -67,6 +67,23 @@ jobs:
         # tests run against both backends in CI.
         run: cargo test -p vitaminc-encrypt --features _test-rust-crypto-backend
 
+      - name: test (hlist static-ciphertext feature)
+        # The `hlist` feature gates the static-ciphertext API and is NOT in the
+        # default set, so plain `cargo test` above never builds or runs it. The
+        # behaviour tests all live in encrypt's `cipher_static` (round-trip /
+        # wrong-key / tamper / nondeterminism); aead's `hlist` module has no
+        # tests of its own, so `-p vitaminc-aead` only compile-checks it here
+        # (encrypt/hlist pulls in aead/hlist transitively).
+        run: cargo test -p vitaminc-aead -p vitaminc-encrypt --features vitaminc-encrypt/hlist
+
+      - name: test (hlist static-ciphertext, RustCrypto backend)
+        # The step above exercises `cipher_static` only against aws-lc-rs. Run it
+        # against the RustCrypto backend too — the path wasm/JS consumers use —
+        # mirroring the two-backend coverage the `_test-rust-crypto-backend` step
+        # gives the main cipher. The wasm test job can't cover this: the
+        # `cipher_static` tests are `#[cfg(not(target_arch = "wasm32"))]`.
+        run: cargo test -p vitaminc-encrypt --features hlist,_test-rust-crypto-backend
+
       - name: build check (vitaminc-encrypt, wasm32)
         run: cargo check --target wasm32-unknown-unknown -p vitaminc-encrypt
 

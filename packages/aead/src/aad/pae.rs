@@ -16,6 +16,14 @@ pub(crate) fn encode(pieces: &[&[u8]]) -> Aad<'static> {
         buf.extend_from_slice(&(piece.len() as u64).to_le_bytes());
         buf.extend_from_slice(piece);
     }
+    // The pre-computed `total_len` is only a capacity hint, so a wrong value
+    // wouldn't change the output. Assert it matches the bytes we actually wrote,
+    // as a defensive invariant against the hint silently drifting from the writes.
+    debug_assert_eq!(
+        buf.len(),
+        total_len,
+        "PAE capacity hint must equal the encoded length"
+    );
     Aad(Cow::Owned(buf))
 }
 

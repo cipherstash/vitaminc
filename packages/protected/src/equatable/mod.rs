@@ -331,7 +331,9 @@ mod private {
 
 #[cfg(test)]
 mod tests {
+    use super::ConstantTimeEq;
     use crate::{Equatable, Protected};
+    use core::num::NonZeroU16;
 
     #[test]
     fn test_opaque_debug() {
@@ -368,5 +370,67 @@ mod tests {
 
         assert_ne!(x, y);
         assert!(!x.constant_time_eq(&y));
+    }
+
+    // The tests below exercise the `ConstantTimeEq` impls directly (the tests
+    // above only reach the `Protected<u8>`/`[u8; N]` inner types via `Equatable`).
+    // Each asserts equal -> true (kills a `-> false` mutant), unequal -> false
+    // (kills a `-> true` mutant), a partial difference (kills `&=` -> `|=` in the
+    // accumulator), and a length mismatch where applicable. See issue #206.
+    #[test]
+    fn ct_eq_u8_slice() {
+        let a: &[u8] = &[1, 2, 3, 4];
+        let equal: &[u8] = &[1, 2, 3, 4];
+        let last_differs: &[u8] = &[1, 2, 3, 5];
+        let first_differs: &[u8] = &[9, 2, 3, 4];
+        let shorter: &[u8] = &[1, 2, 3];
+
+        assert!(a.constant_time_eq(equal));
+        assert!(!a.constant_time_eq(last_differs));
+        assert!(!a.constant_time_eq(first_differs));
+        assert!(!a.constant_time_eq(shorter));
+    }
+
+    #[test]
+    fn ct_eq_str() {
+        assert!("hunter2".constant_time_eq("hunter2"));
+        assert!(!"hunter2".constant_time_eq("hunter3"));
+        assert!(!"hunter2".constant_time_eq("hunter")); // length mismatch
+    }
+
+    #[test]
+    fn ct_eq_string() {
+        let a = String::from("hunter2");
+        assert!(a.constant_time_eq(&String::from("hunter2")));
+        assert!(!a.constant_time_eq(&String::from("hunter3")));
+        assert!(!a.constant_time_eq(&String::from("hunter"))); // length mismatch
+    }
+
+    #[test]
+    fn ct_eq_nonzero_u16() {
+        let a = NonZeroU16::new(42).unwrap();
+        assert!(a.constant_time_eq(&NonZeroU16::new(42).unwrap()));
+        assert!(!a.constant_time_eq(&NonZeroU16::new(43).unwrap()));
+    }
+
+    #[test]
+    fn ct_eq_array() {
+        let a: [u8; 4] = [1, 2, 3, 4];
+
+        assert!(a.constant_time_eq(&[1, 2, 3, 4]));
+        assert!(!a.constant_time_eq(&[1, 2, 3, 5]));
+        assert!(!a.constant_time_eq(&[9, 2, 3, 4])); // partial difference
+    }
+
+    #[test]
+    fn ct_eq_equatable_trait_impl() {
+        // UFCS selects the `ConstantTimeEq for Equatable` trait impl rather than
+        // the inherent `Equatable::constant_time_eq` method exercised above.
+        let x: Equatable<Protected<u8>> = Equatable::new(5);
+        let y: Equatable<Protected<u8>> = Equatable::new(5);
+        let z: Equatable<Protected<u8>> = Equatable::new(6);
+
+        assert!(ConstantTimeEq::constant_time_eq(&x, &y));
+        assert!(!ConstantTimeEq::constant_time_eq(&x, &z));
     }
 }
