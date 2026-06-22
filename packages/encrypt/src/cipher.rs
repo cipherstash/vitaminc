@@ -409,10 +409,7 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
             // treatment of `Option` and is intentional — every caller fixes a
             // concrete type at the call site. See `nested_option_shape_is_caller_decided`.
             other => {
-                let inner = AesDecipher {
-                    cipher: self.cipher,
-                    ciphertext: other,
-                };
+                let inner = self.cipher.decipher(other);
                 T::decrypt_with_aad(inner, aad).map(Some)
             }
         }
@@ -423,8 +420,9 @@ struct AesSeqAccess<'c, 'a> {
     cipher: &'c Aes256Cipher,
     items: std::vec::IntoIter<AesCipherText>,
     // Held as `Aad` (copy-on-write) rather than an owned `Vec<u8>` so a borrowed
-    // AAD stays borrowed; the per-element `clone` below is then cheap for the
-    // common `&str`/`&[u8]` case.
+    // AAD stays borrowed. `next_element` re-supplies it per element by *borrowing*
+    // these bytes, so there is no per-element allocation in either the borrowed
+    // (`&str`/`&[u8]`) or the owned (`Vec`/PAE) case.
     aad: Aad<'a>,
 }
 
@@ -436,10 +434,7 @@ impl<'c, 'a> SeqAccess<'c> for AesSeqAccess<'c, 'a> {
             Some(ct) => ct,
             None => return Ok(None),
         };
-        let decipher = AesDecipher {
-            cipher: self.cipher,
-            ciphertext: ct,
-        };
+        let decipher = self.cipher.decipher(ct);
         // Each element was sealed with the same AAD; re-supply it per element by
         // *borrowing* the stored bytes — no per-element allocation, even when the
         // AAD is owned. Mirrors `SeqCipher::encrypt_next` binding AAD per element.
@@ -461,10 +456,7 @@ impl<'c, 'a> MapAccess<'c> for AesMapAccess<'c, 'a> {
             Some(entry) => entry,
             None => return Ok(None),
         };
-        let decipher = AesDecipher {
-            cipher: self.cipher,
-            ciphertext: ct,
-        };
+        let decipher = self.cipher.decipher(ct);
         // Borrow the stored AAD bytes per entry — see `AesSeqAccess::next_element`.
         let value = T::decrypt_with_aad(decipher, self.aad.as_bytes())?;
         Ok(Some((key, value)))
@@ -556,6 +548,25 @@ mod test {
             .expect("Encryption failed");
         cipher
             .decrypt_with_aad::<String, _>(ciphertext, "wrong-aad")
+            .is_err()
+    }
+
+    #[quickcheck]
+    fn decrypt_seq_fails_with_wrong_aad(key: Key, plaintext: Vec<String>) -> bool {
+        // The Sequence path re-supplies the same AAD to every element, so a wrong
+        // AAD must fail the per-element authentication rather than silently
+        // decrypting (see `AesSeqAccess::next_element`). An empty sequence has no
+        // element tags to reject — the container shape itself is not
+        // AEAD-authenticated on either side — so skip it.
+        if plaintext.is_empty() {
+            return true;
+        }
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ciphertext = plaintext
+            .encrypt_with_aad(&cipher, "correct-aad")
+            .expect("Encryption failed");
+        cipher
+            .decrypt_with_aad::<Vec<String>, _>(ciphertext, "wrong-aad")
             .is_err()
     }
 
@@ -752,7 +763,7 @@ mod test {
     where
         T: Any + Send + 'static,
     {
-        let decipher = AesDecipher { cipher, ciphertext };
+        let decipher = cipher.decipher(ciphertext);
         decipher.decrypt_passthrough::<T>()
     }
 
