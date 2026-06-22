@@ -24,10 +24,16 @@ impl<T: Zeroize> Protected<T> {
     /// the shared primitive and the rationale (including why the source slot is
     /// not scrubbed).
     fn into_inner_unchecked(self) -> T {
-        let field: *const T = &self.0;
-        // SAFETY: `field` points to `self`'s live owned inner; `Protected`'s
-        // `Drop` only zeroizes.
-        unsafe { crate::move_inner_out(self, field) }
+        crate::move_inner_out(self)
+    }
+}
+
+// SAFETY: `inner_ptr` returns a pointer to `self`'s live, owned inner field, and
+// `Protected`'s derived `Drop` only zeroizes — satisfying `MoveInner`'s contract.
+unsafe impl<T: Zeroize> crate::MoveInner for Protected<T> {
+    type Inner = T;
+    fn inner_ptr(&self) -> *const T {
+        &self.0
     }
 }
 

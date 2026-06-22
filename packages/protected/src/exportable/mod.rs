@@ -69,10 +69,16 @@ impl<T: Zeroize> Exportable<T> {
     /// Move the inner value out without running the zeroizing `Drop`.
     /// See [`crate::move_inner_out`] for the shared primitive and rationale.
     fn into_inner_unchecked(self) -> T {
-        let field: *const T = &self.0;
-        // SAFETY: `field` points to `self`'s live owned inner; `Exportable`'s
-        // `Drop` only zeroizes.
-        unsafe { crate::move_inner_out(self, field) }
+        crate::move_inner_out(self)
+    }
+}
+
+// SAFETY: `inner_ptr` returns a pointer to `self`'s live, owned inner field, and
+// `Exportable`'s derived `Drop` only zeroizes — satisfying `MoveInner`'s contract.
+unsafe impl<T: Zeroize> crate::MoveInner for Exportable<T> {
+    type Inner = T;
+    fn inner_ptr(&self) -> *const T {
+        &self.0
     }
 }
 
