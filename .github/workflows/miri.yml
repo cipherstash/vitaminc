@@ -1,0 +1,68 @@
+name: "Miri"
+
+# Runs the vitaminc-protected test suite under Miri to detect undefined
+# behaviour in the crate's `unsafe` code.
+#
+# `vitaminc-protected` is the only crate in the workspace with first-party
+# `unsafe`: the move-out in `move_inner_out` (`ptr::read` + `mem::forget`), which
+# is how `risky_unwrap` / `flatten` / `transpose` move the inner secret out past
+# the zeroizing `Drop`. Miri interprets the tests under the Stacked/Tree Borrows
+# model, catching aliasing/provenance UB that a normal test run (and even ASan)
+# can miss.
+#
+# Scoped to `vitaminc-protected` on purpose: Miri can't execute the aws-lc-rs
+# FFI (vitaminc-encrypt) or the entropy syscalls in random/permutation/password,
+# and `protected` is where the only unsafe lives. Expand the matrix if other
+# crates grow pure-Rust `unsafe`.
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "packages/protected/**"
+      - ".github/workflows/miri.yml"
+      - "!**.md"
+
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+# Cancel an in-flight run when the PR is pushed again — only the latest matters.
+concurrency:
+  group: miri-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  miri:
+    runs-on: ubuntu-latest
+    name: "🔬 Miri (unsafe check)"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-miri-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: setup rust nightly + miri
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+
+      - name: miri test (vitaminc-protected)
+        # Interprets the protected unit tests + doctests under Miri. The
+        # move-out regression tests (drop_zeroizes_inner /
+        # risky_unwrap_does_not_zeroize / flatten / transpose) exercise the one
+        # unsafe block; Miri proves it has no UB. The first run builds a Miri
+        # sysroot (a few minutes); subsequent cached runs are quick.
+        run: cargo +nightly miri test -p vitaminc-protected
