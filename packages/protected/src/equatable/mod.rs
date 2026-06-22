@@ -331,7 +331,9 @@ mod private {
 
 #[cfg(test)]
 mod tests {
+    use super::ConstantTimeEq;
     use crate::{Equatable, Protected};
+    use core::num::NonZeroU16;
 
     #[test]
     fn test_opaque_debug() {
@@ -375,9 +377,6 @@ mod tests {
     // Each asserts equal -> true (kills a `-> false` mutant), unequal -> false
     // (kills a `-> true` mutant), a partial difference (kills `&=` -> `|=` in the
     // accumulator), and a length mismatch where applicable. See issue #206.
-    use super::ConstantTimeEq;
-    use core::num::NonZeroU16;
-
     #[test]
     fn ct_eq_u8_slice() {
         let a: &[u8] = &[1, 2, 3, 4];
