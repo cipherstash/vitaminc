@@ -1,0 +1,151 @@
+name: "CRAP"
+
+# Gates PRs on the CRAP (Change Risk Anti-Patterns) metric for the whole
+# workspace, and posts the scores as a sticky PR comment. CRAP = cyclomatic
+# complexity weighted by test coverage, so the gate trips when a PR adds (or
+# leaves) a complex, under-tested function — the kind of logic in a crypto
+# library we most want covered before it ships.
+#
+# The job fails when any function exceeds the threshold in .cargo-crap.toml
+# (currently 30; the workspace tops out around 20 today). To actually block
+# merges, mark this check ("🚦 CRAP gate") as required in the repo's
+# branch-protection settings. To soften it back to report-only, drop the
+# "Enforce CRAP threshold" step — the sticky comment keeps working either way.
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "packages/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo-crap.toml"
+      - ".github/workflows/crap.yml"
+      # Negative patterns must stay last: keep the matches above but ignore
+      # pure-docs changes so a README-only PR doesn't run coverage.
+      - "!**.md"
+
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+# Needed to post/update the report comment on the PR.
+permissions:
+  contents: read
+  pull-requests: write
+
+# Cancel an in-flight report when the PR is pushed again — only the latest
+# matters.
+concurrency:
+  group: crap-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  crap:
+    runs-on: ubuntu-latest
+    name: "🚦 CRAP gate"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-crap-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: setup rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # llvm-tools-preview is required by cargo-llvm-cov to produce coverage.
+          components: llvm-tools-preview
+
+      - name: Start LocalStack
+        # Mirrors the test.yml gate: vitaminc-kms' tests call a KMS endpoint on
+        # localhost:4566, so coverage of that crate needs LocalStack running too.
+        uses: LocalStack/setup-localstack@v0.3.2
+        with:
+          image-tag: 'latest'
+          install-awslocal: 'true'
+        env:
+          LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
+
+      - name: install cargo-binstall, cargo-llvm-cov and cargo-crap
+        # Install via cargo-binstall (prebuilt binaries — far faster than
+        # `cargo install` from source). cargo-binstall itself is pulled in with
+        # its official install script, the same curl-pipe pattern test.yml uses
+        # for wasm-pack, so we avoid depending on a third-party GitHub Action
+        # that the org actions allowlist may not permit.
+        # GITHUB_TOKEN lifts the anonymous GitHub API rate limit binstall would
+        # otherwise hit when resolving release assets.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf \
+            https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall -y cargo-llvm-cov cargo-crap
+
+      - name: Generate coverage and build CRAP report
+        # Coverage uses default features to match the primary `cargo test` gate
+        # (the aws-lc-rs backend). `cargo crap` then renders the sticky-comment
+        # report. Threshold, exclude and allow rules all live in
+        # .cargo-crap.toml, so this step, the gate below, and `mise run crap`
+        # stay in sync. No `--fail-above` here: this run must always write the
+        # comment, even on a PR that the gate below will fail (a `--fail-above`
+        # run writes an empty output file when it trips).
+        run: |
+          cargo llvm-cov --workspace --lcov --output-path target/vitaminc-lcov.info
+          cargo crap \
+            --workspace \
+            --lcov target/vitaminc-lcov.info \
+            --format pr-comment \
+            --repo-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --commit-ref "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --output target/crap-comment.md
+
+      - name: Post CRAP report as a sticky PR comment
+        # Posted before the gate below so the comment always shows what tripped
+        # it. Only PRs have a comment thread; on workflow_dispatch the report is
+        # still generated above and visible in the job logs.
+        # Best-effort: a comment-posting hiccup must not turn the gate red or
+        # stop the authoritative "Enforce CRAP threshold" step from running.
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('target/crap-comment.md', 'utf8');
+            // cargo crap's pr-comment output starts with this marker.
+            const marker = '<!-- cargo-crap-report -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            // Paginate so the marker is found even on PRs with >100 comments,
+            // otherwise we'd post a duplicate sticky comment each run.
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Enforce CRAP threshold
+        # The gate. Re-scores from the same LCOV (no recompile) and exits
+        # non-zero if any function exceeds the threshold in .cargo-crap.toml,
+        # listing the offenders in the log. Runs last so the sticky comment is
+        # already posted when it fails. Make this check required in branch
+        # protection to actually block merges on a regression.
+        run: |
+          cargo crap \
+            --workspace \
+            --lcov target/vitaminc-lcov.info \
+            --fail-above

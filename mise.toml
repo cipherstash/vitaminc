@@ -1,9 +1,27 @@
 [tools]
 rust = "stable"
+# Coverage → CRAP (Change Risk Anti-Patterns) tooling. `cargo llvm-cov` produces
+# the LCOV file that `cargo crap` scores; see the `crap` task below. Both ship
+# prebuilt binaries, so `mise install` binstalls them quickly.
+"cargo:cargo-llvm-cov" = "latest"
+"cargo:cargo-crap" = "latest"
 
 [tasks.clippy]
 description = "Clippy lints (including tests and all features)"
 run = "cargo clippy --no-deps --tests --all-features -- -D warnings"
+
+[tasks.crap]
+description = "Gate on the CRAP (Change Risk Anti-Patterns) metric across the workspace — fails on complex, under-tested functions"
+run = [
+  # llvm-tools-preview is required by cargo-llvm-cov; adding it is idempotent.
+  "rustup component add llvm-tools-preview",
+  # Default features, matching the primary `cargo test` gate (aws-lc-rs backend).
+  # Needs LocalStack running for the vitaminc-kms tests, same as `cargo test`.
+  "cargo llvm-cov --workspace --lcov --output-path {{ config_root }}/target/vitaminc-lcov.info",
+  # Score against the threshold + exclude/allow rules in .cargo-crap.toml.
+  # `--fail-above` mirrors the CI gate, so a green local run means a green CI run.
+  "cargo crap --workspace --lcov {{ config_root }}/target/vitaminc-lcov.info --fail-above",
+]
 
 [tasks.docs]
 dir = "{{ config_root }}/packages/vitaminc"

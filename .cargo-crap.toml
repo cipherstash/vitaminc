@@ -1,0 +1,39 @@
+# Configuration for `cargo crap` — the CRAP (Change Risk Anti-Patterns) metric.
+#
+# CRAP rewards complex code that is well tested and penalises complex code that
+# is not:
+#
+#     CRAP = CC^2 * (1 - coverage)^3 + CC      (CC = cyclomatic complexity)
+#
+# A simple or fully covered function scores roughly its complexity; a complex,
+# untested one scores into the hundreds. In a crypto library that is exactly the
+# logic we most want covered before it ships, so the metric surfaces it for us.
+#
+# Run it locally via `mise run crap` (generates coverage first, then scores).
+# Config discovery walks up from the working directory, so this single root file
+# applies anywhere in the workspace — and both `mise run crap` and the CI gate
+# (.github/workflows/crap.yml) read their threshold/exclude/allow rules from here.
+
+# CRAP score above which a function is flagged. The CI gate (`cargo crap
+# --fail-above`) fails when any function exceeds it. 30 is the long-standing
+# Crap4J default: a CC-10 function needs ~42% coverage, a CC-15 function ~59%,
+# to fall below it. The whole workspace currently tops out around 20, so this
+# leaves headroom while still catching a complex, under-tested function added
+# in a PR. Lower it over time to ratchet the bar up.
+threshold = 30
+
+# Functions with complexity but no coverage data are scored as 0% covered
+# (worst case) rather than silently skipped — uninstrumented code is risk too.
+missing = "pessimistic"
+
+# Files skipped at walk time, relative to each workspace member's root.
+# Defensive: integration tests aren't walked today, but this keeps them out of
+# the score if that changes.
+exclude = ["tests/**"]
+
+# Functions to analyse but hide from the report, matched against the full path.
+# The proc-macro crates can't be measured by cargo-llvm-cov — macro expansion
+# runs at compile time, not in the instrumented test binary — so they always
+# read as 0% covered and would be permanent false-positives. They are exercised
+# in practice by the crates that use the derives.
+allow = ["**/random-derives/**", "**/protected-derive/**"]
