@@ -1,4 +1,7 @@
 /target
+# cargo-mutants output (mutation testing); see .cargo/mutants.toml
+/mutants.out
+/mutants.out.old
 .env
 .envrc
 .mise
