@@ -202,3 +202,92 @@ fn context_helper_roundtrips_composite_value() {
 
     assert_eq!(plaintext, items);
 }
+
+// --- Negative / coverage tests: the extra AAD, the chained-refine nesting, the
+// --- `aad_with` arg order, composite values, and non-string tags must each be
+// --- authenticated — a wrong/partial context must fail to decrypt. ---
+
+#[test]
+fn decrypt_fails_with_wrong_extra_aad() {
+    let cipher = cipher();
+
+    let ciphertext = ContextTag::new("secret", "table:users")
+        .encrypt_with_aad(&cipher, "row:99")
+        .expect("encryption failed");
+
+    // Correct tag but wrong *extra* AAD: the extra is authenticated too, so this
+    // must fail. Guards against the fold ever dropping `extra_aad`.
+    let result: Result<String, _> =
+        ContextTag::context("table:users").decrypt_with_aad(cipher.decipher(ciphertext), "row:00");
+    assert!(result.is_err(), "wrong extra AAD must not decrypt");
+}
+
+#[test]
+fn context_helper_double_refine_roundtrips() {
+    let cipher = cipher();
+
+    // Two refines => left-nested tag (("a", "b"), "c"). Pins that the e2e decrypt
+    // path reconstructs the same nesting (the unit tests only assert the bytes).
+    let ciphertext = ContextTag::new("secret", "a")
+        .refine("b")
+        .refine("c")
+        .encrypt(&cipher)
+        .expect("encryption failed");
+
+    let plaintext: String = ContextTag::context("a")
+        .refine("b")
+        .refine("c")
+        .decrypt(cipher.decipher(ciphertext))
+        .expect("decryption failed");
+
+    assert_eq!(plaintext, "secret");
+}
+
+#[test]
+fn aad_with_swapped_args_fails_to_decrypt() {
+    let cipher = cipher();
+
+    // Sealed as (extra="row:99", tag="table:users").
+    let ciphertext = ContextTag::new("secret", "table:users")
+        .encrypt_with_aad(&cipher, "row:99")
+        .expect("encryption failed");
+
+    // `aad_with(extra, tag)` — swapping the two same-typed args silently builds the
+    // wrong AAD. This pins that the documented footgun actually fails to decrypt
+    // (i.e. the order genuinely matters at the byte level).
+    let result: Result<String, _> =
+        cipher.decrypt_with_aad(ciphertext, ContextTag::aad_with("table:users", "row:99"));
+    assert!(result.is_err(), "swapped aad_with args must not decrypt");
+}
+
+#[test]
+fn composite_value_fails_with_wrong_context() {
+    let cipher = cipher();
+
+    // Multi-element value: every element is bound to the context. A wrong tag must
+    // fail — guards against per-element AAD threading silently dropping on any element.
+    let items = vec![String::from("a"), String::from("b"), String::from("c")];
+    let ciphertext = ContextTag::new(items, "table:users")
+        .encrypt_with_aad(&cipher, "row:99")
+        .expect("encryption failed");
+
+    let result: Result<Vec<String>, _> =
+        ContextTag::context("table:WRONG").decrypt_with_aad(cipher.decipher(ciphertext), "row:99");
+    assert!(
+        result.is_err(),
+        "wrong context must not decrypt a composite value"
+    );
+}
+
+#[test]
+fn integer_tag_fails_with_wrong_context() {
+    let cipher = cipher();
+
+    // Wrong-context coverage for a non-string (`u64`) tag.
+    let ciphertext = ContextTag::new("secret", 7u64)
+        .encrypt(&cipher)
+        .expect("encryption failed");
+
+    let result: Result<String, _> = ContextTag::context(8u64).decrypt(cipher.decipher(ciphertext));
+    assert!(result.is_err(), "wrong integer context must not decrypt");
+}
