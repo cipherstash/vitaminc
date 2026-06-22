@@ -11,7 +11,18 @@ use crate::{
 
 pub(crate) type KeyInner<const N: usize> = Exportable<Protected<[u8; N]>>;
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, Zeroize)]
+// NOTE: no `Copy` — `PermutationKey` wraps a `Protected` secret that zeroizes
+// on drop, and `Copy`/`Drop` are mutually exclusive. A bitwise copy would also
+// leave un-zeroized duplicates of the key. Use `Clone` where a copy is needed.
+//
+// The key IS wiped on drop: `KeyInner` is `Exportable<Protected<[u8; N]>>`, both
+// of which are `ZeroizeOnDrop`, so the field's drop glue zeroizes the bytes. We
+// deliberately do NOT derive `ZeroizeOnDrop` on `PermutationKey` itself: a `Drop`
+// impl would forbid the `.0` field moves in `complement` / `Permute::permute`
+// (E0509), and recovering them would mean duplicating `protected`'s
+// `ptr::read`+`forget` move-out primitive into this crate. The drop-glue
+// guarantee holds as long as `KeyInner` stays `ZeroizeOnDrop`.
+#[derive(Clone, Debug, Serialize, Deserialize, Zeroize)]
 pub struct PermutationKey<const N: usize>(KeyInner<N>);
 
 impl<const N: usize> PermutationKey<N> {
@@ -33,12 +44,15 @@ impl<const N: usize> PermutationKey<N> {
         Generatable::random(&mut rng)
     }
 
-    /// Consumes the key and returns its inverse.
-    pub fn invert(self) -> Self
+    /// Returns the inverse of this key.
+    ///
+    /// Borrows `self` — inversion builds a fresh key from the borrowed
+    /// permutation, so there is no need to consume (or clone) the original.
+    pub fn invert(&self) -> Self
     where
         [u8; N]: IsPermutable,
     {
-        Self(KeyInner::new(depermute_array(&self, identity())))
+        Self(KeyInner::new(depermute_array(self, identity())))
     }
 
     /// Returns the complement of the key with respect to the target key.
@@ -64,6 +78,8 @@ impl<const N: usize> PermutationKey<N> {
     where
         [u8; N]: IsPermutable + Zeroed,
     {
+        // `invert` borrows, so we map the inverse of the borrowed `target`
+        // through `permute_array` without ever copying the key.
         Self(target.invert().0.map(|arr| permute_array(self, arr)))
     }
 

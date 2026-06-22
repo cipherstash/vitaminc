@@ -5,7 +5,7 @@ use serde::{
     de::{Deserialize, Deserializer},
     ser::{Serialize, Serializer},
 };
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub use safe_deserialize::SafeDeserialize;
 pub use safe_serialize::SafeSerialize;
@@ -52,12 +52,12 @@ pub use safe_serialize::SafeSerialize;
 /// assert_eq!(secret_a, secret_b);
 /// ```
 ///
-#[derive(Debug, Zeroize)]
-pub struct Exportable<T>(pub(crate) T);
+#[derive(Debug, Zeroize, ZeroizeOnDrop)]
+pub struct Exportable<T: Zeroize>(pub(crate) T);
 
 // TODO: Can we implement Hex and Base64 for inner types that implement them?
 // But using safe versions
-impl<T> Exportable<T> {
+impl<T: Zeroize> Exportable<T> {
     /// Create a new `Exportable` from an inner value.
     pub fn new(x: <Exportable<T> as Controlled>::Inner) -> Self
     where
@@ -65,13 +65,28 @@ impl<T> Exportable<T> {
     {
         Self::init_from_inner(x)
     }
+
+    /// Move the inner value out without running the zeroizing `Drop`.
+    /// See [`crate::move_inner_out`] for the shared primitive and rationale.
+    fn into_inner_unchecked(self) -> T {
+        crate::move_inner_out(self)
+    }
 }
 
-impl<T> Copy for Exportable<T> where T: Copy {}
+// SAFETY: `inner_ptr` returns a pointer to `self`'s live, owned inner field, and
+// `Exportable`'s derived `Drop` only zeroizes — satisfying `MoveInner`'s contract.
+unsafe impl<T: Zeroize> crate::MoveInner for Exportable<T> {
+    type Inner = T;
+    fn inner_ptr(&self) -> *const T {
+        &self.0
+    }
+}
+
+// NOTE: no `Copy` — `Copy` and the zeroizing `Drop` are mutually exclusive.
 
 impl<T> Clone for Exportable<T>
 where
-    T: Clone,
+    T: Clone + Zeroize,
 {
     fn clone(&self) -> Self {
         Self(self.0.clone())
@@ -90,7 +105,7 @@ where
     }
 }
 
-impl<T: ControlledPrivate> ControlledPrivate for Exportable<T> {}
+impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Exportable<T> {}
 
 impl<T> Controlled for Exportable<T>
 where
@@ -99,7 +114,7 @@ where
     type Inner = T::Inner;
 
     fn risky_unwrap(self) -> Self::Inner {
-        self.0.risky_unwrap()
+        self.into_inner_unchecked().risky_unwrap()
     }
 
     fn init_from_inner(x: Self::Inner) -> Self {
@@ -117,7 +132,7 @@ where
 
 impl<T, A> Extend<A> for Exportable<T>
 where
-    T: Extend<A>,
+    T: Extend<A> + Zeroize,
 {
     fn extend<I>(&mut self, iter: I)
     where

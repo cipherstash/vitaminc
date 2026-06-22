@@ -16,6 +16,7 @@
 use crate::{RandomError, SafeRand};
 use std::num::NonZeroU16;
 use vitaminc_protected::{Controlled, Equatable, Exportable, Protected, Usage};
+use zeroize::Zeroize;
 
 /// A trait for types that can be generated randomly.
 /// The random number generator is passed as an argument to the `generate` method
@@ -65,6 +66,7 @@ impl<const N: usize> Generatable for [u8; N] {
 
 impl<T, G> Generatable for Protected<T>
 where
+    T: Zeroize,
     G: Generatable,
     Self: Controlled<Inner = G>,
 {
@@ -75,6 +77,7 @@ where
 
 impl<T, G> Generatable for Exportable<T>
 where
+    T: Zeroize,
     G: Generatable,
     Self: Controlled<Inner = G>,
 {
@@ -85,6 +88,7 @@ where
 
 impl<T, G> Generatable for Equatable<T>
 where
+    T: Zeroize,
     G: Generatable,
     Self: Controlled<Inner = G>,
 {

@@ -2,6 +2,7 @@ use serde::{Serialize, Serializer};
 
 use crate::{exportable::SafeSerialize, private::ControlledPrivate, Controlled, Protected};
 use std::marker::PhantomData;
+use zeroize::Zeroize;
 
 // TODO: Docs, explain compile time
 pub struct Usage<T, Scope = DefaultScope>(pub(crate) T, pub(crate) PhantomData<Scope>);
@@ -13,6 +14,23 @@ impl<T, S> Usage<T, S> {
         S: Scope,
     {
         Self::init_from_inner(x)
+    }
+}
+
+// `Usage` is a compile-time scope wrapper; this `Zeroize` impl exists only to
+// satisfy the `Controlled: Zeroize` supertrait and delegates to the inner type
+// (`PhantomData` is a ZST with nothing to wipe).
+//
+// `Usage` intentionally does NOT derive `ZeroizeOnDrop`. Its secret is still
+// wiped on drop: `Usage::new` requires `Self: Controlled`, so the inner `T` is
+// always a controlled type (`Protected`/`Equatable`/`Exportable`), each of which
+// is `ZeroizeOnDrop` — dropping `Usage` runs the field's drop glue and wipes the
+// bytes. Giving `Usage` its own `Drop` would require a viral `T: Zeroize` bound
+// on the struct (E0367: a conditional `Drop` must match the struct bounds),
+// which would cascade through every `Usage<T, S>` use for no behavioural gain.
+impl<T: Zeroize, Scope> Zeroize for Usage<T, Scope> {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
     }
 }
 
@@ -56,7 +74,7 @@ impl<T, S> Acceptable<S> for Usage<T, S> where S: Scope {}
 // TODO: Move this to all of the other modules
 pub struct DefaultScope;
 impl Scope for DefaultScope {}
-impl<T> Acceptable<DefaultScope> for Protected<T> {}
+impl<T: Zeroize> Acceptable<DefaultScope> for Protected<T> {}
 
 /// Serialize implementation for Usage if it is controlled and the inner type is safe serializable.
 ///
