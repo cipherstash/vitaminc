@@ -97,22 +97,31 @@ jobs:
       - name: Compute PR diff
         # cargo-mutants `--in-diff` mutates only lines added/changed by the PR.
         # Diff the checked-out tree against the base branch tip; fetch it first
-        # since the PR checkout doesn't include it.
+        # since the PR checkout doesn't include it. PR-only: a manual
+        # `workflow_dispatch` has no `github.base_ref` to diff against, so it runs
+        # the whole workspace instead (see the run step below).
+        if: github.event_name == 'pull_request'
         run: |
           git fetch --no-tags origin "${{ github.base_ref }}"
           git diff "origin/${{ github.base_ref }}" > pr.diff
           echo "Changed lines under mutation:"
           cat pr.diff
 
-      - name: Run cargo-mutants on the diff
+      - name: Run cargo-mutants
         id: mutants
         # Don't fail the job here: the gate step below is authoritative, and the
-        # sticky comment must be posted first. `--in-diff` + .cargo/mutants.toml
-        # (features/excludes/timeouts) keep this in sync with `mise run mutants`.
+        # sticky comment must be posted first. .cargo/mutants.toml
+        # (features/excludes/timeouts) keeps this in sync with `mise run mutants`.
+        # On a PR, scope to the diff; on a manual dispatch there is no diff, so
+        # sweep the whole workspace (slow, but that's the point of asking for it).
         continue-on-error: true
         run: |
           set +e
-          cargo mutants --no-shuffle -vV --in-diff pr.diff
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            cargo mutants --no-shuffle -vV --in-diff pr.diff
+          else
+            cargo mutants --no-shuffle -vV
+          fi
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Build mutants report
@@ -131,7 +140,14 @@ jobs:
             echo '## 🧬 Mutation testing (cargo-mutants, `--in-diff`)'
             echo
             if [ ! -d "$out" ]; then
-              echo "No mutants were generated for this PR's changed lines."
+              # No output dir: either the run found nothing to mutate (exit 0) or
+              # it died before producing results (e.g. the baseline tests failed).
+              # Distinguish them so a failed run doesn't masquerade as a clean one.
+              if [ "${{ steps.mutants.outputs.exit_code }}" = "0" ]; then
+                echo "No mutants were generated for the changed lines."
+              else
+                echo "⚠️ cargo-mutants did not complete (exit ${{ steps.mutants.outputs.exit_code }}) before producing results — check the workflow run logs. The gate below will fail."
+              fi
               exit 0
             fi
             echo "| caught | missed | unviable | timeout |"
@@ -144,8 +160,10 @@ jobs:
               [ -s "$out/missed.txt" ] && cat "$out/missed.txt"
               [ -s "$out/timeout.txt" ] && { echo '# timed out (treated as surviving):'; cat "$out/timeout.txt"; }
               echo '```'
-            else
+            elif [ "${{ steps.mutants.outputs.exit_code }}" = "0" ]; then
               echo "✅ Every mutant in the changed lines was caught by a test."
+            else
+              echo "⚠️ cargo-mutants exited ${{ steps.mutants.outputs.exit_code }} with no surviving mutants recorded — the run may not have completed cleanly. Check the workflow run logs."
             fi
           } > mutants-comment.md
           cat mutants-comment.md
