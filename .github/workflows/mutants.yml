@@ -1,0 +1,212 @@
+name: "Mutants"
+
+# Gates PRs on mutation testing of the lines they change. cargo-mutants rewrites
+# small pieces of logic (flip `<` to `<=`, replace a body with
+# `Default::default()`, …) and reruns the tests; a mutant that survives is a line
+# the suite does not actually pin down. In a crypto library — comparisons, AAD
+# handling, length checks — that is exactly the logic we want a test to catch
+# before it ships.
+#
+# Scoped with `--in-diff` to the PR's own changes, so the gate trips only when a
+# PR adds (or moves) logic its tests don't exercise — a full-workspace run is far
+# too slow for a per-PR gate (~600 mutants). Run the whole workspace locally with
+# `mise run mutants`. Config (features, excludes, timeouts) lives in
+# .cargo/mutants.toml so this gate and the local task stay in sync.
+#
+# To soften back to report-only, drop the "Enforce — fail on surviving mutants"
+# step; the sticky comment keeps working either way. To block merges, mark this
+# check ("🧬 Mutants gate") as required in the repo's branch-protection settings.
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "packages/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/mutants.toml"
+      - ".github/workflows/mutants.yml"
+      # Negative patterns must stay last: keep the matches above but ignore
+      # pure-docs changes so a README-only PR doesn't run mutation testing.
+      - "!**.md"
+
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+# Needed to post/update the report comment on the PR.
+permissions:
+  contents: read
+  pull-requests: write
+
+# Cancel an in-flight run when the PR is pushed again — only the latest matters.
+concurrency:
+  group: mutants-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutants:
+    runs-on: ubuntu-latest
+    name: "🧬 Mutants gate"
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Full history so we can diff the PR against its base branch for
+          # `--in-diff`.
+          fetch-depth: 0
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-mutants-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: setup rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Start LocalStack
+        # The unmutated baseline runs the whole test suite, and vitaminc-kms'
+        # tests call a KMS endpoint on localhost:4566 — same as the test.yml and
+        # crap.yml gates.
+        uses: LocalStack/setup-localstack@v0.3.2
+        with:
+          image-tag: 'latest'
+          install-awslocal: 'true'
+        env:
+          LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
+
+      - name: install cargo-binstall and cargo-mutants
+        # Install via cargo-binstall (prebuilt binaries — far faster than
+        # `cargo install` from source), the same curl-pipe pattern crap.yml uses,
+        # so we avoid a third-party Action the org allowlist may not permit.
+        # GITHUB_TOKEN lifts the anonymous API rate limit binstall would hit.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf \
+            https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall -y cargo-mutants
+
+      - name: Compute PR diff
+        # cargo-mutants `--in-diff` mutates only lines added/changed by the PR.
+        # Diff the checked-out tree against the base branch tip; fetch it first
+        # since the PR checkout doesn't include it. PR-only: a manual
+        # `workflow_dispatch` has no `github.base_ref` to diff against, so it runs
+        # the whole workspace instead (see the run step below).
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          git diff "origin/${{ github.base_ref }}" > pr.diff
+          echo "Changed lines under mutation:"
+          cat pr.diff
+
+      - name: Run cargo-mutants
+        id: mutants
+        # Don't fail the job here: the gate step below is authoritative, and the
+        # sticky comment must be posted first. .cargo/mutants.toml
+        # (features/excludes/timeouts) keeps this in sync with `mise run mutants`.
+        # On a PR, scope to the diff; on a manual dispatch there is no diff, so
+        # sweep the whole workspace (slow, but that's the point of asking for it).
+        continue-on-error: true
+        run: |
+          set +e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            cargo mutants --no-shuffle -vV --in-diff pr.diff
+          else
+            cargo mutants --no-shuffle -vV
+          fi
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Build mutants report
+        # Compose a sticky-comment body from the cargo-mutants output dir. Always
+        # runs so the comment reflects the run even when the gate below will fail.
+        if: always()
+        run: |
+          out=mutants.out
+          count() { if [ -f "$out/$1" ]; then grep -c . "$out/$1" || true; else echo 0; fi; }
+          caught=$(count caught.txt)
+          missed=$(count missed.txt)
+          unviable=$(count unviable.txt)
+          timeout=$(count timeout.txt)
+          {
+            echo '<!-- cargo-mutants-report -->'
+            echo '## 🧬 Mutation testing (cargo-mutants, `--in-diff`)'
+            echo
+            if [ ! -d "$out" ]; then
+              # No output dir: either the run found nothing to mutate (exit 0) or
+              # it died before producing results (e.g. the baseline tests failed).
+              # Distinguish them so a failed run doesn't masquerade as a clean one.
+              if [ "${{ steps.mutants.outputs.exit_code }}" = "0" ]; then
+                echo "No mutants were generated for the changed lines."
+              else
+                echo "⚠️ cargo-mutants did not complete (exit ${{ steps.mutants.outputs.exit_code }}) before producing results — check the workflow run logs. The gate below will fail."
+              fi
+              exit 0
+            fi
+            echo "| caught | missed | unviable | timeout |"
+            echo "| -----: | -----: | -------: | ------: |"
+            echo "| $caught | $missed | $unviable | $timeout |"
+            echo
+            if [ "$missed" -gt 0 ] || [ "$timeout" -gt 0 ]; then
+              echo "### Surviving mutants — add a test that fails on each before merging"
+              echo '```'
+              [ -s "$out/missed.txt" ] && cat "$out/missed.txt"
+              [ -s "$out/timeout.txt" ] && { echo '# timed out (treated as surviving):'; cat "$out/timeout.txt"; }
+              echo '```'
+            elif [ "${{ steps.mutants.outputs.exit_code }}" = "0" ]; then
+              echo "✅ Every mutant in the changed lines was caught by a test."
+            else
+              echo "⚠️ cargo-mutants exited ${{ steps.mutants.outputs.exit_code }} with no surviving mutants recorded — the run may not have completed cleanly. Check the workflow run logs."
+            fi
+          } > mutants-comment.md
+          cat mutants-comment.md
+
+      - name: Post mutants report as a sticky PR comment
+        # Posted before the gate so the comment always shows what tripped it.
+        # Best-effort: a comment hiccup must not turn the gate red or stop the
+        # authoritative enforce step from running.
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('mutants-comment.md', 'utf8');
+            const marker = '<!-- cargo-mutants-report -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Enforce — fail on surviving mutants
+        # The gate. A surviving ("missed") or timed-out mutant in the changed
+        # lines means a test does not pin that logic down; block the merge.
+        run: |
+          out=mutants.out
+          if [ -s "$out/missed.txt" ] || [ -s "$out/timeout.txt" ]; then
+            echo "::error::Surviving mutants in the PR diff — add tests that catch them (see the PR comment)."
+            [ -s "$out/missed.txt" ] && cat "$out/missed.txt"
+            [ -s "$out/timeout.txt" ] && cat "$out/timeout.txt"
+            exit 1
+          fi
+          # cargo-mutants failed before producing results (e.g. baseline tests
+          # failed) — surface that as a gate failure rather than a false pass.
+          if [ "${{ steps.mutants.outputs.exit_code }}" != "0" ] && [ ! -f "$out/outcomes.json" ]; then
+            echo "::error::cargo-mutants did not complete (exit ${{ steps.mutants.outputs.exit_code }}) — check the run logs."
+            exit 1
+          fi
+          echo "No surviving mutants in the PR diff."

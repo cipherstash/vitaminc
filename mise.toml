@@ -5,6 +5,10 @@ rust = "stable"
 # prebuilt binaries, so `mise install` binstalls them quickly.
 "cargo:cargo-llvm-cov" = "latest"
 "cargo:cargo-crap" = "latest"
+# Mutation testing. `cargo mutants` rewrites small pieces of logic and reruns the
+# tests; a surviving mutant is a line the suite doesn't pin down. Config lives in
+# .cargo/mutants.toml; see the `mutants` task below. Ships a prebuilt binary.
+"cargo:cargo-mutants" = "latest"
 
 [tasks.clippy]
 description = "Clippy lints (including tests and all features)"
@@ -21,6 +25,17 @@ run = [
   # Score against the threshold + exclude/allow rules in .cargo-crap.toml.
   # `--fail-above` mirrors the CI gate, so a green local run means a green CI run.
   "cargo crap --workspace --lcov {{ config_root }}/target/vitaminc-lcov.info --fail-above",
+]
+
+[tasks.mutants]
+description = "Mutation testing (cargo-mutants) across the workspace — surfaces logic the tests don't actually pin down"
+run = [
+  # Whole-workspace mutation run, reading features/excludes/timeouts from
+  # .cargo/mutants.toml. Like `cargo test` / `mise run crap`, the baseline runs
+  # the vitaminc-kms tests, so it needs LocalStack running. CI instead runs this
+  # `--in-diff` as a fast per-PR gate (.github/workflows/mutants.yml), mutating
+  # only the lines a PR changes.
+  "cargo mutants",
 ]
 
 [tasks.docs]
