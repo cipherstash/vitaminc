@@ -678,6 +678,115 @@ mod test {
     }
 
     #[quickcheck]
+    fn roundtrip_equatable_string(key: Key, plaintext: String) -> bool {
+        use vitaminc_protected::{Controlled, Equatable, Protected};
+
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let value: Equatable<Protected<String>> = Equatable::new(plaintext.clone());
+        let ciphertext = value.encrypt(&cipher).expect("Encryption failed");
+        let decrypted: Equatable<Protected<String>> =
+            cipher.decrypt(ciphertext).expect("Decryption failed");
+        decrypted.risky_unwrap() == plaintext
+    }
+
+    #[quickcheck]
+    fn roundtrip_equatable_u32(key: Key, plaintext: u32) -> bool {
+        use vitaminc_protected::{Controlled, Equatable, Protected};
+
+        // `u32` routes through the fixed-size `encrypt_bytes_array` path, so this
+        // exercises the `Equatable` wrapper over that branch — not just the
+        // byte-vec path covered by `roundtrip_equatable_string`.
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let value: Equatable<Protected<u32>> = Equatable::new(plaintext);
+        let ciphertext = value.encrypt(&cipher).expect("Encryption failed");
+        let decrypted: Equatable<Protected<u32>> =
+            cipher.decrypt(ciphertext).expect("Decryption failed");
+        decrypted.risky_unwrap() == plaintext
+    }
+
+    #[quickcheck]
+    fn roundtrip_equatable_with_aad(key: Key, plaintext: String) -> bool {
+        use vitaminc_protected::{Controlled, Equatable, Protected};
+
+        // Positive correct-AAD roundtrip *through* the `Equatable` layer — the
+        // wrong-AAD test only proves rejection, never that the right AAD recovers
+        // the value. Also asserts the rebuilt wrapper's own constant-time
+        // `PartialEq` (the reason `Decrypt` reconstructs `Equatable` via
+        // `init_from_inner` rather than handing back a bare `Protected`).
+        let aad = "equatable-aad";
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let value: Equatable<Protected<String>> = Equatable::new(plaintext.clone());
+        let ciphertext = value
+            .encrypt_with_aad(&cipher, aad)
+            .expect("Encryption failed");
+        let decrypted: Equatable<Protected<String>> = cipher
+            .decrypt_with_aad(ciphertext, aad)
+            .expect("Decryption failed");
+        let expected: Equatable<Protected<String>> = Equatable::new(plaintext.clone());
+        decrypted == expected && decrypted.risky_unwrap() == plaintext
+    }
+
+    #[quickcheck]
+    fn decrypt_equatable_fails_with_wrong_aad(key: Key, plaintext: String) -> bool {
+        use vitaminc_protected::{Equatable, Protected};
+
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let value: Equatable<Protected<String>> = Equatable::new(plaintext);
+        let ciphertext = value
+            .encrypt_with_aad(&cipher, "correct-aad")
+            .expect("Encryption failed");
+        cipher
+            .decrypt_with_aad::<Equatable<Protected<String>>, _>(ciphertext, "wrong-aad")
+            .is_err()
+    }
+
+    #[quickcheck]
+    fn decrypt_equatable_fails_with_wrong_key(keys: DifferingKeyPair, plaintext: String) -> bool {
+        use vitaminc_protected::{Equatable, Protected};
+
+        // Completes the tamper matrix with the key axis (sibling `String` path has
+        // both wrong-AAD and wrong-key). `DifferingKeyPair` guarantees the two keys
+        // are distinct, so a key collision cannot make this spuriously pass.
+        let DifferingKeyPair(key_a, key_b) = keys;
+        let cipher_a = Aes256Cipher::new(&key_a).expect("Failed to create cipher A");
+        let cipher_b = Aes256Cipher::new(&key_b).expect("Failed to create cipher B");
+        let value: Equatable<Protected<String>> = Equatable::new(plaintext);
+        let ciphertext = value.encrypt(&cipher_a).expect("Encryption failed");
+        cipher_b
+            .decrypt::<Equatable<Protected<String>>>(ciphertext)
+            .is_err()
+    }
+
+    #[quickcheck]
+    fn equatable_ciphertext_is_wrapper_agnostic(key: Key, plaintext: String) -> bool {
+        use vitaminc_protected::{Controlled, Equatable, Protected};
+
+        // `Equatable` adds nothing to the ciphertext, so the two are interchangeable:
+        // a value sealed as `Equatable<Protected<String>>` decrypts cleanly as the
+        // bare inner `Protected<String>`, and a bare `String` ciphertext reads back
+        // through the `Equatable` layer. Pins the wrapper-agnostic invariant — a
+        // future change that tagged the wrapper into the ciphertext would break this.
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+
+        let eq_ciphertext = Equatable::<Protected<String>>::new(plaintext.clone())
+            .encrypt(&cipher)
+            .expect("Encryption failed");
+        let as_protected: Protected<String> = cipher
+            .decrypt(eq_ciphertext)
+            .expect("decrypt as Protected failed");
+
+        let bare_ciphertext = plaintext
+            .clone()
+            .encrypt(&cipher)
+            .expect("Encryption failed");
+        let as_equatable: Equatable<Protected<String>> = cipher
+            .decrypt(bare_ciphertext)
+            .expect("decrypt as Equatable failed");
+
+        as_protected.risky_unwrap() == plaintext && as_equatable.risky_unwrap() == plaintext
+    }
+
+    #[quickcheck]
     fn roundtrip_option_some_string(key: Key, plaintext: String) -> bool {
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let value = Some(plaintext.clone());
