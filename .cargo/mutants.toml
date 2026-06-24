@@ -1,0 +1,34 @@
+# Configuration for cargo-mutants — mutation testing for the vitaminc workspace.
+#
+# Mutation testing rewrites small pieces of logic (flip a `<` to `<=`, replace a
+# body with `Default::default()`, etc.) and reruns the tests: a mutant that
+# survives is a line the suite does not actually pin down. In a crypto library
+# that is exactly the logic — comparisons, AAD handling, length checks — we most
+# want a test to catch before it ships.
+#
+# CI runs this `--in-diff` as a per-PR gate (.github/workflows/mutants.yml): only
+# the lines a PR changes are mutated, so the gate trips when a PR adds logic its
+# tests don't exercise. `mise run mutants` runs the whole workspace locally.
+# Both read the settings below, so they stay in sync.
+
+# Build and test with every feature on, so feature-gated code — the `hlist`
+# static-ciphertext API and the `_test-rust-crypto-backend` — is actually
+# compiled and exercised. Without this, a mutant in that code would "survive"
+# only because the gating feature was off, not because a test is missing.
+additional_cargo_args = ["--all-features"]
+
+# Skip the proc-macro derive crates: their logic runs at compile time, not in the
+# instrumented test binary, so cargo-mutants cannot meaningfully test mutants
+# there (they'd survive spuriously). This mirrors the cargo-crap `allow` list;
+# the derives are exercised in practice by the crates that use them.
+exclude_globs = [
+    "packages/protected-derive/**",
+    "packages/random-derives/**",
+]
+
+# Property tests (quickcheck) and AEAD round-trips run slower under mutation than
+# a clean build, so give each mutant generous headroom over the measured baseline
+# before declaring a timeout — a slow-but-correct mutant must not be misreported
+# as surviving (which would fail the gate spuriously).
+timeout_multiplier = 5.0
+minimum_test_timeout = 90
