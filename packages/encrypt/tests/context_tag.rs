@@ -69,6 +69,19 @@ fn decrypt_fails_when_context_omitted() {
 }
 
 #[test]
+fn decrypt_fails_with_wrong_key() {
+    let ciphertext = ContextTag::new("secret", "user:42")
+        .encrypt(&cipher())
+        .expect("encryption failed");
+
+    // Same (correct) context, different key: GCM authentication must still reject
+    // it. Completes the tamper matrix with the key axis alongside the AAD axes.
+    let other = Aes256Cipher::new(&Key::from([7u8; 32])).expect("failed to create cipher");
+    let result: Result<String, _> = other.decrypt_with_aad(ciphertext, ContextTag::aad("user:42"));
+    assert!(result.is_err(), "wrong key must not decrypt");
+}
+
+#[test]
 fn roundtrip_with_refined_context() {
     let cipher = cipher();
 
@@ -98,6 +111,23 @@ fn refined_context_fails_with_unrefined_aad() {
     let result: Result<String, _> =
         cipher.decrypt_with_aad(ciphertext, ContextTag::aad("table:users"));
     assert!(result.is_err());
+}
+
+#[test]
+fn refined_context_fails_with_wrong_inner_aad() {
+    let cipher = cipher();
+
+    let ciphertext = ContextTag::new("secret", "table:users")
+        .refine("column:email")
+        .encrypt(&cipher)
+        .expect("encryption failed");
+
+    // Correct outer tag and correct tuple *shape*, but a wrong inner value —
+    // distinct from `refined_context_fails_with_unrefined_aad`, which omits the
+    // inner entirely. Guards against the refined tag authenticating on shape alone.
+    let result: Result<String, _> =
+        cipher.decrypt_with_aad(ciphertext, ContextTag::aad(("table:users", "column:WRONG")));
+    assert!(result.is_err(), "wrong inner refine value must not decrypt");
 }
 
 #[test]
