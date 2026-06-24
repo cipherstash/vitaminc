@@ -579,6 +579,27 @@ mod test {
     }
 
     #[quickcheck]
+    fn roundtrip_vec_with_aad(key: Key, plaintext: Vec<String>) -> bool {
+        // Positive counterpart to `decrypt_seq_fails_with_wrong_aad`: every element
+        // must authenticate when the *correct* AAD is re-supplied per element by
+        // `AesSeqAccess::next_element`. Exercises the borrowed-AAD seq path across
+        // arbitrary element counts (the empty vec has no element tags and trivially
+        // roundtrips). A wrong-AAD-fails test alone can't catch a regression where
+        // the per-element AAD is dropped or mis-borrowed so even the correct AAD
+        // fails — only this positive multi-element roundtrip does.
+        let aad = "seq-aad";
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ciphertext = plaintext
+            .clone()
+            .encrypt_with_aad(&cipher, aad)
+            .expect("Encryption failed");
+        let decrypted: Vec<String> = cipher
+            .decrypt_with_aad(ciphertext, aad)
+            .expect("Decryption failed");
+        decrypted == plaintext
+    }
+
+    #[quickcheck]
     fn decrypt_fails_with_wrong_key(keys: DifferingKeyPair, plaintext: String) -> bool {
         // `DifferingKeyPair` guarantees the two keys are distinct, so this test
         // is deterministic — a key collision cannot make it spuriously fail.
