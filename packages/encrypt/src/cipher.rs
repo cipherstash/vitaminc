@@ -468,7 +468,15 @@ impl<'c, 'a> MapAccess<'c> for AesMapAccess<'c, 'a> {
 // tests already cover both backends on native via the
 // `_test-rust-crypto-backend` feature; the wasm32 codegen path is gated by the
 // KAT in `crate::backend::tests`.
-#[cfg(all(test, not(target_arch = "wasm32")))]
+//
+// Written as two stacked `cfg` attributes rather than `cfg(all(test, …))` so
+// cargo-mutants sees the literal `cfg(test)` and skips this whole test module —
+// it doesn't look for `test` nested inside `all(...)`, and the `#[quickcheck]`
+// fns aren't `#[test]` at the syntax level, so it would otherwise mutate them
+// (e.g. replace a property body with `true`, which trivially "survives").
+// Stacked `cfg` attributes are AND-ed, so this compiles identically.
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::unwrap_used)]
 mod test {
     use super::*;
