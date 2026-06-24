@@ -2,7 +2,7 @@ use crate::backend::{CipherKey, NONCE_LEN};
 use crate::Key;
 use std::any::Any;
 use vitaminc_aead::{
-    Cipher, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt, IntoAad,
+    Aad, Cipher, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt, IntoAad,
     LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator, SeqAccess,
     SeqCipher, Unspecified,
 };
@@ -258,19 +258,35 @@ impl Aes256Cipher {
         T: Decrypt<'c> + 'c,
         A: IntoAad<'a>,
     {
-        let aad = aad.into_aad();
-        T::decrypt(AesDecipher {
+        // AAD is threaded through the `Decrypt`/`Decipher` call chain (mirroring how
+        // `Encrypt::encrypt_with_aad` threads it on the encrypt side), not baked into the
+        // decipher up front.
+        T::decrypt_with_aad(self.decipher(ciphertext), aad)
+    }
+
+    /// Construct a [`Decipher`] over `ciphertext` bound to this cipher.
+    ///
+    /// This is the decrypt-side counterpart to passing `&cipher` (a [`Cipher`])
+    /// on the encrypt side: it hands callers a concrete [`Decipher`] they can
+    /// drive directly via [`Decrypt::decrypt_with_aad`], which is what generic
+    /// decrypt-side helpers (e.g. `ContextTag`) build on. The ergonomic
+    /// [`decrypt`](Aes256Cipher::decrypt) /
+    /// [`decrypt_with_aad`](Aes256Cipher::decrypt_with_aad) methods are thin
+    /// wrappers around it.
+    pub fn decipher(&self, ciphertext: AesCipherText) -> AesDecipher<'_> {
+        AesDecipher {
             cipher: self,
             ciphertext,
-            aad: aad.as_bytes().to_vec(),
-        })
+        }
     }
 }
 
-struct AesDecipher<'c> {
+/// A [`Decipher`] over a single [`AesCipherText`], produced by
+/// [`Aes256Cipher::decipher`]. Carries the cipher and ciphertext; the AAD is
+/// supplied per call by [`Decrypt::decrypt_with_aad`].
+pub struct AesDecipher<'c> {
     cipher: &'c Aes256Cipher,
     ciphertext: AesCipherText,
-    aad: Vec<u8>,
 }
 
 impl AesDecipher<'_> {
@@ -303,23 +319,32 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         ok.map(f)
     }
 
-    fn decrypt_bytes<V: DecipherVisitor<'c> + Send + 'c>(self, visitor: V) -> Self::Ok<V::Value> {
+    fn decrypt_bytes<'a, V, A>(self, visitor: V, aad: A) -> Self::Ok<V::Value>
+    where
+        V: DecipherVisitor<'c> + Send + 'c,
+        A: IntoAad<'a>,
+    {
         match self.ciphertext {
             AesCipherText::Single(ct) => {
-                let bytes = Self::decrypt_local_ciphertext(self.cipher, ct, &self.aad)?;
+                let aad = aad.into_aad();
+                let bytes = Self::decrypt_local_ciphertext(self.cipher, ct, aad.as_bytes())?;
                 visitor.visit_bytes_vec(bytes)
             }
             _ => Err(Unspecified),
         }
     }
 
-    fn decrypt_seq<V: DecipherVisitor<'c> + Send + 'c>(self, visitor: V) -> Self::Ok<V::Value> {
+    fn decrypt_seq<'a, V, A>(self, visitor: V, aad: A) -> Self::Ok<V::Value>
+    where
+        V: DecipherVisitor<'c> + Send + 'c,
+        A: IntoAad<'a>,
+    {
         match self.ciphertext {
             AesCipherText::Sequence(items) => {
                 let seq_access = AesSeqAccess {
                     cipher: self.cipher,
                     items: items.into_iter(),
-                    aad: self.aad,
+                    aad: aad.into_aad(),
                 };
                 visitor.visit_seq(seq_access)
             }
@@ -327,13 +352,17 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         }
     }
 
-    fn decrypt_map<V: DecipherVisitor<'c> + Send + 'c>(self, visitor: V) -> Self::Ok<V::Value> {
+    fn decrypt_map<'a, V, A>(self, visitor: V, aad: A) -> Self::Ok<V::Value>
+    where
+        V: DecipherVisitor<'c> + Send + 'c,
+        A: IntoAad<'a>,
+    {
         match self.ciphertext {
             AesCipherText::Map(entries) => {
                 let map_access = AesMapAccess {
                     cipher: self.cipher,
                     entries: entries.into_iter(),
-                    aad: self.aad,
+                    aad: aad.into_aad(),
                 };
                 visitor.visit_map(map_access)
             }
@@ -353,14 +382,16 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         }
     }
 
-    fn decrypt_option<T>(self) -> Self::Ok<Option<T>>
+    fn decrypt_option<'a, T, A>(self, aad: A) -> Self::Ok<Option<T>>
     where
         T: Decrypt<'c> + 'c,
+        A: IntoAad<'a>,
     {
         match self.ciphertext {
             AesCipherText::None(ct) => {
                 // Verify the AAD-bound tag over the empty plaintext.
-                Self::decrypt_local_ciphertext(self.cipher, ct, &self.aad)?;
+                let aad = aad.into_aad();
+                Self::decrypt_local_ciphertext(self.cipher, ct, aad.as_bytes())?;
                 Ok(None)
             }
             // Passthrough must never be decoded as an Option payload.
@@ -378,24 +409,24 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
             // treatment of `Option` and is intentional — every caller fixes a
             // concrete type at the call site. See `nested_option_shape_is_caller_decided`.
             other => {
-                let inner = AesDecipher {
-                    cipher: self.cipher,
-                    ciphertext: other,
-                    aad: self.aad,
-                };
-                T::decrypt(inner).map(Some)
+                let inner = self.cipher.decipher(other);
+                T::decrypt_with_aad(inner, aad).map(Some)
             }
         }
     }
 }
 
-struct AesSeqAccess<'c> {
+struct AesSeqAccess<'c, 'a> {
     cipher: &'c Aes256Cipher,
     items: std::vec::IntoIter<AesCipherText>,
-    aad: Vec<u8>,
+    // Held as `Aad` (copy-on-write) rather than an owned `Vec<u8>` so a borrowed
+    // AAD stays borrowed. `next_element` re-supplies it per element by *borrowing*
+    // these bytes, so there is no per-element allocation in either the borrowed
+    // (`&str`/`&[u8]`) or the owned (`Vec`/PAE) case.
+    aad: Aad<'a>,
 }
 
-impl<'c> SeqAccess<'c> for AesSeqAccess<'c> {
+impl<'c, 'a> SeqAccess<'c> for AesSeqAccess<'c, 'a> {
     type Error = Unspecified;
 
     fn next_element<T: Decrypt<'c> + 'c>(&mut self) -> Result<Option<T>, Self::Error> {
@@ -403,22 +434,21 @@ impl<'c> SeqAccess<'c> for AesSeqAccess<'c> {
             Some(ct) => ct,
             None => return Ok(None),
         };
-        let decipher = AesDecipher {
-            cipher: self.cipher,
-            ciphertext: ct,
-            aad: self.aad.clone(),
-        };
-        T::decrypt(decipher).map(Some)
+        let decipher = self.cipher.decipher(ct);
+        // Each element was sealed with the same AAD; re-supply it per element by
+        // *borrowing* the stored bytes — no per-element allocation, even when the
+        // AAD is owned. Mirrors `SeqCipher::encrypt_next` binding AAD per element.
+        T::decrypt_with_aad(decipher, self.aad.as_bytes()).map(Some)
     }
 }
 
-struct AesMapAccess<'c> {
+struct AesMapAccess<'c, 'a> {
     cipher: &'c Aes256Cipher,
     entries: std::vec::IntoIter<(String, AesCipherText)>,
-    aad: Vec<u8>,
+    aad: Aad<'a>,
 }
 
-impl<'c> MapAccess<'c> for AesMapAccess<'c> {
+impl<'c, 'a> MapAccess<'c> for AesMapAccess<'c, 'a> {
     type Error = Unspecified;
 
     fn next_entry<T: Decrypt<'c> + 'c>(&mut self) -> Result<Option<(String, T)>, Self::Error> {
@@ -426,12 +456,9 @@ impl<'c> MapAccess<'c> for AesMapAccess<'c> {
             Some(entry) => entry,
             None => return Ok(None),
         };
-        let decipher = AesDecipher {
-            cipher: self.cipher,
-            ciphertext: ct,
-            aad: self.aad.clone(),
-        };
-        let value = T::decrypt(decipher)?;
+        let decipher = self.cipher.decipher(ct);
+        // Borrow the stored AAD bytes per entry — see `AesSeqAccess::next_element`.
+        let value = T::decrypt_with_aad(decipher, self.aad.as_bytes())?;
         Ok(Some((key, value)))
     }
 }
@@ -441,7 +468,15 @@ impl<'c> MapAccess<'c> for AesMapAccess<'c> {
 // tests already cover both backends on native via the
 // `_test-rust-crypto-backend` feature; the wasm32 codegen path is gated by the
 // KAT in `crate::backend::tests`.
-#[cfg(all(test, not(target_arch = "wasm32")))]
+//
+// Written as two stacked `cfg` attributes rather than `cfg(all(test, …))` so
+// cargo-mutants sees the literal `cfg(test)` and skips this whole test module —
+// it doesn't look for `test` nested inside `all(...)`, and the `#[quickcheck]`
+// fns aren't `#[test]` at the syntax level, so it would otherwise mutate them
+// (e.g. replace a property body with `true`, which trivially "survives").
+// Stacked `cfg` attributes are AND-ed, so this compiles identically.
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::unwrap_used)]
 mod test {
     use super::*;
@@ -522,6 +557,46 @@ mod test {
         cipher
             .decrypt_with_aad::<String, _>(ciphertext, "wrong-aad")
             .is_err()
+    }
+
+    #[quickcheck]
+    fn decrypt_seq_fails_with_wrong_aad(key: Key, plaintext: Vec<String>) -> bool {
+        // The Sequence path re-supplies the same AAD to every element, so a wrong
+        // AAD must fail the per-element authentication rather than silently
+        // decrypting (see `AesSeqAccess::next_element`). An empty sequence has no
+        // element tags to reject — the container shape itself is not
+        // AEAD-authenticated on either side — so skip it.
+        if plaintext.is_empty() {
+            return true;
+        }
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ciphertext = plaintext
+            .encrypt_with_aad(&cipher, "correct-aad")
+            .expect("Encryption failed");
+        cipher
+            .decrypt_with_aad::<Vec<String>, _>(ciphertext, "wrong-aad")
+            .is_err()
+    }
+
+    #[quickcheck]
+    fn roundtrip_vec_with_aad(key: Key, plaintext: Vec<String>) -> bool {
+        // Positive counterpart to `decrypt_seq_fails_with_wrong_aad`: every element
+        // must authenticate when the *correct* AAD is re-supplied per element by
+        // `AesSeqAccess::next_element`. Exercises the borrowed-AAD seq path across
+        // arbitrary element counts (the empty vec has no element tags and trivially
+        // roundtrips). A wrong-AAD-fails test alone can't catch a regression where
+        // the per-element AAD is dropped or mis-borrowed so even the correct AAD
+        // fails — only this positive multi-element roundtrip does.
+        let aad = "seq-aad";
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ciphertext = plaintext
+            .clone()
+            .encrypt_with_aad(&cipher, aad)
+            .expect("Encryption failed");
+        let decrypted: Vec<String> = cipher
+            .decrypt_with_aad(ciphertext, aad)
+            .expect("Decryption failed");
+        decrypted == plaintext
     }
 
     #[quickcheck]
@@ -717,11 +792,7 @@ mod test {
     where
         T: Any + Send + 'static,
     {
-        let decipher = AesDecipher {
-            cipher,
-            ciphertext,
-            aad: Vec::new(),
-        };
+        let decipher = cipher.decipher(ciphertext);
         decipher.decrypt_passthrough::<T>()
     }
 

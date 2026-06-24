@@ -113,7 +113,10 @@ where
         .read()
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+// Split cfgs (not `all(test, …)`) so cargo-mutants recognises the test module
+// and skips it — see the comment on `cipher::test`.
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::unwrap_used)]
 mod test {
     use super::*;
