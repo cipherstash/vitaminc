@@ -52,7 +52,7 @@ jobs:
     name: "🧬 Mutants gate"
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Full history so we can diff the PR against its base branch for
           # `--in-diff`.
