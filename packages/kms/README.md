@@ -1,6 +1,6 @@
 # Vitamin C KMS
 
-[![Crates.io](https://img.shields.io/crates/v/vitaminc-permutation.svg)](https://crates.io/crates/vitaminc-permutation)
+[![Crates.io](https://img.shields.io/crates/v/vitaminc-kms.svg)](https://crates.io/crates/vitaminc-kms)
 [![Workflow Status](https://github.com/cipherstash/vitaminc/actions/workflows/test.yml/badge.svg)](https://github.com/cipherstash/vitaminc/actions/workflows/test.yml)
 
 A `MAC` implementation using [vitaminc](https://github.com/cipherstash/vitaminc) that uses AWS KMS to generate HMACs.
@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     use aws_config::{BehaviorVersion, Region};
 
     let config = aws_sdk_kms::config::Builder::default()
-        .behavior_version(BehaviorVersion::v2025_08_07())
+        .behavior_version(BehaviorVersion::v2026_01_12())
         .region(Region::new("us-east-1"))
     #   .credentials_provider(creds)
         .endpoint_url(endpoint_url)
@@ -48,3 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+## CipherStash
+
+Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
+
+License: MIT

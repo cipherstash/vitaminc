@@ -74,9 +74,7 @@ assert_eq!(x, y);
 
 ### Exportable
 
-The `Exportable` type is a wrapper around `Protected` that implements constant-time serialization.
-
-This adapter is WIP.
+The `Exportable` type is a wrapper around `Protected` that supports safe serialization via the `SafeSerialize` and `SafeDeserialize` traits.
 
 ### Usage
 
@@ -118,7 +116,7 @@ use vitaminc_protected::{Controlled, Protected};
 
 let x = Protected::new(Some([0u8; 32]));
 let y = x.transpose();
-assert!(matches!(y, Some(Protected)));
+assert!(y.is_some());
 ```
 
 A `Protected` of `Protected` can be "flattened" into a single `Protected`.
@@ -132,6 +130,10 @@ assert_eq!(y.risky_unwrap(), [0u8; 32]);
 ```
 
 Use [flatten_array] to convert a `[Protected<T>; N]` into a `Protected<[T; N]>`.
+
+### Also in this crate
+
+Beyond the adapters above, the crate exports `TimingSafeEq` and `Choice` (timing-safe comparison), `OpaqueDebug` and `Redacted` (leak-resistant `Debug`), `ProtectedDigest`, `Zeroed`, and `AsProtectedRef` — see the [docs.rs API reference](https://docs.rs/vitaminc-protected) for details.
 
 ### Generators
 

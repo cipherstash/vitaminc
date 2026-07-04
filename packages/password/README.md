@@ -21,8 +21,8 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-vitaminc-password = "0.1.0-pre4"
-vitaminc-random = "0.1.0-pre4"
+vitaminc-password = "0.2.0-pre.1"
+vitaminc-random = "0.2.0-pre.1"
 ```
 
 ## Quick Start
@@ -105,7 +105,8 @@ let password: AlphaPassword<24> = Generatable::random(&mut rng)?;
 
 The password length is specified as a const generic parameter. You can generate passwords of any length:
 
-```rust
+```rust,ignore
+# // Requires `rng` from the Quick Start example.
 let short: Password<8> = Generatable::random(&mut rng)?;
 let medium: Password<16> = Generatable::random(&mut rng)?;
 let long: Password<32> = Generatable::random(&mut rng)?;
@@ -114,13 +115,15 @@ let very_long: Password<128> = Generatable::random(&mut rng)?;
 
 ### Converting to String
 
-Passwords are stored securely in `Protected` types. When you need to use them (e.g., to send to an API or display to the user), you can convert them to strings:
+> **⚠️ Not yet implemented:** `into_protected_string()` and `into_unprotected_string()` are currently `unimplemented!()` stubs — calling them panics. The examples in this section (and the Use Cases below) show the **planned** API. See Current Limitations.
+
+Passwords are stored securely in `Protected` types. When you need to use them (e.g., to send to an API or display to the user), you will be able to convert them to strings:
 
 #### Protected String (Recommended)
 
 Maintains protection with automatic zeroization:
 
-```rust
+```rust,ignore
 use vitaminc_protected::Protected;
 
 let password: Password<16> = Generatable::random(&mut rng)?;
@@ -135,7 +138,7 @@ let protected_string: Protected<String> = password.into_protected_string();
 
 For final use where the password needs to leave protected memory:
 
-```rust
+```rust,ignore
 let password: Password<16> = Generatable::random(&mut rng)?;
 let string: String = password.into_unprotected_string();
 // Use the string immediately
@@ -181,7 +184,7 @@ All passwords are generated using `vitaminc-random`'s `SafeRand`, which uses Cha
 Passwords are stored in `Protected<[char; N]>`, which ensures:
 
 - **Automatic zeroization**: Memory is cleared when the password is dropped
-- **No accidental leakage**: Debug output shows `Protected { ... }` instead of the actual password
+- **No accidental leakage**: the opaque `Debug` impl prints only the type name (e.g. `Protected<[char; 16]>`), never the contents
 - **Constant-time operations**: Where applicable, to prevent timing side-channels
 
 ### Unbiased Character Selection
@@ -194,9 +197,9 @@ The crate uses bounded random number generation to ensure each character in the 
 
 Generate secure passwords for user accounts:
 
-```rust
+```rust,ignore
 use vitaminc_password::Password;
-use vitaminc_random::{SafeRand, SeedableRng, Generatable};
+use vitaminc_random::{RandomError, SafeRand, SeedableRng, Generatable};
 
 fn generate_user_password(length: usize) -> Result<String, RandomError> {
     let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
@@ -222,9 +225,9 @@ fn generate_user_password(length: usize) -> Result<String, RandomError> {
 
 Generate alphanumeric API keys:
 
-```rust
+```rust,ignore
 use vitaminc_password::AlphaNumericPassword;
-use vitaminc_random::{SafeRand, SeedableRng, Generatable};
+use vitaminc_random::{RandomError, SafeRand, SeedableRng, Generatable};
 
 fn generate_api_key() -> Result<String, RandomError> {
     let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
@@ -235,11 +238,11 @@ fn generate_api_key() -> Result<String, RandomError> {
 
 ### Temporary Passwords
 
-Generate pronounceable temporary passwords:
+Generate short alphabetic temporary passwords:
 
-```rust
+```rust,ignore
 use vitaminc_password::AlphaPassword;
-use vitaminc_random::{SafeRand, SeedableRng, Generatable};
+use vitaminc_random::{RandomError, SafeRand, SeedableRng, Generatable};
 
 fn generate_temp_password() -> Result<String, RandomError> {
     let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");

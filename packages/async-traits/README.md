@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/vitaminc-async-traits.svg)](https://crates.io/crates/vitaminc-async-traits)
 [![Workflow Status](https://github.com/cipherstash/vitaminc/actions/workflows/test.yml/badge.svg)](https://github.com/cipherstash/vitaminc/actions/workflows/test.yml)
 
-A library for permuting data in a secure and efficient manner.
+Async versions of the Vitamin C cryptographic traits — e.g. fixed-output hashing and MAC finalisation for backends that are inherently asynchronous (such as AWS KMS).
 
 This is the companion crate to [`vitaminc-traits`](https://github.com/cipherstash/vitaminc/tree/main/packages/traits) and offers
 `async` versions of some of the traits defined there.
