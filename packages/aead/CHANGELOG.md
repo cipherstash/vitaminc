@@ -9,6 +9,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Documentation
 
+- docs(aead),refactor(encrypt): address decrypt-path review findings
+- docs(aead),test(encrypt): document ContextTag limits; add negative-AAD tests
+
+### Features
+
+- re-introduce ContextTag on the revised Cipher/Decipher traits
+- add ContextTag::context + decrypt/decrypt_with_aad helper
+- implement Encrypt/Decrypt for the Equatable controlled type
+
+### Refactoring
+
+- thread AAD through the decrypt path to mirror encrypt
+- align ContextTag::aad_with arg order with encrypt_with_aad
+- address ContextTag decrypt-helper review
+
+### Testing
+
+- close Tier-1 cargo-mutants gaps (ConstantTimeEq, PAE invariant)
+- close remaining Tier-1 cargo-mutants gaps (ts_ne, zeroize, read_nonce, hlist CI)
+- address code-review findings on the Tier-1 mutation fixes
+- test(aead),test(encrypt): close ContextTag coverage gaps from review
+
+
+### Documentation
+
 - rewrite READMEs for revised Cipher/Decipher traits
 - rustdoc public items and link TODOs to tracking issues
 

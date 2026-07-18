@@ -1,5 +1,20 @@
 
 
+### Documentation
+
+- fix fabricated APIs, wrong metadata, and stale claims; add SECURITY.md
+
+### Fixes
+
+- zeroize controlled types on drop ([#181](https://github.com/cipherstash/vitaminc/pull/181))
+
+### Refactoring
+
+- move instead of copy in flatten_array
+- single-source into_inner_unchecked; document drop-glue guarantees
+- make move_inner_out a safe fn via an unsafe trait
+
+
 
 ### Miscellaneous
 

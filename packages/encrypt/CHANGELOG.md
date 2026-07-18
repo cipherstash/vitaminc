@@ -2,6 +2,42 @@
 
 ### Documentation
 
+- correct stale #181 zeroize note on Aes256Cipher::open
+- docs(aead),refactor(encrypt): address decrypt-path review findings
+- docs(aead),test(encrypt): document ContextTag limits; add negative-AAD tests
+- fix fabricated APIs, wrong metadata, and stale claims; add SECURITY.md
+
+### Features
+
+- expose Aes256Cipher::decipher to construct a Decipher
+- re-introduce ContextTag on the revised Cipher/Decipher traits
+- add ContextTag::context + decrypt/decrypt_with_aad helper
+
+### Miscellaneous
+
+- rustfmt context_tag test to satisfy CI
+
+### Performance
+
+- borrow AAD per seq/map element instead of cloning
+
+### Refactoring
+
+- thread AAD through the decrypt path to mirror encrypt
+- tidy decrypt AAD path per code review
+- align ContextTag::aad_with arg order with encrypt_with_aad
+- address ContextTag decrypt-helper review
+
+### Testing
+
+- split test-module cfg so cargo-mutants skips it
+- add positive AAD roundtrip for the sequence path
+- test(aead),test(encrypt): close ContextTag coverage gaps from review
+- cover Equatable AEAD round-trip and tamper axes
+
+
+### Documentation
+
 - rewrite READMEs for revised Cipher/Decipher traits
 - rustdoc public items and link TODOs to tracking issues
 - document Key SAFETY, map dedup posture, nested Option shape
