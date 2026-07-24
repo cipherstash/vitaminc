@@ -498,6 +498,36 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         }
     }
 
+    fn decrypt_any<'a, V, A>(self, visitor: V, aad: A) -> Self::Ok<V::Value>
+    where
+        V: DecipherVisitor<'c> + Send + 'c,
+        A: IntoAad<'a>,
+    {
+        let AesDecipher { cipher, ciphertext } = self;
+        match ciphertext {
+            ct @ AesCipherText::Single(_) => cipher.decipher(ct).decrypt_bytes(visitor, aad),
+            ct @ (AesCipherText::Sequence(_) | AesCipherText::EmptySequence(_)) => {
+                cipher.decipher(ct).decrypt_seq(visitor, aad)
+            }
+            ct @ (AesCipherText::Map(_) | AesCipherText::EmptyMap(_)) => {
+                cipher.decipher(ct).decrypt_map(visitor, aad)
+            }
+            AesCipherText::None(ct) => {
+                // Verify the domain-separated marker (tag AND empty
+                // plaintext) before reporting absence — an unauthenticated
+                // `visit_none` would let an attacker forge "absent" values,
+                // and a bare-AAD check would let a `Single` leaf be re-tagged
+                // as one. Mirrors `decrypt_option`.
+                let aad = aad.into_aad();
+                Self::verify_empty_marker(cipher, ct, aad.for_none().as_bytes())?;
+                visitor.visit_none()
+            }
+            // Passthrough values are recovered only via the typed
+            // `decrypt_passthrough` path — see the trait docs.
+            AesCipherText::Passthrough(_) => Err(Unspecified),
+        }
+    }
+
     fn decrypt_passthrough(self) -> Self::Ok<Self::Passthrough> {
         match self.ciphertext {
             AesCipherText::Passthrough(boxed) => Ok(boxed),
