@@ -3,42 +3,29 @@ use crate::Key;
 use std::any::Any;
 use std::borrow::Cow;
 use vitaminc_aead::{
-    Aad, Cipher, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt, IntoAad,
-    LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator, SeqAccess,
-    SeqCipher, Unspecified,
+    Aad, Cipher, CipherText, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt,
+    IntoAad, LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator,
+    SeqAccess, SeqCipher, Unspecified,
 };
 use vitaminc_protected::{Controlled, Protected};
 
-/// The recursive ciphertext container produced by [`Aes256Cipher`].
+/// The passthrough payload type used by [`Aes256Cipher`]: type-erased boxed
+/// values, downcast back to a concrete type at decrypt time via
+/// [`AesDecipher::decrypt_passthrough_as`].
+pub type BoxedPassthrough = Box<dyn Any + Send + 'static>;
+
+/// The recursive ciphertext container produced by [`Aes256Cipher`] — the
+/// shared [`CipherText`] tree instantiated with [`LocalCipherText`] leaves
+/// and [`BoxedPassthrough`] passthrough values.
 ///
 /// The shape mirrors the structure of the plaintext that was encrypted: a
-/// single value yields [`Single`](AesCipherText::Single), while non-empty
-/// `Vec`s and `HashMap`s yield [`Sequence`](AesCipherText::Sequence) and
-/// [`Map`](AesCipherText::Map). Empty composites use authenticated marker
-/// variants. Nested structures are represented recursively.
-#[derive(Debug)]
-pub enum AesCipherText {
-    /// A single sealed value (nonce + ciphertext + tag).
-    Single(LocalCipherText),
-    /// A sequence of ciphertexts produced from a `Vec`-shaped plaintext.
-    Sequence(Vec<AesCipherText>),
-    /// An empty sequence authenticated under domain-separated AAD.
-    EmptySequence(LocalCipherText),
-    /// A map of (cleartext key, ciphertext value) pairs produced from a
-    /// `HashMap`-shaped plaintext. Keys are not encrypted.
-    Map(Vec<(String, AesCipherText)>),
-    /// An empty map authenticated under domain-separated AAD.
-    EmptyMap(LocalCipherText),
-    /// The authenticated absent marker produced by [`Cipher::encrypt_none`].
-    /// Stores a sealed empty plaintext whose tag binds the supplied AAD.
-    None(LocalCipherText),
-    /// A typed value passed through unencrypted via [`Cipher::passthrough`].
-    /// Not serializable to bytes — see
-    /// `packages/aead/src/cipher.rs` for the API-level type bound and the
-    /// runtime downcast performed by
-    /// [`Decipher::decrypt_passthrough`](vitaminc_aead::Decipher::decrypt_passthrough).
-    Passthrough(Box<dyn Any + Send + 'static>),
-}
+/// single value yields [`Single`](CipherText::Single), while non-empty
+/// `Vec`s and `HashMap`s yield [`Sequence`](CipherText::Sequence) and
+/// [`Map`](CipherText::Map). Empty composites use the authenticated marker
+/// variants [`EmptySequence`](CipherText::EmptySequence) and
+/// [`EmptyMap`](CipherText::EmptyMap). Nested structures are represented
+/// recursively.
+pub type AesCipherText = CipherText<LocalCipherText, BoxedPassthrough>;
 
 /// Implements AES-256-GCM. Backend is selected at compile time:
 /// `aws-lc-rs` on native targets, `aes-gcm` (RustCrypto) on `wasm32`.
@@ -83,6 +70,7 @@ impl Aes256Cipher {
 impl<'c> Cipher for &'c Aes256Cipher {
     type Ok = AesCipherText;
     type Error = Unspecified;
+    type Passthrough = BoxedPassthrough;
     type SeqCipher = AesSeqCipher<'c>;
     type MapCipher = AesMapCipher<'c>;
 
@@ -147,11 +135,8 @@ impl<'c> Cipher for &'c Aes256Cipher {
             .map(AesCipherText::None)
     }
 
-    fn passthrough<T>(self, value: T) -> Result<Self::Ok, Self::Error>
-    where
-        T: Any + Send + 'static,
-    {
-        Ok(AesCipherText::Passthrough(Box::new(value)))
+    fn passthrough(self, value: Self::Passthrough) -> Result<Self::Ok, Self::Error> {
+        Ok(AesCipherText::Passthrough(value))
     }
 }
 
@@ -174,6 +159,7 @@ pub struct AesSeqCipher<'c> {
 impl<'c> SeqCipher for AesSeqCipher<'c> {
     type Ok = AesCipherText;
     type Error = Unspecified;
+    type Passthrough = BoxedPassthrough;
 
     fn encrypt_next<T>(mut self, data: T) -> Result<Self, Self::Error>
     where
@@ -186,11 +172,8 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
         Ok(self)
     }
 
-    fn passthrough_next<T>(mut self, value: T) -> Result<Self, Self::Error>
-    where
-        T: Any + Send + 'static,
-    {
-        self.items.push(AesCipherText::Passthrough(Box::new(value)));
+    fn passthrough_next(mut self, value: Self::Passthrough) -> Result<Self, Self::Error> {
+        self.items.push(AesCipherText::Passthrough(value));
         Ok(self)
     }
 
@@ -247,6 +230,7 @@ pub struct AesMapCipher<'c> {
 impl<'c> MapCipher for AesMapCipher<'c> {
     type Ok = AesCipherText;
     type Error = Unspecified;
+    type Passthrough = BoxedPassthrough;
 
     fn encrypt_key<K>(mut self, key: K) -> Result<Self, Self::Error>
     where
@@ -277,10 +261,9 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         Ok(self)
     }
 
-    fn passthrough_entry<K, T>(mut self, key: K, value: T) -> Result<Self, Self::Error>
+    fn passthrough_entry<K>(mut self, key: K, value: Self::Passthrough) -> Result<Self, Self::Error>
     where
         K: Into<Cow<'static, str>>,
-        T: Any + Send + 'static,
     {
         // A key already pending means `encrypt_key` ran without a matching
         // `encrypt_value` — adopting it here would silently drop the pending
@@ -289,10 +272,8 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         if self.current_key.is_some() {
             return Err(Unspecified);
         }
-        self.entries.push((
-            key.into().into_owned(),
-            AesCipherText::Passthrough(Box::new(value)),
-        ));
+        self.entries
+            .push((key.into().into_owned(), AesCipherText::Passthrough(value)));
         Ok(self)
     }
 
@@ -370,6 +351,20 @@ pub struct AesDecipher<'c> {
 }
 
 impl AesDecipher<'_> {
+    /// Typed convenience over [`Decipher::decrypt_passthrough`] for this
+    /// cipher's [`BoxedPassthrough`] payload type: recovers the payload and
+    /// downcasts it to `T`, returning [`Unspecified`] if the ciphertext is not
+    /// a passthrough or the stored type does not match.
+    pub fn decrypt_passthrough_as<T>(self) -> Result<T, Unspecified>
+    where
+        T: Any + Send + 'static,
+    {
+        self.decrypt_passthrough()?
+            .downcast::<T>()
+            .map(|b| *b)
+            .map_err(|_| Unspecified)
+    }
+
     fn decrypt_local_ciphertext(
         cipher: &Aes256Cipher,
         ct: LocalCipherText,
@@ -402,6 +397,8 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         = Result<T, Unspecified>
     where
         T: Send + 'c;
+
+    type Passthrough = BoxedPassthrough;
 
     fn map_ok<T, U, F>(ok: Self::Ok<T>, f: F) -> Self::Ok<U>
     where
@@ -501,14 +498,9 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         }
     }
 
-    fn decrypt_passthrough<T>(self) -> Self::Ok<T>
-    where
-        T: Any + Send + 'static,
-    {
+    fn decrypt_passthrough(self) -> Self::Ok<Self::Passthrough> {
         match self.ciphertext {
-            AesCipherText::Passthrough(boxed) => {
-                boxed.downcast::<T>().map(|b| *b).map_err(|_| Unspecified)
-            }
+            AesCipherText::Passthrough(boxed) => Ok(boxed),
             _ => Err(Unspecified),
         }
     }
@@ -1024,7 +1016,9 @@ mod test {
         // Type-laundering guard: a passthrough must not satisfy Option<T>.
         let key = Key::from([11u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let ciphertext = (&cipher).passthrough(42u32).expect("passthrough failed");
+        let ciphertext = (&cipher)
+            .passthrough(Box::new(42u32))
+            .expect("passthrough failed");
         assert!(cipher.decrypt::<Option<u32>>(ciphertext).is_err());
     }
 
@@ -1032,7 +1026,9 @@ mod test {
     fn roundtrip_passthrough_u32() {
         let key = Key::from([1u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let ciphertext = (&cipher).passthrough(12345u32).expect("passthrough failed");
+        let ciphertext = (&cipher)
+            .passthrough(Box::new(12345u32))
+            .expect("passthrough failed");
         let decrypted: u32 = decrypt_passthrough_via(&cipher, ciphertext).expect("decode failed");
         assert_eq!(decrypted, 12345u32);
     }
@@ -1042,7 +1038,7 @@ mod test {
         let key = Key::from([2u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let ciphertext = (&cipher)
-            .passthrough(String::from("version-tag"))
+            .passthrough(Box::new(String::from("version-tag")))
             .expect("passthrough failed");
         let decrypted: String =
             decrypt_passthrough_via(&cipher, ciphertext).expect("decode failed");
@@ -1053,14 +1049,15 @@ mod test {
     fn passthrough_type_mismatch_returns_err() {
         let key = Key::from([3u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let ciphertext = (&cipher).passthrough(42u32).expect("passthrough failed");
+        let ciphertext = (&cipher)
+            .passthrough(Box::new(42u32))
+            .expect("passthrough failed");
         let result: Result<String, _> = decrypt_passthrough_via(&cipher, ciphertext);
         assert!(result.is_err());
     }
 
-    // Convenience: drive `Decipher::decrypt_passthrough` from a known
-    // ciphertext. Mirrors what a derive-generated `Decrypt` impl would do
-    // for a `#[encrypt(passthrough)]` field.
+    // Convenience: recover a typed passthrough from a known ciphertext via
+    // the decipher's `decrypt_passthrough_as` downcast helper.
     fn decrypt_passthrough_via<T>(
         cipher: &Aes256Cipher,
         ciphertext: AesCipherText,
@@ -1068,8 +1065,7 @@ mod test {
     where
         T: Any + Send + 'static,
     {
-        let decipher = cipher.decipher(ciphertext);
-        decipher.decrypt_passthrough::<T>()
+        cipher.decipher(ciphertext).decrypt_passthrough_as::<T>()
     }
 
     #[quickcheck]
@@ -1109,7 +1105,7 @@ mod test {
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let map = (&cipher).encrypt_map(()).encrypt_key("pending").unwrap();
         // Adopting the new key here would silently drop "pending".
-        assert!(map.passthrough_entry("other", 42u32).is_err());
+        assert!(map.passthrough_entry("other", Box::new(42u32)).is_err());
     }
 
     #[test]
@@ -1129,7 +1125,7 @@ mod test {
         // end() — see `all_passthrough_map_fails_to_encrypt`.
         let ciphertext = (&cipher)
             .encrypt_map(())
-            .passthrough_entry("version", 1u32)
+            .passthrough_entry("version", Box::new(1u32))
             .and_then(|m| m.encrypt_key("email"))
             .and_then(|m| m.encrypt_value("ada@example.com"))
             .and_then(|m| m.end())
@@ -1312,7 +1308,7 @@ mod test {
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let result = (&cipher)
             .encrypt_seq(Some(1), "context")
-            .passthrough_next(1u32)
+            .passthrough_next(Box::new(1u32))
             .and_then(|s| s.end());
         assert!(result.is_err());
     }
@@ -1323,7 +1319,7 @@ mod test {
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let result = (&cipher)
             .encrypt_map("context")
-            .passthrough_entry("version", 1u32)
+            .passthrough_entry("version", Box::new(1u32))
             .and_then(|m| m.end());
         assert!(result.is_err());
     }
@@ -1532,7 +1528,7 @@ mod test {
         None::<String>.encrypt(cipher).expect("encrypt")
     }
     fn passthrough_ct(cipher: &Aes256Cipher) -> AesCipherText {
-        cipher.passthrough(7u32).expect("passthrough")
+        cipher.passthrough(Box::new(7u32)).expect("passthrough")
     }
 
     #[test]
@@ -1716,7 +1712,7 @@ mod test {
             .encrypt_seq(Some(3), ())
             .encrypt_next("first")
             .unwrap()
-            .passthrough_next(99u32)
+            .passthrough_next(Box::new(99u32))
             .unwrap()
             .encrypt_next("third")
             .unwrap()
@@ -1745,7 +1741,7 @@ mod test {
             .unwrap()
             .encrypt_value("Alice".to_string())
             .unwrap()
-            .passthrough_entry("schema_version", 1u32)
+            .passthrough_entry("schema_version", Box::new(1u32))
             .unwrap()
             .end()
             .unwrap();
@@ -1773,12 +1769,16 @@ mod test {
         // when the value is `Some(n)`. A passthrough sealed as `Option<u32>`
         // must only downcast back to `Option<u32>`.
         let cipher = Aes256Cipher::new(&Key::from([43u8; 32])).expect("Failed to create cipher");
-        let ct = cipher.passthrough(Some(42u32)).expect("passthrough failed");
+        let ct = cipher
+            .passthrough(Box::new(Some(42u32)))
+            .expect("passthrough failed");
         let decoded: Option<u32> =
             decrypt_passthrough_via(&cipher, ct).expect("decode as Option<u32> should succeed");
         assert_eq!(decoded, Some(42u32));
 
-        let ct2 = cipher.passthrough(Some(42u32)).expect("passthrough failed");
+        let ct2 = cipher
+            .passthrough(Box::new(Some(42u32)))
+            .expect("passthrough failed");
         assert!(
             decrypt_passthrough_via::<u32>(&cipher, ct2).is_err(),
             "Option<u32> passthrough must not downcast to u32"
