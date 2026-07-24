@@ -1,6 +1,7 @@
 use crate::backend::{CipherKey, NONCE_LEN};
 use crate::Key;
 use std::any::Any;
+use std::borrow::Cow;
 use vitaminc_aead::{
     Aad, Cipher, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt, IntoAad,
     LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator, SeqAccess,
@@ -165,7 +166,10 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
 
 /// [`MapCipher`] driver for [`Aes256Cipher`]. Keys are stored in the clear;
 /// values are encrypted under their own fresh nonce and accumulated into an
-/// [`AesCipherText::Map`].
+/// [`AesCipherText::Map`]. Each value is sealed against
+/// [`Aad::for_map_entry`] of the caller's AAD and its key, so swapping or
+/// renaming keys in a stored ciphertext fails decryption (passthrough
+/// entries excepted — they are unauthenticated by design).
 ///
 /// This driver is intended for encrypting sources that already enforce key
 /// uniqueness themselves — `HashMap`s and structs (whose field names are
@@ -181,21 +185,24 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
 pub struct AesMapCipher<'c> {
     cipher: &'c Aes256Cipher,
     entries: Vec<(String, AesCipherText)>,
-    current_key: Option<&'static str>,
+    current_key: Option<Cow<'static, str>>,
 }
 
 impl<'c> MapCipher for AesMapCipher<'c> {
     type Ok = AesCipherText;
     type Error = Unspecified;
 
-    fn encrypt_key(mut self, key: &'static str) -> Result<Self, Self::Error> {
+    fn encrypt_key<K>(mut self, key: K) -> Result<Self, Self::Error>
+    where
+        K: Into<Cow<'static, str>>,
+    {
         // A key already pending means `encrypt_key` was called twice with no
         // intervening `encrypt_value` — a trait-contract violation. Fail rather
         // than silently drop the first key.
         if self.current_key.is_some() {
             return Err(Unspecified);
         }
-        self.current_key = Some(key);
+        self.current_key = Some(key.into());
         Ok(self)
     }
 
@@ -205,13 +212,18 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         A: IntoAad<'a>,
     {
         let key = self.current_key.take().ok_or(Unspecified)?;
-        let encrypted = value.encrypt_with_aad(self.cipher, aad)?;
-        self.entries.push((key.to_string(), encrypted));
+        // Seal against PAE(domain, aad, key) — the trait contract that makes
+        // key and value inseparable. `AesMapAccess::next_entry` derives the
+        // same AAD on decrypt.
+        let entry_aad = aad.into_aad().for_map_entry(&key);
+        let encrypted = value.encrypt_with_aad(self.cipher, entry_aad)?;
+        self.entries.push((key.into_owned(), encrypted));
         Ok(self)
     }
 
-    fn passthrough_entry<T>(mut self, key: &'static str, value: T) -> Result<Self, Self::Error>
+    fn passthrough_entry<K, T>(mut self, key: K, value: T) -> Result<Self, Self::Error>
     where
+        K: Into<Cow<'static, str>>,
         T: Any + Send + 'static,
     {
         // A key already pending means `encrypt_key` ran without a matching
@@ -221,8 +233,10 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         if self.current_key.is_some() {
             return Err(Unspecified);
         }
-        self.entries
-            .push((key.to_string(), AesCipherText::Passthrough(Box::new(value))));
+        self.entries.push((
+            key.into().into_owned(),
+            AesCipherText::Passthrough(Box::new(value)),
+        ));
         Ok(self)
     }
 
@@ -457,8 +471,10 @@ impl<'c, 'a> MapAccess<'c> for AesMapAccess<'c, 'a> {
             None => return Ok(None),
         };
         let decipher = self.cipher.decipher(ct);
-        // Borrow the stored AAD bytes per entry — see `AesSeqAccess::next_element`.
-        let value = T::decrypt_with_aad(decipher, self.aad.as_bytes())?;
+        // Mirror `AesMapCipher::encrypt_value`: the value was sealed against
+        // PAE(domain, aad, key), so a swapped or renamed key fails here.
+        let entry_aad = self.aad.for_map_entry(&key);
+        let value = T::decrypt_with_aad(decipher, entry_aad)?;
         Ok(Some((key, value)))
     }
 }
@@ -971,6 +987,88 @@ mod test {
             }
             _ => panic!("expected Map ciphertext"),
         }
+    }
+
+    // --- Map key authentication ---
+    //
+    // Each map value is sealed against `Aad::for_map_entry(aad, key)`, so key
+    // and value are cryptographically inseparable: an attacker who swaps or
+    // renames the cleartext keys inside a stored ciphertext cannot produce a
+    // map that still decrypts.
+
+    fn encrypted_two_entry_map(cipher: &Aes256Cipher) -> Vec<(String, AesCipherText)> {
+        let mut map = HashMap::new();
+        map.insert("a", 1u32);
+        map.insert("b", 2u32);
+        match map.encrypt(cipher).expect("Encryption failed") {
+            AesCipherText::Map(entries) => entries,
+            _ => panic!("expected Map ciphertext"),
+        }
+    }
+
+    #[test]
+    fn swapped_map_keys_fail_decryption() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let mut entries = encrypted_two_entry_map(&cipher);
+
+        // Exchange the cleartext keys, leaving each value in place.
+        let (k0, k1) = (entries[0].0.clone(), entries[1].0.clone());
+        entries[0].0 = k1;
+        entries[1].0 = k0;
+
+        let result: Result<HashMap<String, u32>, _> = cipher.decrypt(AesCipherText::Map(entries));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn renamed_map_key_fails_decryption() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let mut entries = encrypted_two_entry_map(&cipher);
+
+        entries[0].0 = "evil".to_string();
+
+        let result: Result<HashMap<String, u32>, _> = cipher.decrypt(AesCipherText::Map(entries));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn reordered_map_entries_still_decrypt() {
+        // Reordering entries WITHOUT touching the key↔value pairing is fine —
+        // a map is unordered, and each value stays sealed against its own key.
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let mut entries = encrypted_two_entry_map(&cipher);
+
+        entries.swap(0, 1);
+
+        let decrypted: HashMap<String, u32> = cipher
+            .decrypt(AesCipherText::Map(entries))
+            .expect("reordered entries should decrypt");
+        assert_eq!(decrypted.len(), 2);
+    }
+
+    #[test]
+    fn runtime_string_keys_roundtrip() {
+        // Keys built at runtime (the FFI case) — exercises the
+        // `HashMap<String, T>` Encrypt impl and Cow-keyed `encrypt_key`.
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+
+        let mut map: HashMap<String, String> = HashMap::new();
+        for id in 0..3 {
+            map.insert(format!("user:{id}"), format!("value-{id}"));
+        }
+
+        let ciphertext = map
+            .clone()
+            .encrypt_with_aad(&cipher, "context")
+            .expect("Encryption failed");
+        let decrypted: HashMap<String, String> = cipher
+            .decrypt_with_aad(ciphertext, "context")
+            .expect("Decryption failed");
+        assert_eq!(decrypted, map);
     }
 
     // --- Nonce uniqueness (fundamental AEAD property) ---
