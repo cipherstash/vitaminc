@@ -2460,6 +2460,16 @@ version = "0.2.0-pre.1"
 dependencies = [
  "napi",
  "vitaminc-aead",
+ "vitaminc-aead-value",
+ "vitaminc-protected",
+ "zeroize",
+]
+
+[[package]]
+name = "vitaminc-aead-value"
+version = "0.2.0-pre.1"
+dependencies = [
+ "vitaminc-aead",
  "vitaminc-encrypt",
  "vitaminc-protected",
  "zeroize",

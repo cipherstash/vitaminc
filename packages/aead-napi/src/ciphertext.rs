@@ -16,8 +16,15 @@
 //! Passthrough(p)      ↦ { t: "pt",   v: <P's own JS projection> }
 //! ```
 //!
-//! The `t`/`v` node shape is a stable convention: changing it breaks
-//! ciphertexts persisted by JS applications.
+//! The `t`/`v` node shape is an **in-memory/application-side convenience**:
+//! it is what a JS application holds between `encrypt` and `decrypt` calls,
+//! and what an application that manages its own storage may choose to
+//! persist. Database interop across languages is *not* this projection's
+//! job — that is the role of the EQL layer, which owns the durable
+//! database format and treats the sealed leaves opaquely. Within that
+//! scope the node shape should still change only deliberately (apps may
+//! have persisted it), but it is not a cross-language wire commitment;
+//! only the leaf byte format (see `vitaminc-aead-value`) is frozen.
 
 use napi::bindgen_prelude::{Array, Buffer, FromNapiValue, Object, ToNapiValue, Unknown};
 use napi::{sys, Env, Error, Result, Status, ValueType};

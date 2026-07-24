@@ -1,13 +1,25 @@
-//! Conversions between live JS values and [`NapiValue`].
+//! Conversions between live JS values and [`FfiValue`].
 //!
 //! Both directions run on the JS thread (they need the `Env`); everything
 //! between — encryption, decryption, transport — operates on the owned,
-//! `Send` [`NapiValue`] tree.
+//! `Send` [`FfiValue`] tree from `vitaminc-aead-value`.
+//!
+//! # Numeric mapping
+//!
+//! JS `number` always converts to [`FfiValue::Number`] — integral JS
+//! numbers do **not** become [`FfiValue::Int`], preserving JS semantics
+//! (`42` and `42.0` are the same value in JS). JS `BigInt` converts to
+//! [`FfiValue::Int`] and must fit in `i64`. On the way out, `Int` becomes a
+//! JS `number` when within `Number.MAX_SAFE_INTEGER` (±2⁵³ − 1) and a
+//! `BigInt` otherwise, so integer-typed values written by other languages
+//! (Python, Go) surface losslessly in JS.
 
 use napi::bindgen_prelude::{
-    Array, Buffer, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue, Uint8Array, Unknown,
+    Array, BigInt, Buffer, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue, Uint8Array,
+    Unknown,
 };
 use napi::{sys, Env, Error, Result, Status, ValueType};
+use vitaminc_aead_value::FfiValue;
 use vitaminc_protected::{Controlled, Protected};
 
 use crate::value::NapiValue;
@@ -16,6 +28,10 @@ use crate::value::NapiValue;
 /// rebuilding one). Bounds recursion so a hostile deeply-nested input cannot
 /// overflow the stack.
 pub(crate) const MAX_DEPTH: usize = 128;
+
+/// The largest integer JS numbers represent exactly: 2⁵³ − 1
+/// (`Number.MAX_SAFE_INTEGER`).
+const MAX_SAFE_INTEGER: i64 = (1 << 53) - 1;
 
 /// Property names that must never be read from or written onto a plain JS
 /// object: assigning them via `napi_set_property` triggers prototype-chain
@@ -151,31 +167,42 @@ fn ensure_plain_object(obj: &Object<'_>) -> Result<()> {
     }
 }
 
-fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<NapiValue> {
+fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<FfiValue> {
     if depth > MAX_DEPTH {
         return Err(depth_error());
     }
     match unknown.get_type()? {
-        ValueType::Null => Ok(NapiValue::Null),
-        ValueType::Undefined => Ok(NapiValue::Undefined),
-        ValueType::Boolean => Ok(NapiValue::Bool(bool::from_unknown(unknown)?)),
-        ValueType::Number => Ok(NapiValue::Number(f64::from_unknown(unknown)?)),
+        ValueType::Null => Ok(FfiValue::Null),
+        ValueType::Undefined => Ok(FfiValue::Undefined),
+        ValueType::Boolean => Ok(FfiValue::Bool(bool::from_unknown(unknown)?)),
+        ValueType::Number => Ok(FfiValue::Number(f64::from_unknown(unknown)?)),
+        ValueType::BigInt => {
+            let big = BigInt::from_unknown(unknown)?;
+            let (value, lossless) = big.get_i64();
+            if !lossless {
+                return Err(Error::new(
+                    Status::InvalidArg,
+                    "BigInt value does not fit in a signed 64-bit integer",
+                ));
+            }
+            Ok(FfiValue::Int(value))
+        }
         ValueType::String => {
             // `String::from_unknown` copies out of the V8 heap; the copy is
             // moved into `Protected` without further duplication. The V8
             // original is owned by the engine and cannot be wiped from here.
             let s = String::from_unknown(unknown)?;
-            Ok(NapiValue::String(Protected::new(s.into_bytes())))
+            Ok(FfiValue::String(Protected::new(s.into_bytes())))
         }
         ValueType::Object => {
             if unknown.is_buffer()? {
                 let buf = Buffer::from_unknown(unknown)?;
-                Ok(NapiValue::Bytes(Protected::new(buf.to_vec())))
+                Ok(FfiValue::Bytes(Protected::new(buf.to_vec())))
             } else if unknown.is_typedarray()? {
                 // Only byte views are meaningful plaintext; other typed
                 // arrays (Float64Array, …) are rejected by the cast.
                 let arr = Uint8Array::from_unknown(unknown)?;
-                Ok(NapiValue::Bytes(Protected::new(arr.to_vec())))
+                Ok(FfiValue::Bytes(Protected::new(arr.to_vec())))
             } else if unknown.is_array()? {
                 let arr = Array::from_unknown(unknown)?;
                 // The same JS value seen as an object, for per-index
@@ -201,7 +228,7 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<NapiValue> {
                     })?;
                     items.push(js_to_value(element, depth + 1)?);
                 }
-                Ok(NapiValue::Array(items))
+                Ok(FfiValue::Array(items))
             } else if unknown.is_date()? {
                 Err(Error::new(
                     Status::InvalidArg,
@@ -217,11 +244,11 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<NapiValue> {
                         return Err(forbidden_key_error(&key));
                     }
                     // Raw fetch so an explicit `undefined` value survives as
-                    // `NapiValue::Undefined` instead of erroring.
+                    // `FfiValue::Undefined` instead of erroring.
                     let value = get_property_unknown(&obj, &key)?;
                     entries.push((key, js_to_value(value, depth + 1)?));
                 }
-                Ok(NapiValue::Object(entries))
+                Ok(FfiValue::Object(entries))
             }
         }
         other => Err(Error::new(
@@ -234,19 +261,29 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<NapiValue> {
 impl FromNapiValue for NapiValue {
     unsafe fn from_napi_value(env: sys::napi_env, napi_val: sys::napi_value) -> Result<Self> {
         let unknown = unsafe { Unknown::from_napi_value(env, napi_val) }?;
-        js_to_value(unknown, 0)
+        js_to_value(unknown, 0).map(NapiValue)
     }
 }
 
-fn value_to_js(env: sys::napi_env, value: NapiValue) -> Result<sys::napi_value> {
+fn value_to_js(env: sys::napi_env, value: FfiValue) -> Result<sys::napi_value> {
     match value {
-        NapiValue::Null => unsafe {
+        FfiValue::Null => unsafe {
             napi::bindgen_prelude::Null::to_napi_value(env, napi::bindgen_prelude::Null)
         },
-        NapiValue::Undefined => unsafe { <()>::to_napi_value(env, ()) },
-        NapiValue::Bool(b) => unsafe { bool::to_napi_value(env, b) },
-        NapiValue::Number(n) => unsafe { f64::to_napi_value(env, n) },
-        NapiValue::String(s) => {
+        FfiValue::Undefined => unsafe { <()>::to_napi_value(env, ()) },
+        FfiValue::Bool(b) => unsafe { bool::to_napi_value(env, b) },
+        FfiValue::Number(n) => unsafe { f64::to_napi_value(env, n) },
+        FfiValue::Int(i) => {
+            // Exactly representable → plain number (the common case, and
+            // what JS callers expect for e.g. a Python-written `30`).
+            // Beyond ±MAX_SAFE_INTEGER → BigInt, losslessly.
+            if i.abs() <= MAX_SAFE_INTEGER {
+                unsafe { f64::to_napi_value(env, i as f64) }
+            } else {
+                unsafe { BigInt::to_napi_value(env, BigInt::from(i)) }
+            }
+        }
+        FfiValue::String(s) => {
             // Validated as UTF-8 on construction (both the decrypt visitor
             // and the JS-side conversion produce valid UTF-8).
             let utf8 = std::str::from_utf8(s.risky_ref())
@@ -255,11 +292,11 @@ fn value_to_js(env: sys::napi_env, value: NapiValue) -> Result<sys::napi_value> 
             // `s` drops (and wipes the Rust copy) here; the JS copy is owned
             // by the engine.
         }
-        NapiValue::Bytes(b) => {
+        FfiValue::Bytes(b) => {
             let buf = Buffer::from(b.risky_ref().to_vec());
             unsafe { Buffer::to_napi_value(env, buf) }
         }
-        NapiValue::Array(items) => {
+        FfiValue::Array(items) => {
             let raw_env = Env::from_raw(env);
             let mut arr = raw_env.create_array(items.len() as u32)?;
             for (i, item) in items.into_iter().enumerate() {
@@ -268,7 +305,7 @@ fn value_to_js(env: sys::napi_env, value: NapiValue) -> Result<sys::napi_value> 
             }
             unsafe { Array::to_napi_value(env, arr) }
         }
-        NapiValue::Object(entries) => {
+        FfiValue::Object(entries) => {
             let raw_env = Env::from_raw(env);
             let mut obj = Object::new(&raw_env)?;
             for (key, value) in entries {
@@ -287,7 +324,7 @@ fn value_to_js(env: sys::napi_env, value: NapiValue) -> Result<sys::napi_value> 
 /// Internal newtype so recursive positions (array elements, object values)
 /// can go through `ToNapiValue` without exposing a blanket recursive impl
 /// signature difference.
-struct ValueHandle(NapiValue);
+struct ValueHandle(FfiValue);
 
 impl ToNapiValue for ValueHandle {
     unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
@@ -297,13 +334,13 @@ impl ToNapiValue for ValueHandle {
 
 impl ToNapiValue for NapiValue {
     unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
-        value_to_js(env, val)
+        value_to_js(env, val.0)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{eager_capacity, forbidden_key, MAX_EAGER_CAPACITY};
+    use super::{eager_capacity, forbidden_key, MAX_EAGER_CAPACITY, MAX_SAFE_INTEGER};
 
     #[test]
     fn forbidden_keys_are_rejected() {
@@ -313,6 +350,12 @@ mod tests {
         assert!(!forbidden_key("proto"));
         assert!(!forbidden_key("name"));
         assert!(!forbidden_key(""));
+    }
+
+    #[test]
+    fn max_safe_integer_matches_js() {
+        // Number.MAX_SAFE_INTEGER
+        assert_eq!(MAX_SAFE_INTEGER, 9_007_199_254_740_991);
     }
 
     #[test]
