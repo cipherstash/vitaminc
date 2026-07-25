@@ -29,19 +29,98 @@ defer client.Close(ctx)
 
 cipher, _ := client.NewCipher(ctx, key) // a key schedule (handle) in the guest
 defer cipher.Close(ctx)
+```
 
-// id/created_at travel in the clear; email/name are sealed.
+`Encrypt` takes `any` (encoded through the `vcvalue` currency); `Decrypt`
+returns the `vcvalue` decode shape. A runnable, end-to-end walk-through of
+everything below is the testable `Example` in `example_test.go`.
+
+### Encrypting a user record with mixed fields
+
+A type controls its own sealing by implementing `vcvalue.Encryptable` (the Go
+analog of Rust's `impl Encrypt`, since Go has no orphan impls). Non-secret
+fields opt into passthrough explicitly — they travel **unencrypted and
+unauthenticated**, so a database can read and index them without the key:
+
+```go
+type User struct {
+    ID        int64
+    CreatedAt string
+    Email     string
+    Name      string
+}
+
+func (u User) EncryptValue(enc vcvalue.Encoder) error {
+    m := enc.Map()
+    m.Field("id").Passthrough().Int64(u.ID)
+    m.Field("created_at").Passthrough().String(u.CreatedAt)
+    m.Field("email").String(u.Email)
+    m.Field("name").String(u.Name)
+    return m.End()
+}
+
+aad := []byte("user:42") // bind the ciphertext to the row identity
+ct, err := cipher.Encrypt(ctx, User{42, "2026-07-25", "ada@example.com", "Ada Lovelace"}, aad)
+```
+
+Dynamic shapes encode the same way via reflection, with `vcvalue.Plain`
+as the explicit passthrough marker — passthrough never happens implicitly:
+
+```go
 record := map[string]any{
     "id":    vcvalue.Plain{V: int64(42)},
     "email": "ada@example.com",
 }
-ct, _  := cipher.Encrypt(ctx, record, aad)
-got, _ := cipher.Decrypt(ctx, ct, aad) // vcvalue natives + Object + Plain
 ```
 
-`Encrypt` takes `any` (encoded through the `vcvalue` currency); `Decrypt`
-returns the `vcvalue` decode shape. A runnable, end-to-end walk-through of the
-user-record shape is the testable `Example` in `example_test.go`.
+(Reflection sorts map keys for determinism; an `Encryptable` writes fields in
+the order of its choosing.)
+
+### The ciphertext is structured, not a blob
+
+`Encrypt` returns the tree. Each sealed field is an independent
+`nonce || ciphertext || tag` leaf and passthrough fields are readable in
+place, so a user record maps naturally onto table columns:
+
+```go
+for _, f := range ct.Fields {
+    switch f.Node.Kind {
+    case vcvalue.KindPassthrough:
+        fmt.Println(f.Key, "=", f.Node.Passthrough) // id = 42 — no key involved
+    case vcvalue.KindSingle:
+        storeColumn(f.Key, f.Node.Leaf) // email → its own column of sealed bytes
+    }
+}
+```
+
+### Decrypting — the whole record, or one column
+
+Map keys travel in the clear but each is cryptographically bound into its
+value's AAD, and there is no whole-map seal — so any subset of entries
+decrypts independently. To read one column back, rebuild a one-entry map
+around the stored leaf:
+
+```go
+one := vcvalue.CipherText{
+    Kind:   vcvalue.KindMap,
+    Fields: []vcvalue.CipherTextField{{Key: "email", Node: loadedNode}},
+}
+got, err := cipher.Decrypt(ctx, one, aad) // Object{{"email", "ada@example.com"}}
+```
+
+The binding cuts the other way too: presenting that same leaf under a renamed
+key, or bare outside its map entry, fails with `ErrAuthentication`.
+
+Decrypted passthrough fields come back wrapped in `vcvalue.Plain`, so a
+caller can always tell which fields were never sealed:
+
+```go
+for _, f := range got.(vcvalue.Object) {
+    if p, ok := f.Value.(vcvalue.Plain); ok {
+        fmt.Println(f.Key, "was in the clear:", p.V)
+    }
+}
+```
 
 ## Error surface
 
