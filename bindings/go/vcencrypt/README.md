@@ -122,6 +122,34 @@ for _, f := range got.(vcvalue.Object) {
 }
 ```
 
+### An array of user records
+
+A slice works directly — reflection consults `Encryptable` for each element,
+so `[]User` produces a sequence of the per-user trees from above:
+
+```go
+users := []User{
+    {1, "2026-07-24", "ada@example.com", "Ada Lovelace"},
+    {2, "2026-07-25", "grace@example.com", "Grace Hopper"},
+}
+ct, err := cipher.Encrypt(ctx, users, aad)
+
+// ct.Kind == vcvalue.KindSeq; one KindMap per user.
+for i, row := range ct.Items {
+    for _, f := range row.Fields {
+        fmt.Println(i, f.Key, f.Node.Kind) // id: KindPassthrough, email: KindSingle, …
+    }
+}
+```
+
+`Decrypt` of the whole tree returns `[]any` of `vcvalue.Object`. Rows are
+independent: a single element decrypts on its own (wrapped in a one-item
+sequence, or directly as the root), which suits row-at-a-time reads. The flip
+side is that the sequence itself carries no seal — element order and
+membership are **not authenticated**, just as a map has no whole-map seal. A
+caller that needs those properties must bind them itself, e.g. a per-row AAD
+carrying the row's identity.
+
 ## Error surface
 
 Decryption reveals nothing about the plaintext, but the binding separates
