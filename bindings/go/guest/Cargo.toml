@@ -1,0 +1,31 @@
+[package]
+name = "vitaminc-wasi-guest"
+description = "WASI guest module exposing vitaminc AEAD encryption to non-Rust hosts (spike)."
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+# Deliberately a standalone workspace: this crate targets wasm32-wasip1 and
+# is consumed as a .wasm artifact by the Go module one directory up. Keeping
+# it out of the main workspace keeps it out of the release-plz version group
+# and out of native CI builds.
+[workspace]
+
+[lib]
+# cdylib: the .wasm guest module. rlib: lets the codec unit tests and the
+# fixture generator build natively.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+vitaminc-aead = { path = "../../../packages/aead" }
+vitaminc-aead-value = { path = "../../../packages/aead-value" }
+vitaminc-encrypt = { path = "../../../packages/encrypt" }
+vitaminc-protected = { path = "../../../packages/protected" }
+zeroize = "1"
+
+[profile.release]
+# Smaller .wasm; the guest is IO-bound on the FFI copy, not on codegen.
+opt-level = "s"
+lto = true
+strip = true

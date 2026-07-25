@@ -1,0 +1,430 @@
+//! Transport-only binary encoding for [`FfiValue`] trees and
+//! [`CipherText`] containers crossing the wasm boundary.
+//!
+//! This is a **transport encoding, not a storage format**: it exists so a
+//! host language and the wasm guest can hand each other a tree in one
+//! linear-memory copy. Nothing here is a compatibility commitment — the
+//! only frozen byte format in the stack is the sealed leaf payload
+//! (`[tag] ++ payload`, see `vitaminc_aead_value::tags`), which lives
+//! *inside* the AEAD envelope and never touches this codec. Durable
+//! cross-language storage is the EQL layer's job.
+//!
+//! Value leaves reuse the frozen tag constants for the scalar kinds so the
+//! two tables can't drift apart on meaning; `ARRAY`/`OBJECT` framing tags
+//! are transport-local (the sealed format has no container tags — container
+//! shape is carried by the ciphertext tree itself).
+//!
+//! All lengths and counts are `u32` little-endian. Object keys are UTF-8.
+
+use vitaminc_aead::CipherText;
+use vitaminc_aead_value::{tags, FfiValue};
+use vitaminc_protected::{Controlled, Protected};
+
+/// Transport-local framing tag for [`FfiValue::Array`].
+pub const ARRAY: u8 = 0x10;
+/// Transport-local framing tag for [`FfiValue::Object`].
+pub const OBJECT: u8 = 0x11;
+
+/// Ciphertext node kinds.
+pub const CT_SINGLE: u8 = 0x01;
+pub const CT_NONE: u8 = 0x02;
+pub const CT_SEQ: u8 = 0x03;
+pub const CT_MAP: u8 = 0x04;
+
+/// Mirrors the hardening bound used by the NAPI conversion layer.
+pub const MAX_DEPTH: usize = 128;
+
+/// Opaque codec error. Like the trait-layer `Unspecified`, it carries no
+/// detail: malformed transport bytes on the decrypt path are
+/// attacker-reachable input.
+#[derive(Debug, PartialEq, Eq)]
+pub struct CodecError;
+
+pub struct Reader<'a> {
+    buf: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Reader<'a> {
+    pub fn new(buf: &'a [u8]) -> Self {
+        Reader { buf, pos: 0 }
+    }
+
+    fn byte(&mut self) -> Result<u8, CodecError> {
+        let b = *self.buf.get(self.pos).ok_or(CodecError)?;
+        self.pos += 1;
+        Ok(b)
+    }
+
+    fn take(&mut self, len: usize) -> Result<&'a [u8], CodecError> {
+        let end = self.pos.checked_add(len).ok_or(CodecError)?;
+        let slice = self.buf.get(self.pos..end).ok_or(CodecError)?;
+        self.pos = end;
+        Ok(slice)
+    }
+
+    fn u32(&mut self) -> Result<u32, CodecError> {
+        let bytes: [u8; 4] = self.take(4)?.try_into().map_err(|_| CodecError)?;
+        Ok(u32::from_le_bytes(bytes))
+    }
+
+    /// A count of items still to be decoded can never exceed the bytes
+    /// remaining (every item costs at least one byte); rejecting early
+    /// keeps a hostile count from driving a huge preallocation.
+    fn count(&mut self) -> Result<usize, CodecError> {
+        let n = self.u32()? as usize;
+        if n > self.buf.len() - self.pos {
+            return Err(CodecError);
+        }
+        Ok(n)
+    }
+
+    fn finished(&self) -> bool {
+        self.pos == self.buf.len()
+    }
+}
+
+fn write_len(out: &mut Vec<u8>, len: usize) -> Result<(), CodecError> {
+    let len: u32 = len.try_into().map_err(|_| CodecError)?;
+    out.extend_from_slice(&len.to_le_bytes());
+    Ok(())
+}
+
+fn write_bytes(out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), CodecError> {
+    write_len(out, bytes.len())?;
+    out.extend_from_slice(bytes);
+    Ok(())
+}
+
+/// Encode a value tree. The output buffer contains **plaintext** — callers
+/// own wiping it (the ABI layer zeroizes transport buffers on dealloc).
+///
+/// Consumes the value; `Protected` leaves are wiped as they drop here.
+pub fn encode_value(value: FfiValue, out: &mut Vec<u8>) -> Result<(), CodecError> {
+    match value {
+        FfiValue::Null => out.push(tags::NULL),
+        FfiValue::Undefined => out.push(tags::UNDEFINED),
+        FfiValue::Bool(false) => out.push(tags::BOOL_FALSE),
+        FfiValue::Bool(true) => out.push(tags::BOOL_TRUE),
+        FfiValue::Number(n) => {
+            out.push(tags::NUMBER);
+            out.extend_from_slice(&n.to_bits().to_le_bytes());
+        }
+        FfiValue::Int(i) => {
+            out.push(tags::INT64);
+            out.extend_from_slice(&i.to_le_bytes());
+        }
+        FfiValue::String(s) => {
+            out.push(tags::STRING);
+            write_bytes(out, s.risky_ref())?;
+        }
+        FfiValue::Bytes(b) => {
+            out.push(tags::BYTES);
+            write_bytes(out, b.risky_ref())?;
+        }
+        FfiValue::Array(items) => {
+            out.push(ARRAY);
+            write_len(out, items.len())?;
+            for item in items {
+                encode_value(item, out)?;
+            }
+        }
+        FfiValue::Object(entries) => {
+            out.push(OBJECT);
+            write_len(out, entries.len())?;
+            for (key, value) in entries {
+                write_bytes(out, key.as_bytes())?;
+                encode_value(value, out)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Decode a value tree, requiring the reader to be fully consumed.
+pub fn decode_value(reader: &mut Reader<'_>) -> Result<FfiValue, CodecError> {
+    let value = decode_value_inner(reader, 0)?;
+    if !reader.finished() {
+        return Err(CodecError);
+    }
+    Ok(value)
+}
+
+fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue, CodecError> {
+    if depth > MAX_DEPTH {
+        return Err(CodecError);
+    }
+    match reader.byte()? {
+        tags::NULL => Ok(FfiValue::Null),
+        tags::UNDEFINED => Ok(FfiValue::Undefined),
+        tags::BOOL_FALSE => Ok(FfiValue::Bool(false)),
+        tags::BOOL_TRUE => Ok(FfiValue::Bool(true)),
+        tags::NUMBER => {
+            let bits: [u8; 8] = reader.take(8)?.try_into().map_err(|_| CodecError)?;
+            Ok(FfiValue::Number(f64::from_bits(u64::from_le_bytes(bits))))
+        }
+        tags::INT64 => {
+            let bytes: [u8; 8] = reader.take(8)?.try_into().map_err(|_| CodecError)?;
+            Ok(FfiValue::Int(i64::from_le_bytes(bytes)))
+        }
+        tags::STRING => {
+            let len = reader.count()?;
+            let bytes = reader.take(len)?;
+            std::str::from_utf8(bytes).map_err(|_| CodecError)?;
+            Ok(FfiValue::String(Protected::new(bytes.to_vec())))
+        }
+        tags::BYTES => {
+            let len = reader.count()?;
+            Ok(FfiValue::Bytes(Protected::new(reader.take(len)?.to_vec())))
+        }
+        ARRAY => {
+            let count = reader.count()?;
+            let mut items = Vec::with_capacity(count);
+            for _ in 0..count {
+                items.push(decode_value_inner(reader, depth + 1)?);
+            }
+            Ok(FfiValue::Array(items))
+        }
+        OBJECT => {
+            let count = reader.count()?;
+            let mut entries = Vec::with_capacity(count);
+            for _ in 0..count {
+                let key_len = reader.count()?;
+                let key = std::str::from_utf8(reader.take(key_len)?)
+                    .map_err(|_| CodecError)?
+                    .to_owned();
+                entries.push((key, decode_value_inner(reader, depth + 1)?));
+            }
+            Ok(FfiValue::Object(entries))
+        }
+        _ => Err(CodecError),
+    }
+}
+
+/// Encode a ciphertext tree. `Passthrough` nodes cannot cross this
+/// transport (the wasm guest has no passthrough currency) and are an error.
+pub fn encode_ciphertext<Leaf, P>(
+    ct: &CipherText<Leaf, P>,
+    out: &mut Vec<u8>,
+) -> Result<(), CodecError>
+where
+    Leaf: AsRef<[u8]>,
+{
+    match ct {
+        CipherText::Single(leaf) => {
+            out.push(CT_SINGLE);
+            write_bytes(out, leaf.as_ref())?;
+        }
+        CipherText::None(leaf) => {
+            out.push(CT_NONE);
+            write_bytes(out, leaf.as_ref())?;
+        }
+        CipherText::Sequence(items) => {
+            out.push(CT_SEQ);
+            write_len(out, items.len())?;
+            for item in items {
+                encode_ciphertext(item, out)?;
+            }
+        }
+        CipherText::Map(entries) => {
+            out.push(CT_MAP);
+            write_len(out, entries.len())?;
+            for (key, value) in entries {
+                write_bytes(out, key.as_bytes())?;
+                encode_ciphertext(value, out)?;
+            }
+        }
+        CipherText::Passthrough(_) => return Err(CodecError),
+    }
+    Ok(())
+}
+
+/// Decode a ciphertext tree, requiring the reader to be fully consumed.
+pub fn decode_ciphertext<Leaf, P>(
+    reader: &mut Reader<'_>,
+) -> Result<CipherText<Leaf, P>, CodecError>
+where
+    Leaf: From<Vec<u8>>,
+{
+    let ct = decode_ciphertext_inner(reader, 0)?;
+    if !reader.finished() {
+        return Err(CodecError);
+    }
+    Ok(ct)
+}
+
+fn decode_ciphertext_inner<Leaf, P>(
+    reader: &mut Reader<'_>,
+    depth: usize,
+) -> Result<CipherText<Leaf, P>, CodecError>
+where
+    Leaf: From<Vec<u8>>,
+{
+    if depth > MAX_DEPTH {
+        return Err(CodecError);
+    }
+    match reader.byte()? {
+        CT_SINGLE => {
+            let len = reader.count()?;
+            Ok(CipherText::Single(Leaf::from(reader.take(len)?.to_vec())))
+        }
+        CT_NONE => {
+            let len = reader.count()?;
+            Ok(CipherText::None(Leaf::from(reader.take(len)?.to_vec())))
+        }
+        CT_SEQ => {
+            let count = reader.count()?;
+            let mut items = Vec::with_capacity(count);
+            for _ in 0..count {
+                items.push(decode_ciphertext_inner(reader, depth + 1)?);
+            }
+            Ok(CipherText::Sequence(items))
+        }
+        CT_MAP => {
+            let count = reader.count()?;
+            let mut entries = Vec::with_capacity(count);
+            for _ in 0..count {
+                let key_len = reader.count()?;
+                let key = std::str::from_utf8(reader.take(key_len)?)
+                    .map_err(|_| CodecError)?
+                    .to_owned();
+                entries.push((key, decode_ciphertext_inner(reader, depth + 1)?));
+            }
+            Ok(CipherText::Map(entries))
+        }
+        _ => Err(CodecError),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vitaminc_encrypt::AesCipherText;
+
+    fn string(s: &str) -> FfiValue {
+        FfiValue::String(Protected::new(s.as_bytes().to_vec()))
+    }
+
+    fn sample() -> FfiValue {
+        FfiValue::Object(vec![
+            ("name".into(), string("Ada")),
+            ("age".into(), FfiValue::Int(36)),
+            ("score".into(), FfiValue::Number(1.5)),
+            ("active".into(), FfiValue::Bool(true)),
+            ("nothing".into(), FfiValue::Null),
+            (
+                "tags".into(),
+                FfiValue::Array(vec![
+                    string("a"),
+                    FfiValue::Bytes(Protected::new(vec![1, 2, 3])),
+                    FfiValue::Undefined,
+                ]),
+            ),
+        ])
+    }
+
+    /// Structural equality via re-encoding: the codec is deterministic, so
+    /// equal transport bytes ⇔ equal trees (Number compared by bit pattern).
+    fn encoded(value: FfiValue) -> Vec<u8> {
+        let mut out = Vec::new();
+        encode_value(value, &mut out).unwrap();
+        out
+    }
+
+    #[test]
+    fn value_round_trips() {
+        let bytes = encoded(sample());
+        let decoded = decode_value(&mut Reader::new(&bytes)).unwrap();
+        assert_eq!(encoded(decoded), bytes);
+    }
+
+    #[test]
+    fn scalar_encodings_are_pinned() {
+        assert_eq!(encoded(FfiValue::Null), [0x00]);
+        assert_eq!(encoded(FfiValue::Undefined), [0x01]);
+        assert_eq!(encoded(FfiValue::Bool(false)), [0x02]);
+        assert_eq!(encoded(FfiValue::Bool(true)), [0x03]);
+        assert_eq!(
+            encoded(FfiValue::Number(1.5)),
+            [0x04, 0, 0, 0, 0, 0, 0, 0xF8, 0x3F]
+        );
+        assert_eq!(
+            encoded(FfiValue::Int(-1)),
+            [0x07, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
+        assert_eq!(encoded(string("hi")), [0x05, 2, 0, 0, 0, b'h', b'i']);
+        assert_eq!(
+            encoded(FfiValue::Array(vec![FfiValue::Null])),
+            [0x10, 1, 0, 0, 0, 0x00]
+        );
+    }
+
+    #[test]
+    fn trailing_bytes_are_rejected() {
+        let mut bytes = encoded(FfiValue::Null);
+        bytes.push(0x00);
+        assert!(decode_value(&mut Reader::new(&bytes)).is_err());
+    }
+
+    #[test]
+    fn truncated_input_is_rejected() {
+        let bytes = encoded(sample());
+        for end in 0..bytes.len() - 1 {
+            assert!(
+                decode_value(&mut Reader::new(&bytes[..end])).is_err(),
+                "truncation at {end} must not decode"
+            );
+        }
+    }
+
+    #[test]
+    fn hostile_count_is_rejected_before_allocation() {
+        // ARRAY claiming u32::MAX items with no bytes behind it.
+        let bytes = [ARRAY, 0xFF, 0xFF, 0xFF, 0xFF];
+        assert!(decode_value(&mut Reader::new(&bytes)).is_err());
+    }
+
+    #[test]
+    fn invalid_utf8_key_is_rejected() {
+        let mut bytes = vec![OBJECT, 1, 0, 0, 0, 1, 0, 0, 0, 0xFF];
+        bytes.push(tags::NULL);
+        assert!(decode_value(&mut Reader::new(&bytes)).is_err());
+    }
+
+    #[test]
+    fn depth_bomb_is_rejected() {
+        let mut bytes = Vec::new();
+        for _ in 0..(MAX_DEPTH + 2) {
+            bytes.extend_from_slice(&[ARRAY, 1, 0, 0, 0]);
+        }
+        bytes.push(tags::NULL);
+        assert!(decode_value(&mut Reader::new(&bytes)).is_err());
+    }
+
+    #[test]
+    fn ciphertext_round_trips() {
+        let ct: AesCipherText = CipherText::Map(vec![
+            ("a".into(), CipherText::Single(vec![9u8; 40].into())),
+            (
+                "b".into(),
+                CipherText::Sequence(vec![
+                    CipherText::Single(vec![1u8; 3].into()),
+                    CipherText::None(vec![2u8; 3].into()),
+                ]),
+            ),
+        ]);
+        let mut out = Vec::new();
+        encode_ciphertext(&ct, &mut out).unwrap();
+        let decoded: AesCipherText = decode_ciphertext(&mut Reader::new(&out)).unwrap();
+        let mut out2 = Vec::new();
+        encode_ciphertext(&decoded, &mut out2).unwrap();
+        assert_eq!(out, out2);
+    }
+
+    #[test]
+    fn passthrough_cannot_cross_the_transport() {
+        let ct: AesCipherText = CipherText::Passthrough(Box::new(42u32));
+        let mut out = Vec::new();
+        assert_eq!(encode_ciphertext(&ct, &mut out), Err(CodecError));
+    }
+}
