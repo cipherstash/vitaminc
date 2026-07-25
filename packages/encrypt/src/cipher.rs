@@ -173,6 +173,16 @@ impl<'c> Cipher for &'c Aes256Cipher {
     fn passthrough(self, value: Self::Passthrough) -> Result<Self::Ok, Self::Error> {
         Ok(AesCipherText::Passthrough(value))
     }
+
+    fn passthrough_boxed(
+        self,
+        value: Box<dyn Any + Send + 'static>,
+    ) -> Result<Self::Ok, Self::Error> {
+        // This cipher's currency *is* `Box<dyn Any + Send>` (see
+        // `BoxedPassthrough`), so the type-erased box is already the
+        // passthrough payload — store it directly.
+        self.passthrough(value)
+    }
 }
 
 /// [`SeqCipher`] driver for [`Aes256Cipher`]. Encrypts each element under its
@@ -582,9 +592,12 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
                 Self::verify_empty_marker(cipher, ct, aad.for_none().as_bytes())?;
                 visitor.visit_none()
             }
-            // Passthrough values are recovered only via the typed
-            // `decrypt_passthrough` path — see the trait docs.
-            AesCipherText::Passthrough(_) => Err(Unspecified),
+            // A self-describing visitor recovers a passthrough via
+            // `visit_passthrough` (the payload is handed over type-erased);
+            // visitors that do not override it inherit the default rejection.
+            // The typed `decrypt_passthrough` path remains available for
+            // callers that know the shape up front.
+            AesCipherText::Passthrough(boxed) => visitor.visit_passthrough(boxed),
         }
     }
 
