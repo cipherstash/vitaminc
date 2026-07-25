@@ -16,6 +16,8 @@
 //!
 //! All lengths and counts are `u32` little-endian. Object keys are UTF-8.
 
+use std::any::Any;
+
 use crate::{tags, FfiValue};
 use vitaminc_aead::CipherText;
 use vitaminc_protected::{Controlled, Protected};
@@ -24,6 +26,12 @@ use vitaminc_protected::{Controlled, Protected};
 pub const ARRAY: u8 = 0x10;
 /// Transport-local framing tag for [`FfiValue::Object`].
 pub const OBJECT: u8 = 0x11;
+/// Transport-local framing tag for [`FfiValue::Passthrough`]: the next value
+/// node is a passthrough (unencrypted, unauthenticated) subtree. Like
+/// [`ARRAY`]/[`OBJECT`] this is transport-local — the sealed leaf format has
+/// no passthrough tag; the ciphertext tree carries passthrough via
+/// [`CT_PASSTHROUGH`].
+pub const PASSTHROUGH: u8 = 0x12;
 
 /// Ciphertext node kind: a single sealed leaf.
 pub const CT_SINGLE: u8 = 0x01;
@@ -33,6 +41,34 @@ pub const CT_NONE: u8 = 0x02;
 pub const CT_SEQ: u8 = 0x03;
 /// Ciphertext node kind: a map of clear keys to nodes.
 pub const CT_MAP: u8 = 0x04;
+/// Ciphertext node kind: a passthrough value — one encoded plaintext value
+/// node travelling in the clear beside the sealed nodes.
+pub const CT_PASSTHROUGH: u8 = 0x05;
+
+/// A passthrough payload the ciphertext transport can carry as an embedded
+/// plaintext value node.
+///
+/// The generic [`CipherText<Leaf, P>`] passthrough currency `P` is opaque, but
+/// to cross this transport a passthrough value must be serializable as a value
+/// node. This trait supplies that, implemented for [`FfiValue`] — the currency
+/// the guest re-homes the Rust-native `Box<dyn Any + Send>` into (via
+/// [`CipherText::map_passthrough`]) before encoding, and back into after
+/// decoding. See [`encode_ciphertext_boxed`] / [`decode_ciphertext_boxed`].
+pub trait TransportPassthrough: Sized {
+    /// Encode this payload as one value node.
+    fn encode_node(&self, out: &mut Vec<u8>) -> Result<(), CodecError>;
+    /// Decode one value node into this payload, honouring the recursion bound.
+    fn decode_node(reader: &mut Reader<'_>, depth: usize) -> Result<Self, CodecError>;
+}
+
+impl TransportPassthrough for FfiValue {
+    fn encode_node(&self, out: &mut Vec<u8>) -> Result<(), CodecError> {
+        encode_value_ref(self, out)
+    }
+    fn decode_node(reader: &mut Reader<'_>, depth: usize) -> Result<Self, CodecError> {
+        decode_value_inner(reader, depth)
+    }
+}
 
 /// Mirrors the hardening bound used by the NAPI conversion layer.
 pub const MAX_DEPTH: usize = 128;
@@ -104,8 +140,17 @@ fn write_bytes(out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), CodecError> {
 /// Encode a value tree. The output buffer contains **plaintext** — callers
 /// own wiping it (the wasm ABI layer zeroizes transport buffers on dealloc).
 ///
-/// Consumes the value; `Protected` leaves are wiped as they drop here.
+/// Consumes the value; `Protected` leaves are wiped as `value` drops here.
 pub fn encode_value(value: FfiValue, out: &mut Vec<u8>) -> Result<(), CodecError> {
+    // Borrow-encode, then let `value` drop (wiping any `Protected` leaves).
+    encode_value_ref(&value, out)
+}
+
+/// Borrowing core of [`encode_value`]: encode a value tree without consuming
+/// it. Reads secret leaves through `risky_ref` (they are not wiped here); the
+/// owning caller is responsible for the value's lifetime. Also the encoder for
+/// a passthrough payload node (see [`TransportPassthrough`]).
+fn encode_value_ref(value: &FfiValue, out: &mut Vec<u8>) -> Result<(), CodecError> {
     match value {
         FfiValue::Null => out.push(tags::NULL),
         FfiValue::Undefined => out.push(tags::UNDEFINED),
@@ -147,7 +192,7 @@ pub fn encode_value(value: FfiValue, out: &mut Vec<u8>) -> Result<(), CodecError
             out.push(ARRAY);
             write_len(out, items.len())?;
             for item in items {
-                encode_value(item, out)?;
+                encode_value_ref(item, out)?;
             }
         }
         FfiValue::Object(entries) => {
@@ -155,8 +200,12 @@ pub fn encode_value(value: FfiValue, out: &mut Vec<u8>) -> Result<(), CodecError
             write_len(out, entries.len())?;
             for (key, value) in entries {
                 write_bytes(out, key.as_bytes())?;
-                encode_value(value, out)?;
+                encode_value_ref(value, out)?;
             }
+        }
+        FfiValue::Passthrough(inner) => {
+            out.push(PASSTHROUGH);
+            encode_value_ref(inner, out)?;
         }
     }
     Ok(())
@@ -234,18 +283,27 @@ fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue,
             }
             Ok(FfiValue::Object(entries))
         }
+        PASSTHROUGH => {
+            // One wrapped value node, one level deeper for the recursion bound.
+            let inner = decode_value_inner(reader, depth + 1)?;
+            Ok(FfiValue::Passthrough(Box::new(inner)))
+        }
         _ => Err(CodecError),
     }
 }
 
-/// Encode a ciphertext tree. `Passthrough` nodes cannot cross this
-/// transport (a wasm guest has no passthrough currency) and are an error.
+/// Encode a ciphertext tree. A `Passthrough` node carries its payload as one
+/// embedded plaintext value node, so the payload currency `P` must be
+/// serializable via [`TransportPassthrough`]. The Rust-native `Box<dyn Any +
+/// Send>` currency is not — re-home it to [`FfiValue`] first (see
+/// [`encode_ciphertext_boxed`]).
 pub fn encode_ciphertext<Leaf, P>(
     ct: &CipherText<Leaf, P>,
     out: &mut Vec<u8>,
 ) -> Result<(), CodecError>
 where
     Leaf: AsRef<[u8]>,
+    P: TransportPassthrough,
 {
     match ct {
         CipherText::Single(leaf) => {
@@ -271,9 +329,33 @@ where
                 encode_ciphertext(value, out)?;
             }
         }
-        CipherText::Passthrough(_) => return Err(CodecError),
+        CipherText::Passthrough(payload) => {
+            out.push(CT_PASSTHROUGH);
+            payload.encode_node(out)?;
+        }
     }
     Ok(())
+}
+
+/// Encode an `AesCipherText`-shaped tree (Rust-native `Box<dyn Any + Send>`
+/// passthrough currency) by first re-homing each passthrough payload to an
+/// [`FfiValue`] value node via [`CipherText::map_passthrough`]. A boxed
+/// payload whose concrete type is not `FfiValue` (a foreign passthrough that
+/// cannot cross the transport) is rejected.
+pub fn encode_ciphertext_boxed<Leaf>(
+    ct: CipherText<Leaf, Box<dyn Any + Send + 'static>>,
+    out: &mut Vec<u8>,
+) -> Result<(), CodecError>
+where
+    Leaf: AsRef<[u8]>,
+{
+    let rehomed: CipherText<Leaf, FfiValue> = ct.map_passthrough(&mut |boxed| {
+        boxed
+            .downcast::<FfiValue>()
+            .map(|inner| *inner)
+            .map_err(|_| CodecError)
+    })?;
+    encode_ciphertext(&rehomed, out)
 }
 
 /// Decode a ciphertext tree, requiring the reader to be fully consumed.
@@ -282,6 +364,7 @@ pub fn decode_ciphertext<Leaf, P>(
 ) -> Result<CipherText<Leaf, P>, CodecError>
 where
     Leaf: From<Vec<u8>>,
+    P: TransportPassthrough,
 {
     let ct = decode_ciphertext_inner(reader, 0)?;
     if !reader.finished() {
@@ -290,12 +373,29 @@ where
     Ok(ct)
 }
 
+/// Decode a ciphertext tree into the `AesCipherText`-shaped `Box<dyn Any +
+/// Send>` passthrough currency, re-homing each decoded [`FfiValue`] payload
+/// into a box via [`CipherText::map_passthrough`] so the tree can be handed to
+/// the Rust-native decipher.
+pub fn decode_ciphertext_boxed<Leaf>(
+    reader: &mut Reader<'_>,
+) -> Result<CipherText<Leaf, Box<dyn Any + Send + 'static>>, CodecError>
+where
+    Leaf: From<Vec<u8>>,
+{
+    let ct: CipherText<Leaf, FfiValue> = decode_ciphertext(reader)?;
+    ct.map_passthrough(&mut |inner| {
+        Ok::<Box<dyn Any + Send + 'static>, CodecError>(Box::new(inner))
+    })
+}
+
 fn decode_ciphertext_inner<Leaf, P>(
     reader: &mut Reader<'_>,
     depth: usize,
 ) -> Result<CipherText<Leaf, P>, CodecError>
 where
     Leaf: From<Vec<u8>>,
+    P: TransportPassthrough,
 {
     if depth > MAX_DEPTH {
         return Err(CodecError);
@@ -328,6 +428,11 @@ where
                 entries.push((key, decode_ciphertext_inner(reader, depth + 1)?));
             }
             Ok(CipherText::Map(entries))
+        }
+        CT_PASSTHROUGH => {
+            // The payload is one plaintext value node, decoded one level deeper
+            // so a hostile nesting through passthrough stays bounded.
+            Ok(CipherText::Passthrough(P::decode_node(reader, depth + 1)?))
         }
         _ => Err(CodecError),
     }
@@ -501,17 +606,96 @@ mod tests {
             ),
         ]);
         let mut out = Vec::new();
-        encode_ciphertext(&ct, &mut out).expect("codec");
-        let decoded: AesCipherText = decode_ciphertext(&mut Reader::new(&out)).expect("codec");
+        encode_ciphertext_boxed(ct, &mut out).expect("codec");
+        let decoded: AesCipherText =
+            decode_ciphertext_boxed(&mut Reader::new(&out)).expect("codec");
         let mut out2 = Vec::new();
-        encode_ciphertext(&decoded, &mut out2).expect("codec");
+        encode_ciphertext_boxed(decoded, &mut out2).expect("codec");
+        assert_eq!(out, out2);
+    }
+
+    // ---------------------------------------------------------------
+    // Passthrough over the wire
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn passthrough_marker_is_pinned() {
+        // PASSTHROUGH (0x12) then the wrapped value node.
+        assert_eq!(
+            encoded(FfiValue::Passthrough(Box::new(FfiValue::Null))),
+            [0x12, 0x00]
+        );
+        assert_eq!(
+            encoded(FfiValue::Passthrough(Box::new(FfiValue::Int32(-1)))),
+            [0x12, 0x04, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
+    }
+
+    #[test]
+    fn passthrough_value_round_trips() {
+        // Passthrough at array/object positions and wrapping a whole subtree.
+        let make = || {
+            FfiValue::Object(vec![
+                (
+                    "id".into(),
+                    FfiValue::Passthrough(Box::new(FfiValue::Int64(42))),
+                ),
+                (
+                    "meta".into(),
+                    FfiValue::Passthrough(Box::new(FfiValue::Array(vec![
+                        string("a"),
+                        FfiValue::Bool(true),
+                    ]))),
+                ),
+                ("email".into(), string("sealed-elsewhere")),
+            ])
+        };
+        let bytes = encoded(make());
+        let decoded = decode_value(&mut Reader::new(&bytes)).expect("codec");
+        assert_eq!(encoded(decoded), bytes);
+    }
+
+    #[test]
+    fn truncated_passthrough_node_is_rejected() {
+        // A PASSTHROUGH marker with no value node behind it.
+        assert!(decode_value(&mut Reader::new(&[PASSTHROUGH])).is_err());
+    }
+
+    #[test]
+    fn passthrough_depth_bomb_is_rejected() {
+        // Nesting exclusively through passthrough markers must still hit the
+        // recursion bound.
+        let mut bytes = vec![PASSTHROUGH; MAX_DEPTH + 2];
+        bytes.push(tags::NULL);
+        assert!(decode_value(&mut Reader::new(&bytes)).is_err());
+    }
+
+    #[test]
+    fn passthrough_crosses_the_ciphertext_transport() {
+        // A passthrough with an FfiValue payload round-trips through the
+        // ciphertext transport once the Box currency is re-homed.
+        let ct: AesCipherText = CipherText::Map(vec![
+            (
+                "id".into(),
+                CipherText::Passthrough(Box::new(FfiValue::Int64(42))),
+            ),
+            ("email".into(), CipherText::Single(vec![9u8; 40].into())),
+        ]);
+        let mut out = Vec::new();
+        encode_ciphertext_boxed(ct, &mut out).expect("codec");
+        let decoded: AesCipherText =
+            decode_ciphertext_boxed(&mut Reader::new(&out)).expect("codec");
+        let mut out2 = Vec::new();
+        encode_ciphertext_boxed(decoded, &mut out2).expect("codec");
         assert_eq!(out, out2);
     }
 
     #[test]
-    fn passthrough_cannot_cross_the_transport() {
+    fn foreign_passthrough_payload_cannot_cross() {
+        // A boxed payload that is not an FfiValue cannot be serialized as a
+        // value node; re-homing rejects it rather than emitting garbage.
         let ct: AesCipherText = CipherText::Passthrough(Box::new(42u32));
         let mut out = Vec::new();
-        assert_eq!(encode_ciphertext(&ct, &mut out), Err(CodecError));
+        assert_eq!(encode_ciphertext_boxed(ct, &mut out), Err(CodecError));
     }
 }
