@@ -1,8 +1,20 @@
 //! Tagged leaf plaintexts: the `[tag] ++ payload` assembly, typed.
 //!
-//! Every scalar [`FfiValue`](crate::FfiValue) seals as a one-byte type tag
-//! followed by its payload (see [`tags`](crate::tags)). Rather than build
-//! that byte string ad-hoc at each leaf, the two types here own the layout:
+//! # Why leaves carry a type tag (the FFI use-case)
+//!
+//! This crate serves dynamically-typed FFI hosts (JavaScript, Go's `any`,
+//! Python) that have **no static type at the decrypt site** — the caller asks
+//! to decrypt a value without knowing whether it is an integer, a float, a
+//! string, or a container. Untagged bytes cannot be safely re-interpreted:
+//! any 8 bytes parse equally as a valid `i64`, `u64`, or `f64`, so a bare
+//! payload gives the decrypt side no way to tell which. Each scalar
+//! [`FfiValue`](crate::FfiValue) therefore seals as a one-byte type tag
+//! followed by its payload (`[tag] ++ payload`, see [`tags`](crate::tags)) —
+//! the tag rides *inside* the AEAD envelope, so it is authenticated and the
+//! value describes its own type on the way back out.
+//!
+//! Rather than build that byte string ad-hoc at each leaf, the two types here
+//! own the layout:
 //!
 //! - [`TaggedFixed`] for the fixed-width leaves (the numeric family and the
 //!   payloadless Null/Undefined/Bool tags). The header byte is written into a
@@ -23,13 +35,12 @@
 //! # `TAG` and expectation-side binding
 //!
 //! Each alias exposes its tag as the associated const
-//! [`TaggedFixed::TAG`] / [`TaggedVariable::TAG`]. A schema-aware caller (the
-//! future `EqlCipher`) can mix the *expected* tag into AAD via
-//! [`Aad::for_leaf_type`](vitaminc_aead::Aad::for_leaf_type) at both encrypt
-//! and decrypt so a wrong type hypothesis fails authentication. The
-//! self-describing [`FfiValue`](crate::FfiValue) path does **not** use that —
-//! it relies on the inner authenticated tag, which is known only *after*
-//! decryption.
+//! [`TaggedFixed::TAG`] / [`TaggedVariable::TAG`]. A schema-aware caller (one
+//! that knows the expected type up front) can mix that tag into AAD via
+//! [`LeafTypeAad`](crate::LeafTypeAad) at both encrypt and decrypt so a wrong
+//! type hypothesis fails authentication. The self-describing
+//! [`FfiValue`](crate::FfiValue) path does **not** use that — it relies on the
+//! inner authenticated tag, which is known only *after* decryption.
 
 use crate::tags;
 use vitaminc_aead::{Cipher, Encrypt, IntoAad};
@@ -43,27 +54,29 @@ use vitaminc_protected::{Controlled, Protected};
 pub struct TaggedFixed<const HDR: u8, const N: usize>(Protected<[u8; N]>);
 
 impl<const HDR: u8, const N: usize> TaggedFixed<HDR, N> {
-    /// The leaf type tag this plaintext carries — used by schema-aware
-    /// callers for [`Aad::for_leaf_type`](vitaminc_aead::Aad::for_leaf_type)
-    /// binding.
+    /// The leaf type tag this plaintext carries — used by schema-aware callers
+    /// for [`LeafTypeAad`](crate::LeafTypeAad) binding.
     pub const TAG: u8 = HDR;
-
-    /// Construct a payloadless tagged leaf (`N == 1`): the tag *is* the whole
-    /// plaintext. Used for Null/Undefined/Bool.
-    pub fn tag_only() -> Self {
-        // No heap allocation: the one-byte plaintext lives on the stack until
-        // it is sealed, then is wiped when the `Protected` drops.
-        Self(Protected::new([HDR; N]))
-    }
 
     /// Assemble from the raw little-endian payload bytes, writing the header
     /// into slot 0 on the stack. The `From` impls on the aliases are the
     /// ergonomic entry point; this is the shared core.
-    fn from_payload(payload: &[u8]) -> Self {
+    fn copy_from_slice(payload: &[u8]) -> Self {
         let mut buf = [0u8; N];
         buf[0] = HDR;
         buf[1..].copy_from_slice(payload);
         Self(Protected::new(buf))
+    }
+}
+
+impl<const HDR: u8> TaggedFixed<HDR, 1> {
+    /// Construct a payloadless tagged leaf: the tag *is* the whole plaintext.
+    /// Only exists for the single-byte (`N == 1`) leaves — Null/Undefined/Bool
+    /// — so the type system forbids calling it on a wider fixed-width leaf.
+    pub fn tag_only() -> Self {
+        // No heap allocation: the one-byte plaintext lives on the stack until
+        // it is sealed, then is wiped when the `Protected` drops.
+        Self(Protected::new([HDR; 1]))
     }
 }
 
@@ -106,33 +119,33 @@ pub type TaggedFloat64 = TaggedFixed<{ tags::FLOAT64 }, 9>;
 
 impl From<i32> for TaggedInt32 {
     fn from(v: i32) -> Self {
-        Self::from_payload(&v.to_le_bytes())
+        Self::copy_from_slice(&v.to_le_bytes())
     }
 }
 impl From<i64> for TaggedInt64 {
     fn from(v: i64) -> Self {
-        Self::from_payload(&v.to_le_bytes())
+        Self::copy_from_slice(&v.to_le_bytes())
     }
 }
 impl From<u32> for TaggedUInt32 {
     fn from(v: u32) -> Self {
-        Self::from_payload(&v.to_le_bytes())
+        Self::copy_from_slice(&v.to_le_bytes())
     }
 }
 impl From<u64> for TaggedUInt64 {
     fn from(v: u64) -> Self {
-        Self::from_payload(&v.to_le_bytes())
+        Self::copy_from_slice(&v.to_le_bytes())
     }
 }
 impl From<f32> for TaggedFloat32 {
     fn from(v: f32) -> Self {
         // Raw bit pattern, so NaN payloads and -0.0 survive.
-        Self::from_payload(&v.to_bits().to_le_bytes())
+        Self::copy_from_slice(&v.to_bits().to_le_bytes())
     }
 }
 impl From<f64> for TaggedFloat64 {
     fn from(v: f64) -> Self {
-        Self::from_payload(&v.to_bits().to_le_bytes())
+        Self::copy_from_slice(&v.to_bits().to_le_bytes())
     }
 }
 
@@ -182,7 +195,7 @@ mod tests {
     use super::*;
 
     // The associated `TAG` const must equal the underlying tag byte — this is
-    // what a schema-aware caller reads for `Aad::for_leaf_type` binding.
+    // what a schema-aware caller reads for `LeafTypeAad` binding.
     #[test]
     fn tag_consts_match_the_table() {
         assert_eq!(TaggedNull::TAG, tags::NULL);
@@ -245,37 +258,5 @@ mod tests {
         assert_eq!(empty.0.risky_ref(), &[0x0A]);
         let b = TaggedBytes::new(Protected::new(vec![0xDE, 0xAD]));
         assert_eq!(b.0.risky_ref(), &[0x0B, 0xDE, 0xAD]);
-    }
-
-    // End-to-end proof that `Aad::for_leaf_type` is the expectation-side type
-    // binding: a leaf sealed with the expected tag mixed into AAD decrypts
-    // only when the same tag is expected on decrypt; a different type
-    // hypothesis fails authentication before any plaintext is released.
-    #[test]
-    fn for_leaf_type_binds_the_expected_leaf_tag() {
-        use crate::FfiValue;
-        use vitaminc_aead::Aad;
-        use vitaminc_encrypt::{Aes256Cipher, Key};
-
-        let cipher = Aes256Cipher::new(&Key::from([9u8; 32])).expect("cipher");
-        let aad = Aad::from_slice(b"schema-ctx");
-
-        let ct = TaggedInt64::from(42i64)
-            .encrypt_with_aad(&cipher, aad.for_leaf_type(TaggedInt64::TAG))
-            .expect("encrypt");
-
-        // Same expected type → authenticates and decrypts.
-        let ct_ok = TaggedInt64::from(42i64)
-            .encrypt_with_aad(&cipher, aad.for_leaf_type(TaggedInt64::TAG))
-            .expect("encrypt");
-        let value: FfiValue = cipher
-            .decrypt_with_aad(ct_ok, aad.for_leaf_type(TaggedInt64::TAG))
-            .expect("decrypt with matching leaf-type AAD");
-        assert_eq!(value, FfiValue::Int64(42));
-
-        // Wrong type hypothesis (FLOAT64) → authentication fails.
-        assert!(cipher
-            .decrypt_with_aad::<FfiValue, _>(ct, aad.for_leaf_type(tags::FLOAT64))
-            .is_err());
     }
 }
