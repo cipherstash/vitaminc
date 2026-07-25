@@ -30,7 +30,8 @@ type Field struct {
 //   - String             → string;
 //   - Bytes              → []byte;
 //   - Array              → []any;
-//   - Object             → Object (ordered []Field).
+//   - Object             → Object (ordered []Field);
+//   - Passthrough        → Plain{V: <decoded value>} (the clear-field marker).
 //
 // Go maps exactly in both directions — the 32-bit tags decode to int32 /
 // uint32 / float32, not widened to 64-bit — unlike JavaScript, which widens
@@ -147,6 +148,15 @@ func decodeValue(r *reader, depth int) (any, error) {
 			fields = append(fields, Field{Key: key, Value: value})
 		}
 		return fields, nil
+	case tagPassthrough:
+		// A passthrough value surfaces as Plain{V: <decoded value>}, the
+		// mirror of the Encoder's Plain opt-in, so a caller can tell the
+		// field travelled in the clear.
+		inner, err := decodeValue(r, depth+1)
+		if err != nil {
+			return nil, err
+		}
+		return Plain{V: inner}, nil
 	default:
 		return nil, errMalformed
 	}

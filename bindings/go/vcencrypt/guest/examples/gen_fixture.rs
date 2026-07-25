@@ -5,14 +5,14 @@
 //! sealed-leaf tags, and AAD handling all line up across languages *and*
 //! across crypto backends.
 //!
-//! Run from `bindings/go/guest`:
+//! Run from `bindings/go/vcencrypt/guest`:
 //!
 //! ```sh
 //! cargo run --example gen_fixture
 //! ```
 //!
 //! Regenerate only when the transport encoding or the fixture value
-//! changes; the output is committed at `bindings/go/vitaminc/testdata/`.
+//! changes; the output is committed at `bindings/go/vcencrypt/testdata/`.
 //!
 //! Layout (all lengths u32 LE):
 //! `"VCGO1" ++ key[32] ++ len(aad) ++ aad ++ len(ct) ++ ct ++ len(val) ++ val`
@@ -32,8 +32,19 @@ fn string(s: &str) -> FfiValue {
     FfiValue::String(Protected::new(s.as_bytes().to_vec()))
 }
 
+fn passthrough(v: FfiValue) -> FfiValue {
+    FfiValue::Passthrough(Box::new(v))
+}
+
 fn fixture_value() -> FfiValue {
     FfiValue::Object(vec![
+        // Passthrough fields: non-secret, travel in the clear. Go must read
+        // these back WITHOUT the key path proving decryption.
+        ("id".into(), passthrough(FfiValue::Int64(42))),
+        (
+            "created_at".into(),
+            passthrough(string("2026-07-25T00:00:00Z")),
+        ),
         ("name".into(), string("Ada Lovelace")),
         ("age".into(), FfiValue::Int64(36)),
         ("score".into(), FfiValue::Float64(1.5)),
@@ -76,7 +87,8 @@ fn main() {
         .encrypt_with_aad(&cipher, Aad::from_slice(AAD))
         .unwrap();
     let mut ct_bytes = Vec::new();
-    codec::encode_ciphertext(&ct, &mut ct_bytes).unwrap();
+    // Re-home the Box passthrough currency to FfiValue value-nodes for the wire.
+    codec::encode_ciphertext_boxed(ct, &mut ct_bytes).unwrap();
 
     let mut val_bytes = Vec::new();
     codec::encode_value(fixture_value(), &mut val_bytes).unwrap();
@@ -88,11 +100,8 @@ fn main() {
     push_chunk(&mut out, &ct_bytes);
     push_chunk(&mut out, &val_bytes);
 
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../vitaminc/testdata/cross_lang.bin"
-    );
-    fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/../vitaminc/testdata")).unwrap();
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/cross_lang.bin");
+    fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata")).unwrap();
     fs::write(path, &out).unwrap();
     println!("wrote {path} ({} bytes)", out.len());
 }

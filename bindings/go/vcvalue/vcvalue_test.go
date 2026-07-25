@@ -194,6 +194,92 @@ func TestUnmarshalRejectsGarbage(t *testing.T) {
 	}
 }
 
+// TestPlainPassthroughRoundTrip: the reflection opt-in marker Plain seals a
+// value as passthrough, and it decodes back as Plain{V:...} — the marking
+// round-trips so a caller can tell the field travelled in the clear.
+func TestPlainPassthroughRoundTrip(t *testing.T) {
+	got := marshalUnmarshal(t, map[string]any{
+		"id":    vcvalue.Plain{V: int64(42)},
+		"email": "ada@example.com",
+	})
+	want := vcvalue.Object{
+		{Key: "email", Value: "ada@example.com"},
+		{Key: "id", Value: vcvalue.Plain{V: int64(42)}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+// A Plain wrapping a whole subtree makes the entire subtree passthrough.
+func TestPlainPassthroughSubtree(t *testing.T) {
+	got := marshalUnmarshal(t, vcvalue.Plain{V: []any{int64(1), "two", true}})
+	want := vcvalue.Plain{V: []any{int64(1), "two", true}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+// The raw Encoder.Passthrough() channel, at root/seq/map positions.
+type passthroughBuilder struct{}
+
+func (passthroughBuilder) EncryptValue(enc vcvalue.Encoder) error {
+	s := enc.Seq()
+	s.Elem().Passthrough().Int64(7) // passthrough sequence element
+	s.Elem().String("sealed")
+	return s.End()
+}
+
+func TestEncoderPassthroughChannel(t *testing.T) {
+	got := marshalUnmarshal(t, passthroughBuilder{})
+	want := []any{vcvalue.Plain{V: int64(7)}, "sealed"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestUnmarshalRejectsTruncatedPassthrough(t *testing.T) {
+	// A passthrough marker (0x12) with no value node behind it.
+	if _, err := vcvalue.Unmarshal([]byte{0x12}); err == nil {
+		t.Fatal("truncated passthrough node must be rejected")
+	}
+}
+
+func TestUnmarshalRejectsPassthroughDepthBomb(t *testing.T) {
+	// Nesting exclusively through passthrough markers must hit the depth bound.
+	bytes := make([]byte, 0, 200)
+	for range 130 { // > maxDepth (128)
+		bytes = append(bytes, 0x12)
+	}
+	bytes = append(bytes, 0x00) // NULL
+	if _, err := vcvalue.Unmarshal(bytes); err == nil {
+		t.Fatal("over-deep passthrough nesting must be rejected")
+	}
+}
+
+// A KindPassthrough ciphertext node carries its readable value across the
+// transport and back.
+func TestCipherTextPassthroughTransportRoundTrip(t *testing.T) {
+	ct := vcvalue.CipherText{
+		Kind: vcvalue.KindMap,
+		Fields: []vcvalue.CipherTextField{
+			{Key: "id", Node: vcvalue.CipherText{Kind: vcvalue.KindPassthrough, Passthrough: int64(42)}},
+			{Key: "email", Node: vcvalue.CipherText{Kind: vcvalue.KindSingle, Leaf: []byte{9, 9, 9}}},
+		},
+	}
+	buf, err := ct.MarshalTransport()
+	if err != nil {
+		t.Fatalf("MarshalTransport: %v", err)
+	}
+	got, err := vcvalue.UnmarshalCipherText(buf)
+	if err != nil {
+		t.Fatalf("UnmarshalCipherText: %v", err)
+	}
+	if !reflect.DeepEqual(got, ct) {
+		t.Fatalf("got %#v, want %#v", got, ct)
+	}
+}
+
 func TestCipherTextTransportRoundTrip(t *testing.T) {
 	ct := vcvalue.CipherText{
 		Kind: vcvalue.KindMap,

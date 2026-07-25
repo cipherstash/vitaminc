@@ -12,6 +12,10 @@ type CipherText struct {
 	Leaf   []byte // Single, None
 	Items  []CipherText
 	Fields []CipherTextField
+	// Passthrough holds the decoded plaintext value (in the Unmarshal decode
+	// shape — Go natives plus Object) for a KindPassthrough node: a field that
+	// travelled in the clear, readable without the key.
+	Passthrough any
 }
 
 // CipherTextField is one entry of a map-mode ciphertext. The key travels in
@@ -35,6 +39,10 @@ const (
 	KindSeq CipherTextKind = 0x03
 	// KindMap is a map of clear keys to nodes.
 	KindMap CipherTextKind = 0x04
+	// KindPassthrough is a value that travelled in the clear beside the
+	// sealed nodes — unencrypted and unauthenticated. Its readable value is
+	// in the Passthrough field.
+	KindPassthrough CipherTextKind = 0x05
 )
 
 // MarshalTransport encodes the ciphertext tree into transport bytes.
@@ -91,6 +99,17 @@ func encodeCipherText(out []byte, ct *CipherText, depth int) ([]byte, error) {
 			}
 		}
 		return out, nil
+	case KindPassthrough:
+		out = append(out, byte(ct.Kind))
+		// Encode the plaintext payload as one value node, sharing the
+		// recursion budget with the surrounding ciphertext (depth+1), mirroring
+		// the Rust CT_PASSTHROUGH framing.
+		st := &encState{buf: out}
+		encodeAny(Encoder{st: st, depth: depth + 1}, ct.Passthrough)
+		if st.err != nil {
+			return nil, st.err
+		}
+		return st.buf, nil
 	default:
 		return nil, errors.New("vcvalue: unknown ciphertext kind")
 	}
@@ -149,6 +168,13 @@ func decodeCipherText(r *reader, depth int) (CipherText, error) {
 			fields = append(fields, CipherTextField{Key: key, Node: node})
 		}
 		return CipherText{Kind: KindMap, Fields: fields}, nil
+	case KindPassthrough:
+		// One embedded plaintext value node, decoded one level deeper.
+		v, err := decodeValue(r, depth+1)
+		if err != nil {
+			return CipherText{}, err
+		}
+		return CipherText{Kind: KindPassthrough, Passthrough: v}, nil
 	default:
 		return CipherText{}, errMalformed
 	}

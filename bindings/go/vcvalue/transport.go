@@ -28,6 +28,9 @@ const (
 	tagBytes     = 0x0B
 	tagArray     = 0x10
 	tagObject    = 0x11
+	// tagPassthrough wraps one value node that travels in the clear
+	// (unencrypted, unauthenticated). Transport-local, like array/object.
+	tagPassthrough = 0x12
 )
 
 // maxUint32 bounds every length/count written or read (all are u32 LE).

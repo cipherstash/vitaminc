@@ -18,10 +18,10 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-vitaminc-aead = { path = "../../../packages/aead" }
-vitaminc-aead-value = { path = "../../../packages/aead-value" }
-vitaminc-encrypt = { path = "../../../packages/encrypt" }
-vitaminc-protected = { path = "../../../packages/protected" }
+vitaminc-aead = { path = "../../../../packages/aead" }
+vitaminc-aead-value = { path = "../../../../packages/aead-value" }
+vitaminc-encrypt = { path = "../../../../packages/encrypt" }
+vitaminc-protected = { path = "../../../../packages/protected" }
 zeroize = "1"
 
 [profile.release]

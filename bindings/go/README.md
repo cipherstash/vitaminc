@@ -3,119 +3,97 @@
 Go bindings for the vitaminc AEAD encryption stack. The Rust code is compiled
 to a **wasm32-wasip1** module and run in-process with
 [wazero](https://github.com/tetratelabs/wazero) — pure Go, `CGO_ENABLED=0`,
-no shared libraries, no cross-compilation matrix. One `.wasm` file ships
-inside the harness package.
+no shared libraries, no cross-compilation matrix.
 
 **Status: spike.** The API shape and transport encoding are not stable.
 
-## Two packages, on purpose
+## Two modules, on purpose
 
-One Go module rooted at `bindings/go`, split into two packages:
+This directory holds **two separate Go modules**, each with its own `go.mod`:
 
-- **`vcvalue/`** — the durable layer: the value currency (Encoder /
-  Encryptable / reflection encode, and a natives decode) plus the transport
-  codec and the `CipherText` projection. **Zero dependencies on wazero or any
-  crypto.** This is the package a future stack-encrypt Go SDK is expected to
+- **[`vcvalue/`](vcvalue)** — the durable value layer: the value currency
+  (encoder / `Encryptable` / reflection encode + natives decode), the transport
+  codec, and the `CipherText` projection. **Zero dependencies** (no wazero, no
+  crypto). This is the module a future stack-encrypt Go SDK is expected to
   import.
-- **`vitaminc/`** — the reference harness: the wazero `Client`, the embedded
-  `.wasm`, and the end-to-end tests. It is explicitly a reference tool that
-  proves the currency and transport work end-to-end; the product surface is
-  the forthcoming stack-encrypt SDK, not this package.
-- **`guest/`** — the Rust crate (`vitaminc-wasi-guest`, its own workspace,
-  outside the release-plz version group) exposing `vc_alloc`/`vc_dealloc`/
-  `vc_encrypt`/`vc_decrypt`. It imports the transport codec from
-  `vitaminc_aead_value::transport`; it needs no host imports beyond WASI
-  itself (`random_get` supplies nonce entropy).
+  Module path: `github.com/cipherstash/vitaminc/bindings/go/vcvalue`.
 
-## Usage
+- **[`vcencrypt/`](vcencrypt)** — the demonstration binding of the
+  `vitaminc-encrypt` crate specifically: the wazero `Client`, the embedded
+  `.wasm`, and the Rust guest (`vcencrypt/guest/`). Single static key **by
+  design** — that is what `vitaminc-encrypt` is; key management / ZeroKMS
+  belongs to stack-encrypt, out of scope here.
+  Module path: `github.com/cipherstash/vitaminc/bindings/go/vcencrypt`.
 
-Any Go value goes in — builtins, slices, maps, and structs are handled by
-reflection, and a type can implement `vcvalue.Encryptable` to control its own
-sealing (the Go analog of Rust's `impl Encrypt`, since Go has no orphan
-impls):
+`vcencrypt` depends on `vcvalue`. Both live in this repo and neither is
+published, so `vcencrypt/go.mod` resolves the dependency with a local
+`replace` directive:
 
-```go
-type Person struct{ Name string; Age uint64 }
-
-func (p Person) EncryptValue(enc vcvalue.Encoder) error {
-    m := enc.Map()
-    m.Field("name").String(p.Name)
-    m.Field("age").UInt64(p.Age)
-    return m.End()
-}
-
-client, _ := vitaminc.NewClient(ctx)
-defer client.Close(ctx)
-
-ct, _ := client.Encrypt(ctx, key, Person{"Ada", 36}, aad)
-value, _ := client.Decrypt(ctx, key, ct, aad) // vcvalue natives + Object
+```
+replace github.com/cipherstash/vitaminc/bindings/go/vcvalue => ../vcvalue
 ```
 
-`Encrypt` takes `any`; `Decrypt` returns the vcvalue decode shape (Go
-natives — `nil`, `bool`, `int32`, `int64`, `uint32`, `uint64`, `float32`,
-`float64`, `string`, `[]byte`, `[]any` — and the ordered `vcvalue.Object`
-for maps). The numeric family stays distinct across the boundary by both
-signedness and width, and Go maps **exactly in both directions**: an
-`int32` comes back `int32`, never widened to `int64` (unlike JavaScript,
-which widens every numeric tag to a `number` on decode). Narrower Go kinds
-encode up to the matching width (`int16`→`INT32`), `uint`/`uintptr` map to
-`UINT64`, and a `uint64` above `int64` uses the `UINT64` tag. Object keys
-travel in the clear but are bound into each value's AAD — renaming or
-swapping keys fails decryption; reordering entries does not.
+That is self-contained — `go test ./...` works from either module directory
+with no `go.work` file required.
 
-## Rebuilding the guest
+### Why two modules, not two packages
 
-```sh
-cd guest
-cargo build --release --target wasm32-wasip1
-cp target/wasm32-wasip1/release/vitaminc_wasi_guest.wasm ../vitaminc/wasm/vitaminc_guest.wasm
-cargo run --example gen_fixture   # only if the fixture value/codec changed
-cd .. && CGO_ENABLED=0 go test ./...
-```
+`vcvalue` **is not a binding at all** — it is the Go materialization of the
+frozen data model, which real applications (via stack-encrypt) will depend on
+directly. `vcencrypt` is a reference tool that proves the model works
+end-to-end through wasm. A hard module boundary is what guarantees the
+wazero/crypto dependencies of the reference tool can never leak into the layer
+applications ship. This is the sharpened form of the earlier "two layers"
+rationale: one of the two is not a binding, so it gets its own module.
 
 ## Design decisions and non-decisions
 
 Settled choices for this spike, and things deliberately left out of scope:
 
-1. **Two layers on purpose.** `vcvalue` is the durable, dependency-free
-   currency + transport codec; a future stack-encrypt Go SDK will consume it.
-   `vitaminc` is a reference harness that proves the model end-to-end through
-   wasm. Keeping them separate stops wazero/crypto leaking into the layer that
-   real applications will depend on.
-
-2. **The data model is the tag table + leaf encodings.** The cross-language
+1. **The data model is the tag table + leaf encodings.** The cross-language
    contract is the frozen sealed-leaf tags (`[tag] ++ payload` inside the AEAD
    envelope, defined in `vitaminc-aead-value`), not any particular language's
-   types. Rust's `FfiValue` and Go's Encoder channels / decode natives are
+   types. Rust's `FfiValue` and Go's `vcvalue` channels / decode natives are
    materializations of that model. It is deliberately narrow (JSON/CBOR-class,
    not serde-class): a new tag is added only when a value class *cannot be
    represented* in the existing model, and requires a defined decode mapping
    for every supported language before it ships. `UINT64` is the worked
-   example.
+   example; passthrough (`PASSTHROUGH` / `CT_PASSTHROUGH`) is transport-local
+   framing, not a new sealed-leaf tag.
 
-3. **Typed Rust-static ↔ Go interop is out of scope.** Reusing Rust's
-   untagged `impl Encrypt for u32` leaf formats to carry static Rust types
-   across to Go is a non-goal. Typed fidelity comes from the schema layer (EQL
-   domains carry bigint/double/text), not from value tags. The value model is
-   dynamically typed by design.
+2. **Passthrough is opt-in and non-sensitive.** Fields that are not secret can
+   travel in the clear (unencrypted *and* unauthenticated) beside the sealed
+   ones — a user record's `id`/`created_at` alongside a sealed `email`/`name`.
+   It never happens implicitly: reflection encode requires the `vcvalue.Plain`
+   marker, and the Encoder exposes an explicit `Passthrough()` channel.
 
-4. **Wasm component model / WIT is the likely future, not adopted yet.** A
-   WIT-defined component interface is the probable direction for the
-   function-binding layer, but it is blocked on pure-Go host support: wazero
-   has no component-model runtime, and wasmtime-go reintroduces cgo. Tracked,
-   not adopted; the hand-written `vc_*` ABI stands in for now.
+3. **A cipher is a session handle.** The key is loaded once (`NewCipher` →
+   `vc_cipher_init`) and addressed by handle thereafter, so it crosses the
+   boundary a single time and the guest owns the key schedule for the handle's
+   lifetime. The old key-per-call ABI is gone (this is a spike; no shims).
 
-5. **A chatty per-leaf ABI was rejected.** Having Go drive the live cipher
-   across the boundary call-by-call (one crossing per leaf) was considered and
-   dropped: it pays per-crossing cost and forces the guest to hold session
-   state for half-built seq/map builders, with no byte-format-authority
-   benefit over the current replay design (host hands over a whole transport
-   tree, guest replays it through the cipher in one call).
+4. **Typed Rust-static ↔ Go interop is out of scope.** Reusing Rust's untagged
+   `impl Encrypt for u32` leaf formats to carry static Rust types across to Go
+   is a non-goal. Typed fidelity comes from the schema layer, not value tags.
+   The value model is dynamically typed by design.
 
-6. **suite PR #2099's conventions are one option, not an inherited idiom.**
-   The hand-written ABI, packed-`u64` returns, and committed `.wasm` follow
-   what the cipherstash-suite WASI bridge proved out, but they are treated as
-   one workable approach for the spike, not a house style to adopt by default.
+5. **Wasm component model / WIT is the likely future, not adopted yet.** A
+   WIT-defined component interface is the probable direction, but it is blocked
+   on pure-Go host support (wazero has no component-model runtime; wasmtime-go
+   reintroduces cgo). Tracked, not adopted; the hand-written `vc_*` ABI stands
+   in for now.
+
+6. **A chatty per-leaf ABI was rejected.** Having Go drive the live cipher
+   across the boundary call-by-call was considered and dropped: it pays
+   per-crossing cost and forces the guest to hold half-built builder state,
+   with no byte-format-authority benefit over the replay design (host hands
+   over a whole transport tree, guest replays it through the cipher in one
+   call).
+
+7. **suite PR #2099's conventions are one option, not an inherited idiom.** The
+   hand-written ABI, packed-`u64` returns, and committed `.wasm` follow what
+   the cipherstash-suite WASI bridge proved out, but they are treated as one
+   workable approach for the spike, not a house style.
 
 ## Trade-offs (accepted for the spike)
 
@@ -123,12 +101,11 @@ Settled choices for this spike, and things deliberately left out of scope:
   AES-NI, roughly an order of magnitude slower than aws-lc-rs. Fine for
   envelope/field workloads; not for bulk streams.
 - A wasm instance is single-threaded; `Client` serializes calls with a mutex.
-  Instantiate multiple Clients for parallelism (a compiled-module cache would
-  remove the per-Client compile cost — deferred).
+  A process-wide compilation cache removes the per-`Client` compile cost;
+  instantiate multiple `Client`s for parallelism.
 - Guest-side buffers are zeroized before free, but copies on the Go heap
   (keys, plaintext values) cannot be reliably wiped from Go.
-- The transport encoding is transport-only. The only frozen byte format is
-  the sealed leaf (`[tag] ++ payload`, see `vitaminc-aead-value`); durable
-  database interop belongs to the EQL layer, which this module knows nothing
+- The transport encoding is transport-only. The only frozen byte format is the
+  sealed leaf (`[tag] ++ payload`, see `vitaminc-aead-value`); durable database
+  interop belongs to a schema-aware layer, which these modules know nothing
   about.
-```

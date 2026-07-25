@@ -22,6 +22,20 @@ type Encryptable interface {
 	EncryptValue(enc Encoder) error
 }
 
+// Plain marks a value that must travel through the cipher **unencrypted and
+// unauthenticated** — the reflection-encode opt-in for passthrough. Wrap a
+// non-secret value (Plain{V: id}) and Encode/Marshal records it via the
+// Encoder's Passthrough channel instead of sealing it. Passthrough never
+// happens implicitly: only an explicit Plain (or a direct
+// enc.Passthrough() call) produces it.
+//
+// A decoded passthrough field surfaces back as Plain{V: <decoded value>},
+// so the marking round-trips and a caller can tell which fields were in the
+// clear. See the package docs — non-sensitive fields only.
+type Plain struct {
+	V any
+}
+
 // encState is the buffer and first-error shared by an Encoder and every
 // sub-encoder it hands out. Errors accumulate: once one is recorded, further
 // channel calls are no-ops, so consumer code can chain writes without
@@ -175,6 +189,27 @@ func (e Encoder) Bytes(b []byte) {
 	}
 }
 
+// Passthrough marks the next value as passthrough (unencrypted,
+// unauthenticated) and returns an Encoder for it — the same channel set, so
+// the wrapped value is written exactly as any other:
+//
+//	m.Field("id").Passthrough().Int64(42)   // a passthrough map entry
+//	enc.Passthrough().String("v")           // a passthrough root value
+//	s.Elem().Passthrough().Bool(true)       // a passthrough sequence element
+//
+// Write exactly one value (terminal or container) through the returned
+// Encoder. Non-sensitive data only — the wrapped value is not sealed.
+func (e Encoder) Passthrough() Encoder {
+	if e.st.err == nil {
+		if e.depth+1 > maxDepth {
+			e.st.fail(errors.New("vcvalue: value is nested too deeply"))
+		} else {
+			e.push(tagPassthrough)
+		}
+	}
+	return Encoder{st: e.st, depth: e.depth + 1}
+}
+
 // Seq begins a sequence. Call Elem once per element and End when done.
 func (e Encoder) Seq() *SeqEncoder {
 	s := &SeqEncoder{st: e.st, depth: e.depth + 1}
@@ -325,6 +360,13 @@ func encodeAny(enc Encoder, v any) {
 		enc.Null()
 		return
 	}
+	// Explicit passthrough opt-in: wrap the inner value in a passthrough
+	// marker, then encode it normally. Checked before Encryptable/reflection
+	// so a Plain is never mistaken for a plain struct.
+	if p, ok := v.(Plain); ok {
+		encodeAny(enc.Passthrough(), p.V)
+		return
+	}
 	if e, ok := v.(Encryptable); ok {
 		if err := e.EncryptValue(enc); err != nil {
 			enc.st.fail(err)
@@ -346,9 +388,14 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 		enc.Null()
 		return
 	}
-	// Re-check Encryptable for values reached through reflection (struct
-	// fields, slice elements, map values).
+	// Re-check the explicit markers for values reached through reflection
+	// (struct fields, slice elements, map values). Plain is itself a struct,
+	// so it must be intercepted before the reflect.Struct arm below.
 	if rv.CanInterface() {
+		if p, ok := rv.Interface().(Plain); ok {
+			encodeAny(enc.Passthrough(), p.V)
+			return
+		}
 		if e, ok := rv.Interface().(Encryptable); ok {
 			if err := e.EncryptValue(enc); err != nil {
 				enc.st.fail(err)
