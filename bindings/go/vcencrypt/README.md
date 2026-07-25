@@ -32,8 +32,9 @@ defer cipher.Close(ctx)
 ```
 
 `Encrypt` takes `any` (encoded through the `vcvalue` currency); `Decrypt`
-returns the `vcvalue` decode shape. A runnable, end-to-end walk-through of
-everything below is the testable `Example` in `example_test.go`.
+returns the `vcvalue` decode shape. Everything below is runnable:
+`go run ./examples/userrecord` walks the whole story (there is also a
+testable `Example` in `example_test.go`).
 
 ### Encrypting a user record with mixed fields
 
