@@ -31,9 +31,22 @@ carries a small, fixed set of value classes, and governs its own growth:
 > existing model, and requires a defined decode mapping for every supported
 > language before it ships.
 
-The `UINT64` tag is the worked example: unsigned integers above `i64::MAX`
-were previously unrepresentable — a genuine hole in the model — so it earned
-a new tag, with the Go/Python/JavaScript decode mappings defined below.
+The numeric family is the worked example. It divides the number space by
+both **signedness** and **width**: `INT32`/`INT64`/`UINT32`/`UINT64` for
+exact integers and `FLOAT32`/`FLOAT64` for IEEE-754 values. The unsigned
+tags close a genuine representational hole (values above `i64::MAX` had no
+home); the 32-bit widths exist for **schema fidelity with the EQL layer**
+(Postgres `int4`/`float4`), not byte savings, so an `int4` column
+round-trips as a 32-bit value rather than silently widening. Every tag has
+a defined Go/Python/JavaScript decode mapping (below).
+
+> **Governance note — this table is v2.** It was renumbered and renamed
+> once, on 2026-07-25, *before any ciphertext shipped*, to add the
+> fixed-width 32-bit numeric variants and to rename the floating-point tag
+> from the JS-centric `NUMBER` to the language-neutral `FLOAT64`. Nothing
+> was in the wild, so the renumber cost nothing — and it was the **last**
+> one. From v2 onward the freeze is absolute: the only permitted change is
+> *appending* a new tag for a genuinely unrepresentable value class.
 
 ## Leaf encoding (cross-language wire commitment)
 
@@ -49,16 +62,23 @@ onto the cipher's sequence and map modes and carry no tag of their own.
 | `0x01` | `UNDEFINED` | none |
 | `0x02` | `BOOL_FALSE` | none |
 | `0x03` | `BOOL_TRUE` | none |
-| `0x04` | `NUMBER` | 8 bytes, IEEE-754 binary64 bit pattern, little-endian |
-| `0x05` | `STRING` | UTF-8 bytes |
-| `0x06` | `BYTES` | raw bytes |
-| `0x07` | `INT64` | 8 bytes, two's-complement, little-endian |
-| `0x08` | `UINT64` | 8 bytes, little-endian |
+| `0x04` | `INT32` | 4 bytes, two's-complement, little-endian |
+| `0x05` | `INT64` | 8 bytes, two's-complement, little-endian |
+| `0x06` | `UINT32` | 4 bytes, little-endian |
+| `0x07` | `UINT64` | 8 bytes, little-endian |
+| `0x08` | `FLOAT32` | 4 bytes, IEEE-754 binary32 bit pattern, little-endian |
+| `0x09` | `FLOAT64` | 8 bytes, IEEE-754 binary64 bit pattern, little-endian |
+| `0x0A` | `STRING` | UTF-8 bytes |
+| `0x0B` | `BYTES` | raw bytes |
+
+The float tags carry the **raw IEEE-754 bit pattern** (not a numeric
+encoding), so `NaN` payloads and `-0.0` survive a round trip.
 
 This table is a **frozen wire format**: changing a tag or payload encoding
 breaks decryption of existing ciphertexts in every language. New types must
 take new tags. The known-answer tests in this crate pin each encoding
-byte-for-byte.
+byte-for-byte. (See the governance note above: the table was renumbered
+once pre-release, on 2026-07-25, and is now frozen for good.)
 
 ## Cross-language type mapping
 
@@ -70,9 +90,12 @@ mapping. The defining rules:
 | `Null` | `null` | `None` | `nil` |
 | `Undefined` | `undefined` | decodes as `None` | decodes as `nil` |
 | `Bool` | `boolean` | `bool` | `bool` |
-| `Number` | `number` (always — integral JS numbers do **not** become `Int`) | `float` | `float64` |
-| `Int` | encodes from `BigInt` that fits `i64`; decodes as `number` when within ±2⁵³, else `BigInt` | `int` | `int`/`int64` |
-| `UInt` | encodes from `BigInt` above `i64::MAX` that fits `u64`; decodes as `number` when ≤ 2⁵³−1, else `BigInt` | `int` | `uint64` |
+| `Int32` | decodes as `number` (never encoded — JS has no `int32`) | `int` | `int8`/`int16`/`int32` → encode; decodes as `int32` |
+| `Int64` | encodes from `BigInt` that fits `i64`; decodes as `number` when within ±2⁵³, else `BigInt` | `int` | `int`/`int64` → encode; decodes as `int64` |
+| `UInt32` | decodes as `number` (never encoded) | `int` | `uint8`/`uint16`/`uint32` → encode; decodes as `uint32` |
+| `UInt64` | encodes from `BigInt` above `i64::MAX` that fits `u64`; decodes as `number` when ≤ 2⁵³−1, else `BigInt` | `int` | `uint`/`uint64`/`uintptr` → encode; decodes as `uint64` |
+| `Float32` | decodes as `number` (exact widening; never encoded) | `float` | `float32` |
+| `Float64` | `number` (always — integral JS numbers do **not** become an integer tag) | `float` | `float64` |
 | `String` | `string` | `str` | `string` |
 | `Bytes` | `Buffer`/`Uint8Array` | `bytes` | `[]byte` |
 | `Array` | `Array` | `list` | `[]any` |
@@ -81,10 +104,19 @@ mapping. The defining rules:
 `Undefined` exists for JavaScript round-trip fidelity; languages without an
 analog decode it to their null value and never encode it.
 
-A JS `number` always encodes as `Number`, never `Int`/`UInt` — `42` and
-`42.0` are the same value in JS. Integer typing comes from `BigInt`: a
-`BigInt` that fits `i64` encodes as `Int`, one above `i64::MAX` that fits
-`u64` encodes as `UInt`, and anything larger is rejected.
+**JavaScript.** A JS `number` always encodes as `Float64`, never an integer
+tag — `42` and `42.0` are the same value in JS. Integer typing comes from
+`BigInt`: one that fits `i64` encodes as `Int64`, one above `i64::MAX` that
+fits `u64` encodes as `UInt64`, and anything larger is rejected. JS has no
+32-bit numeric types, so it never *encodes* `Int32`/`UInt32`/`Float32`; on
+decode it widens all of them to a JS `number` (a `Float32` widens exactly
+via `f64::from(f32)`; 32-bit integers always fit `Number.MAX_SAFE_INTEGER`).
+
+**Go.** Go maps **exactly in both directions**, unlike JS which widens on
+decode: `INT32`↔`int32`, `UINT32`↔`uint32`, `FLOAT32`↔`float32`, and the
+64-bit tags to their 64-bit Go types. Narrower Go integer kinds encode up to
+the matching width (e.g. `int16`→`INT32`), and `uint`/`uintptr` map to
+`UINT64`.
 
 ## Security notes
 

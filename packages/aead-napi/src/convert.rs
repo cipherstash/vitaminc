@@ -6,15 +6,22 @@
 //!
 //! # Numeric mapping
 //!
-//! JS `number` always converts to [`FfiValue::Number`] — integral JS
-//! numbers do **not** become [`FfiValue::Int`], preserving JS semantics
+//! JS `number` always converts to [`FfiValue::Float64`] — integral JS
+//! numbers do **not** become an integer variant, preserving JS semantics
 //! (`42` and `42.0` are the same value in JS). JS `BigInt` carries integer
-//! typing: one that fits `i64` converts to [`FfiValue::Int`]; one above
-//! `i64::MAX` that still fits `u64` converts to [`FfiValue::UInt`]; anything
-//! larger is rejected. On the way out, `Int` and `UInt` become a JS `number`
-//! when within `Number.MAX_SAFE_INTEGER` (2⁵³ − 1 in magnitude) and a
-//! `BigInt` otherwise, so integer-typed values written by other languages
-//! (Python, Go) surface losslessly in JS.
+//! typing: one that fits `i64` converts to [`FfiValue::Int64`]; one above
+//! `i64::MAX` that still fits `u64` converts to [`FfiValue::UInt64`];
+//! anything larger is rejected. JS has no 32-bit numeric types, so it
+//! **never** encodes [`FfiValue::Int32`], [`FfiValue::UInt32`], or
+//! [`FfiValue::Float32`].
+//!
+//! On the way out, values written by other languages (Python, Go) surface
+//! losslessly: [`FfiValue::Float32`] widens exactly to a JS `number`
+//! (`f64::from(f32)`); [`FfiValue::Float64`] is a `number`;
+//! [`FfiValue::Int32`] / [`FfiValue::UInt32`] are always a `number` (their
+//! magnitude never exceeds 2⁵³); [`FfiValue::Int64`] / [`FfiValue::UInt64`]
+//! become a `number` when within `Number.MAX_SAFE_INTEGER` (2⁵³ − 1 in
+//! magnitude) and a `BigInt` otherwise.
 
 use napi::bindgen_prelude::{
     Array, BigInt, Buffer, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue, Uint8Array,
@@ -177,20 +184,20 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<FfiValue> {
         ValueType::Null => Ok(FfiValue::Null),
         ValueType::Undefined => Ok(FfiValue::Undefined),
         ValueType::Boolean => Ok(FfiValue::Bool(bool::from_unknown(unknown)?)),
-        ValueType::Number => Ok(FfiValue::Number(f64::from_unknown(unknown)?)),
+        ValueType::Number => Ok(FfiValue::Float64(f64::from_unknown(unknown)?)),
         ValueType::BigInt => {
             let big = BigInt::from_unknown(unknown)?;
-            // Signed first: a BigInt that fits `i64` is an `Int`.
+            // Signed first: a BigInt that fits `i64` is an `Int64`.
             let (signed, i64_lossless) = big.get_i64();
             if i64_lossless {
-                return Ok(FfiValue::Int(signed));
+                return Ok(FfiValue::Int64(signed));
             }
             // Otherwise try unsigned: `get_u64` reports lossless only when the
             // value is non-negative and fits in a single 64-bit word, so a
-            // positive BigInt in (i64::MAX, u64::MAX] lands here as `UInt`.
+            // positive BigInt in (i64::MAX, u64::MAX] lands here as `UInt64`.
             let (_sign, unsigned, u64_lossless) = big.get_u64();
             if u64_lossless {
-                return Ok(FfiValue::UInt(unsigned));
+                return Ok(FfiValue::UInt64(unsigned));
             }
             Err(Error::new(
                 Status::InvalidArg,
@@ -282,8 +289,14 @@ fn value_to_js(env: sys::napi_env, value: FfiValue) -> Result<sys::napi_value> {
         },
         FfiValue::Undefined => unsafe { <()>::to_napi_value(env, ()) },
         FfiValue::Bool(b) => unsafe { bool::to_napi_value(env, b) },
-        FfiValue::Number(n) => unsafe { f64::to_napi_value(env, n) },
-        FfiValue::Int(i) => {
+        // Both float widths surface as a JS `number`; `f32` widens exactly.
+        FfiValue::Float64(n) => unsafe { f64::to_napi_value(env, n) },
+        FfiValue::Float32(f) => unsafe { f64::to_napi_value(env, f64::from(f)) },
+        // 32-bit integers always fit `Number.MAX_SAFE_INTEGER`, so they are
+        // always a plain JS `number`.
+        FfiValue::Int32(i) => unsafe { f64::to_napi_value(env, i as f64) },
+        FfiValue::UInt32(u) => unsafe { f64::to_napi_value(env, u as f64) },
+        FfiValue::Int64(i) => {
             // Exactly representable → plain number (the common case, and
             // what JS callers expect for e.g. a Python-written `30`).
             // Beyond ±MAX_SAFE_INTEGER → BigInt, losslessly.
@@ -293,8 +306,8 @@ fn value_to_js(env: sys::napi_env, value: FfiValue) -> Result<sys::napi_value> {
                 unsafe { BigInt::to_napi_value(env, BigInt::from(i)) }
             }
         }
-        FfiValue::UInt(u) => {
-            // Same rule as `Int`: exactly representable → plain number, else
+        FfiValue::UInt64(u) => {
+            // Same rule as `Int64`: exactly representable → plain number, else
             // BigInt. `MAX_SAFE_INTEGER` is non-negative so the cast is safe.
             if u <= MAX_SAFE_INTEGER as u64 {
                 unsafe { f64::to_napi_value(env, u as f64) }

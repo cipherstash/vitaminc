@@ -1,5 +1,9 @@
 use std::borrow::Cow;
 
+use crate::tagged::{
+    TaggedBoolFalse, TaggedBoolTrue, TaggedBytes, TaggedFloat32, TaggedFloat64, TaggedInt32,
+    TaggedInt64, TaggedNull, TaggedString, TaggedUInt32, TaggedUInt64, TaggedUndefined,
+};
 use crate::tags;
 use vitaminc_aead::{
     Cipher, Decipher, DecipherVisitor, Decrypt, Encrypt, IntoAad, MapAccess, MapCipher, SeqAccess,
@@ -29,10 +33,14 @@ use zeroize::Zeroize;
 ///
 /// `Null` and `Undefined` are distinct tagged leaves rather than uses of
 /// [`Cipher::encrypt_none`] — `Option` semantics can't distinguish them,
-/// and JavaScript callers can. See the crate docs for the cross-language
-/// type mapping, including how [`Number`](FfiValue::Number),
-/// [`Int`](FfiValue::Int), and [`UInt`](FfiValue::UInt) divide the numeric
-/// space.
+/// and JavaScript callers can. The numeric family divides the number space
+/// by both signedness and width: [`Int32`](FfiValue::Int32) /
+/// [`Int64`](FfiValue::Int64) / [`UInt32`](FfiValue::UInt32) /
+/// [`UInt64`](FfiValue::UInt64) for exact integers and
+/// [`Float32`](FfiValue::Float32) / [`Float64`](FfiValue::Float64) for
+/// IEEE-754 values. The 32-bit widths exist for schema fidelity with the
+/// EQL layer (Postgres `int4`/`float4`), not byte savings. See the crate
+/// docs for the cross-language type mapping.
 ///
 /// The cross-language contract is the frozen tag table plus the leaf
 /// encodings (see [`tags`]); this enum is merely Rust's materialization of
@@ -47,16 +55,27 @@ pub enum FfiValue {
     Undefined,
     /// Boolean.
     Bool(bool),
-    /// Floating-point number. Round-trips by IEEE-754 bit pattern.
-    Number(f64),
-    /// 64-bit signed integer. Kept distinct from [`Number`](FfiValue::Number)
-    /// so integer-typed languages round-trip integers as integers.
-    Int(i64),
-    /// 64-bit unsigned integer. Kept distinct from [`Int`](FfiValue::Int) so
-    /// unsigned values above `i64::MAX` — previously unrepresentable — round
-    /// trip losslessly. This closes the model's only representational hole in
-    /// the integer space.
-    UInt(u64),
+    /// 32-bit signed integer. For schema fidelity with `int4` at the EQL
+    /// layer; integer-typed languages keep it distinct from
+    /// [`Int64`](FfiValue::Int64).
+    Int32(i32),
+    /// 64-bit signed integer. Kept distinct from the float tags so
+    /// integer-typed languages round-trip integers as integers.
+    Int64(i64),
+    /// 32-bit unsigned integer. For schema fidelity with the EQL layer.
+    UInt32(u32),
+    /// 64-bit unsigned integer. Kept distinct from [`Int64`](FfiValue::Int64)
+    /// so unsigned values above `i64::MAX` — previously unrepresentable —
+    /// round trip losslessly. This closes the model's only representational
+    /// hole in the integer space.
+    UInt64(u64),
+    /// 32-bit floating-point number. Round-trips by IEEE-754 bit pattern
+    /// (`NaN` payloads and `-0.0` survive). For schema fidelity with
+    /// `float4` at the EQL layer.
+    Float32(f32),
+    /// 64-bit floating-point number. Round-trips by IEEE-754 bit pattern.
+    /// This is the tag a JavaScript `number` maps to.
+    Float64(f64),
     /// String as UTF-8 bytes. Validated UTF-8 at construction; held as
     /// bytes inside [`Protected`] so the copy is wiped on drop.
     String(Protected<Vec<u8>>),
@@ -76,55 +95,29 @@ pub enum FfiValue {
 // its own; container metadata (numbers, booleans, keys) can be wiped
 // explicitly via `Zeroize` where callers need it.
 
-/// Build a tagged leaf plaintext: `[tag] ++ payload`.
-///
-/// The bare-bytes window between `risky_ref` and the re-wrap in
-/// [`Protected`] is bounded to this function, mirroring the built-in leaf
-/// `Encrypt` impls (see the chain-of-custody notes in `vitaminc-aead`).
-fn tagged(tag: u8, data: Protected<Vec<u8>>) -> Protected<Vec<u8>> {
-    let payload = data.risky_ref();
-    let mut buf = Vec::with_capacity(1 + payload.len());
-    buf.push(tag);
-    buf.extend_from_slice(payload);
-    // `data` drops (and wipes) here; `buf` is owned by the new `Protected`.
-    Protected::new(buf)
-}
-
 impl Encrypt for FfiValue {
     fn encrypt_with_aad<'a, C, A>(self, cipher: C, aad: A) -> Result<C::Ok, C::Error>
     where
         C: Cipher,
         A: IntoAad<'a>,
     {
+        // Each leaf is assembled by a typed `Tagged*` plaintext (see
+        // `crate::tagged`) that owns the `[tag] ++ payload` layout: the
+        // fixed-width leaves seal from a stack array (no heap allocation),
+        // the variable-width ones allocate once.
         match self {
-            FfiValue::Null => cipher.encrypt_bytes_vec(Protected::new(vec![tags::NULL]), aad),
-            FfiValue::Undefined => {
-                cipher.encrypt_bytes_vec(Protected::new(vec![tags::UNDEFINED]), aad)
-            }
-            FfiValue::Bool(b) => {
-                let t = if b { tags::BOOL_TRUE } else { tags::BOOL_FALSE };
-                cipher.encrypt_bytes_vec(Protected::new(vec![t]), aad)
-            }
-            FfiValue::Number(n) => {
-                let mut buf = Vec::with_capacity(9);
-                buf.push(tags::NUMBER);
-                buf.extend_from_slice(&n.to_bits().to_le_bytes());
-                cipher.encrypt_bytes_vec(Protected::new(buf), aad)
-            }
-            FfiValue::Int(i) => {
-                let mut buf = Vec::with_capacity(9);
-                buf.push(tags::INT64);
-                buf.extend_from_slice(&i.to_le_bytes());
-                cipher.encrypt_bytes_vec(Protected::new(buf), aad)
-            }
-            FfiValue::UInt(u) => {
-                let mut buf = Vec::with_capacity(9);
-                buf.push(tags::UINT64);
-                buf.extend_from_slice(&u.to_le_bytes());
-                cipher.encrypt_bytes_vec(Protected::new(buf), aad)
-            }
-            FfiValue::String(s) => cipher.encrypt_bytes_vec(tagged(tags::STRING, s), aad),
-            FfiValue::Bytes(b) => cipher.encrypt_bytes_vec(tagged(tags::BYTES, b), aad),
+            FfiValue::Null => TaggedNull::tag_only().encrypt_with_aad(cipher, aad),
+            FfiValue::Undefined => TaggedUndefined::tag_only().encrypt_with_aad(cipher, aad),
+            FfiValue::Bool(false) => TaggedBoolFalse::tag_only().encrypt_with_aad(cipher, aad),
+            FfiValue::Bool(true) => TaggedBoolTrue::tag_only().encrypt_with_aad(cipher, aad),
+            FfiValue::Int32(i) => TaggedInt32::from(i).encrypt_with_aad(cipher, aad),
+            FfiValue::Int64(i) => TaggedInt64::from(i).encrypt_with_aad(cipher, aad),
+            FfiValue::UInt32(u) => TaggedUInt32::from(u).encrypt_with_aad(cipher, aad),
+            FfiValue::UInt64(u) => TaggedUInt64::from(u).encrypt_with_aad(cipher, aad),
+            FfiValue::Float32(f) => TaggedFloat32::from(f).encrypt_with_aad(cipher, aad),
+            FfiValue::Float64(f) => TaggedFloat64::from(f).encrypt_with_aad(cipher, aad),
+            FfiValue::String(s) => TaggedString::new(s).encrypt_with_aad(cipher, aad),
+            FfiValue::Bytes(b) => TaggedBytes::new(b).encrypt_with_aad(cipher, aad),
             FfiValue::Array(items) => {
                 // Mirror the built-in `Vec<T>` impl: every element sealed
                 // against `Aad::for_sequence_element` of the caller's AAD.
@@ -162,22 +155,36 @@ impl<'c> DecipherVisitor<'c> for FfiValueVisitor {
     fn visit_bytes_vec(self, data: Protected<Vec<u8>>) -> Result<Self::Value, Unspecified> {
         let bytes = data.risky_ref();
         let (&t, payload) = bytes.split_first().ok_or(Unspecified)?;
+        // The `try_into` on each fixed-width arm rejects any payload that is
+        // not exactly the tag's width — truncated or over-long leaves fail.
         match (t, payload) {
             (tags::NULL, []) => Ok(FfiValue::Null),
             (tags::UNDEFINED, []) => Ok(FfiValue::Undefined),
             (tags::BOOL_FALSE, []) => Ok(FfiValue::Bool(false)),
             (tags::BOOL_TRUE, []) => Ok(FfiValue::Bool(true)),
-            (tags::NUMBER, bits) => {
-                let bits: [u8; 8] = bits.try_into().map_err(|_| Unspecified)?;
-                Ok(FfiValue::Number(f64::from_bits(u64::from_le_bytes(bits))))
+            (tags::INT32, bytes) => {
+                let bytes: [u8; 4] = bytes.try_into().map_err(|_| Unspecified)?;
+                Ok(FfiValue::Int32(i32::from_le_bytes(bytes)))
             }
             (tags::INT64, bytes) => {
                 let bytes: [u8; 8] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(FfiValue::Int(i64::from_le_bytes(bytes)))
+                Ok(FfiValue::Int64(i64::from_le_bytes(bytes)))
+            }
+            (tags::UINT32, bytes) => {
+                let bytes: [u8; 4] = bytes.try_into().map_err(|_| Unspecified)?;
+                Ok(FfiValue::UInt32(u32::from_le_bytes(bytes)))
             }
             (tags::UINT64, bytes) => {
                 let bytes: [u8; 8] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(FfiValue::UInt(u64::from_le_bytes(bytes)))
+                Ok(FfiValue::UInt64(u64::from_le_bytes(bytes)))
+            }
+            (tags::FLOAT32, bits) => {
+                let bits: [u8; 4] = bits.try_into().map_err(|_| Unspecified)?;
+                Ok(FfiValue::Float32(f32::from_bits(u32::from_le_bytes(bits))))
+            }
+            (tags::FLOAT64, bits) => {
+                let bits: [u8; 8] = bits.try_into().map_err(|_| Unspecified)?;
+                Ok(FfiValue::Float64(f64::from_bits(u64::from_le_bytes(bits))))
             }
             (tags::STRING, utf8) => {
                 // Validate now so host conversions later are infallible.
@@ -233,15 +240,19 @@ impl PartialEq for FfiValue {
     /// Structural equality for tests only. Variable-time — leaf comparisons
     /// use ordinary byte equality — which is why this is `cfg(test)`: use
     /// `vitaminc_protected::Equatable` where constant-time equality of
-    /// secrets is required.
+    /// secrets is required. Floats compare by raw bit pattern so `-0.0` and
+    /// `NaN` payloads compare as they seal.
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (FfiValue::Null, FfiValue::Null) => true,
             (FfiValue::Undefined, FfiValue::Undefined) => true,
             (FfiValue::Bool(a), FfiValue::Bool(b)) => a == b,
-            (FfiValue::Number(a), FfiValue::Number(b)) => a.to_bits() == b.to_bits(),
-            (FfiValue::Int(a), FfiValue::Int(b)) => a == b,
-            (FfiValue::UInt(a), FfiValue::UInt(b)) => a == b,
+            (FfiValue::Int32(a), FfiValue::Int32(b)) => a == b,
+            (FfiValue::Int64(a), FfiValue::Int64(b)) => a == b,
+            (FfiValue::UInt32(a), FfiValue::UInt32(b)) => a == b,
+            (FfiValue::UInt64(a), FfiValue::UInt64(b)) => a == b,
+            (FfiValue::Float32(a), FfiValue::Float32(b)) => a.to_bits() == b.to_bits(),
+            (FfiValue::Float64(a), FfiValue::Float64(b)) => a.to_bits() == b.to_bits(),
             (FfiValue::String(a), FfiValue::String(b))
             | (FfiValue::Bytes(a), FfiValue::Bytes(b)) => a.risky_ref() == b.risky_ref(),
             (FfiValue::Array(a), FfiValue::Array(b)) => a == b,
@@ -258,9 +269,12 @@ impl std::fmt::Debug for FfiValue {
             FfiValue::Null => f.write_str("Null"),
             FfiValue::Undefined => f.write_str("Undefined"),
             FfiValue::Bool(b) => write!(f, "Bool({b})"),
-            FfiValue::Number(n) => write!(f, "Number({n})"),
-            FfiValue::Int(i) => write!(f, "Int({i})"),
-            FfiValue::UInt(u) => write!(f, "UInt({u})"),
+            FfiValue::Int32(i) => write!(f, "Int32({i})"),
+            FfiValue::Int64(i) => write!(f, "Int64({i})"),
+            FfiValue::UInt32(u) => write!(f, "UInt32({u})"),
+            FfiValue::UInt64(u) => write!(f, "UInt64({u})"),
+            FfiValue::Float32(n) => write!(f, "Float32({n})"),
+            FfiValue::Float64(n) => write!(f, "Float64({n})"),
             FfiValue::String(_) => f.write_str("String(<redacted>)"),
             FfiValue::Bytes(_) => f.write_str("Bytes(<redacted>)"),
             FfiValue::Array(items) => f.debug_tuple("Array").field(items).finish(),
@@ -444,83 +458,153 @@ mod tests {
     }
 
     #[test]
-    fn kat_number() {
-        // 1.5 = 0x3FF8000000000000, little-endian.
+    fn kat_int32() {
         assert_eq!(
-            leaf_bytes(FfiValue::Number(1.5)),
-            [0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8, 0x3F]
+            leaf_bytes(FfiValue::Int32(42)),
+            [0x04, 42, 0x00, 0x00, 0x00]
         );
-        // -0.0: sign bit only — distinct from +0.0 on the wire.
+        // -1: all ones (two's complement).
         assert_eq!(
-            leaf_bytes(FfiValue::Number(-0.0)),
-            [0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]
+            leaf_bytes(FfiValue::Int32(-1)),
+            [0x04, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
+        // i32::MIN: sign bit only in the top byte.
+        assert_eq!(
+            leaf_bytes(FfiValue::Int32(i32::MIN)),
+            [0x04, 0x00, 0x00, 0x00, 0x80]
         );
     }
 
     #[test]
     fn kat_int64() {
         assert_eq!(
-            leaf_bytes(FfiValue::Int(42)),
-            [0x07, 42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+            leaf_bytes(FfiValue::Int64(42)),
+            [0x05, 42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
         );
         // -1: all ones (two's complement).
         assert_eq!(
-            leaf_bytes(FfiValue::Int(-1)),
-            [0x07, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+            leaf_bytes(FfiValue::Int64(-1)),
+            [0x05, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
         );
         assert_eq!(
-            leaf_bytes(FfiValue::Int(i64::MIN)),
-            [0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]
+            leaf_bytes(FfiValue::Int64(i64::MIN)),
+            [0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]
+        );
+    }
+
+    #[test]
+    fn kat_uint32() {
+        assert_eq!(
+            leaf_bytes(FfiValue::UInt32(0)),
+            [0x06, 0x00, 0x00, 0x00, 0x00]
+        );
+        // u32::MAX: all ones.
+        assert_eq!(
+            leaf_bytes(FfiValue::UInt32(u32::MAX)),
+            [0x06, 0xFF, 0xFF, 0xFF, 0xFF]
         );
     }
 
     #[test]
     fn kat_uint64() {
         assert_eq!(
-            leaf_bytes(FfiValue::UInt(42)),
-            [0x08, 42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+            leaf_bytes(FfiValue::UInt64(42)),
+            [0x07, 42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
         );
         // u64::MAX: all ones — the value INT64 cannot represent.
         assert_eq!(
-            leaf_bytes(FfiValue::UInt(u64::MAX)),
-            [0x08, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+            leaf_bytes(FfiValue::UInt64(u64::MAX)),
+            [0x07, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
         );
         assert_eq!(
-            leaf_bytes(FfiValue::UInt(0)),
-            [0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+            leaf_bytes(FfiValue::UInt64(0)),
+            [0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
         );
     }
 
     #[test]
-    fn kat_int_and_uint_never_collide() {
-        // Int(-1) and UInt(u64::MAX) share payload bytes but differ by tag,
-        // so they never collide on the wire.
-        assert_ne!(
-            leaf_bytes(FfiValue::Int(-1)),
-            leaf_bytes(FfiValue::UInt(u64::MAX))
+    fn kat_float32() {
+        // 1.5f32 = 0x3FC00000, little-endian.
+        assert_eq!(
+            leaf_bytes(FfiValue::Float32(1.5)),
+            [0x08, 0x00, 0x00, 0xC0, 0x3F]
+        );
+        // -0.0f32: sign bit only — distinct from +0.0 on the wire.
+        assert_eq!(
+            leaf_bytes(FfiValue::Float32(-0.0)),
+            [0x08, 0x00, 0x00, 0x00, 0x80]
+        );
+        // A specific NaN bit pattern survives by raw bits.
+        let nan = f32::from_bits(0x7fc0_0001);
+        assert_eq!(
+            leaf_bytes(FfiValue::Float32(nan)),
+            [0x08, 0x01, 0x00, 0xC0, 0x7F]
+        );
+    }
+
+    #[test]
+    fn kat_float64() {
+        // 1.5 = 0x3FF8000000000000, little-endian.
+        assert_eq!(
+            leaf_bytes(FfiValue::Float64(1.5)),
+            [0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8, 0x3F]
+        );
+        // -0.0: sign bit only — distinct from +0.0 on the wire.
+        assert_eq!(
+            leaf_bytes(FfiValue::Float64(-0.0)),
+            [0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]
         );
     }
 
     #[test]
     fn kat_string() {
-        assert_eq!(leaf_bytes(s("abc")), [0x05, b'a', b'b', b'c']);
-        assert_eq!(leaf_bytes(s("")), [0x05]);
+        assert_eq!(leaf_bytes(s("abc")), [0x0A, b'a', b'b', b'c']);
+        assert_eq!(leaf_bytes(s("")), [0x0A]);
     }
 
     #[test]
     fn kat_bytes() {
         assert_eq!(
             leaf_bytes(FfiValue::Bytes(Protected::new(vec![0xDE, 0xAD]))),
-            [0x06, 0xDE, 0xAD]
+            [0x0B, 0xDE, 0xAD]
         );
     }
 
     #[test]
-    fn kat_int_and_number_never_collide() {
-        // Int(1) and Number(1.0) are different types AND different bytes.
+    fn kat_int64_and_uint64_never_collide() {
+        // Int64(-1) and UInt64(u64::MAX) share payload bytes but differ by
+        // tag, so they never collide on the wire.
         assert_ne!(
-            leaf_bytes(FfiValue::Int(1)),
-            leaf_bytes(FfiValue::Number(1.0))
+            leaf_bytes(FfiValue::Int64(-1)),
+            leaf_bytes(FfiValue::UInt64(u64::MAX))
+        );
+    }
+
+    #[test]
+    fn kat_int32_and_int64_never_collide() {
+        // Same small value, different widths AND tags: 32- and 64-bit
+        // integers never collide on the wire.
+        assert_ne!(
+            leaf_bytes(FfiValue::Int32(7)),
+            leaf_bytes(FfiValue::Int64(7))
+        );
+    }
+
+    #[test]
+    fn kat_float32_and_float64_never_collide() {
+        // 1.5 in binary32 and binary64 differ by tag, width, and bits.
+        assert_ne!(
+            leaf_bytes(FfiValue::Float32(1.5)),
+            leaf_bytes(FfiValue::Float64(1.5))
+        );
+    }
+
+    #[test]
+    fn kat_int64_and_float64_never_collide() {
+        // Int64(1) and Float64(1.0) are different types AND different bytes.
+        assert_ne!(
+            leaf_bytes(FfiValue::Int64(1)),
+            leaf_bytes(FfiValue::Float64(1.0))
         );
     }
 
@@ -535,16 +619,40 @@ mod tests {
         assert_eq!(roundtrip(FfiValue::Bool(true)), FfiValue::Bool(true));
         assert_eq!(roundtrip(FfiValue::Bool(false)), FfiValue::Bool(false));
         assert_eq!(
-            roundtrip(FfiValue::Number(1234.5678)),
-            FfiValue::Number(1234.5678)
+            roundtrip(FfiValue::Float64(1234.5678)),
+            FfiValue::Float64(1234.5678)
         );
-        assert_eq!(roundtrip(FfiValue::Int(0)), FfiValue::Int(0));
-        assert_eq!(roundtrip(FfiValue::Int(i64::MAX)), FfiValue::Int(i64::MAX));
-        assert_eq!(roundtrip(FfiValue::Int(i64::MIN)), FfiValue::Int(i64::MIN));
-        assert_eq!(roundtrip(FfiValue::UInt(0)), FfiValue::UInt(0));
         assert_eq!(
-            roundtrip(FfiValue::UInt(u64::MAX)),
-            FfiValue::UInt(u64::MAX)
+            roundtrip(FfiValue::Float32(1234.5f32)),
+            FfiValue::Float32(1234.5f32)
+        );
+        assert_eq!(roundtrip(FfiValue::Int32(0)), FfiValue::Int32(0));
+        assert_eq!(
+            roundtrip(FfiValue::Int32(i32::MAX)),
+            FfiValue::Int32(i32::MAX)
+        );
+        assert_eq!(
+            roundtrip(FfiValue::Int32(i32::MIN)),
+            FfiValue::Int32(i32::MIN)
+        );
+        assert_eq!(roundtrip(FfiValue::Int64(0)), FfiValue::Int64(0));
+        assert_eq!(
+            roundtrip(FfiValue::Int64(i64::MAX)),
+            FfiValue::Int64(i64::MAX)
+        );
+        assert_eq!(
+            roundtrip(FfiValue::Int64(i64::MIN)),
+            FfiValue::Int64(i64::MIN)
+        );
+        assert_eq!(roundtrip(FfiValue::UInt32(0)), FfiValue::UInt32(0));
+        assert_eq!(
+            roundtrip(FfiValue::UInt32(u32::MAX)),
+            FfiValue::UInt32(u32::MAX)
+        );
+        assert_eq!(roundtrip(FfiValue::UInt64(0)), FfiValue::UInt64(0));
+        assert_eq!(
+            roundtrip(FfiValue::UInt64(u64::MAX)),
+            FfiValue::UInt64(u64::MAX)
         );
         assert_eq!(roundtrip(s("hello world")), s("hello world"));
         assert_eq!(
@@ -554,28 +662,49 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_preserves_int_vs_number() {
+    fn roundtrip_preserves_numeric_types() {
         // The decrypted variant matches the encrypted one — integers do not
-        // collapse into floats or vice versa.
-        assert!(matches!(roundtrip(FfiValue::Int(1)), FfiValue::Int(1)));
+        // collapse into floats, widths are preserved, and signedness holds.
+        assert!(matches!(roundtrip(FfiValue::Int32(1)), FfiValue::Int32(1)));
+        assert!(matches!(roundtrip(FfiValue::Int64(1)), FfiValue::Int64(1)));
         assert!(matches!(
-            roundtrip(FfiValue::Number(1.0)),
-            FfiValue::Number(_)
+            roundtrip(FfiValue::UInt32(1)),
+            FfiValue::UInt32(1)
         ));
-        // UInt stays UInt — it does not collapse into Int or Number.
-        assert!(matches!(roundtrip(FfiValue::UInt(1)), FfiValue::UInt(1)));
+        assert!(matches!(
+            roundtrip(FfiValue::UInt64(1)),
+            FfiValue::UInt64(1)
+        ));
+        assert!(matches!(
+            roundtrip(FfiValue::Float32(1.0)),
+            FfiValue::Float32(_)
+        ));
+        assert!(matches!(
+            roundtrip(FfiValue::Float64(1.0)),
+            FfiValue::Float64(_)
+        ));
     }
 
     #[test]
-    fn roundtrip_number_edge_cases() {
-        // Raw-bits round-trip: -0.0 and a specific NaN payload survive.
-        assert_eq!(roundtrip(FfiValue::Number(-0.0)), FfiValue::Number(-0.0));
+    fn roundtrip_float_edge_cases() {
+        // Raw-bits round-trip: -0.0 and specific NaN payloads survive, in
+        // both widths.
+        assert_eq!(roundtrip(FfiValue::Float64(-0.0)), FfiValue::Float64(-0.0));
+        assert_eq!(roundtrip(FfiValue::Float32(-0.0)), FfiValue::Float32(-0.0));
         assert_eq!(
-            roundtrip(FfiValue::Number(f64::INFINITY)),
-            FfiValue::Number(f64::INFINITY)
+            roundtrip(FfiValue::Float64(f64::INFINITY)),
+            FfiValue::Float64(f64::INFINITY)
         );
-        let nan = f64::from_bits(0x7ff8_dead_beef_0001);
-        assert_eq!(roundtrip(FfiValue::Number(nan)), FfiValue::Number(nan));
+        let nan64 = f64::from_bits(0x7ff8_dead_beef_0001);
+        assert_eq!(
+            roundtrip(FfiValue::Float64(nan64)),
+            FfiValue::Float64(nan64)
+        );
+        let nan32 = f32::from_bits(0x7fc0_0001);
+        assert_eq!(
+            roundtrip(FfiValue::Float32(nan32)),
+            FfiValue::Float32(nan32)
+        );
     }
 
     #[test]
@@ -583,13 +712,14 @@ mod tests {
         let make = || {
             FfiValue::Object(vec![
                 ("name".into(), s("alice")),
-                ("age".into(), FfiValue::Int(30)),
-                ("score".into(), FfiValue::Number(99.5)),
+                ("age".into(), FfiValue::Int64(30)),
+                ("score".into(), FfiValue::Float64(99.5)),
+                ("rank".into(), FfiValue::Int32(-3)),
                 ("active".into(), FfiValue::Bool(true)),
                 ("nickname".into(), FfiValue::Null),
                 (
                     "tags".into(),
-                    FfiValue::Array(vec![s("a"), s("b"), FfiValue::Int(3)]),
+                    FfiValue::Array(vec![s("a"), s("b"), FfiValue::Int64(3)]),
                 ),
                 (
                     "nested".into(),
@@ -665,24 +795,40 @@ mod tests {
 
     #[test]
     fn truncated_fixed_width_leaves_fail() {
+        // Every numeric tag rejects a payload that is not exactly its width,
+        // in both the too-short and too-long directions.
         let cipher = cipher();
         use vitaminc_aead::Cipher as _;
-        for tag in [tags::NUMBER, tags::INT64, tags::UINT64] {
-            // 3 payload bytes instead of 8.
+        // (tag, correct payload width)
+        let cases = [
+            (tags::INT32, 4usize),
+            (tags::INT64, 8),
+            (tags::UINT32, 4),
+            (tags::UINT64, 8),
+            (tags::FLOAT32, 4),
+            (tags::FLOAT64, 8),
+        ];
+        for (tag, width) in cases {
+            // One byte short.
+            let mut short = vec![tag];
+            short.extend(std::iter::repeat_n(0u8, width - 1));
             let bad = (&cipher)
-                .encrypt_bytes_vec(
-                    Protected::new(vec![tag, 1, 2, 3]),
-                    vitaminc_aead::Aad::empty(),
-                )
+                .encrypt_bytes_vec(Protected::new(short), vitaminc_aead::Aad::empty())
                 .expect("encrypt raw");
-            assert!(cipher.decrypt::<FfiValue>(bad).is_err());
-            // 9 payload bytes instead of 8.
+            assert!(
+                cipher.decrypt::<FfiValue>(bad).is_err(),
+                "tag {tag:#x} width-1 must fail"
+            );
+            // One byte long.
             let mut long = vec![tag];
-            long.extend_from_slice(&[0u8; 9]);
+            long.extend(std::iter::repeat_n(0u8, width + 1));
             let bad = (&cipher)
                 .encrypt_bytes_vec(Protected::new(long), vitaminc_aead::Aad::empty())
                 .expect("encrypt raw");
-            assert!(cipher.decrypt::<FfiValue>(bad).is_err());
+            assert!(
+                cipher.decrypt::<FfiValue>(bad).is_err(),
+                "tag {tag:#x} width+1 must fail"
+            );
         }
     }
 
@@ -736,8 +882,8 @@ mod tests {
         use vitaminc_encrypt::AesCipherText;
         let cipher = cipher();
         let value = FfiValue::Object(vec![
-            ("a".into(), FfiValue::Int(1)),
-            ("b".into(), FfiValue::Int(2)),
+            ("a".into(), FfiValue::Int64(1)),
+            ("b".into(), FfiValue::Int64(2)),
         ]);
         let ct = value.encrypt(&cipher).expect("encrypt");
         let tampered = match ct {

@@ -13,11 +13,14 @@ cross-language leaf wire format. This crate adds only what is JS-specific:
   implementing napi's traits on the foreign type directly). Conversions run
   on the JS thread; everything past the `#[napi]` boundary works with the
   bare `FfiValue`, on any thread.
-  - JS `number` ↔ `FfiValue::Number` (always — integral JS numbers stay
-    numbers). JS `BigInt` carries integer typing: fits `i64` → `FfiValue::Int`,
-    above `i64::MAX` but fits `u64` → `FfiValue::UInt`, larger → rejected.
-    Decoding an `Int`/`UInt` yields a JS `number` within
-    `Number.MAX_SAFE_INTEGER` and a `BigInt` beyond it.
+  - JS `number` ↔ `FfiValue::Float64` (always — integral JS numbers stay
+    numbers). JS `BigInt` carries integer typing: fits `i64` →
+    `FfiValue::Int64`, above `i64::MAX` but fits `u64` → `FfiValue::UInt64`,
+    larger → rejected. JS has no 32-bit numeric types, so it never encodes
+    `Int32`/`UInt32`/`Float32`. On decode: `Float32` widens exactly to a JS
+    `number` (`f64::from(f32)`); `Float64` is a `number`; `Int32`/`UInt32`
+    are always a `number` (magnitude ≤ 2⁵³); `Int64`/`UInt64` yield a JS
+    `number` within `Number.MAX_SAFE_INTEGER` and a `BigInt` beyond it.
 - **`JsCipherText<Leaf, P>`** — projects the generic `CipherText` container
   onto plain JS values (`{ t, v }` nodes with `Buffer` leaves) and back, as
   an in-memory/application-side representation. Durable cross-language
