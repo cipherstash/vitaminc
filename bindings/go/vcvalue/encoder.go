@@ -41,8 +41,8 @@ func (s *encState) fail(err error) {
 // Encoder records a single value in transport form. It mirrors the Rust
 // Cipher channels — it is a recorder that writes the transport bytes, not a
 // live cipher handle. Exactly one channel must be used per Encoder: a
-// terminal (Null, Undefined, Bool, Number, Int, UInt, String, Bytes) or a
-// container (Seq, Map).
+// terminal (Null, Undefined, Bool, Int32, Int64, UInt32, UInt64, Float32,
+// Float64, String, Bytes) or a container (Seq, Map).
 //
 // Encoder is passed and stored by value; all instances handed out for one
 // encode share the same underlying buffer and first-error via a pointer, so
@@ -84,19 +84,40 @@ func (e Encoder) Bool(b bool) {
 	}
 }
 
-// Number records an IEEE-754 double. Distinct from Int/UInt: it round-trips
-// as a float in every language.
-func (e Encoder) Number(f float64) {
+// Float64 records an IEEE-754 double. Distinct from the integer channels: it
+// round-trips as a 64-bit float in every language. Round-trips by raw bit
+// pattern, so NaN payloads and -0.0 survive.
+func (e Encoder) Float64(f float64) {
 	if e.st.err != nil {
 		return
 	}
-	e.push(tagNumber)
+	e.push(tagFloat64)
 	e.st.buf = binary.LittleEndian.AppendUint64(e.st.buf, math.Float64bits(f))
 }
 
-// Int records a signed 64-bit integer. Kept distinct from Number so
+// Float32 records an IEEE-754 single. For schema fidelity with float4 at the
+// EQL layer; round-trips by raw bit pattern.
+func (e Encoder) Float32(f float32) {
+	if e.st.err != nil {
+		return
+	}
+	e.push(tagFloat32)
+	e.st.buf = binary.LittleEndian.AppendUint32(e.st.buf, math.Float32bits(f))
+}
+
+// Int32 records a signed 32-bit integer. For schema fidelity with int4 at
+// the EQL layer; kept distinct from Int64.
+func (e Encoder) Int32(i int32) {
+	if e.st.err != nil {
+		return
+	}
+	e.push(tagInt32)
+	e.st.buf = binary.LittleEndian.AppendUint32(e.st.buf, uint32(i))
+}
+
+// Int64 records a signed 64-bit integer. Kept distinct from Float64 so
 // integer-typed languages round-trip integers as integers.
-func (e Encoder) Int(i int64) {
+func (e Encoder) Int64(i int64) {
 	if e.st.err != nil {
 		return
 	}
@@ -104,9 +125,19 @@ func (e Encoder) Int(i int64) {
 	e.st.buf = binary.LittleEndian.AppendUint64(e.st.buf, uint64(i))
 }
 
-// UInt records an unsigned 64-bit integer. Values above math.MaxInt64 are
+// UInt32 records an unsigned 32-bit integer. For schema fidelity with the
+// EQL layer.
+func (e Encoder) UInt32(u uint32) {
+	if e.st.err != nil {
+		return
+	}
+	e.push(tagUint32)
+	e.st.buf = binary.LittleEndian.AppendUint32(e.st.buf, u)
+}
+
+// UInt64 records an unsigned 64-bit integer. Values above math.MaxInt64 are
 // representable here and nowhere else in the model.
-func (e Encoder) UInt(u uint64) {
+func (e Encoder) UInt64(u uint64) {
 	if e.st.err != nil {
 		return
 	}
@@ -261,10 +292,12 @@ func Marshal(v any) ([]byte, error) {
 //   - a value implementing Encryptable uses its EncryptValue;
 //   - nil                        → Null;
 //   - bool                       → Bool;
-//   - int/int8/16/32/64          → Int;
-//   - uint8/16/32                → Int (they always fit int64);
-//   - uint64 (and uint/uintptr)  → UInt;
-//   - float32/float64            → Number;
+//   - int8/int16/int32           → Int32;
+//   - int/int64                  → Int64;
+//   - uint8/uint16/uint32        → UInt32;
+//   - uint/uint64/uintptr        → UInt64;
+//   - float32                    → Float32;
+//   - float64                    → Float64;
 //   - string                     → String;
 //   - []byte                     → Bytes;
 //   - slices/arrays              → Seq;
@@ -327,21 +360,22 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 	switch rv.Kind() {
 	case reflect.Bool:
 		enc.Bool(rv.Bool())
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		enc.Int(rv.Int())
+	case reflect.Int8, reflect.Int16, reflect.Int32:
+		// Narrower signed kinds map to the 32-bit tag (schema fidelity with
+		// int4); int/int64 keep 64-bit width.
+		enc.Int32(int32(rv.Int()))
+	case reflect.Int, reflect.Int64:
+		enc.Int64(rv.Int())
 	case reflect.Uint8, reflect.Uint16, reflect.Uint32:
-		enc.Int(int64(rv.Uint()))
+		enc.UInt32(uint32(rv.Uint()))
 	case reflect.Uint, reflect.Uint64, reflect.Uintptr:
-		// uint64 keeps its unsigned identity; platform-width uint/uintptr
-		// stay Int when they fit int64 and become UInt only when they must.
-		u := rv.Uint()
-		if rv.Kind() == reflect.Uint64 || u > math.MaxInt64 {
-			enc.UInt(u)
-		} else {
-			enc.Int(int64(u))
-		}
-	case reflect.Float32, reflect.Float64:
-		enc.Number(rv.Float())
+		// Every unsigned word-or-wider kind keeps its unsigned identity as
+		// UInt64 (no fit-check: a bare uint always maps to UINT64 now).
+		enc.UInt64(rv.Uint())
+	case reflect.Float32:
+		enc.Float32(float32(rv.Float()))
+	case reflect.Float64:
+		enc.Float64(rv.Float())
 	case reflect.String:
 		enc.String(rv.String())
 	case reflect.Slice:

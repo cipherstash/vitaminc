@@ -33,7 +33,7 @@ type record struct {
 	Age    int64
 	Score  float64
 	Active bool
-	Huge   uint64 // above int64: forces the UInt channel
+	Huge   uint64 // above int64: forces the UInt64 channel
 	Tags   []string
 	Blob   []byte
 }
@@ -95,7 +95,7 @@ type person struct {
 func (p person) EncryptValue(enc vcvalue.Encoder) error {
 	m := enc.Map()
 	m.Field("name").String(p.Name)
-	m.Field("age").UInt(p.Age)
+	m.Field("age").UInt64(p.Age)
 	return m.End()
 }
 
@@ -119,9 +119,10 @@ func TestEncryptableRoundTrip(t *testing.T) {
 	}
 }
 
-// Int, Number and UInt must remain distinct across the boundary even when
-// they denote the same magnitude — and UInt must carry values above int64.
-func TestIntNumberUIntDistinction(t *testing.T) {
+// Int64, Float64 and UInt64 must remain distinct across the boundary even
+// when they denote the same magnitude — and UInt64 must carry values above
+// int64.
+func TestInt64Float64UInt64Distinction(t *testing.T) {
 	client := newTestClient(t)
 
 	value := []any{int64(42), float64(42), uint64(math.MaxUint64)}
@@ -134,6 +135,36 @@ func TestIntNumberUIntDistinction(t *testing.T) {
 		t.Fatalf("Decrypt: %v", err)
 	}
 	want := []any{int64(42), float64(42), uint64(math.MaxUint64)}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+// The 32- and 64-bit widths of a numeric value must be preserved across the
+// boundary: Go maps exactly in both directions, so a value written as int32
+// comes back int32, never widened to int64 (and likewise for the unsigned
+// and float families).
+func TestNumericWidthPreserved(t *testing.T) {
+	client := newTestClient(t)
+
+	value := []any{
+		int32(-7), int64(-7),
+		uint32(4000000000), uint64(4000000000),
+		float32(0.5), float64(0.5),
+	}
+	ct, err := client.Encrypt(t.Context(), testKey, value, nil)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	got, err := client.Decrypt(t.Context(), testKey, ct, nil)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	want := []any{
+		int32(-7), int64(-7),
+		uint32(4000000000), uint64(4000000000),
+		float32(0.5), float64(0.5),
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
@@ -238,8 +269,9 @@ func TestMapReorderSucceeds(t *testing.T) {
 // TestCrossLanguageFixture decrypts a ciphertext produced by NATIVE Rust
 // (aws-lc-rs backend, see guest/examples/gen_fixture.rs) through the wasm
 // guest (RustCrypto backend): the true cross-language, cross-backend vector
-// test. The fixture includes a UInt(u64::MAX) field exercising the UINT64
-// tag across languages.
+// test. The fixture exercises the whole numeric family across languages —
+// a UInt64(u64::MAX) field plus edge-value Int32/UInt32/Float32 fields —
+// proving Go's exact-width decode against native Rust's encoding.
 func TestCrossLanguageFixture(t *testing.T) {
 	raw, err := os.ReadFile("testdata/cross_lang.bin")
 	if err != nil {

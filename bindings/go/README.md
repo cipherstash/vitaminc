@@ -40,7 +40,7 @@ type Person struct{ Name string; Age uint64 }
 func (p Person) EncryptValue(enc vcvalue.Encoder) error {
     m := enc.Map()
     m.Field("name").String(p.Name)
-    m.Field("age").UInt(p.Age)
+    m.Field("age").UInt64(p.Age)
     return m.End()
 }
 
@@ -52,12 +52,16 @@ value, _ := client.Decrypt(ctx, key, ct, aad) // vcvalue natives + Object
 ```
 
 `Encrypt` takes `any`; `Decrypt` returns the vcvalue decode shape (Go
-natives — `nil`, `bool`, `float64`, `int64`, `uint64`, `string`, `[]byte`,
-`[]any` — and the ordered `vcvalue.Object` for maps). `Int`, `UInt` and
-`Number` stay distinct across the boundary; a `uint64` above `int64` uses the
-`UINT64` tag. Object keys travel in the clear but are bound into each value's
-AAD — renaming or swapping keys fails decryption; reordering entries does
-not.
+natives — `nil`, `bool`, `int32`, `int64`, `uint32`, `uint64`, `float32`,
+`float64`, `string`, `[]byte`, `[]any` — and the ordered `vcvalue.Object`
+for maps). The numeric family stays distinct across the boundary by both
+signedness and width, and Go maps **exactly in both directions**: an
+`int32` comes back `int32`, never widened to `int64` (unlike JavaScript,
+which widens every numeric tag to a `number` on decode). Narrower Go kinds
+encode up to the matching width (`int16`→`INT32`), `uint`/`uintptr` map to
+`UINT64`, and a `uint64` above `int64` uses the `UINT64` tag. Object keys
+travel in the clear but are bound into each value's AAD — renaming or
+swapping keys fails decryption; reordering entries does not.
 
 ## Rebuilding the guest
 

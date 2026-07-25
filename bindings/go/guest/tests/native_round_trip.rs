@@ -22,12 +22,18 @@ fn sample() -> FfiValue {
                     "email".into(),
                     FfiValue::String(Protected::new(b"ada@example.com".to_vec())),
                 ),
-                ("logins".into(), FfiValue::Int(42)),
+                ("logins".into(), FfiValue::Int64(42)),
+                ("visits".into(), FfiValue::Int32(-3)),
+                ("port".into(), FfiValue::UInt32(8080)),
             ]),
         ),
         (
             "readings".into(),
-            FfiValue::Array(vec![FfiValue::Number(1.25), FfiValue::Number(-0.0)]),
+            FfiValue::Array(vec![
+                FfiValue::Float64(1.25),
+                FfiValue::Float64(-0.0),
+                FfiValue::Float32(0.5),
+            ]),
         ),
     ])
 }

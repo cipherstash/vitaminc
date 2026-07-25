@@ -21,13 +21,20 @@ type Field struct {
 //
 //   - Null and Undefined → nil (Go has no undefined analog);
 //   - Bool               → bool;
-//   - Number             → float64;
-//   - Int                → int64;
-//   - UInt               → uint64;
+//   - Int32              → int32;
+//   - Int64              → int64;
+//   - UInt32             → uint32;
+//   - UInt64             → uint64;
+//   - Float32            → float32;
+//   - Float64            → float64;
 //   - String             → string;
 //   - Bytes              → []byte;
 //   - Array              → []any;
 //   - Object             → Object (ordered []Field).
+//
+// Go maps exactly in both directions — the 32-bit tags decode to int32 /
+// uint32 / float32, not widened to 64-bit — unlike JavaScript, which widens
+// every numeric tag to a JS number on decode.
 //
 // This self-describing shape is deliberately spike-scoped. A reflection-based
 // Unmarshal into caller structs (the mirror of Encode) is future work.
@@ -58,24 +65,42 @@ func decodeValue(r *reader, depth int) (any, error) {
 		return false, nil
 	case tagTrue:
 		return true, nil
-	case tagNumber:
-		s, err := r.take(8)
+	case tagInt32:
+		s, err := r.take(4)
 		if err != nil {
 			return nil, err
 		}
-		return math.Float64frombits(binary.LittleEndian.Uint64(s)), nil
+		return int32(binary.LittleEndian.Uint32(s)), nil
 	case tagInt64:
 		s, err := r.take(8)
 		if err != nil {
 			return nil, err
 		}
 		return int64(binary.LittleEndian.Uint64(s)), nil
+	case tagUint32:
+		s, err := r.take(4)
+		if err != nil {
+			return nil, err
+		}
+		return binary.LittleEndian.Uint32(s), nil
 	case tagUint64:
 		s, err := r.take(8)
 		if err != nil {
 			return nil, err
 		}
 		return binary.LittleEndian.Uint64(s), nil
+	case tagFloat32:
+		s, err := r.take(4)
+		if err != nil {
+			return nil, err
+		}
+		return math.Float32frombits(binary.LittleEndian.Uint32(s)), nil
+	case tagFloat64:
+		s, err := r.take(8)
+		if err != nil {
+			return nil, err
+		}
+		return math.Float64frombits(binary.LittleEndian.Uint64(s)), nil
 	case tagString:
 		return r.str()
 	case tagBytes:

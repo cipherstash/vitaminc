@@ -31,12 +31,19 @@ func TestReflectNatives(t *testing.T) {
 	}{
 		{"nil", nil, nil},
 		{"bool", true, true},
-		{"int", 42, int64(42)},
-		{"int64", int64(-9), int64(-9)},
-		{"uint32", uint32(7), int64(7)},        // fits int64 → Int
-		{"uint64-small", uint64(7), uint64(7)}, // static uint64 → UInt
+		{"int", 42, int64(42)},                 // int → Int64
+		{"int8", int8(-5), int32(-5)},          // narrow signed → Int32
+		{"int16", int16(-300), int32(-300)},    // narrow signed → Int32
+		{"int32", int32(-9), int32(-9)},        // Int32, exact width
+		{"int64", int64(-9), int64(-9)},        // Int64
+		{"uint8", uint8(7), uint32(7)},         // narrow unsigned → UInt32
+		{"uint16", uint16(300), uint32(300)},   // narrow unsigned → UInt32
+		{"uint32", uint32(7), uint32(7)},       // UInt32, exact width
+		{"uint", uint(7), uint64(7)},           // bare uint → UInt64 (no fit-check)
+		{"uint64-small", uint64(7), uint64(7)}, // uint64 → UInt64
 		{"uint64-max", uint64(math.MaxUint64), uint64(math.MaxUint64)},
-		{"float", 1.5, 1.5},
+		{"float32", float32(1.5), float32(1.5)}, // Float32, exact width
+		{"float", 1.5, 1.5},                     // float64 → Float64
 		{"string", "hi", "hi"},
 		{"bytes", []byte{1, 2, 3}, []byte{1, 2, 3}},
 		{"slice", []int{1, 2}, []any{int64(1), int64(2)}},
@@ -101,8 +108,8 @@ type point struct{ X, Y int64 }
 
 func (p point) EncryptValue(enc vcvalue.Encoder) error {
 	m := enc.Map()
-	m.Field("x").Int(p.X)
-	m.Field("y").Int(p.Y)
+	m.Field("x").Int64(p.X)
+	m.Field("y").Int64(p.Y)
 	return m.End()
 }
 
@@ -142,7 +149,13 @@ func TestEncoderChannels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	want := []any{nil, true, 1.5, int64(-1), uint64(math.MaxUint64), "s", []byte{9}}
+	want := []any{
+		nil, true,
+		float64(1.5), float32(0.5),
+		int32(-1), int64(-1),
+		uint32(math.MaxUint32), uint64(math.MaxUint64),
+		"s", []byte{9},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
 	}
@@ -154,9 +167,12 @@ func (seqBuilder) EncryptValue(enc vcvalue.Encoder) error {
 	s := enc.Seq()
 	s.Elem().Null()
 	s.Elem().Bool(true)
-	s.Elem().Number(1.5)
-	s.Elem().Int(-1)
-	s.Elem().UInt(math.MaxUint64)
+	s.Elem().Float64(1.5)
+	s.Elem().Float32(0.5)
+	s.Elem().Int32(-1)
+	s.Elem().Int64(-1)
+	s.Elem().UInt32(math.MaxUint32)
+	s.Elem().UInt64(math.MaxUint64)
 	s.Elem().String("s")
 	s.Elem().Bytes([]byte{9})
 	return s.End()

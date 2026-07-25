@@ -111,17 +111,29 @@ pub fn encode_value(value: FfiValue, out: &mut Vec<u8>) -> Result<(), CodecError
         FfiValue::Undefined => out.push(tags::UNDEFINED),
         FfiValue::Bool(false) => out.push(tags::BOOL_FALSE),
         FfiValue::Bool(true) => out.push(tags::BOOL_TRUE),
-        FfiValue::Number(n) => {
-            out.push(tags::NUMBER);
-            out.extend_from_slice(&n.to_bits().to_le_bytes());
+        FfiValue::Int32(i) => {
+            out.push(tags::INT32);
+            out.extend_from_slice(&i.to_le_bytes());
         }
-        FfiValue::Int(i) => {
+        FfiValue::Int64(i) => {
             out.push(tags::INT64);
             out.extend_from_slice(&i.to_le_bytes());
         }
-        FfiValue::UInt(u) => {
+        FfiValue::UInt32(u) => {
+            out.push(tags::UINT32);
+            out.extend_from_slice(&u.to_le_bytes());
+        }
+        FfiValue::UInt64(u) => {
             out.push(tags::UINT64);
             out.extend_from_slice(&u.to_le_bytes());
+        }
+        FfiValue::Float32(f) => {
+            out.push(tags::FLOAT32);
+            out.extend_from_slice(&f.to_bits().to_le_bytes());
+        }
+        FfiValue::Float64(f) => {
+            out.push(tags::FLOAT64);
+            out.extend_from_slice(&f.to_bits().to_le_bytes());
         }
         FfiValue::String(s) => {
             out.push(tags::STRING);
@@ -168,17 +180,29 @@ fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue,
         tags::UNDEFINED => Ok(FfiValue::Undefined),
         tags::BOOL_FALSE => Ok(FfiValue::Bool(false)),
         tags::BOOL_TRUE => Ok(FfiValue::Bool(true)),
-        tags::NUMBER => {
-            let bits: [u8; 8] = reader.take(8)?.try_into().map_err(|_| CodecError)?;
-            Ok(FfiValue::Number(f64::from_bits(u64::from_le_bytes(bits))))
+        tags::INT32 => {
+            let bytes: [u8; 4] = reader.take(4)?.try_into().map_err(|_| CodecError)?;
+            Ok(FfiValue::Int32(i32::from_le_bytes(bytes)))
         }
         tags::INT64 => {
             let bytes: [u8; 8] = reader.take(8)?.try_into().map_err(|_| CodecError)?;
-            Ok(FfiValue::Int(i64::from_le_bytes(bytes)))
+            Ok(FfiValue::Int64(i64::from_le_bytes(bytes)))
+        }
+        tags::UINT32 => {
+            let bytes: [u8; 4] = reader.take(4)?.try_into().map_err(|_| CodecError)?;
+            Ok(FfiValue::UInt32(u32::from_le_bytes(bytes)))
         }
         tags::UINT64 => {
             let bytes: [u8; 8] = reader.take(8)?.try_into().map_err(|_| CodecError)?;
-            Ok(FfiValue::UInt(u64::from_le_bytes(bytes)))
+            Ok(FfiValue::UInt64(u64::from_le_bytes(bytes)))
+        }
+        tags::FLOAT32 => {
+            let bits: [u8; 4] = reader.take(4)?.try_into().map_err(|_| CodecError)?;
+            Ok(FfiValue::Float32(f32::from_bits(u32::from_le_bytes(bits))))
+        }
+        tags::FLOAT64 => {
+            let bits: [u8; 8] = reader.take(8)?.try_into().map_err(|_| CodecError)?;
+            Ok(FfiValue::Float64(f64::from_bits(u64::from_le_bytes(bits))))
         }
         tags::STRING => {
             let len = reader.count()?;
@@ -321,9 +345,12 @@ mod tests {
     fn sample() -> FfiValue {
         FfiValue::Object(vec![
             ("name".into(), string("Ada")),
-            ("age".into(), FfiValue::Int(36)),
-            ("huge".into(), FfiValue::UInt(u64::MAX)),
-            ("score".into(), FfiValue::Number(1.5)),
+            ("age".into(), FfiValue::Int64(36)),
+            ("rank".into(), FfiValue::Int32(-7)),
+            ("port".into(), FfiValue::UInt32(65535)),
+            ("huge".into(), FfiValue::UInt64(u64::MAX)),
+            ("score".into(), FfiValue::Float64(1.5)),
+            ("ratio".into(), FfiValue::Float32(0.5)),
             ("active".into(), FfiValue::Bool(true)),
             ("nothing".into(), FfiValue::Null),
             (
@@ -358,19 +385,26 @@ mod tests {
         assert_eq!(encoded(FfiValue::Undefined), [0x01]);
         assert_eq!(encoded(FfiValue::Bool(false)), [0x02]);
         assert_eq!(encoded(FfiValue::Bool(true)), [0x03]);
+        assert_eq!(encoded(FfiValue::Int32(-1)), [0x04, 0xFF, 0xFF, 0xFF, 0xFF]);
         assert_eq!(
-            encoded(FfiValue::Number(1.5)),
-            [0x04, 0, 0, 0, 0, 0, 0, 0xF8, 0x3F]
+            encoded(FfiValue::Int64(-1)),
+            [0x05, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
         );
         assert_eq!(
-            encoded(FfiValue::Int(-1)),
+            encoded(FfiValue::UInt32(u32::MAX)),
+            [0x06, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
+        assert_eq!(
+            encoded(FfiValue::UInt64(u64::MAX)),
             [0x07, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
         );
+        // 1.5f32 = 0x3FC00000; 1.5f64 = 0x3FF8000000000000, little-endian.
+        assert_eq!(encoded(FfiValue::Float32(1.5)), [0x08, 0, 0, 0xC0, 0x3F]);
         assert_eq!(
-            encoded(FfiValue::UInt(u64::MAX)),
-            [0x08, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+            encoded(FfiValue::Float64(1.5)),
+            [0x09, 0, 0, 0, 0, 0, 0, 0xF8, 0x3F]
         );
-        assert_eq!(encoded(string("hi")), [0x05, 2, 0, 0, 0, b'h', b'i']);
+        assert_eq!(encoded(string("hi")), [0x0A, 2, 0, 0, 0, b'h', b'i']);
         assert_eq!(
             encoded(FfiValue::Array(vec![FfiValue::Null])),
             [0x10, 1, 0, 0, 0, 0x00]
@@ -380,7 +414,33 @@ mod tests {
     #[test]
     fn uint_round_trips() {
         for u in [0u64, 1, i64::MAX as u64, i64::MAX as u64 + 1, u64::MAX] {
-            let bytes = encoded(FfiValue::UInt(u));
+            let bytes = encoded(FfiValue::UInt64(u));
+            let decoded = decode_value(&mut Reader::new(&bytes)).expect("codec");
+            assert_eq!(encoded(decoded), bytes);
+        }
+    }
+
+    #[test]
+    fn narrow_numeric_round_trips() {
+        // The 32-bit numeric tags preserve width and signedness through the
+        // codec (edge values included).
+        for v in [i32::MIN, -1, 0, i32::MAX] {
+            let bytes = encoded(FfiValue::Int32(v));
+            let decoded = decode_value(&mut Reader::new(&bytes)).expect("codec");
+            assert_eq!(encoded(decoded), bytes);
+        }
+        for v in [0u32, 1, u32::MAX] {
+            let bytes = encoded(FfiValue::UInt32(v));
+            let decoded = decode_value(&mut Reader::new(&bytes)).expect("codec");
+            assert_eq!(encoded(decoded), bytes);
+        }
+        // Raw-bits floats: -0.0 and a NaN payload survive in binary32.
+        for v in [
+            f32::from_bits(0x8000_0000),
+            f32::from_bits(0x7fc0_0001),
+            1.5,
+        ] {
+            let bytes = encoded(FfiValue::Float32(v));
             let decoded = decode_value(&mut Reader::new(&bytes)).expect("codec");
             assert_eq!(encoded(decoded), bytes);
         }

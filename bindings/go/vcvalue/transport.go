@@ -18,11 +18,14 @@ const (
 	tagUndefined = 0x01
 	tagFalse     = 0x02
 	tagTrue      = 0x03
-	tagNumber    = 0x04
-	tagString    = 0x05
-	tagBytes     = 0x06
-	tagInt64     = 0x07
-	tagUint64    = 0x08
+	tagInt32     = 0x04
+	tagInt64     = 0x05
+	tagUint32    = 0x06
+	tagUint64    = 0x07
+	tagFloat32   = 0x08
+	tagFloat64   = 0x09
+	tagString    = 0x0A
+	tagBytes     = 0x0B
 	tagArray     = 0x10
 	tagObject    = 0x11
 )

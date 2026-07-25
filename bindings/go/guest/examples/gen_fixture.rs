@@ -35,13 +35,18 @@ fn string(s: &str) -> FfiValue {
 fn fixture_value() -> FfiValue {
     FfiValue::Object(vec![
         ("name".into(), string("Ada Lovelace")),
-        ("age".into(), FfiValue::Int(36)),
-        ("score".into(), FfiValue::Number(1.5)),
+        ("age".into(), FfiValue::Int64(36)),
+        ("score".into(), FfiValue::Float64(1.5)),
         ("active".into(), FfiValue::Bool(true)),
         ("nickname".into(), FfiValue::Null),
-        ("big".into(), FfiValue::Int(i64::MIN)),
+        ("big".into(), FfiValue::Int64(i64::MIN)),
         // Above i64::MAX: exercises the UINT64 tag cross-language.
-        ("huge".into(), FfiValue::UInt(u64::MAX)),
+        ("huge".into(), FfiValue::UInt64(u64::MAX)),
+        // The 32-bit numeric family, at edge values: exercises the INT32 /
+        // UINT32 / FLOAT32 tags (and Go's exact-width decode) cross-language.
+        ("rank".into(), FfiValue::Int32(i32::MIN)),
+        ("port".into(), FfiValue::UInt32(u32::MAX)),
+        ("ratio".into(), FfiValue::Float32(0.5)),
         (
             "tags".into(),
             FfiValue::Array(vec![
