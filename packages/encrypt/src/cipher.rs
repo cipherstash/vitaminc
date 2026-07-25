@@ -1,4 +1,4 @@
-use crate::backend::{CipherKey, NONCE_LEN};
+use crate::backend::{CipherKey, NONCE_LEN, TAG_LEN};
 use crate::Key;
 use std::any::Any;
 use std::borrow::Cow;
@@ -92,6 +92,46 @@ impl<'c> Cipher for &'c Aes256Cipher {
         CipherTextBuilder::new()
             .append_nonce(nonce)
             .append_target_plaintext(data)
+            .accepts_ciphertext_and_tag_ok(|mut buf| {
+                self.key
+                    .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
+                    .map(|()| buf)
+            })
+            .build()
+            .map(AesCipherText::Single)
+    }
+
+    fn encrypt_bytes_array<'a, const N: usize, A>(
+        self,
+        data: Protected<[u8; N]>,
+        aad: A,
+    ) -> Result<Self::Ok, Self::Error>
+    where
+        A: IntoAad<'a>,
+    {
+        // Override the trait default (which does a plain `to_vec`, sized
+        // exactly `N`, forcing the in-place seal to reallocate when it
+        // appends the tag). Here the plaintext buffer is sized `N + TAG_LEN`
+        // up front, so the seal appends the tag into spare capacity and the
+        // ciphertext is produced with a single heap allocation. Output bytes
+        // are identical to the default path.
+        //
+        // The array is copied out via `risky_ref` (a borrow), so `data`
+        // keeps ownership of the original and is wiped by ZeroizeOnDrop at
+        // end of scope — a `risky_unwrap` would partially-move the bare
+        // `[u8; N]` out and skip that wipe (see issue #170).
+        let src = data.risky_ref();
+        let mut buf = Vec::with_capacity(N + TAG_LEN);
+        buf.extend_from_slice(src);
+        let plaintext = Protected::new(buf);
+
+        let nonce = self.nonce_generator.generate()?;
+        let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
+        let aad = aad.into_aad();
+
+        CipherTextBuilder::new()
+            .append_nonce(nonce)
+            .append_target_plaintext(plaintext)
             .accepts_ciphertext_and_tag_ok(|mut buf| {
                 self.key
                     .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
