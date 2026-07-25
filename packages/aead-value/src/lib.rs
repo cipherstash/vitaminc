@@ -3,6 +3,7 @@
 pub mod aad;
 pub mod tagged;
 pub mod tags;
+pub mod transport;
 mod value;
 
 pub use aad::LeafTypeAad;

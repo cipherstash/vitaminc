@@ -4,10 +4,10 @@
 //! `vc_decrypt` drive inside the wasm module, minus the linear-memory ABI.
 
 use vitaminc_aead::{Aad, Encrypt};
+use vitaminc_aead_value::transport::{self as codec, Reader};
 use vitaminc_aead_value::FfiValue;
 use vitaminc_encrypt::{Aes256Cipher, AesCipherText, Key};
 use vitaminc_protected::Protected;
-use vitaminc_wasi_guest::codec::{self, Reader};
 
 fn cipher() -> Aes256Cipher {
     Aes256Cipher::new(&Key::from([7u8; 32])).unwrap()

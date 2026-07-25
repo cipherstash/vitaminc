@@ -1,27 +1,28 @@
-package vitaminc
+package vcvalue
 
 import "errors"
 
 // CipherText is the Go projection of vitaminc's generic ciphertext
-// container. The container shape has no canonical byte representation —
-// only the sealed leaf bytes (inside Leaf) are a frozen format. The
-// transport encoding used to cross the wasm boundary is an implementation
-// detail; durable cross-language storage is the EQL layer's job.
+// container. The container shape has no canonical byte representation — only
+// the sealed leaf bytes (inside Leaf) are a frozen format. The transport
+// encoding used to cross the FFI boundary is an implementation detail;
+// durable cross-language storage is the EQL layer's job.
 type CipherText struct {
 	Kind   CipherTextKind
-	Leaf   []byte       // Single, None
-	Items  []CipherText // Seq
+	Leaf   []byte // Single, None
+	Items  []CipherText
 	Fields []CipherTextField
 }
 
-// CipherTextField is one entry of a map-mode ciphertext. The key travels
-// in the clear but is cryptographically bound to its sealed value: renaming
-// or swapping keys makes decryption fail.
+// CipherTextField is one entry of a map-mode ciphertext. The key travels in
+// the clear but is cryptographically bound to its sealed value: renaming or
+// swapping keys makes decryption fail.
 type CipherTextField struct {
 	Key  string
 	Node CipherText
 }
 
+// CipherTextKind identifies a ciphertext node's shape.
 type CipherTextKind byte
 
 const (
@@ -36,9 +37,28 @@ const (
 	KindMap CipherTextKind = 0x04
 )
 
+// MarshalTransport encodes the ciphertext tree into transport bytes.
+func (ct CipherText) MarshalTransport() ([]byte, error) {
+	return encodeCipherText(nil, &ct, 0)
+}
+
+// UnmarshalCipherText decodes a transport-encoded ciphertext tree, requiring
+// the whole buffer to be consumed.
+func UnmarshalCipherText(buf []byte) (CipherText, error) {
+	r := &reader{buf: buf}
+	ct, err := decodeCipherText(r, 0)
+	if err != nil {
+		return CipherText{}, err
+	}
+	if !r.finished() {
+		return CipherText{}, errMalformed
+	}
+	return ct, nil
+}
+
 func encodeCipherText(out []byte, ct *CipherText, depth int) ([]byte, error) {
 	if depth > maxDepth {
-		return nil, errors.New("vitaminc: ciphertext is nested too deeply")
+		return nil, errors.New("vcvalue: ciphertext is nested too deeply")
 	}
 	switch ct.Kind {
 	case KindSingle, KindNone:
@@ -72,7 +92,7 @@ func encodeCipherText(out []byte, ct *CipherText, depth int) ([]byte, error) {
 		}
 		return out, nil
 	default:
-		return nil, errors.New("vitaminc: unknown ciphertext kind")
+		return nil, errors.New("vcvalue: unknown ciphertext kind")
 	}
 }
 

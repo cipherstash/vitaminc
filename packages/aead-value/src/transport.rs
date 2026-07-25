@@ -1,23 +1,23 @@
 //! Transport-only binary encoding for [`FfiValue`] trees and
-//! [`CipherText`] containers crossing the wasm boundary.
+//! [`CipherText`] containers crossing an FFI boundary (e.g. the Go/WASI
+//! binding's wasm linear-memory copy).
 //!
 //! This is a **transport encoding, not a storage format**: it exists so a
-//! host language and the wasm guest can hand each other a tree in one
-//! linear-memory copy. Nothing here is a compatibility commitment — the
-//! only frozen byte format in the stack is the sealed leaf payload
-//! (`[tag] ++ payload`, see `vitaminc_aead_value::tags`), which lives
-//! *inside* the AEAD envelope and never touches this codec. Durable
-//! cross-language storage is the EQL layer's job.
+//! host language and a guest can hand each other a tree in one linear-memory
+//! copy. Nothing here is a compatibility commitment — the only frozen byte
+//! format in the stack is the sealed leaf payload (`[tag] ++ payload`, see
+//! [`tags`]), which lives *inside* the AEAD envelope and never touches this
+//! codec. Durable cross-language storage is the EQL layer's job.
 //!
 //! Value leaves reuse the frozen tag constants for the scalar kinds so the
-//! two tables can't drift apart on meaning; `ARRAY`/`OBJECT` framing tags
-//! are transport-local (the sealed format has no container tags — container
-//! shape is carried by the ciphertext tree itself).
+//! two tables can't drift apart on meaning; [`ARRAY`]/[`OBJECT`] framing
+//! tags are transport-local (the sealed format has no container tags —
+//! container shape is carried by the ciphertext tree itself).
 //!
 //! All lengths and counts are `u32` little-endian. Object keys are UTF-8.
 
+use crate::{tags, FfiValue};
 use vitaminc_aead::CipherText;
-use vitaminc_aead_value::{tags, FfiValue};
 use vitaminc_protected::{Controlled, Protected};
 
 /// Transport-local framing tag for [`FfiValue::Array`].
@@ -25,10 +25,13 @@ pub const ARRAY: u8 = 0x10;
 /// Transport-local framing tag for [`FfiValue::Object`].
 pub const OBJECT: u8 = 0x11;
 
-/// Ciphertext node kinds.
+/// Ciphertext node kind: a single sealed leaf.
 pub const CT_SINGLE: u8 = 0x01;
+/// Ciphertext node kind: a sealed "no value" marker (`Option::None`).
 pub const CT_NONE: u8 = 0x02;
+/// Ciphertext node kind: a sequence of nodes.
 pub const CT_SEQ: u8 = 0x03;
+/// Ciphertext node kind: a map of clear keys to nodes.
 pub const CT_MAP: u8 = 0x04;
 
 /// Mirrors the hardening bound used by the NAPI conversion layer.
@@ -40,12 +43,14 @@ pub const MAX_DEPTH: usize = 128;
 #[derive(Debug, PartialEq, Eq)]
 pub struct CodecError;
 
+/// A cursor over a transport buffer, tracking how many bytes are consumed.
 pub struct Reader<'a> {
     buf: &'a [u8],
     pos: usize,
 }
 
 impl<'a> Reader<'a> {
+    /// Wrap a buffer for decoding.
     pub fn new(buf: &'a [u8]) -> Self {
         Reader { buf, pos: 0 }
     }
@@ -97,7 +102,7 @@ fn write_bytes(out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), CodecError> {
 }
 
 /// Encode a value tree. The output buffer contains **plaintext** — callers
-/// own wiping it (the ABI layer zeroizes transport buffers on dealloc).
+/// own wiping it (the wasm ABI layer zeroizes transport buffers on dealloc).
 ///
 /// Consumes the value; `Protected` leaves are wiped as they drop here.
 pub fn encode_value(value: FfiValue, out: &mut Vec<u8>) -> Result<(), CodecError> {
@@ -113,6 +118,10 @@ pub fn encode_value(value: FfiValue, out: &mut Vec<u8>) -> Result<(), CodecError
         FfiValue::Int(i) => {
             out.push(tags::INT64);
             out.extend_from_slice(&i.to_le_bytes());
+        }
+        FfiValue::UInt(u) => {
+            out.push(tags::UINT64);
+            out.extend_from_slice(&u.to_le_bytes());
         }
         FfiValue::String(s) => {
             out.push(tags::STRING);
@@ -167,6 +176,10 @@ fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue,
             let bytes: [u8; 8] = reader.take(8)?.try_into().map_err(|_| CodecError)?;
             Ok(FfiValue::Int(i64::from_le_bytes(bytes)))
         }
+        tags::UINT64 => {
+            let bytes: [u8; 8] = reader.take(8)?.try_into().map_err(|_| CodecError)?;
+            Ok(FfiValue::UInt(u64::from_le_bytes(bytes)))
+        }
         tags::STRING => {
             let len = reader.count()?;
             let bytes = reader.take(len)?;
@@ -202,7 +215,7 @@ fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue,
 }
 
 /// Encode a ciphertext tree. `Passthrough` nodes cannot cross this
-/// transport (the wasm guest has no passthrough currency) and are an error.
+/// transport (a wasm guest has no passthrough currency) and are an error.
 pub fn encode_ciphertext<Leaf, P>(
     ct: &CipherText<Leaf, P>,
     out: &mut Vec<u8>,
@@ -309,6 +322,7 @@ mod tests {
         FfiValue::Object(vec![
             ("name".into(), string("Ada")),
             ("age".into(), FfiValue::Int(36)),
+            ("huge".into(), FfiValue::UInt(u64::MAX)),
             ("score".into(), FfiValue::Number(1.5)),
             ("active".into(), FfiValue::Bool(true)),
             ("nothing".into(), FfiValue::Null),
@@ -327,14 +341,14 @@ mod tests {
     /// equal transport bytes ⇔ equal trees (Number compared by bit pattern).
     fn encoded(value: FfiValue) -> Vec<u8> {
         let mut out = Vec::new();
-        encode_value(value, &mut out).unwrap();
+        encode_value(value, &mut out).expect("codec");
         out
     }
 
     #[test]
     fn value_round_trips() {
         let bytes = encoded(sample());
-        let decoded = decode_value(&mut Reader::new(&bytes)).unwrap();
+        let decoded = decode_value(&mut Reader::new(&bytes)).expect("codec");
         assert_eq!(encoded(decoded), bytes);
     }
 
@@ -352,11 +366,24 @@ mod tests {
             encoded(FfiValue::Int(-1)),
             [0x07, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
         );
+        assert_eq!(
+            encoded(FfiValue::UInt(u64::MAX)),
+            [0x08, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
         assert_eq!(encoded(string("hi")), [0x05, 2, 0, 0, 0, b'h', b'i']);
         assert_eq!(
             encoded(FfiValue::Array(vec![FfiValue::Null])),
             [0x10, 1, 0, 0, 0, 0x00]
         );
+    }
+
+    #[test]
+    fn uint_round_trips() {
+        for u in [0u64, 1, i64::MAX as u64, i64::MAX as u64 + 1, u64::MAX] {
+            let bytes = encoded(FfiValue::UInt(u));
+            let decoded = decode_value(&mut Reader::new(&bytes)).expect("codec");
+            assert_eq!(encoded(decoded), bytes);
+        }
     }
 
     #[test]
@@ -414,10 +441,10 @@ mod tests {
             ),
         ]);
         let mut out = Vec::new();
-        encode_ciphertext(&ct, &mut out).unwrap();
-        let decoded: AesCipherText = decode_ciphertext(&mut Reader::new(&out)).unwrap();
+        encode_ciphertext(&ct, &mut out).expect("codec");
+        let decoded: AesCipherText = decode_ciphertext(&mut Reader::new(&out)).expect("codec");
         let mut out2 = Vec::new();
-        encode_ciphertext(&decoded, &mut out2).unwrap();
+        encode_ciphertext(&decoded, &mut out2).expect("codec");
         assert_eq!(out, out2);
     }
 

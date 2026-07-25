@@ -1,17 +1,3 @@
-// Package vitaminc provides Go bindings for the vitaminc AEAD encryption
-// stack via a WASI guest module (spike).
-//
-// The Rust guest (bindings/go/guest) is compiled to wasm32-wasip1 and
-// embedded in this package; wazero runs it with CGO_ENABLED=0 — no shared
-// libraries, no cgo toolchain, a single self-contained Go module.
-//
-// Security notes:
-//   - Buffers inside guest memory are zeroized before being freed. Copies
-//     on the Go heap (the key, plaintext Values) cannot be reliably wiped
-//     from Go; treat process memory as sensitive.
-//   - Decryption failures are deliberately opaque (like the Rust layer's
-//     Unspecified): wrong key, wrong AAD, tampered ciphertext, renamed map
-//     key and malformed input are indistinguishable.
 package vitaminc
 
 import (
@@ -21,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -81,32 +68,28 @@ func (c *Client) Close(ctx context.Context) error {
 	return c.runtime.Close(ctx)
 }
 
-// Encrypt seals value with the 32-byte key. aad is authenticated but not
-// encrypted; the same aad must be presented to Decrypt.
-func (c *Client) Encrypt(ctx context.Context, key []byte, value Value, aad []byte) (CipherText, error) {
-	encoded, err := encodeValue(nil, value, 0)
+// Encrypt seals v with the 32-byte key. v is encoded through the vcvalue
+// currency: builtins, slices, maps and structs are handled by reflection,
+// and any type implementing vcvalue.Encryptable controls its own encoding.
+// aad is authenticated but not encrypted; the same aad must be presented to
+// Decrypt.
+func (c *Client) Encrypt(ctx context.Context, key []byte, v any, aad []byte) (vcvalue.CipherText, error) {
+	encoded, err := vcvalue.Marshal(v)
 	if err != nil {
-		return CipherText{}, err
+		return vcvalue.CipherText{}, err
 	}
 	out, err := c.call(ctx, c.encrypt, key, aad, encoded)
 	if err != nil {
-		return CipherText{}, err
+		return vcvalue.CipherText{}, err
 	}
-	r := &reader{buf: out}
-	ct, err := decodeCipherText(r, 0)
-	if err == nil && !r.finished() {
-		err = errMalformed
-	}
-	if err != nil {
-		return CipherText{}, err
-	}
-	return ct, nil
+	return vcvalue.UnmarshalCipherText(out)
 }
 
-// Decrypt opens a ciphertext produced by Encrypt (in any language) with
-// the same key and aad.
-func (c *Client) Decrypt(ctx context.Context, key []byte, ct CipherText, aad []byte) (Value, error) {
-	encoded, err := encodeCipherText(nil, &ct, 0)
+// Decrypt opens a ciphertext produced by Encrypt (in any language) with the
+// same key and aad. The plaintext is returned in vcvalue's decode shape (Go
+// natives plus vcvalue.Object for maps).
+func (c *Client) Decrypt(ctx context.Context, key []byte, ct vcvalue.CipherText, aad []byte) (any, error) {
+	encoded, err := ct.MarshalTransport()
 	if err != nil {
 		return nil, err
 	}
@@ -114,15 +97,7 @@ func (c *Client) Decrypt(ctx context.Context, key []byte, ct CipherText, aad []b
 	if err != nil {
 		return nil, err
 	}
-	r := &reader{buf: out}
-	value, err := decodeValue(r, 0)
-	if err == nil && !r.finished() {
-		err = errMalformed
-	}
-	if err != nil {
-		return nil, err
-	}
-	return value, nil
+	return vcvalue.Unmarshal(out)
 }
 
 // guestBuf is a host-owned allocation inside guest linear memory.

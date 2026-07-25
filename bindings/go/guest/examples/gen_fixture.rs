@@ -12,7 +12,7 @@
 //! ```
 //!
 //! Regenerate only when the transport encoding or the fixture value
-//! changes; the output is committed at `bindings/go/testdata/`.
+//! changes; the output is committed at `bindings/go/vitaminc/testdata/`.
 //!
 //! Layout (all lengths u32 LE):
 //! `"VCGO1" ++ key[32] ++ len(aad) ++ aad ++ len(ct) ++ ct ++ len(val) ++ val`
@@ -21,10 +21,10 @@
 use std::fs;
 
 use vitaminc_aead::{Aad, Encrypt};
+use vitaminc_aead_value::transport as codec;
 use vitaminc_aead_value::FfiValue;
 use vitaminc_encrypt::{Aes256Cipher, Key};
 use vitaminc_protected::Protected;
-use vitaminc_wasi_guest::codec;
 
 const AAD: &[u8] = b"vitaminc/go-spike/fixture";
 
@@ -40,6 +40,8 @@ fn fixture_value() -> FfiValue {
         ("active".into(), FfiValue::Bool(true)),
         ("nickname".into(), FfiValue::Null),
         ("big".into(), FfiValue::Int(i64::MIN)),
+        // Above i64::MAX: exercises the UINT64 tag cross-language.
+        ("huge".into(), FfiValue::UInt(u64::MAX)),
         (
             "tags".into(),
             FfiValue::Array(vec![
@@ -81,8 +83,11 @@ fn main() {
     push_chunk(&mut out, &ct_bytes);
     push_chunk(&mut out, &val_bytes);
 
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata/cross_lang.bin");
-    fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/../testdata")).unwrap();
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../vitaminc/testdata/cross_lang.bin"
+    );
+    fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/../vitaminc/testdata")).unwrap();
     fs::write(path, &out).unwrap();
     println!("wrote {path} ({} bytes)", out.len());
 }

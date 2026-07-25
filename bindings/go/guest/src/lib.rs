@@ -13,11 +13,11 @@
 //! On wasm32 the `vitaminc-encrypt` crate uses its pure-Rust
 //! (RustCrypto `aes-gcm`) backend; the trade-offs are documented there.
 //!
-//! See [`abi`] for the export surface and buffer-ownership rules, and
-//! [`codec`] for the transport encoding (transport-only — the sealed leaf
-//! format inside the envelope is the only frozen byte format).
+//! See [`abi`] for the export surface and buffer-ownership rules. The
+//! transport encoding lives in `vitaminc_aead_value::transport`
+//! (transport-only — the sealed leaf format inside the envelope is the only
+//! frozen byte format).
 //!
 //! [`FfiValue`]: vitaminc_aead_value::FfiValue
 
 pub mod abi;
-pub mod codec;

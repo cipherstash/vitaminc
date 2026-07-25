@@ -19,11 +19,9 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use vitaminc_aead::{Aad, Encrypt};
-use vitaminc_aead_value::FfiValue;
+use vitaminc_aead_value::{transport as codec, FfiValue};
 use vitaminc_encrypt::{Aes256Cipher, AesCipherText, Key};
 use zeroize::Zeroize;
-
-use crate::codec;
 
 /// Allocate `len` bytes of guest memory for the host to write into.
 /// Returns a pointer valid until passed to [`vc_dealloc`], or null if the
