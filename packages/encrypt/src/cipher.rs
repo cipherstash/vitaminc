@@ -117,7 +117,8 @@ impl<'c> Cipher for &'c Aes256Cipher {
         // are identical to the default path.
         let nonce = self.nonce_generator.generate()?;
         let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-        let aad = aad.into_aad();
+        // Outermost derivation: bind the wire version — see `Aad::for_leaf`.
+        let aad = aad.into_aad().for_leaf(WIRE_VERSION);
 
         CipherTextBuilder::new()
             .append_nonce(nonce)
@@ -178,7 +179,7 @@ impl<'c> Cipher for &'c Aes256Cipher {
         self,
         value: Box<dyn Any + Send + 'static>,
     ) -> Result<Self::Ok, Self::Error> {
-        // This cipher's currency *is* `Box<dyn Any + Send>` (see
+        // This cipher's passthrough type *is* `Box<dyn Any + Send>` (see
         // `BoxedPassthrough`), so the type-erased box is already the
         // passthrough payload — store it directly.
         self.passthrough(value)

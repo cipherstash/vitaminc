@@ -176,6 +176,14 @@ fn ensure_plain_object(obj: &Object<'_>) -> Result<()> {
     }
 }
 
+// NOTE: there is intentionally no path here that constructs
+// [`FfiValue::Passthrough`]. Marking a field non-sensitive so it travels in
+// the clear needs a deliberate JS-side opt-in (a wrapper the caller applies),
+// which is not yet designed — building it would be silent, dangerous default
+// behaviour otherwise. Until then JS input is always fully sealed; the decode
+// direction still projects a passthrough produced elsewhere (e.g. a value
+// written by another binding) onto its plain JS value. Follow-up: add an
+// explicit passthrough marker type to the JS API.
 fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<FfiValue> {
     if depth > MAX_DEPTH {
         return Err(depth_error());
@@ -350,6 +358,12 @@ fn value_to_js(env: sys::napi_env, value: FfiValue) -> Result<sys::napi_value> {
             }
             unsafe { Object::to_napi_value(env, obj) }
         }
+        // A passthrough subtree projects onto its plain JS value: the marking
+        // exists to steer encryption, and once decrypted the field is an
+        // ordinary value to the application. (Round-tripping the *marking*
+        // back into a re-encryptable JS value is future work — see
+        // `js_to_value`, which has no passthrough constructor yet.)
+        FfiValue::Passthrough(inner) => value_to_js(env, *inner),
     }
 }
 

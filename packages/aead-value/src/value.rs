@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::borrow::Cow;
 
 use crate::tagged::{
@@ -87,6 +88,32 @@ pub enum FfiValue {
     /// travel in the clear (bound into each value's AAD — see
     /// [`Aad::for_map_entry`]); values are sealed.
     Object(Vec<(String, FfiValue)>),
+    /// A subtree that travels alongside the ciphertext **unencrypted and
+    /// unauthenticated**, via the cipher's passthrough channel (see
+    /// [`Cipher::passthrough`]). The wrapped value — which may be any
+    /// `FfiValue`, including a whole [`Array`](FfiValue::Array) or
+    /// [`Object`](FfiValue::Object) subtree — is then entirely plaintext: it
+    /// is neither sealed nor covered by any AEAD tag, so it can be read and
+    /// altered by anyone holding the ciphertext.
+    ///
+    /// # ⚠️ Non-sensitive fields only
+    ///
+    /// Use this only for data that is safe in the clear and safe to have
+    /// tampered with. The motivating shape is a user record where the
+    /// non-secret keys pass through while the secrets are sealed:
+    /// `{ id, created_at }` marked passthrough alongside a sealed
+    /// `{ email, name }`. Never wrap secrets — there is no encryption, no
+    /// authentication, and no zeroize discipline on the payload. Mirrors the
+    /// container-level [`CipherText::Passthrough`] contract.
+    ///
+    /// [`Cipher::passthrough`]: vitaminc_aead::Cipher::passthrough
+    /// [`CipherText::Passthrough`]: vitaminc_aead::CipherText::Passthrough
+    // Skipped by `Zeroize`: the payload is non-sensitive by contract (it is
+    // sent in the clear), and `Box<T>` is not `Zeroize` anyway. Wrapping a
+    // secret here is a misuse the type documents against, not something the
+    // zeroize path should paper over.
+    #[zeroize(skip)]
+    Passthrough(Box<FfiValue>),
 }
 
 // No `ZeroizeOnDrop` derive: it would add a `Drop` impl, and `Drop` types
@@ -142,6 +169,25 @@ impl Encrypt for FfiValue {
                         c.encrypt_entry(Cow::Owned(key), value)
                     })?
                     .end()
+            }
+            FfiValue::Passthrough(inner) => {
+                // Route the (non-sensitive, unauthenticated) subtree through
+                // the cipher's type-erased passthrough channel. This impl is
+                // generic over every cipher, so it cannot name a specific
+                // cipher's `Passthrough` type; `passthrough_boxed` takes the
+                // subtree as `Box<dyn Any + Send>` and each cipher absorbs it
+                // (for the Rust-native ciphers that type *is* the box).
+                // No AAD is consumed — passthrough values are not
+                // authenticated. `FfiValueVisitor::visit_passthrough` downcasts
+                // the box back to an `FfiValue` on decrypt.
+                //
+                // Passthrough nested *inside* an `Array`/`Object` needs no
+                // special handling here: those arms recurse through
+                // `encrypt_next`/`encrypt_entry` into each element's own
+                // `Encrypt` impl, so a nested `Passthrough` element reaches
+                // this arm against the same root cipher.
+                let boxed: Box<dyn Any + Send + 'static> = Box::new(*inner);
+                cipher.passthrough_boxed(boxed)
             }
         }
     }
@@ -221,6 +267,21 @@ impl<'c> DecipherVisitor<'c> for FfiValueVisitor {
     fn visit_none(self) -> Result<Self::Value, Unspecified> {
         Ok(FfiValue::Null)
     }
+
+    /// Recover a passthrough subtree, preserving its marking so a decrypted
+    /// tree records which fields travelled in the clear. The payload was boxed
+    /// as an `FfiValue` by this crate's [`Encrypt`] impl; a box carrying any
+    /// other concrete type (a foreign payload never produced here) is rejected
+    /// with [`Unspecified`] rather than panicking on the downcast.
+    fn visit_passthrough(
+        self,
+        value: Box<dyn Any + Send + 'static>,
+    ) -> Result<Self::Value, Unspecified> {
+        value
+            .downcast::<FfiValue>()
+            .map(FfiValue::Passthrough)
+            .map_err(|_| Unspecified)
+    }
 }
 
 impl<'c> Decrypt<'c> for FfiValue {
@@ -257,6 +318,7 @@ impl PartialEq for FfiValue {
             | (FfiValue::Bytes(a), FfiValue::Bytes(b)) => a.risky_ref() == b.risky_ref(),
             (FfiValue::Array(a), FfiValue::Array(b)) => a == b,
             (FfiValue::Object(a), FfiValue::Object(b)) => a == b,
+            (FfiValue::Passthrough(a), FfiValue::Passthrough(b)) => a == b,
             _ => false,
         }
     }
@@ -279,6 +341,7 @@ impl std::fmt::Debug for FfiValue {
             FfiValue::Bytes(_) => f.write_str("Bytes(<redacted>)"),
             FfiValue::Array(items) => f.debug_tuple("Array").field(items).finish(),
             FfiValue::Object(entries) => f.debug_tuple("Object").field(entries).finish(),
+            FfiValue::Passthrough(inner) => f.debug_tuple("Passthrough").field(inner).finish(),
         }
     }
 }
@@ -294,6 +357,47 @@ mod tests {
 
     fn s(v: &str) -> FfiValue {
         FfiValue::String(Protected::new(v.as_bytes().to_vec()))
+    }
+
+    /// The `Debug` impl exists for assertion failures, so a passing suite
+    /// never formats one — exercise it explicitly, and pin the property that
+    /// matters: secret-bearing leaves must render redacted, so a failing
+    /// assertion in any downstream test can't spill plaintext into CI logs.
+    #[test]
+    fn debug_redacts_secret_leaves_and_renders_the_rest() {
+        // Scalars render their value — the numeric tags are distinguishable,
+        // which is the point of the split numeric family.
+        assert_eq!(format!("{:?}", FfiValue::Null), "Null");
+        assert_eq!(format!("{:?}", FfiValue::Undefined), "Undefined");
+        assert_eq!(format!("{:?}", FfiValue::Bool(true)), "Bool(true)");
+        assert_eq!(format!("{:?}", FfiValue::Int32(-1)), "Int32(-1)");
+        assert_eq!(format!("{:?}", FfiValue::Int64(-1)), "Int64(-1)");
+        assert_eq!(format!("{:?}", FfiValue::UInt32(1)), "UInt32(1)");
+        assert_eq!(format!("{:?}", FfiValue::UInt64(1)), "UInt64(1)");
+        assert_eq!(format!("{:?}", FfiValue::Float32(1.5)), "Float32(1.5)");
+        assert_eq!(format!("{:?}", FfiValue::Float64(1.5)), "Float64(1.5)");
+
+        // The two secret-bearing variants never show their contents.
+        let secret = format!("{:?}", s("hunter2"));
+        assert_eq!(secret, "String(<redacted>)");
+        assert!(!secret.contains("hunter2"));
+        let bytes = FfiValue::Bytes(Protected::new(vec![0xDE, 0xAD]));
+        assert_eq!(format!("{bytes:?}"), "Bytes(<redacted>)");
+
+        // Containers recurse, so nested secrets stay redacted too — including
+        // through a passthrough wrapper.
+        assert_eq!(
+            format!("{:?}", FfiValue::Array(vec![FfiValue::Null, s("secret")])),
+            "Array([Null, String(<redacted>)])"
+        );
+        let obj = FfiValue::Object(vec![("k".to_string(), s("secret"))]);
+        let rendered = format!("{obj:?}");
+        assert!(rendered.contains("String(<redacted>)"), "{rendered}");
+        assert!(!rendered.contains("secret"), "{rendered}");
+        assert_eq!(
+            format!("{:?}", FfiValue::Passthrough(Box::new(s("secret")))),
+            "Passthrough(String(<redacted>))"
+        );
     }
 
     fn roundtrip(value: FfiValue) -> FfiValue {
@@ -370,6 +474,13 @@ mod tests {
             }
 
             fn passthrough(self, _value: Self::Passthrough) -> Result<Self::Ok, Self::Error> {
+                Err(Unspecified)
+            }
+
+            fn passthrough_boxed(
+                self,
+                _value: Box<dyn Any + Send + 'static>,
+            ) -> Result<Self::Ok, Self::Error> {
                 Err(Unspecified)
             }
         }
@@ -896,5 +1007,173 @@ mod tests {
             _ => panic!("expected Map"),
         };
         assert!(cipher.decrypt::<FfiValue>(tampered).is_err());
+    }
+
+    // ---------------------------------------------------------------
+    // Passthrough: unencrypted, unauthenticated fields alongside sealed ones
+    // ---------------------------------------------------------------
+
+    fn pt(v: FfiValue) -> FfiValue {
+        FfiValue::Passthrough(Box::new(v))
+    }
+
+    #[test]
+    fn passthrough_free_value_is_unchanged() {
+        // Regression guard for the new `Passthrough` variant: a value tree
+        // that contains no passthrough nodes must seal exactly as before.
+        // The scalar leaf bytes are still the frozen KATs, and a nested
+        // passthrough-free structure still round-trips unchanged.
+        assert_eq!(
+            leaf_bytes(FfiValue::Int64(42)),
+            [0x05, 42, 0, 0, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(leaf_bytes(s("abc")), [0x0A, b'a', b'b', b'c']);
+        let make = || {
+            FfiValue::Object(vec![
+                ("name".into(), s("alice")),
+                ("age".into(), FfiValue::Int64(30)),
+                (
+                    "tags".into(),
+                    FfiValue::Array(vec![s("a"), FfiValue::Int64(3)]),
+                ),
+            ])
+        };
+        assert_eq!(roundtrip(make()), make());
+    }
+
+    #[test]
+    fn roundtrip_passthrough_leaf() {
+        // A scalar wrapped in passthrough round-trips, keeping its marking.
+        assert_eq!(roundtrip(pt(FfiValue::Int64(42))), pt(FfiValue::Int64(42)));
+        assert_eq!(roundtrip(pt(s("in-the-clear"))), pt(s("in-the-clear")));
+    }
+
+    #[test]
+    fn roundtrip_mixed_map_sealed_and_passthrough() {
+        // The motivating shape: id/created_at pass through in the clear while
+        // email/name are sealed. Everything round-trips, marking preserved.
+        let make = || {
+            FfiValue::Object(vec![
+                ("id".into(), pt(FfiValue::Int64(42))),
+                ("created_at".into(), pt(s("2026-07-25T00:00:00Z"))),
+                ("email".into(), s("ada@example.com")),
+                ("name".into(), s("Ada Lovelace")),
+            ])
+        };
+        assert_eq!(roundtrip(make()), make());
+    }
+
+    #[test]
+    fn roundtrip_nested_passthrough_subtree() {
+        // Passthrough may wrap a whole Object/Array subtree — the entire
+        // subtree is then plaintext and round-trips as one passthrough node.
+        let subtree = || {
+            FfiValue::Object(vec![
+                ("kind".into(), s("public")),
+                (
+                    "labels".into(),
+                    FfiValue::Array(vec![s("a"), s("b"), FfiValue::Int32(3)]),
+                ),
+            ])
+        };
+        let make = || {
+            FfiValue::Object(vec![
+                ("meta".into(), pt(subtree())),
+                ("secret".into(), s("classified")),
+            ])
+        };
+        assert_eq!(roundtrip(make()), make());
+    }
+
+    #[test]
+    fn passthrough_value_is_not_authenticated() {
+        // Honest documentation of the property: a modified passthrough value
+        // is NOT detected. We rebuild the ciphertext with a forged passthrough
+        // payload — no key required — and decryption still succeeds, returning
+        // the forged value.
+        use vitaminc_encrypt::AesCipherText;
+        let cipher = cipher();
+        let value = FfiValue::Object(vec![
+            ("id".into(), pt(FfiValue::Int64(42))),
+            ("email".into(), s("ada@example.com")),
+        ]);
+        let ct = value.encrypt(&cipher).expect("encrypt");
+        let tampered = match ct {
+            AesCipherText::Map(mut entries) => {
+                for (key, node) in entries.iter_mut() {
+                    if key == "id" {
+                        *node = AesCipherText::Passthrough(Box::new(FfiValue::Int64(999)));
+                    }
+                }
+                AesCipherText::Map(entries)
+            }
+            _ => panic!("expected Map"),
+        };
+        let decrypted: FfiValue = cipher.decrypt(tampered).expect("decrypt");
+        match decrypted {
+            FfiValue::Object(entries) => {
+                let id = entries.iter().find(|(k, _)| k == "id").expect("id");
+                // The forged value is accepted — passthrough is unauthenticated.
+                assert_eq!(id.1, pt(FfiValue::Int64(999)));
+            }
+            _ => panic!("expected Object"),
+        }
+    }
+
+    #[test]
+    fn sealed_sibling_authenticates_alongside_passthrough() {
+        // The flip side: tampering a SEALED sibling of a passthrough field is
+        // still detected — the passthrough field does not weaken the sealed
+        // ones. Flip a byte in the sealed "email" leaf; decryption must fail.
+        use vitaminc_aead::LocalCipherText;
+        use vitaminc_encrypt::AesCipherText;
+        let cipher = cipher();
+        let value = FfiValue::Object(vec![
+            ("id".into(), pt(FfiValue::Int64(42))),
+            ("email".into(), s("ada@example.com")),
+        ]);
+        let ct = value.encrypt(&cipher).expect("encrypt");
+        let tampered = match ct {
+            AesCipherText::Map(mut entries) => {
+                for (key, node) in entries.iter_mut() {
+                    if key == "email" {
+                        if let AesCipherText::Single(leaf) = node {
+                            let mut bytes = leaf.as_ref().to_vec();
+                            let mid = bytes.len() / 2;
+                            bytes[mid] ^= 0x01;
+                            *node = AesCipherText::Single(LocalCipherText::from(bytes));
+                        }
+                    }
+                }
+                AesCipherText::Map(entries)
+            }
+            _ => panic!("expected Map"),
+        };
+        assert!(cipher.decrypt::<FfiValue>(tampered).is_err());
+    }
+
+    #[test]
+    fn foreign_passthrough_payload_is_rejected() {
+        // A passthrough whose boxed payload is not an `FfiValue` (a raw u32,
+        // as a Rust-native cipher user might store) must be rejected cleanly
+        // on the self-describing decode path — an error, never a panic.
+        use vitaminc_encrypt::AesCipherText;
+        let cipher = cipher();
+        let ct: AesCipherText = AesCipherText::Passthrough(Box::new(42u32));
+        assert!(cipher.decrypt::<FfiValue>(ct).is_err());
+    }
+
+    #[test]
+    fn passthrough_in_array_round_trips() {
+        // Passthrough nested as an array element (not a map value) exercises
+        // the seq recursion path into the passthrough arm.
+        let make = || {
+            FfiValue::Array(vec![
+                s("sealed"),
+                pt(FfiValue::Int64(7)),
+                FfiValue::Int32(-1),
+            ])
+        };
+        assert_eq!(roundtrip(make()), make());
     }
 }

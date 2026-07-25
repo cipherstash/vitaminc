@@ -81,7 +81,7 @@ mod tests {
         let leaf = LeafTypeAad::new(Aad::from_slice(b"ctx"), b'n').into_aad();
         let map_entry = Aad::from_slice(b"ctx").for_map_entry("n");
         assert_ne!(leaf.as_bytes(), map_entry.as_bytes());
-        let tuple = (Aad::from_slice(b"ctx"), [b'n']).into_aad();
+        let tuple = (Aad::from_slice(b"ctx"), *b"n").into_aad();
         assert_ne!(leaf.as_bytes(), tuple.as_bytes());
     }
 
