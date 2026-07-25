@@ -14,9 +14,10 @@ cross-language leaf wire format. This crate adds only what is JS-specific:
   on the JS thread; everything past the `#[napi]` boundary works with the
   bare `FfiValue`, on any thread.
   - JS `number` ↔ `FfiValue::Number` (always — integral JS numbers stay
-    numbers). JS `BigInt` ↔ `FfiValue::Int` (must fit `i64`); decoding an
-    `Int` yields a JS `number` within `Number.MAX_SAFE_INTEGER` and a
-    `BigInt` beyond it.
+    numbers). JS `BigInt` carries integer typing: fits `i64` → `FfiValue::Int`,
+    above `i64::MAX` but fits `u64` → `FfiValue::UInt`, larger → rejected.
+    Decoding an `Int`/`UInt` yields a JS `number` within
+    `Number.MAX_SAFE_INTEGER` and a `BigInt` beyond it.
 - **`JsCipherText<Leaf, P>`** — projects the generic `CipherText` container
   onto plain JS values (`{ t, v }` nodes with `Buffer` leaves) and back, as
   an in-memory/application-side representation. Durable cross-language

@@ -34,3 +34,8 @@ pub const BYTES: u8 = 0x06;
 /// Distinct from [`NUMBER`] so integer-typed languages (Python, Go)
 /// round-trip integers as integers.
 pub const INT64: u8 = 0x07;
+/// 64-bit unsigned integer: 8 bytes, little-endian. Distinct from
+/// [`INT64`] so unsigned values above `i64::MAX` (which [`INT64`] cannot
+/// represent) round-trip losslessly — this closes the model's only
+/// representational hole in the integer space.
+pub const UINT64: u8 = 0x08;

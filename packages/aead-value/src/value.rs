@@ -30,8 +30,14 @@ use zeroize::Zeroize;
 /// `Null` and `Undefined` are distinct tagged leaves rather than uses of
 /// [`Cipher::encrypt_none`] — `Option` semantics can't distinguish them,
 /// and JavaScript callers can. See the crate docs for the cross-language
-/// type mapping, including how [`Number`](FfiValue::Number) and
-/// [`Int`](FfiValue::Int) divide the numeric space.
+/// type mapping, including how [`Number`](FfiValue::Number),
+/// [`Int`](FfiValue::Int), and [`UInt`](FfiValue::UInt) divide the numeric
+/// space.
+///
+/// The cross-language contract is the frozen tag table plus the leaf
+/// encodings (see [`tags`]); this enum is merely Rust's materialization of
+/// that model. Bindings in other languages implement the model, not this
+/// enum.
 #[derive(Zeroize)]
 pub enum FfiValue {
     /// Null (JS `null`, Python `None`, Go `nil`).
@@ -46,6 +52,11 @@ pub enum FfiValue {
     /// 64-bit signed integer. Kept distinct from [`Number`](FfiValue::Number)
     /// so integer-typed languages round-trip integers as integers.
     Int(i64),
+    /// 64-bit unsigned integer. Kept distinct from [`Int`](FfiValue::Int) so
+    /// unsigned values above `i64::MAX` — previously unrepresentable — round
+    /// trip losslessly. This closes the model's only representational hole in
+    /// the integer space.
+    UInt(u64),
     /// String as UTF-8 bytes. Validated UTF-8 at construction; held as
     /// bytes inside [`Protected`] so the copy is wiped on drop.
     String(Protected<Vec<u8>>),
@@ -106,6 +117,12 @@ impl Encrypt for FfiValue {
                 buf.extend_from_slice(&i.to_le_bytes());
                 cipher.encrypt_bytes_vec(Protected::new(buf), aad)
             }
+            FfiValue::UInt(u) => {
+                let mut buf = Vec::with_capacity(9);
+                buf.push(tags::UINT64);
+                buf.extend_from_slice(&u.to_le_bytes());
+                cipher.encrypt_bytes_vec(Protected::new(buf), aad)
+            }
             FfiValue::String(s) => cipher.encrypt_bytes_vec(tagged(tags::STRING, s), aad),
             FfiValue::Bytes(b) => cipher.encrypt_bytes_vec(tagged(tags::BYTES, b), aad),
             FfiValue::Array(items) => {
@@ -157,6 +174,10 @@ impl<'c> DecipherVisitor<'c> for FfiValueVisitor {
             (tags::INT64, bytes) => {
                 let bytes: [u8; 8] = bytes.try_into().map_err(|_| Unspecified)?;
                 Ok(FfiValue::Int(i64::from_le_bytes(bytes)))
+            }
+            (tags::UINT64, bytes) => {
+                let bytes: [u8; 8] = bytes.try_into().map_err(|_| Unspecified)?;
+                Ok(FfiValue::UInt(u64::from_le_bytes(bytes)))
             }
             (tags::STRING, utf8) => {
                 // Validate now so host conversions later are infallible.
@@ -220,6 +241,7 @@ impl PartialEq for FfiValue {
             (FfiValue::Bool(a), FfiValue::Bool(b)) => a == b,
             (FfiValue::Number(a), FfiValue::Number(b)) => a.to_bits() == b.to_bits(),
             (FfiValue::Int(a), FfiValue::Int(b)) => a == b,
+            (FfiValue::UInt(a), FfiValue::UInt(b)) => a == b,
             (FfiValue::String(a), FfiValue::String(b))
             | (FfiValue::Bytes(a), FfiValue::Bytes(b)) => a.risky_ref() == b.risky_ref(),
             (FfiValue::Array(a), FfiValue::Array(b)) => a == b,
@@ -238,6 +260,7 @@ impl std::fmt::Debug for FfiValue {
             FfiValue::Bool(b) => write!(f, "Bool({b})"),
             FfiValue::Number(n) => write!(f, "Number({n})"),
             FfiValue::Int(i) => write!(f, "Int({i})"),
+            FfiValue::UInt(u) => write!(f, "UInt({u})"),
             FfiValue::String(_) => f.write_str("String(<redacted>)"),
             FfiValue::Bytes(_) => f.write_str("Bytes(<redacted>)"),
             FfiValue::Array(items) => f.debug_tuple("Array").field(items).finish(),
@@ -452,6 +475,33 @@ mod tests {
     }
 
     #[test]
+    fn kat_uint64() {
+        assert_eq!(
+            leaf_bytes(FfiValue::UInt(42)),
+            [0x08, 42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+        );
+        // u64::MAX: all ones — the value INT64 cannot represent.
+        assert_eq!(
+            leaf_bytes(FfiValue::UInt(u64::MAX)),
+            [0x08, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
+        );
+        assert_eq!(
+            leaf_bytes(FfiValue::UInt(0)),
+            [0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+        );
+    }
+
+    #[test]
+    fn kat_int_and_uint_never_collide() {
+        // Int(-1) and UInt(u64::MAX) share payload bytes but differ by tag,
+        // so they never collide on the wire.
+        assert_ne!(
+            leaf_bytes(FfiValue::Int(-1)),
+            leaf_bytes(FfiValue::UInt(u64::MAX))
+        );
+    }
+
+    #[test]
     fn kat_string() {
         assert_eq!(leaf_bytes(s("abc")), [0x05, b'a', b'b', b'c']);
         assert_eq!(leaf_bytes(s("")), [0x05]);
@@ -491,6 +541,11 @@ mod tests {
         assert_eq!(roundtrip(FfiValue::Int(0)), FfiValue::Int(0));
         assert_eq!(roundtrip(FfiValue::Int(i64::MAX)), FfiValue::Int(i64::MAX));
         assert_eq!(roundtrip(FfiValue::Int(i64::MIN)), FfiValue::Int(i64::MIN));
+        assert_eq!(roundtrip(FfiValue::UInt(0)), FfiValue::UInt(0));
+        assert_eq!(
+            roundtrip(FfiValue::UInt(u64::MAX)),
+            FfiValue::UInt(u64::MAX)
+        );
         assert_eq!(roundtrip(s("hello world")), s("hello world"));
         assert_eq!(
             roundtrip(FfiValue::Bytes(Protected::new(vec![0, 159, 146, 150]))),
@@ -507,6 +562,8 @@ mod tests {
             roundtrip(FfiValue::Number(1.0)),
             FfiValue::Number(_)
         ));
+        // UInt stays UInt — it does not collapse into Int or Number.
+        assert!(matches!(roundtrip(FfiValue::UInt(1)), FfiValue::UInt(1)));
     }
 
     #[test]
@@ -610,7 +667,7 @@ mod tests {
     fn truncated_fixed_width_leaves_fail() {
         let cipher = cipher();
         use vitaminc_aead::Cipher as _;
-        for tag in [tags::NUMBER, tags::INT64] {
+        for tag in [tags::NUMBER, tags::INT64, tags::UINT64] {
             // 3 payload bytes instead of 8.
             let bad = (&cipher)
                 .encrypt_bytes_vec(

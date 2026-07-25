@@ -8,9 +8,11 @@
 //!
 //! JS `number` always converts to [`FfiValue::Number`] — integral JS
 //! numbers do **not** become [`FfiValue::Int`], preserving JS semantics
-//! (`42` and `42.0` are the same value in JS). JS `BigInt` converts to
-//! [`FfiValue::Int`] and must fit in `i64`. On the way out, `Int` becomes a
-//! JS `number` when within `Number.MAX_SAFE_INTEGER` (±2⁵³ − 1) and a
+//! (`42` and `42.0` are the same value in JS). JS `BigInt` carries integer
+//! typing: one that fits `i64` converts to [`FfiValue::Int`]; one above
+//! `i64::MAX` that still fits `u64` converts to [`FfiValue::UInt`]; anything
+//! larger is rejected. On the way out, `Int` and `UInt` become a JS `number`
+//! when within `Number.MAX_SAFE_INTEGER` (2⁵³ − 1 in magnitude) and a
 //! `BigInt` otherwise, so integer-typed values written by other languages
 //! (Python, Go) surface losslessly in JS.
 
@@ -178,14 +180,22 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<FfiValue> {
         ValueType::Number => Ok(FfiValue::Number(f64::from_unknown(unknown)?)),
         ValueType::BigInt => {
             let big = BigInt::from_unknown(unknown)?;
-            let (value, lossless) = big.get_i64();
-            if !lossless {
-                return Err(Error::new(
-                    Status::InvalidArg,
-                    "BigInt value does not fit in a signed 64-bit integer",
-                ));
+            // Signed first: a BigInt that fits `i64` is an `Int`.
+            let (signed, i64_lossless) = big.get_i64();
+            if i64_lossless {
+                return Ok(FfiValue::Int(signed));
             }
-            Ok(FfiValue::Int(value))
+            // Otherwise try unsigned: `get_u64` reports lossless only when the
+            // value is non-negative and fits in a single 64-bit word, so a
+            // positive BigInt in (i64::MAX, u64::MAX] lands here as `UInt`.
+            let (_sign, unsigned, u64_lossless) = big.get_u64();
+            if u64_lossless {
+                return Ok(FfiValue::UInt(unsigned));
+            }
+            Err(Error::new(
+                Status::InvalidArg,
+                "BigInt value does not fit in a 64-bit integer",
+            ))
         }
         ValueType::String => {
             // `String::from_unknown` copies out of the V8 heap; the copy is
@@ -281,6 +291,15 @@ fn value_to_js(env: sys::napi_env, value: FfiValue) -> Result<sys::napi_value> {
                 unsafe { f64::to_napi_value(env, i as f64) }
             } else {
                 unsafe { BigInt::to_napi_value(env, BigInt::from(i)) }
+            }
+        }
+        FfiValue::UInt(u) => {
+            // Same rule as `Int`: exactly representable → plain number, else
+            // BigInt. `MAX_SAFE_INTEGER` is non-negative so the cast is safe.
+            if u <= MAX_SAFE_INTEGER as u64 {
+                unsafe { f64::to_napi_value(env, u as f64) }
+            } else {
+                unsafe { BigInt::to_napi_value(env, BigInt::from(u)) }
             }
         }
         FfiValue::String(s) => {

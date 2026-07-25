@@ -15,6 +15,26 @@ This crate is consumed by the per-language binding crates (e.g.
 `vitaminc-aead-napi` for Node.js); applications normally use those rather
 than this crate directly.
 
+## The contract is the tag table, not this enum
+
+The cross-language contract is the **frozen tag table plus the sealed leaf
+encodings** (`[tag] ++ payload`, sealed inside the AEAD envelope). That
+model — and only that model — is what every language binding agrees on.
+`FfiValue` is simply Rust's materialization of it; a Go, Python, or
+JavaScript binding implements the same model in whatever local shape fits
+its language, not this enum.
+
+The model is deliberately narrow — JSON/CBOR-class, not serde-class. It
+carries a small, fixed set of value classes, and governs its own growth:
+
+> A new tag is added only when a value class cannot be represented in the
+> existing model, and requires a defined decode mapping for every supported
+> language before it ships.
+
+The `UINT64` tag is the worked example: unsigned integers above `i64::MAX`
+were previously unrepresentable — a genuine hole in the model — so it earned
+a new tag, with the Go/Python/JavaScript decode mappings defined below.
+
 ## Leaf encoding (cross-language wire commitment)
 
 Scalar values seal as a one-byte type tag followed by the payload,
@@ -33,6 +53,7 @@ onto the cipher's sequence and map modes and carry no tag of their own.
 | `0x05` | `STRING` | UTF-8 bytes |
 | `0x06` | `BYTES` | raw bytes |
 | `0x07` | `INT64` | 8 bytes, two's-complement, little-endian |
+| `0x08` | `UINT64` | 8 bytes, little-endian |
 
 This table is a **frozen wire format**: changing a tag or payload encoding
 breaks decryption of existing ciphertexts in every language. New types must
@@ -50,7 +71,8 @@ mapping. The defining rules:
 | `Undefined` | `undefined` | decodes as `None` | decodes as `nil` |
 | `Bool` | `boolean` | `bool` | `bool` |
 | `Number` | `number` (always — integral JS numbers do **not** become `Int`) | `float` | `float64` |
-| `Int` | encodes from `BigInt`; decodes as `number` when within ±2⁵³, else `BigInt` | `int` (error outside i64 range) | `int`/`int64` |
+| `Int` | encodes from `BigInt` that fits `i64`; decodes as `number` when within ±2⁵³, else `BigInt` | `int` | `int`/`int64` |
+| `UInt` | encodes from `BigInt` above `i64::MAX` that fits `u64`; decodes as `number` when ≤ 2⁵³−1, else `BigInt` | `int` | `uint64` |
 | `String` | `string` | `str` | `string` |
 | `Bytes` | `Buffer`/`Uint8Array` | `bytes` | `[]byte` |
 | `Array` | `Array` | `list` | `[]any` |
@@ -58,6 +80,11 @@ mapping. The defining rules:
 
 `Undefined` exists for JavaScript round-trip fidelity; languages without an
 analog decode it to their null value and never encode it.
+
+A JS `number` always encodes as `Number`, never `Int`/`UInt` — `42` and
+`42.0` are the same value in JS. Integer typing comes from `BigInt`: a
+`BigInt` that fits `i64` encodes as `Int`, one above `i64::MAX` that fits
+`u64` encodes as `UInt`, and anything larger is rejected.
 
 ## Security notes
 
