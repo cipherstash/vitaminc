@@ -4,15 +4,18 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/cipherstash/vitaminc/bindings/go/vcencrypt"
 	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 )
 
 // Example encrypts a user record where the non-secret fields (id, created_at)
-// travel in the clear via vcvalue.Plain while email and name are sealed, then
-// shows the structured ciphertext — passthrough values readable without the
-// key, sealed fields as opaque leaves — and finally decrypts it.
+// travel in the clear via vcvalue.Plain while email and name are sealed. The
+// ciphertext mirrors the record's structure in ordinary Go values — Plain
+// fields readable without the key, Sealed leaves for the encrypted fields —
+// and decrypts back to the same shape.
 func Example() {
 	ctx := context.Background()
 	client, err := vcencrypt.NewClient(ctx)
@@ -41,14 +44,15 @@ func Example() {
 		panic(err)
 	}
 
-	// The structured ciphertext, field by field (keys are sorted on encode).
+	// The ciphertext is a map of ordinary values, field by field.
+	m := ct.(map[string]any)
 	fmt.Println("ciphertext:")
-	for _, f := range ct.Fields {
-		switch f.Node.Kind {
-		case vcvalue.KindPassthrough:
-			fmt.Printf("  %-11s passthrough = %v\n", f.Key, f.Node.Passthrough)
-		case vcvalue.KindSingle:
-			fmt.Printf("  %-11s sealed (%d-byte leaf)\n", f.Key, len(f.Node.Leaf))
+	for _, key := range slices.Sorted(maps.Keys(m)) {
+		switch node := m[key].(type) {
+		case vcvalue.Plain:
+			fmt.Printf("  %-11s passthrough = %v\n", key, node.V)
+		case vcvalue.Sealed:
+			fmt.Printf("  %-11s sealed (%d-byte leaf)\n", key, len(node))
 		}
 	}
 

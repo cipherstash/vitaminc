@@ -29,8 +29,8 @@
 // beside the sealed ones. It never happens implicitly: reflection encode
 // requires the Plain{V: ...} marker, and the Encoder exposes an explicit
 // Passthrough() channel. A decoded passthrough field surfaces back as
-// Plain{V: ...}, and a passthrough ciphertext node is KindPassthrough with a
-// readable value.
+// Plain{V: ...}, and a passthrough node in a ciphertext is likewise a Plain
+// with a readable value.
 //
 // # Decoding
 //

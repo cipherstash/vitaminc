@@ -257,19 +257,17 @@ func TestUnmarshalRejectsPassthroughDepthBomb(t *testing.T) {
 	}
 }
 
-// A KindPassthrough ciphertext node carries its readable value across the
-// transport and back.
+// A passthrough ciphertext node carries its readable value across the
+// transport and back, marked Plain so it cannot be mistaken for a
+// ciphertext map or sequence on the way back in.
 func TestCipherTextPassthroughTransportRoundTrip(t *testing.T) {
-	ct := vcvalue.CipherText{
-		Kind: vcvalue.KindMap,
-		Fields: []vcvalue.CipherTextField{
-			{Key: "id", Node: vcvalue.CipherText{Kind: vcvalue.KindPassthrough, Passthrough: int64(42)}},
-			{Key: "email", Node: vcvalue.CipherText{Kind: vcvalue.KindSingle, Leaf: []byte{9, 9, 9}}},
-		},
+	ct := map[string]any{
+		"id":    vcvalue.Plain{V: int64(42)},
+		"email": vcvalue.Sealed{9, 9, 9},
 	}
-	buf, err := ct.MarshalTransport()
+	buf, err := vcvalue.MarshalCipherText(ct)
 	if err != nil {
-		t.Fatalf("MarshalTransport: %v", err)
+		t.Fatalf("MarshalCipherText: %v", err)
 	}
 	got, err := vcvalue.UnmarshalCipherText(buf)
 	if err != nil {
@@ -281,19 +279,13 @@ func TestCipherTextPassthroughTransportRoundTrip(t *testing.T) {
 }
 
 func TestCipherTextTransportRoundTrip(t *testing.T) {
-	ct := vcvalue.CipherText{
-		Kind: vcvalue.KindMap,
-		Fields: []vcvalue.CipherTextField{
-			{Key: "a", Node: vcvalue.CipherText{Kind: vcvalue.KindSingle, Leaf: []byte{9, 9, 9}}},
-			{Key: "b", Node: vcvalue.CipherText{Kind: vcvalue.KindSeq, Items: []vcvalue.CipherText{
-				{Kind: vcvalue.KindSingle, Leaf: []byte{1}},
-				{Kind: vcvalue.KindNone, Leaf: []byte{2}},
-			}}},
-		},
+	ct := map[string]any{
+		"a": vcvalue.Sealed{9, 9, 9},
+		"b": []any{vcvalue.Sealed{1}, vcvalue.SealedNone{2}},
 	}
-	buf, err := ct.MarshalTransport()
+	buf, err := vcvalue.MarshalCipherText(ct)
 	if err != nil {
-		t.Fatalf("MarshalTransport: %v", err)
+		t.Fatalf("MarshalCipherText: %v", err)
 	}
 	got, err := vcvalue.UnmarshalCipherText(buf)
 	if err != nil {
@@ -301,5 +293,16 @@ func TestCipherTextTransportRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, ct) {
 		t.Fatalf("got %#v, want %#v", got, ct)
+	}
+}
+
+// A bare plaintext value in ciphertext position is rejected: passthrough must
+// be explicit (Plain), so nothing travels unencrypted by accident.
+func TestCipherTextRejectsBarePlaintext(t *testing.T) {
+	if _, err := vcvalue.MarshalCipherText(map[string]any{"x": "oops"}); err == nil {
+		t.Fatal("bare plaintext in ciphertext position must be rejected")
+	}
+	if _, err := vcvalue.MarshalCipherText([]byte{1, 2, 3}); err == nil {
+		t.Fatal("bare []byte must be rejected (use Sealed or Plain)")
 	}
 }

@@ -13,7 +13,8 @@ This directory holds **two separate Go modules**, each with its own `go.mod`:
 
 - **[`vcvalue/`](vcvalue)** — the durable value layer: the value currency
   (encoder / `Encryptable` / reflection encode + natives decode), the transport
-  codec, and the `CipherText` projection. **Zero dependencies** (no wazero, no
+  codec, and the ciphertext value shape (`Sealed`/`Plain`). **Zero
+  dependencies** (no wazero, no
   crypto). This is the module a future stack-encrypt Go SDK is expected to
   import.
   Module path: `github.com/cipherstash/vitaminc/bindings/go/vcvalue`.

@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/cipherstash/vitaminc/bindings/go/vcencrypt"
@@ -61,16 +62,26 @@ func sampleRecord() record {
 	}
 }
 
+// wantRecord lists fields key-sorted: a ciphertext map is unordered (entry
+// order is not authenticated), so decryption returns fields sorted by key.
 func wantRecord() vcvalue.Object {
 	return vcvalue.Object{
-		{Key: "Name", Value: "Ada"},
-		{Key: "Age", Value: int64(36)},
-		{Key: "Score", Value: 1.5},
 		{Key: "Active", Value: true},
-		{Key: "Huge", Value: uint64(math.MaxUint64)},
-		{Key: "Tags", Value: []any{"math", "engines"}},
+		{Key: "Age", Value: int64(36)},
 		{Key: "Blob", Value: []byte{0xDE, 0xAD, 0xBE, 0xEF}},
+		{Key: "Huge", Value: uint64(math.MaxUint64)},
+		{Key: "Name", Value: "Ada"},
+		{Key: "Score", Value: 1.5},
+		{Key: "Tags", Value: []any{"math", "engines"}},
 	}
+}
+
+// sortedByKey returns a key-sorted copy of an Object, for comparisons where
+// the source field order is not part of the contract.
+func sortedByKey(o vcvalue.Object) vcvalue.Object {
+	s := append(vcvalue.Object(nil), o...)
+	sort.Slice(s, func(i, j int) bool { return s[i].Key < s[j].Key })
+	return s
 }
 
 func TestRoundTrip(t *testing.T) {
@@ -81,8 +92,8 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Encrypt: %v", err)
 	}
-	if ct.Kind != vcvalue.KindMap {
-		t.Fatalf("expected map-mode ciphertext, got kind %#x", ct.Kind)
+	if _, ok := ct.(map[string]any); !ok {
+		t.Fatalf("expected map-shaped ciphertext, got %T", ct)
 	}
 
 	got, err := cipher.Decrypt(t.Context(), ct, aad)
@@ -120,8 +131,8 @@ func TestEncryptableRoundTrip(t *testing.T) {
 		t.Fatalf("Decrypt: %v", err)
 	}
 	want := vcvalue.Object{
-		{Key: "name", Value: "Ada"},
 		{Key: "age", Value: uint64(36)},
+		{Key: "name", Value: "Ada"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
@@ -144,18 +155,13 @@ func TestPassthroughRoundTrip(t *testing.T) {
 	}
 
 	// The passthrough field is readable straight from the ciphertext — no key,
-	// no Decrypt call.
-	var idField *vcvalue.CipherTextField
-	for i := range ct.Fields {
-		if ct.Fields[i].Key == "id" {
-			idField = &ct.Fields[i]
-		}
+	// no Decrypt call — and the sealed sibling is a marked Sealed leaf.
+	m := ct.(map[string]any)
+	if id, ok := m["id"].(vcvalue.Plain); !ok || id.V != int64(42) {
+		t.Fatalf("expected id to be a readable Plain int64(42), got %#v", m["id"])
 	}
-	if idField == nil || idField.Node.Kind != vcvalue.KindPassthrough {
-		t.Fatalf("expected id to be a passthrough node, got %#v", ct.Fields)
-	}
-	if idField.Node.Passthrough != int64(42) {
-		t.Fatalf("passthrough value = %#v, want int64(42)", idField.Node.Passthrough)
+	if _, ok := m["email"].(vcvalue.Sealed); !ok {
+		t.Fatalf("expected email to be a Sealed leaf, got %#v", m["email"])
 	}
 
 	got, err := cipher.Decrypt(t.Context(), ct, aad)
@@ -185,11 +191,7 @@ func TestPassthroughIsUnauthenticated(t *testing.T) {
 		t.Fatalf("Encrypt: %v", err)
 	}
 	// Forge the passthrough value in place — no key needed.
-	for i := range ct.Fields {
-		if ct.Fields[i].Key == "id" {
-			ct.Fields[i].Node.Passthrough = int64(999)
-		}
-	}
+	ct.(map[string]any)["id"] = vcvalue.Plain{V: int64(999)}
 	got, err := cipher.Decrypt(t.Context(), ct, nil)
 	if err != nil {
 		t.Fatalf("Decrypt after forging passthrough: %v", err)
@@ -292,7 +294,8 @@ func TestTamperedLeafGivesAuthenticationError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Encrypt: %v", err)
 	}
-	ct.Leaf[len(ct.Leaf)/2] ^= 0x01
+	leaf := ct.(vcvalue.Sealed)
+	leaf[len(leaf)/2] ^= 0x01
 	if _, err := cipher.Decrypt(t.Context(), ct, nil); !errors.Is(err, vcencrypt.ErrAuthentication) {
 		t.Fatalf("expected ErrAuthentication, got %v", err)
 	}
@@ -303,14 +306,8 @@ func TestTamperedLeafGivesAuthenticationError(t *testing.T) {
 func TestGarbageTransportGivesEncodingError(t *testing.T) {
 	cipher := newCipher(t)
 
-	ct := vcvalue.CipherText{
-		Kind: vcvalue.KindMap,
-		Fields: []vcvalue.CipherTextField{
-			{
-				Key:  string([]byte{0xff}), // invalid UTF-8 key
-				Node: vcvalue.CipherText{Kind: vcvalue.KindSingle, Leaf: []byte{1, 2, 3}},
-			},
-		},
+	ct := map[string]any{
+		string([]byte{0xff}): vcvalue.Sealed{1, 2, 3}, // invalid UTF-8 key
 	}
 	if _, err := cipher.Decrypt(t.Context(), ct, nil); !errors.Is(err, vcencrypt.ErrEncoding) {
 		t.Fatalf("expected ErrEncoding, got %v", err)
@@ -344,44 +341,45 @@ func TestMapKeyRenameFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Encrypt: %v", err)
 	}
-	if len(ct.Fields) != 2 {
-		t.Fatalf("expected 2 fields, got %d", len(ct.Fields))
+	m := ct.(map[string]any)
+	if len(m) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(m))
 	}
 
-	renamed := ct
-	renamed.Fields = append([]vcvalue.CipherTextField(nil), ct.Fields...)
-	renamed.Fields[0].Key = "renamed"
+	renamed := map[string]any{"renamed": m["salary"], "bonus": m["bonus"]}
 	if _, err := cipher.Decrypt(t.Context(), renamed, nil); !errors.Is(err, vcencrypt.ErrAuthentication) {
 		t.Fatalf("expected rename to fail with ErrAuthentication, got %v", err)
 	}
 
-	swapped := ct
-	swapped.Fields = []vcvalue.CipherTextField{
-		{Key: ct.Fields[1].Key, Node: ct.Fields[0].Node},
-		{Key: ct.Fields[0].Key, Node: ct.Fields[1].Node},
-	}
+	swapped := map[string]any{"salary": m["bonus"], "bonus": m["salary"]}
 	if _, err := cipher.Decrypt(t.Context(), swapped, nil); !errors.Is(err, vcencrypt.ErrAuthentication) {
 		t.Fatalf("expected swap to fail with ErrAuthentication, got %v", err)
 	}
 }
 
-// Reordering map entries WITHOUT reassigning values is legitimate.
-func TestMapReorderSucceeds(t *testing.T) {
+// There is no whole-map seal: any subset of a record's entries decrypts on
+// its own — the property per-column database reads rely on. The key binding
+// still holds: a leaf lifted out of its map entry fails authentication.
+func TestMapSubsetDecrypts(t *testing.T) {
 	cipher := newCipher(t)
 
 	ct, err := cipher.Encrypt(t.Context(), map[string]int64{"a": 1, "b": 2}, nil)
 	if err != nil {
 		t.Fatalf("Encrypt: %v", err)
 	}
-	ct.Fields[0], ct.Fields[1] = ct.Fields[1], ct.Fields[0]
+	m := ct.(map[string]any)
 
-	got, err := cipher.Decrypt(t.Context(), ct, nil)
+	got, err := cipher.Decrypt(t.Context(), map[string]any{"b": m["b"]}, nil)
 	if err != nil {
-		t.Fatalf("Decrypt after reorder: %v", err)
+		t.Fatalf("Decrypt(subset): %v", err)
 	}
-	want := vcvalue.Object{{Key: "b", Value: int64(2)}, {Key: "a", Value: int64(1)}}
+	want := vcvalue.Object{{Key: "b", Value: int64(2)}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %#v, want %#v", got, want)
+	}
+
+	if _, err := cipher.Decrypt(t.Context(), m["b"], nil); !errors.Is(err, vcencrypt.ErrAuthentication) {
+		t.Fatalf("expected bare leaf to fail authentication, got %v", err)
 	}
 }
 
@@ -430,16 +428,12 @@ func TestCrossLanguageFixture(t *testing.T) {
 
 	// Prove the passthrough fields are readable straight from the native-Rust
 	// ciphertext, without any decryption.
-	fields := ct.Fields
-	byKey := map[string]vcvalue.CipherText{}
-	for _, f := range fields {
-		byKey[f.Key] = f.Node
+	byKey := ct.(map[string]any)
+	if p, ok := byKey["id"].(vcvalue.Plain); !ok || p.V != int64(42) {
+		t.Fatalf("id should be a readable passthrough int64(42), got %#v", byKey["id"])
 	}
-	if n := byKey["id"]; n.Kind != vcvalue.KindPassthrough || n.Passthrough != int64(42) {
-		t.Fatalf("id should be a readable passthrough int64(42), got %#v", n)
-	}
-	if n := byKey["created_at"]; n.Kind != vcvalue.KindPassthrough || n.Passthrough != "2026-07-25T00:00:00Z" {
-		t.Fatalf("created_at should be a readable passthrough string, got %#v", n)
+	if p, ok := byKey["created_at"].(vcvalue.Plain); !ok || p.V != "2026-07-25T00:00:00Z" {
+		t.Fatalf("created_at should be a readable passthrough string, got %#v", byKey["created_at"])
 	}
 
 	client := newClient(t)
@@ -453,7 +447,10 @@ func TestCrossLanguageFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decrypt(fixture): %v", err)
 	}
-	if !reflect.DeepEqual(got, want) {
+	// The fixture's expected value keeps Rust's write order; decryption
+	// returns key-sorted fields (ciphertext maps are unordered), so compare
+	// order-insensitively.
+	if !reflect.DeepEqual(got, sortedByKey(want.(vcvalue.Object))) {
 		t.Fatalf("cross-language mismatch:\n got %#v\nwant %#v", got, want)
 	}
 }

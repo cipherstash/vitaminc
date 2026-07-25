@@ -25,7 +25,7 @@ the existing model, and needs a defined decode mapping in every supported
 language before it ships.
 
 The transport encoding used to hand a tree across an FFI boundary in one copy
-(`Marshal` / `Unmarshal`, `MarshalTransport` / `UnmarshalCipherText`) is
+(`Marshal` / `Unmarshal`, `MarshalCipherText` / `UnmarshalCipherText`) is
 **transport-only**, not a storage format. Durable cross-language database
 interop is a schema-aware layer's job, which this package knows nothing about.
 
@@ -63,9 +63,30 @@ m.End()
 ```
 
 On decode a passthrough field surfaces back as `Plain{V: <decoded value>}`, so
-the marking round-trips and a caller can tell which fields were in the clear. A
-`CipherText` node for a passthrough field is `KindPassthrough`, and its
-readable value is in the `Passthrough` field — legible with no key.
+the marking round-trips and a caller can tell which fields were in the clear.
+A passthrough field inside a *ciphertext* is likewise a `Plain` — legible with
+no key.
+
+## Ciphertexts are ordinary Go values
+
+There is no ciphertext tree type and no conversion step. A ciphertext has the
+same dynamic shape as decoded plaintext, with two marker types naming what is
+sealed:
+
+| value             | meaning                                              |
+| ----------------- | ---------------------------------------------------- |
+| `Sealed`          | one encrypted leaf: `nonce \|\| ciphertext \|\| tag` |
+| `SealedNone`      | the authenticated absent marker                      |
+| `Plain{V: ...}`   | a passthrough field, readable without the key        |
+| `map[string]any`  | a record of named nodes (clear keys, bound into AAD)  |
+| `[]any`           | a sequence of nodes                                  |
+
+`Sealed` implements `driver.Valuer` and `sql.Scanner`, and `Plain` implements
+`driver.Valuer`, so a record-shaped ciphertext binds straight into a database
+as named parameters and sealed columns scan straight back out — no adapter
+layer. Because a record is a plain map, any subset of its fields can be
+handed back for decryption: there is no whole-map seal, and each key is bound
+into its own value's AAD.
 
 ## Decoding
 

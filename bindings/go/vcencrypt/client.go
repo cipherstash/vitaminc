@@ -173,24 +173,31 @@ func (c *Client) NewCipher(ctx context.Context, key []byte) (*Cipher, error) {
 // type implementing vcvalue.Encryptable controls its own encoding, and a
 // vcvalue.Plain marks a field to travel in the clear (passthrough). aad is
 // authenticated but not encrypted; the same aad must be presented to Decrypt.
-func (cph *Cipher) Encrypt(ctx context.Context, v any, aad []byte) (vcvalue.CipherText, error) {
+//
+// The ciphertext comes back as ordinary Go values mirroring the plaintext's
+// structure: vcvalue.Sealed leaves where fields were encrypted, vcvalue.Plain
+// where they passed through, map[string]any for records (directly bindable as
+// database named parameters), []any for sequences.
+func (cph *Cipher) Encrypt(ctx context.Context, v any, aad []byte) (any, error) {
 	encoded, err := vcvalue.Marshal(v)
 	if err != nil {
-		return vcvalue.CipherText{}, err
+		return nil, err
 	}
 	out, err := cph.client.call(ctx, cph.client.encrypt, cph.handle, aad, encoded)
 	if err != nil {
-		return vcvalue.CipherText{}, err
+		return nil, err
 	}
 	return vcvalue.UnmarshalCipherText(out)
 }
 
 // Decrypt opens a ciphertext produced by Encrypt (in any language) with the
-// same cipher and aad. The plaintext is returned in vcvalue's decode shape
-// (Go natives, vcvalue.Object for maps, and vcvalue.Plain for passthrough
-// fields).
-func (cph *Cipher) Decrypt(ctx context.Context, ct vcvalue.CipherText, aad []byte) (any, error) {
-	encoded, err := ct.MarshalTransport()
+// same cipher and aad. ct takes the same dynamic shape Encrypt returns —
+// e.g. a map[string]any of vcvalue.Sealed leaves loaded back from database
+// columns; any subset of a record's entries decrypts. The plaintext is
+// returned in vcvalue's decode shape (Go natives, vcvalue.Object for maps,
+// and vcvalue.Plain for passthrough fields).
+func (cph *Cipher) Decrypt(ctx context.Context, ct any, aad []byte) (any, error) {
+	encoded, err := vcvalue.MarshalCipherText(ct)
 	if err != nil {
 		return nil, err
 	}

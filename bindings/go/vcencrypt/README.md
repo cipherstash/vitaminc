@@ -88,42 +88,35 @@ the order of its choosing.)
 
 ### The ciphertext is structured, not a blob
 
-`Encrypt` returns the tree. Each sealed field is an independent
-`nonce || ciphertext || tag` leaf and passthrough fields are readable in
-place, so a user record maps naturally onto table columns:
+`Encrypt` returns ordinary Go values mirroring the record's structure — there
+is no dedicated ciphertext tree type and nothing to convert. A record comes
+back as a `map[string]any` holding `vcvalue.Sealed` leaves (each an
+independent `nonce || ciphertext || tag`) where fields were encrypted and
+`vcvalue.Plain` values where they passed through:
 
 ```go
-for _, f := range ct.Fields {
-    switch f.Node.Kind {
-    case vcvalue.KindPassthrough:
-        fmt.Println(f.Key, "=", f.Node.Passthrough) // id = 42 — no key involved
-    case vcvalue.KindSingle:
-        storeColumn(f.Key, f.Node.Leaf) // email → its own column of sealed bytes
-    }
-}
-```
+m := ct.(map[string]any)
+fmt.Println(m["id"].(vcvalue.Plain).V) // 42 — readable, no key involved
+_ = m["email"].(vcvalue.Sealed)        // opaque leaf bytes
 
-For flat records the walk is one call: `ct.Columns()` flattens the tree into
-named parameters (passthrough fields as native values, sealed fields as leaf
-bytes) that bind directly in `database/sql`, sqlx, or an ORM:
-
-```go
-cols, _ := ct.Columns()
+// Sealed and Plain implement driver.Valuer, so the map binds directly:
 db.NamedExecContext(ctx, `INSERT INTO users (id, created_at, email, name)
-    VALUES (:id, :created_at, :email, :name)`, cols)
+    VALUES (:id, :created_at, :email, :name)`, m)
 ```
 
 ### Decrypting — the whole record, or one column
 
 Map keys travel in the clear but each is cryptographically bound into its
 value's AAD, and there is no whole-map seal — so any subset of entries
-decrypts independently. To read columns back, `vcvalue.SealedColumns`
-rebuilds the decryptable map node around the stored leaf bytes:
+decrypts independently. `Decrypt` takes the same shape `Encrypt` returns: to
+read columns back, put the loaded leaves in a map under the exact names they
+were sealed with (`Sealed` implements `sql.Scanner`, so it loads straight
+from a BLOB column):
 
 ```go
-var leaf []byte // e.g. SELECT email FROM users WHERE id = 42
+var leaf vcvalue.Sealed // e.g. SELECT email FROM users WHERE id = 42
 got, err := cipher.Decrypt(ctx,
-    vcvalue.SealedColumns(map[string][]byte{"email": leaf}),
+    map[string]any{"email": leaf},
     aad) // Object{{"email", "ada@example.com"}}
 ```
 
@@ -143,8 +136,10 @@ for _, f := range got.(vcvalue.Object) {
 
 ### An array of user records
 
-A slice works directly — reflection consults `Encryptable` for each element,
-so `[]User` produces a sequence of the per-user trees from above:
+The collection itself is encryptable — one `Encrypt` call seals the whole
+slice (reflection consults `Encryptable` per element, the Go analog of Rust's
+`impl Encrypt for Vec<T>`), and each element of the result is already a
+bindable row:
 
 ```go
 users := []User{
@@ -153,15 +148,13 @@ users := []User{
 }
 ct, err := cipher.Encrypt(ctx, users, aad)
 
-// ct.Kind == vcvalue.KindSeq; one KindMap per user.
-for i, row := range ct.Items {
-    for _, f := range row.Fields {
-        fmt.Println(i, f.Key, f.Node.Kind) // id: KindPassthrough, email: KindSingle, …
-    }
+for _, row := range ct.([]any) { // one map[string]any per user
+    db.NamedExecContext(ctx, `INSERT INTO users (id, created_at, email, name)
+        VALUES (:id, :created_at, :email, :name)`, row.(map[string]any))
 }
 ```
 
-`Decrypt` of the whole tree returns `[]any` of `vcvalue.Object`. Rows are
+`Decrypt` of the whole slice returns `[]any` of `vcvalue.Object`. Rows are
 independent: a single element decrypts on its own (wrapped in a one-item
 sequence, or directly as the root), which suits row-at-a-time reads. The flip
 side is that the sequence itself carries no seal — element order and
