@@ -103,19 +103,28 @@ for _, f := range ct.Fields {
 }
 ```
 
+For flat records the walk is one call: `ct.Columns()` flattens the tree into
+named parameters (passthrough fields as native values, sealed fields as leaf
+bytes) that bind directly in `database/sql`, sqlx, or an ORM:
+
+```go
+cols, _ := ct.Columns()
+db.NamedExecContext(ctx, `INSERT INTO users (id, created_at, email, name)
+    VALUES (:id, :created_at, :email, :name)`, cols)
+```
+
 ### Decrypting — the whole record, or one column
 
 Map keys travel in the clear but each is cryptographically bound into its
 value's AAD, and there is no whole-map seal — so any subset of entries
-decrypts independently. To read one column back, rebuild a one-entry map
-around the stored leaf:
+decrypts independently. To read columns back, `vcvalue.SealedColumns`
+rebuilds the decryptable map node around the stored leaf bytes:
 
 ```go
-one := vcvalue.CipherText{
-    Kind:   vcvalue.KindMap,
-    Fields: []vcvalue.CipherTextField{{Key: "email", Node: loadedNode}},
-}
-got, err := cipher.Decrypt(ctx, one, aad) // Object{{"email", "ada@example.com"}}
+var leaf []byte // e.g. SELECT email FROM users WHERE id = 42
+got, err := cipher.Decrypt(ctx,
+    vcvalue.SealedColumns(map[string][]byte{"email": leaf}),
+    aad) // Object{{"email", "ada@example.com"}}
 ```
 
 The binding cuts the other way too: presenting that same leaf under a renamed

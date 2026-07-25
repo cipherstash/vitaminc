@@ -42,10 +42,10 @@ func (u User) EncryptValue(enc vcvalue.Encoder) error {
 	return m.End()
 }
 
-// userRow is the table shape of an encrypted User: passthrough fields map to
-// native columns, sealed fields to BLOB columns holding leaf bytes. Column
-// names must equal the sealed field names — the name is authenticated into
-// each leaf's AAD, so a mis-mapped column fails decryption instead of
+// userRow is the scan destination for whole-row SELECTs: passthrough fields
+// map to native columns, sealed fields to BLOB columns holding leaf bytes.
+// Column names must equal the sealed field names — the name is authenticated
+// into each leaf's AAD, so a mis-mapped column fails decryption instead of
 // decrypting into the wrong field.
 type userRow struct {
 	ID        int64  `db:"id"`
@@ -67,37 +67,6 @@ const schema = `CREATE TABLE users (
 // user 2's row undetected.
 func rowAad(id int64) []byte {
 	return fmt.Appendf(nil, "users:%d", id)
-}
-
-// toRow walks a structured ciphertext into the table shape.
-func toRow(ct vcvalue.CipherText) (row userRow, err error) {
-	for _, f := range ct.Fields {
-		switch f.Key {
-		case "id":
-			row.ID = f.Node.Passthrough.(int64)
-		case "created_at":
-			row.CreatedAt = f.Node.Passthrough.(string)
-		case "email":
-			row.Email = f.Node.Leaf
-		case "name":
-			row.Name = f.Node.Leaf
-		default:
-			return row, fmt.Errorf("unexpected field %q", f.Key)
-		}
-	}
-	return row, nil
-}
-
-// sealedMap rebuilds the decryptable map node for stored leaf columns.
-func sealedMap(fields map[string][]byte) vcvalue.CipherText {
-	ct := vcvalue.CipherText{Kind: vcvalue.KindMap}
-	for key, leaf := range fields {
-		ct.Fields = append(ct.Fields, vcvalue.CipherTextField{
-			Key:  key,
-			Node: vcvalue.CipherText{Kind: vcvalue.KindSingle, Leaf: leaf},
-		})
-	}
-	return ct
 }
 
 func main() {
@@ -132,12 +101,14 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		row, err := toRow(ct)
+		// Columns flattens the tree into sqlx-bindable named parameters:
+		// passthrough fields as native values, sealed fields as leaf bytes.
+		cols, err := ct.Columns()
 		if err != nil {
 			log.Fatal(err)
 		}
 		if _, err := db.NamedExecContext(ctx, `INSERT INTO users (id, created_at, email, name)
-			VALUES (:id, :created_at, :email, :name)`, row); err != nil {
+			VALUES (:id, :created_at, :email, :name)`, cols); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -155,14 +126,14 @@ func main() {
 	if err := db.GetContext(ctx, &leaf, `SELECT email FROM users WHERE id = ?`, 42); err != nil {
 		log.Fatal(err)
 	}
-	got, err := cipher.Decrypt(ctx, sealedMap(map[string][]byte{"email": leaf}), rowAad(42))
+	got, err := cipher.Decrypt(ctx, vcvalue.SealedColumns(map[string][]byte{"email": leaf}), rowAad(42))
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("single-column decrypt:  email = %v\n", got.(vcvalue.Object)[0].Value)
 
 	// The same leaf under the wrong row identity fails authentication.
-	if _, err := cipher.Decrypt(ctx, sealedMap(map[string][]byte{"email": leaf}), rowAad(7)); err != nil {
+	if _, err := cipher.Decrypt(ctx, vcvalue.SealedColumns(map[string][]byte{"email": leaf}), rowAad(7)); err != nil {
 		fmt.Printf("wrong row AAD:          %v\n", err)
 	}
 
@@ -172,7 +143,7 @@ func main() {
 	if err := db.GetContext(ctx, &row, `SELECT id, created_at, email, name FROM users WHERE id = ?`, 43); err != nil {
 		log.Fatal(err)
 	}
-	obj, err := cipher.Decrypt(ctx, sealedMap(map[string][]byte{"email": row.Email, "name": row.Name}), rowAad(row.ID))
+	obj, err := cipher.Decrypt(ctx, vcvalue.SealedColumns(map[string][]byte{"email": row.Email, "name": row.Name}), rowAad(row.ID))
 	if err != nil {
 		log.Fatal(err)
 	}
