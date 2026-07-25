@@ -33,8 +33,17 @@ defer cipher.Close(ctx)
 
 `Encrypt` takes `any` (encoded through the `vcvalue` currency); `Decrypt`
 returns the `vcvalue` decode shape. Everything below is runnable:
-`go run ./examples/userrecord` walks the whole story (there is also a
-testable `Example` in `example_test.go`).
+
+```sh
+cd examples && go run ./userrecord
+```
+
+walks the whole story against a real database — sqlx + pure-Go sqlite
+(still `CGO_ENABLED=0`): passthrough fields as native columns you can
+`WHERE` on, sealed leaves as BLOBs, single-column and whole-record reads.
+The examples are a separate Go module so sqlx and the sqlite driver never
+become dependencies of the binding itself. (There is also a testable
+`Example` in `example_test.go`.)
 
 ### Encrypting a user record with mixed fields
 

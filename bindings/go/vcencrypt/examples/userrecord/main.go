@@ -1,9 +1,13 @@
-// Command userrecord is a runnable walk-through of the vcencrypt README:
-// a user record with mixed passthrough/sealed fields, the structured
-// ciphertext it produces, per-column storage, single-column decryption,
-// and a slice of records.
+// Command userrecord is a runnable walk-through of the vcencrypt README,
+// storing the results in a real database via sqlx: a user record with mixed
+// passthrough/sealed fields, per-column storage (passthrough fields as
+// native columns, sealed leaves as BLOBs), single-column decryption, and a
+// slice of records.
 //
-//	cd bindings/go/vcencrypt && go run ./examples/userrecord
+//	cd bindings/go/vcencrypt/examples && go run ./userrecord
+//
+// The sqlite driver is pure Go, so the whole example still runs with
+// CGO_ENABLED=0 — same as the binding itself.
 package main
 
 import (
@@ -11,6 +15,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+
+	"github.com/jmoiron/sqlx"
+	_ "modernc.org/sqlite"
 
 	"github.com/cipherstash/vitaminc/bindings/go/vcencrypt"
 	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
@@ -35,12 +42,62 @@ func (u User) EncryptValue(enc vcvalue.Encoder) error {
 	return m.End()
 }
 
+// userRow is the table shape of an encrypted User: passthrough fields map to
+// native columns, sealed fields to BLOB columns holding leaf bytes. Column
+// names must equal the sealed field names — the name is authenticated into
+// each leaf's AAD, so a mis-mapped column fails decryption instead of
+// decrypting into the wrong field.
+type userRow struct {
+	ID        int64  `db:"id"`
+	CreatedAt string `db:"created_at"`
+	Email     []byte `db:"email"`
+	Name      []byte `db:"name"`
+}
+
+const schema = `CREATE TABLE users (
+	id         INTEGER PRIMARY KEY,
+	created_at TEXT NOT NULL,
+	email      BLOB NOT NULL,
+	name       BLOB NOT NULL
+)`
+
 // rowAad binds a ciphertext to its row identity. Sealed leaves from two rows
 // are otherwise interchangeable (same key, same field name), so without this
 // an attacker with database write access could swap user 1's email into
 // user 2's row undetected.
 func rowAad(id int64) []byte {
 	return fmt.Appendf(nil, "users:%d", id)
+}
+
+// toRow walks a structured ciphertext into the table shape.
+func toRow(ct vcvalue.CipherText) (row userRow, err error) {
+	for _, f := range ct.Fields {
+		switch f.Key {
+		case "id":
+			row.ID = f.Node.Passthrough.(int64)
+		case "created_at":
+			row.CreatedAt = f.Node.Passthrough.(string)
+		case "email":
+			row.Email = f.Node.Leaf
+		case "name":
+			row.Name = f.Node.Leaf
+		default:
+			return row, fmt.Errorf("unexpected field %q", f.Key)
+		}
+	}
+	return row, nil
+}
+
+// sealedMap rebuilds the decryptable map node for stored leaf columns.
+func sealedMap(fields map[string][]byte) vcvalue.CipherText {
+	ct := vcvalue.CipherText{Kind: vcvalue.KindMap}
+	for key, leaf := range fields {
+		ct.Fields = append(ct.Fields, vcvalue.CipherTextField{
+			Key:  key,
+			Node: vcvalue.CipherText{Kind: vcvalue.KindSingle, Leaf: leaf},
+		})
+	}
+	return ct
 }
 
 func main() {
@@ -61,65 +118,72 @@ func main() {
 	}
 	defer cipher.Close(ctx)
 
-	ada := User{ID: 42, CreatedAt: "2026-07-25", Email: "ada@example.com", Name: "Ada Lovelace"}
+	db := sqlx.MustConnect("sqlite", ":memory:")
+	defer db.Close()
+	db.MustExec(schema)
 
-	// --- Encrypt one record: the ciphertext is a tree, not a blob. --------
-	ct, err := cipher.Encrypt(ctx, ada, rowAad(ada.ID))
-	if err != nil {
-		log.Fatal(err)
+	// --- Write path: encrypt each record, walk the tree into a row. -------
+	users := []User{
+		{ID: 42, CreatedAt: "2026-07-25", Email: "ada@example.com", Name: "Ada Lovelace"},
+		{ID: 43, CreatedAt: "2026-07-25", Email: "grace@example.com", Name: "Grace Hopper"},
 	}
-
-	fmt.Println("structured ciphertext:")
-	columns := map[string][]byte{} // sealed leaves, as a database would hold them
-	for _, f := range ct.Fields {
-		switch f.Node.Kind {
-		case vcvalue.KindPassthrough:
-			fmt.Printf("  %-11s passthrough  %v\n", f.Key, f.Node.Passthrough)
-		case vcvalue.KindSingle:
-			fmt.Printf("  %-11s sealed leaf  %d bytes (nonce||ct||tag)\n", f.Key, len(f.Node.Leaf))
-			columns[f.Key] = f.Node.Leaf
+	for _, u := range users {
+		ct, err := cipher.Encrypt(ctx, u, rowAad(u.ID))
+		if err != nil {
+			log.Fatal(err)
+		}
+		row, err := toRow(ct)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if _, err := db.NamedExecContext(ctx, `INSERT INTO users (id, created_at, email, name)
+			VALUES (:id, :created_at, :email, :name)`, row); err != nil {
+			log.Fatal(err)
 		}
 	}
+	fmt.Printf("inserted %d users (email/name stored as sealed BLOBs)\n", len(users))
 
-	// --- Read back one column: rebuild a one-entry map around the leaf. ---
-	one := vcvalue.CipherText{
-		Kind:   vcvalue.KindMap,
-		Fields: []vcvalue.CipherTextField{{Key: "email", Node: vcvalue.CipherText{Kind: vcvalue.KindSingle, Leaf: columns["email"]}}},
+	// Passthrough columns are plain SQL — no key, no cipher.
+	var count int
+	if err := db.GetContext(ctx, &count, `SELECT COUNT(*) FROM users WHERE created_at = ?`, "2026-07-25"); err != nil {
+		log.Fatal(err)
 	}
-	got, err := cipher.Decrypt(ctx, one, rowAad(ada.ID))
+	fmt.Printf("WHERE on passthrough column: %d rows created 2026-07-25\n", count)
+
+	// --- Read path, one column: SELECT the leaf, rebuild, decrypt. --------
+	var leaf []byte
+	if err := db.GetContext(ctx, &leaf, `SELECT email FROM users WHERE id = ?`, 42); err != nil {
+		log.Fatal(err)
+	}
+	got, err := cipher.Decrypt(ctx, sealedMap(map[string][]byte{"email": leaf}), rowAad(42))
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("\nsingle-column decrypt: email = %v\n", got.(vcvalue.Object)[0].Value)
+	fmt.Printf("single-column decrypt:  email = %v\n", got.(vcvalue.Object)[0].Value)
 
 	// The same leaf under the wrong row identity fails authentication.
-	if _, err := cipher.Decrypt(ctx, one, rowAad(7)); err != nil {
-		fmt.Printf("wrong row AAD:         %v\n", err)
+	if _, err := cipher.Decrypt(ctx, sealedMap(map[string][]byte{"email": leaf}), rowAad(7)); err != nil {
+		fmt.Printf("wrong row AAD:          %v\n", err)
 	}
 
-	// --- A slice of records: one KindMap per user inside a KindSeq. -------
-	users := []User{ada, {ID: 43, CreatedAt: "2026-07-25", Email: "grace@example.com", Name: "Grace Hopper"}}
-	seqCt, err := cipher.Encrypt(ctx, users, []byte("users:list"))
+	// --- Read path, whole record: natives straight from SQL, sealed
+	// columns through one decrypt. ------------------------------------------
+	var row userRow
+	if err := db.GetContext(ctx, &row, `SELECT id, created_at, email, name FROM users WHERE id = ?`, 43); err != nil {
+		log.Fatal(err)
+	}
+	obj, err := cipher.Decrypt(ctx, sealedMap(map[string][]byte{"email": row.Email, "name": row.Name}), rowAad(row.ID))
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("\nslice of %d users -> %d ciphertext trees:\n", len(users), len(seqCt.Items))
-	for i, row := range seqCt.Items {
-		sealed := 0
-		for _, f := range row.Fields {
-			if f.Node.Kind == vcvalue.KindSingle {
-				sealed++
-			}
+	u := User{ID: row.ID, CreatedAt: row.CreatedAt}
+	for _, f := range obj.(vcvalue.Object) {
+		switch f.Key {
+		case "email":
+			u.Email = f.Value.(string)
+		case "name":
+			u.Name = f.Value.(string)
 		}
-		fmt.Printf("  row %d: %d fields, %d sealed\n", i, len(row.Fields), sealed)
 	}
-
-	decrypted, err := cipher.Decrypt(ctx, seqCt, []byte("users:list"))
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, row := range decrypted.([]any) {
-		obj := row.(vcvalue.Object)
-		fmt.Printf("  decrypted: %v %v\n", obj[0].Value.(vcvalue.Plain).V, obj[2].Value)
-	}
+	fmt.Printf("whole-record read:      %+v\n", u)
 }
