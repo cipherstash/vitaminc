@@ -2436,6 +2436,7 @@ dependencies = [
  "vitaminc-encrypt",
  "vitaminc-kms",
  "vitaminc-permutation",
+ "vitaminc-prf",
  "vitaminc-protected",
  "vitaminc-random",
  "vitaminc-traits",
@@ -2531,6 +2532,20 @@ dependencies = [
  "subtle",
  "vitaminc-protected",
  "vitaminc-random",
+ "zeroize",
+]
+
+[[package]]
+name = "vitaminc-prf"
+version = "0.2.0-pre.1"
+dependencies = [
+ "futures",
+ "hmac",
+ "quickcheck",
+ "quickcheck_macros",
+ "sha2",
+ "thiserror",
+ "vitaminc-protected",
  "zeroize",
 ]
 

@@ -17,6 +17,7 @@ all-features = true
 [dependencies]
 vitaminc-kms = { path = "../kms", version = "0.2.0-pre.1", optional = true }
 vitaminc-permutation = { path = "../permutation", version = "0.2.0-pre.1", optional = true }
+vitaminc-prf = { path = "../prf", version = "0.2.0-pre.1", optional = true }
 vitaminc-protected = { path = "../protected", version = "0.2.0-pre.1", optional = true }
 vitaminc-random = { path = "../random", version = "0.2.0-pre.1", optional = true }
 vitaminc-traits = { path = "../traits", version = "0.2.0-pre.1", optional = true }
@@ -28,6 +29,7 @@ vitaminc-aead = { path = "../aead", version = "0.2.0-pre.1", optional = true }
 protected = ["dep:vitaminc-protected"]
 random = ["dep:vitaminc-random"]
 permutation = ["dep:vitaminc-permutation", "protected"]
+prf = ["dep:vitaminc-prf"]
 traits = ["dep:vitaminc-traits"]
 async-traits = ["dep:vitaminc-async-traits", "traits"]
 aws-kms = ["traits", "dep:vitaminc-kms"]
