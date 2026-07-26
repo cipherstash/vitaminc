@@ -65,6 +65,25 @@ fn hmac_sha256_known_answer_and_byte_container_equivalence() {
     assert_eq!(from_array, from_vec);
 }
 
+#[test]
+fn hmac_sha256_normalizes_keys_larger_than_one_hash_block() {
+    let key_bytes = vec![0xaa; 131];
+    let input = b"long HMAC key".to_vec();
+    let local = input
+        .clone()
+        .prf(HmacSha256Prf::new(Protected::new(key_bytes.clone())))
+        .into_result()
+        .unwrap();
+    let reference = block_on(
+        input
+            .prf(DeferredPrf::new(Protected::new(key_bytes)))
+            .into_future(),
+    )
+    .unwrap();
+
+    assert_eq!(local, reference);
+}
+
 #[derive(Clone, Copy)]
 struct BloomVisitor {
     positions: usize,

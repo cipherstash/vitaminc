@@ -27,7 +27,7 @@ pub enum PrfVisitorError {
 /// Builder and visitor failures describe malformed local structure. Backend
 /// failures describe execution of an otherwise valid program (for example, a
 /// remote batch request being rejected).
-#[derive(Debug, Error)]
+#[derive(Debug, PartialEq, Eq, Error)]
 pub enum PrfError<E> {
     #[error("failed to build PRF operation: {0}")]
     Build(#[from] PrfBuildError),
@@ -36,16 +36,3 @@ pub enum PrfError<E> {
     #[error("PRF backend failed: {0}")]
     Backend(E),
 }
-
-impl<E: PartialEq> PartialEq for PrfError<E> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Build(a), Self::Build(b)) => a == b,
-            (Self::Visitor(a), Self::Visitor(b)) => a == b,
-            (Self::Backend(a), Self::Backend(b)) => a == b,
-            _ => false,
-        }
-    }
-}
-
-impl<E: Eq> Eq for PrfError<E> {}

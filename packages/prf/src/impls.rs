@@ -6,7 +6,6 @@ use std::{
 };
 
 use vitaminc_protected::{Controlled, Protected};
-use zeroize::Zeroize;
 
 use crate::{IntoPrfContext, MapPrf, Prf, PrfEncoding, PrfValue, PrfVisitor, SeqPrf};
 
@@ -127,6 +126,77 @@ integer_value!(
     i128 => PrfEncoding::I128,
 );
 
+impl<const N: usize> PrfValue for Protected<[u8; N]> {
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    where
+        P: Prf,
+        V: PrfVisitor<P::Block, P::Passthrough>,
+        C: IntoPrfContext<'a>,
+    {
+        prf.prf_bytes_array(
+            self,
+            PrfEncoding::BYTES,
+            context.into_prf_context().into_owned(),
+            visitor,
+        )
+    }
+}
+
+impl PrfValue for Protected<Vec<u8>> {
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    where
+        P: Prf,
+        V: PrfVisitor<P::Block, P::Passthrough>,
+        C: IntoPrfContext<'a>,
+    {
+        prf.prf_bytes_vec(
+            self,
+            PrfEncoding::BYTES,
+            context.into_prf_context().into_owned(),
+            visitor,
+        )
+    }
+}
+
+macro_rules! protected_integer_value {
+    ($($ty:ty => $encoding:expr),+ $(,)?) => {$ (
+        impl PrfValue for Protected<$ty> {
+            fn prf_visit_with_context<'a, P, V, C>(
+                self,
+                prf: P,
+                context: C,
+                visitor: V,
+            ) -> P::Ok<V::Value>
+            where
+                P: Prf,
+                V: PrfVisitor<P::Block, P::Passthrough>,
+                C: IntoPrfContext<'a>,
+            {
+                let bytes = Protected::new(self.risky_ref().to_le_bytes());
+                prf.prf_bytes_array(
+                    bytes,
+                    $encoding,
+                    context.into_prf_context().into_owned(),
+                    visitor,
+                )
+            }
+        }
+    )+};
+}
+
+protected_integer_value!(
+    u8 => PrfEncoding::U8,
+    u16 => PrfEncoding::U16,
+    u32 => PrfEncoding::U32,
+    u64 => PrfEncoding::U64,
+    u128 => PrfEncoding::U128,
+    i8 => PrfEncoding::I8,
+    i16 => PrfEncoding::I16,
+    i32 => PrfEncoding::I32,
+    i64 => PrfEncoding::I64,
+    i128 => PrfEncoding::I128,
+);
+
 impl PrfValue for String {
     fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
     where
@@ -136,6 +206,23 @@ impl PrfValue for String {
     {
         prf.prf_bytes_vec(
             Protected::new(self.into_bytes()),
+            PrfEncoding::UTF8,
+            context.into_prf_context().into_owned(),
+            visitor,
+        )
+    }
+}
+
+impl PrfValue for Protected<String> {
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    where
+        P: Prf,
+        V: PrfVisitor<P::Block, P::Passthrough>,
+        C: IntoPrfContext<'a>,
+    {
+        let bytes = Protected::new(self.risky_ref().as_bytes().to_vec());
+        prf.prf_bytes_vec(
+            bytes,
             PrfEncoding::UTF8,
             context.into_prf_context().into_owned(),
             visitor,
@@ -218,23 +305,6 @@ where
             }
             None => prf.prf_none(context, visitor),
         }
-    }
-}
-
-impl<T> PrfValue for Protected<T>
-where
-    T: PrfValue + Zeroize,
-{
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
-    where
-        P: Prf,
-        V: PrfVisitor<P::Block, P::Passthrough>,
-        C: IntoPrfContext<'a>,
-    {
-        // Built-in leaves immediately re-wrap bytes in Protected before they
-        // cross the backend boundary.
-        self.risky_unwrap()
-            .prf_visit_with_context(prf, context, visitor)
     }
 }
 
@@ -444,6 +514,38 @@ mod tests {
     fn protected_impl_matches_the_wrapped_value() {
         assert_eq!(term(Protected::new(String::from("secret"))), term("secret"));
     }
+
+    #[test]
+    fn protected_byte_containers_match_their_unwrapped_values() {
+        assert_eq!(term(Protected::new([1_u8, 2, 3])), term([1_u8, 2, 3]));
+        assert_eq!(
+            term(Protected::new(vec![1_u8, 2, 3])),
+            term(vec![1_u8, 2, 3])
+        );
+    }
+
+    macro_rules! protected_integer_impl_test {
+        ($($name:ident: $ty:ty),+ $(,)?) => {$ (
+            #[test]
+            fn $name() {
+                let value: $ty = 7;
+                assert_eq!(term(Protected::new(value)), term(value));
+            }
+        )+};
+    }
+
+    protected_integer_impl_test!(
+        protected_u8_impl: u8,
+        protected_u16_impl: u16,
+        protected_u32_impl: u32,
+        protected_u64_impl: u64,
+        protected_u128_impl: u128,
+        protected_i8_impl: i8,
+        protected_i16_impl: i16,
+        protected_i32_impl: i32,
+        protected_i64_impl: i64,
+        protected_i128_impl: i128,
+    );
 
     #[test]
     fn hash_map_impl_preserves_keys_and_separates_their_contexts() {

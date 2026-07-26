@@ -44,3 +44,15 @@ impl PrfEncoding {
         self.0.as_bytes()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PrfEncoding;
+
+    #[test]
+    fn string_and_byte_views_preserve_the_identifier() {
+        let encoding = PrfEncoding::new("com.example/test-value/v1");
+        assert_eq!(encoding.as_str(), "com.example/test-value/v1");
+        assert_eq!(encoding.as_bytes(), b"com.example/test-value/v1");
+    }
+}

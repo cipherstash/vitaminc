@@ -105,6 +105,42 @@ impl<Block, Passthrough> Iterator for MapAccess<Block, Passthrough> {
 
 impl<Block, Passthrough> ExactSizeIterator for MapAccess<Block, Passthrough> {}
 
+#[cfg(test)]
+mod access_tests {
+    use super::{MapAccess, ResolvedPrf, SeqAccess};
+
+    #[test]
+    fn sequence_access_reports_its_exact_remaining_length() {
+        let mut seq = SeqAccess::<u8, ()>::new(vec![ResolvedPrf::Block(1), ResolvedPrf::Block(2)]);
+
+        assert_eq!(seq.len(), 2);
+        assert_eq!(seq.size_hint(), (2, Some(2)));
+        assert!(!seq.is_empty());
+        assert!(seq.next().is_some());
+        assert_eq!(seq.len(), 1);
+        assert!(seq.next().is_some());
+        assert_eq!(seq.size_hint(), (0, Some(0)));
+        assert!(seq.is_empty());
+    }
+
+    #[test]
+    fn map_access_reports_its_exact_remaining_length() {
+        let mut map = MapAccess::<u8, ()>::new(vec![
+            (String::from("one"), ResolvedPrf::Block(1)),
+            (String::from("two"), ResolvedPrf::Block(2)),
+        ]);
+
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.size_hint(), (2, Some(2)));
+        assert!(!map.is_empty());
+        assert!(map.next().is_some());
+        assert_eq!(map.len(), 1);
+        assert!(map.next().is_some());
+        assert_eq!(map.size_hint(), (0, Some(0)));
+        assert!(map.is_empty());
+    }
+}
+
 /// Interprets a resolved PRF result.
 pub trait PrfVisitor<Block, Passthrough>: Sized + 'static {
     type Value: Send + 'static;

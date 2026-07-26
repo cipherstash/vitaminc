@@ -11,8 +11,11 @@ const OPTION_SOME_DOMAIN: &[u8] = b"vitaminc/prf/option-some/v1";
 pub struct PrfContext<'a>(Cow<'a, [u8]>);
 
 impl<'a> PrfContext<'a> {
+    // `empty` and `Default::default` are intentionally identical, so replacing
+    // this body with `Default::default` is an equivalent mutation.
+    #[mutants::skip]
     pub fn empty() -> Self {
-        Self(Cow::Borrowed(&[]))
+        Self::default()
     }
 
     pub fn from_slice(bytes: &'a [u8]) -> Self {
@@ -38,8 +41,7 @@ impl<'a> PrfContext<'a> {
     /// Prefix-free Pre-Authentication Encoding:
     /// `LE64(piece_count) || (LE64(piece_len) || piece)*`.
     pub fn pae(pieces: &[&[u8]]) -> PrfContext<'static> {
-        let capacity = 8 + pieces.iter().map(|piece| 8 + piece.len()).sum::<usize>();
-        let mut encoded = Vec::with_capacity(capacity);
+        let mut encoded = Vec::new();
         encoded.extend_from_slice(&(pieces.len() as u64).to_le_bytes());
         for piece in pieces {
             encoded.extend_from_slice(&(piece.len() as u64).to_le_bytes());
@@ -82,8 +84,11 @@ impl<'a> IntoPrfContext<'a> for PrfContext<'a> {
 }
 
 impl<'a> IntoPrfContext<'a> for () {
+    // Unit is the default/empty context by definition. The generated return
+    // replacement is therefore equivalent to the implementation.
+    #[mutants::skip]
     fn into_prf_context(self) -> PrfContext<'a> {
-        PrfContext::empty()
+        PrfContext::default()
     }
 }
 
@@ -178,6 +183,41 @@ mod tests {
     use super::*;
     use quickcheck_macros::quickcheck;
 
+    #[test]
+    fn constructors_and_empty_state_preserve_bytes() {
+        let bytes = [1_u8, 2, 3];
+        let borrowed = PrfContext::from_slice(&bytes);
+        let owned = PrfContext::new_owned(bytes);
+
+        assert_eq!(borrowed.as_bytes(), &[1, 2, 3]);
+        assert_eq!(owned.as_bytes(), &[1, 2, 3]);
+        assert!(!borrowed.is_empty());
+        assert!(PrfContext::empty().is_empty());
+    }
+
+    #[test]
+    fn pae_has_the_documented_little_endian_framing() {
+        assert_eq!(
+            PrfContext::pae(&[b"a", b"bc"]).as_bytes(),
+            &[
+                2, 0, 0, 0, 0, 0, 0, 0, // piece count
+                1, 0, 0, 0, 0, 0, 0, 0, b'a', // first piece
+                2, 0, 0, 0, 0, 0, 0, 0, b'b', b'c', // second piece
+            ]
+        );
+    }
+
+    #[test]
+    fn refine_frames_the_parent_and_component() {
+        let parent = PrfContext::from_slice(b"parent");
+        let expected = PrfContext::pae(&[
+            b"parent",
+            PrfContext::typed(PrfEncoding::UTF8, b"child").as_bytes(),
+        ]);
+
+        assert_eq!(parent.refine("child"), expected);
+    }
+
     #[quickcheck]
     fn pae_is_prefix_free(a: Vec<u8>, b: Vec<u8>, c: Vec<u8>) -> bool {
         let left = PrfContext::pae(&[&a, &b]);
@@ -214,5 +254,27 @@ mod tests {
     fn equivalent_context_containers_share_an_encoding() {
         assert_eq!("a".into_prf_context(), String::from("a").into_prf_context());
         assert_eq!(b"a".into_prf_context(), b"a".to_vec().into_prf_context());
+    }
+
+    #[test]
+    fn every_context_conversion_preserves_structure() {
+        let expected_bytes = PrfContext::typed(PrfEncoding::BYTES, b"abc");
+        let slice: &[u8] = b"abc";
+        assert_eq!(slice.into_prf_context(), expected_bytes);
+        assert_eq!((*b"abc").into_prf_context(), expected_bytes);
+        assert_eq!(b"abc".to_vec().into_prf_context(), expected_bytes);
+        assert_eq!(().into_prf_context(), PrfContext::default());
+
+        let some = Some("value").into_prf_context();
+        let typed_value = PrfContext::typed(PrfEncoding::UTF8, b"value");
+        assert_eq!(some, PrfContext::pae(&[typed_value.as_bytes()]));
+        assert_eq!(None::<&str>.into_prf_context(), PrfContext::pae(&[]));
+
+        let left = PrfContext::typed(PrfEncoding::UTF8, b"left");
+        let right = PrfContext::typed(PrfEncoding::U16, &7_u16.to_le_bytes());
+        assert_eq!(
+            ("left", 7_u16).into_prf_context(),
+            PrfContext::pae(&[left.as_bytes(), right.as_bytes()])
+        );
     }
 }
