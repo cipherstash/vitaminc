@@ -6,8 +6,16 @@ use std::{
     sync::Arc,
 };
 
-use sha2::{Digest, Sha256};
-use vitaminc_protected::{Controlled, Protected};
+use hmac::{
+    digest::{
+        common::{Key, KeySizeUser},
+        FixedOutput, KeyInit, Output, OutputSizeUser, Update,
+    },
+    Hmac,
+};
+use sha2::Sha256;
+use vitaminc_protected::{Controlled, Protected, ProtectedDigest};
+use zeroize::ZeroizeOnDrop;
 
 use crate::visitor::ResolvedVisitor;
 use crate::{
@@ -16,9 +24,43 @@ use crate::{
 };
 
 type PassthroughValue = Box<dyn Any + Send + 'static>;
-const SHA256_BLOCK_SIZE: usize = 64;
-const HMAC_IPAD: u8 = 0x36;
-const HMAC_OPAD: u8 = 0x5c;
+
+/// RustCrypto's HMAC state is transitively zeroizing when both `hmac` and
+/// `sha2` enable their `zeroize` features, but HMAC 0.13 does not propagate
+/// the `ZeroizeOnDrop` marker to its public wrapper.
+struct ZeroizingHmacSha256(Hmac<Sha256>);
+
+impl KeySizeUser for ZeroizingHmacSha256 {
+    type KeySize = <Hmac<Sha256> as KeySizeUser>::KeySize;
+}
+
+impl KeyInit for ZeroizingHmacSha256 {
+    fn new(key: &Key<Self>) -> Self {
+        Self(<Hmac<Sha256> as KeyInit>::new(key))
+    }
+
+    fn new_from_slice(key: &[u8]) -> Result<Self, hmac::digest::InvalidLength> {
+        <Hmac<Sha256> as KeyInit>::new_from_slice(key).map(Self)
+    }
+}
+
+impl OutputSizeUser for ZeroizingHmacSha256 {
+    type OutputSize = <Hmac<Sha256> as OutputSizeUser>::OutputSize;
+}
+
+impl Update for ZeroizingHmacSha256 {
+    fn update(&mut self, data: &[u8]) {
+        Update::update(&mut self.0, data);
+    }
+}
+
+impl FixedOutput for ZeroizingHmacSha256 {
+    fn finalize_into(self, out: &mut Output<Self>) {
+        FixedOutput::finalize_into(self.0, out);
+    }
+}
+
+impl ZeroizeOnDrop for ZeroizingHmacSha256 {}
 
 /// An immediately available, awaitable PRF result.
 #[must_use = "PRF output does nothing until it is awaited or inspected"]
@@ -69,46 +111,22 @@ impl HmacSha256Prf {
         encoding: PrfEncoding,
         context: &PrfContext<'_>,
     ) -> [u8; 32] {
-        let mut key_block = Protected::new([0_u8; SHA256_BLOCK_SIZE]);
-        if self.key.risky_ref().len() <= SHA256_BLOCK_SIZE {
-            key_block.risky_inner_mut()[..self.key.risky_ref().len()]
-                .copy_from_slice(self.key.risky_ref());
-        } else {
-            let mut hasher = Sha256::new();
-            hasher.update(self.key.risky_ref());
-            let mut hashed_key = Protected::new([0_u8; 32]);
-            hasher.finalize_into(hashed_key.risky_inner_mut().into());
-            key_block.risky_inner_mut()[..hashed_key.risky_ref().len()]
-                .copy_from_slice(hashed_key.risky_ref());
-        }
-
-        for byte in key_block.risky_inner_mut() {
-            *byte ^= HMAC_IPAD;
-        }
-
-        let mut inner = Sha256::new();
-        inner.update(key_block.risky_ref());
+        let mut hmac: ProtectedDigest<ZeroizingHmacSha256> =
+            ProtectedDigest::new_with_key(self.key.as_ref())
+                .expect("HMAC-SHA256 accepts keys of any length");
 
         // Stream PAE directly into the digest. Building a framed Vec here would
         // create an ordinary, unwiped copy of the protected input.
-        let pieces = [encoding.as_bytes(), context.as_bytes(), data.risky_ref()];
-        inner.update((pieces.len() as u64).to_le_bytes());
-        for piece in pieces {
-            inner.update((piece.len() as u64).to_le_bytes());
-            inner.update(piece);
-        }
-        let mut inner_hash = Protected::new([0_u8; 32]);
-        inner.finalize_into(inner_hash.risky_inner_mut().into());
+        hmac.update_public(&3_u64.to_le_bytes());
+        hmac.update_public(&(encoding.as_bytes().len() as u64).to_le_bytes());
+        hmac.update_public(encoding.as_bytes());
+        hmac.update_public(&(context.as_bytes().len() as u64).to_le_bytes());
+        hmac.update_public(context.as_bytes());
+        hmac.update_public(&(data.risky_ref().len() as u64).to_le_bytes());
+        hmac.update(data);
 
-        for byte in key_block.risky_inner_mut() {
-            *byte ^= HMAC_IPAD ^ HMAC_OPAD;
-        }
-
-        let mut outer = Sha256::new();
-        outer.update(key_block.risky_ref());
-        outer.update(inner_hash.risky_ref());
         let mut block = [0_u8; 32];
-        outer.finalize_into((&mut block).into());
+        hmac.finalize_public_into(&mut block);
         block
     }
 
@@ -339,12 +357,13 @@ impl MapPrf for HmacMapPrf {
 
 #[cfg(test)]
 mod tests {
-    use sha2::Sha256;
+    use super::ZeroizingHmacSha256;
+    use vitaminc_protected::ProtectedDigest;
     use zeroize::ZeroizeOnDrop;
 
     #[test]
-    fn sha256_state_zeroizes_on_drop() {
+    fn hmac_sha256_state_zeroizes_on_drop() {
         fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
-        assert_zeroize_on_drop::<Sha256>();
+        assert_zeroize_on_drop::<ProtectedDigest<ZeroizingHmacSha256>>();
     }
 }

@@ -133,9 +133,13 @@ Use [flatten_array] to convert a `[Protected<T>; N]` into a `Protected<[T; N]>`.
 
 ### Protected digests
 
-`ProtectedDigest` requires a digest implementation that zeroizes its internal
-state on drop. Enable the digest crate's zeroization feature, such as
+`ProtectedDigest` requires a fixed-output implementation that zeroizes its
+internal state on drop. Enable the digest crate's zeroization feature, such as
 `sha2 = { version = "0.11", features = ["zeroize"] }`.
+
+Unkeyed digests use `new`; keyed fixed-output functions implementing `KeyInit`
+use `new_with_key` so the key remains in a `Controlled` container at the API
+boundary.
 
 Secret inputs use `update` and protected outputs use `finalize_into`. Public
 protocol framing and intentionally exposed outputs cross separate, explicitly

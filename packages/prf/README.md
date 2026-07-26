@@ -6,6 +6,9 @@ domain-separated pseudorandom values. Inputs cross backend boundaries in
 backend output is always awaitable so local and remote batched implementations
 share one interface.
 
+The local HMAC-SHA256 backend delegates HMAC construction to RustCrypto and
+keeps the keyed state behind `ProtectedDigest`.
+
 Every protected leaf carries an explicit [`PrfEncoding`](https://docs.rs/vitaminc-prf/latest/vitaminc_prf/struct.PrfEncoding.html)
 domain. Built-in text, bytes, and fixed-width integers are separated even when
 their byte representations happen to match. Custom leaf implementations must
