@@ -1,4 +1,14 @@
 
+### Security
+
+- require `ProtectedDigest` state to implement `ZeroizeOnDrop`
+- write digest outputs directly into protected or explicitly public destinations
+
+### Breaking changes
+
+- remove return-by-value `ProtectedDigest` finalization helpers
+- add explicit public input and output methods to `ProtectedDigest`
+
 
 
 ### Miscellaneous

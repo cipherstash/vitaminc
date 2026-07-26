@@ -131,6 +131,30 @@ assert_eq!(y.risky_unwrap(), [0u8; 32]);
 
 Use [flatten_array] to convert a `[Protected<T>; N]` into a `Protected<[T; N]>`.
 
+### Protected digests
+
+`ProtectedDigest` requires a digest implementation that zeroizes its internal
+state on drop. Enable the digest crate's zeroization feature, such as
+`sha2 = { version = "0.11", features = ["zeroize"] }`.
+
+Secret inputs use `update` and protected outputs use `finalize_into`. Public
+protocol framing and intentionally exposed outputs cross separate, explicitly
+named channels:
+
+```rust
+use sha2::Sha256;
+use vitaminc_protected::{Controlled, Protected, ProtectedDigest};
+
+let secret = Protected::new(*b"secret");
+let mut digest = ProtectedDigest::<Sha256>::new();
+digest.update_public(b"example/domain/v1");
+digest.update(&secret);
+
+let mut output = Protected::new([0u8; 32]);
+digest.finalize_into(&mut output);
+assert_ne!(output.risky_ref(), &[0u8; 32]);
+```
+
 ### Also in this crate
 
 Beyond the adapters above, the crate exports `TimingSafeEq` and `Choice` (timing-safe comparison), `OpaqueDebug` and `Redacted` (leak-resistant `Debug`), `ProtectedDigest`, `Zeroed`, and `AsProtectedRef` — see the [docs.rs API reference](https://docs.rs/vitaminc-protected) for details.
