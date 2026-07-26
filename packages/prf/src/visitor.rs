@@ -153,7 +153,11 @@ where
     }
 }
 
-/// Internal/public identity visitor useful to backend implementors.
+/// Identity visitor that preserves a resolved node's structural shape.
+///
+/// Backend sequence and map drivers use this visitor to collect child
+/// programs as [`ResolvedPrf`] nodes before the caller's final visitor is
+/// applied.
 impl<Block, Passthrough> PrfVisitor<Block, Passthrough> for ResolvedVisitor
 where
     Block: Send + 'static,
@@ -182,6 +186,5 @@ where
     }
 }
 
-#[doc(hidden)]
 #[derive(Clone, Copy)]
 pub struct ResolvedVisitor;

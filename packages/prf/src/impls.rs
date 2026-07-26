@@ -8,7 +8,7 @@ use std::{
 use vitaminc_protected::{Controlled, Protected};
 use zeroize::Zeroize;
 
-use crate::{IntoPrfContext, MapPrf, Prf, PrfValue, PrfVisitor, SeqPrf};
+use crate::{IntoPrfContext, MapPrf, Prf, PrfEncoding, PrfValue, PrfVisitor, SeqPrf};
 
 /// Marks an explicitly non-secret value that should pass through unchanged.
 ///
@@ -50,6 +50,7 @@ impl<const N: usize> PrfValue for [u8; N] {
     {
         prf.prf_bytes_array(
             Protected::new(self),
+            PrfEncoding::BYTES,
             context.into_prf_context().into_owned(),
             visitor,
         )
@@ -65,6 +66,7 @@ impl PrfValue for Box<[u8]> {
     {
         prf.prf_bytes_vec(
             Protected::new(self.into_vec()),
+            PrfEncoding::BYTES,
             context.into_prf_context().into_owned(),
             visitor,
         )
@@ -80,6 +82,7 @@ impl PrfValue for &[u8] {
     {
         prf.prf_bytes_vec(
             Protected::new(self.to_vec()),
+            PrfEncoding::BYTES,
             context.into_prf_context().into_owned(),
             visitor,
         )
@@ -87,7 +90,7 @@ impl PrfValue for &[u8] {
 }
 
 macro_rules! integer_value {
-    ($($ty:ty),+ $(,)?) => {$ (
+    ($($ty:ty => $encoding:expr),+ $(,)?) => {$ (
         impl PrfValue for $ty {
             fn prf_visit_with_context<'a, P, V, C>(
                 self,
@@ -100,13 +103,29 @@ macro_rules! integer_value {
                 V: PrfVisitor<P::Block, P::Passthrough>,
                 C: IntoPrfContext<'a>,
             {
-                self.to_le_bytes().prf_visit_with_context(prf, context, visitor)
+                prf.prf_bytes_array(
+                    Protected::new(self.to_le_bytes()),
+                    $encoding,
+                    context.into_prf_context().into_owned(),
+                    visitor,
+                )
             }
         }
     )+};
 }
 
-integer_value!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+integer_value!(
+    u8 => PrfEncoding::U8,
+    u16 => PrfEncoding::U16,
+    u32 => PrfEncoding::U32,
+    u64 => PrfEncoding::U64,
+    u128 => PrfEncoding::U128,
+    i8 => PrfEncoding::I8,
+    i16 => PrfEncoding::I16,
+    i32 => PrfEncoding::I32,
+    i64 => PrfEncoding::I64,
+    i128 => PrfEncoding::I128,
+);
 
 impl PrfValue for String {
     fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
@@ -117,6 +136,7 @@ impl PrfValue for String {
     {
         prf.prf_bytes_vec(
             Protected::new(self.into_bytes()),
+            PrfEncoding::UTF8,
             context.into_prf_context().into_owned(),
             visitor,
         )
@@ -130,8 +150,12 @@ impl PrfValue for &str {
         V: PrfVisitor<P::Block, P::Passthrough>,
         C: IntoPrfContext<'a>,
     {
-        self.as_bytes()
-            .prf_visit_with_context(prf, context, visitor)
+        prf.prf_bytes_vec(
+            Protected::new(self.as_bytes().to_vec()),
+            PrfEncoding::UTF8,
+            context.into_prf_context().into_owned(),
+            visitor,
+        )
     }
 }
 
@@ -153,7 +177,12 @@ where
         // byte-leaf API while every other Vec remains a structural sequence.
         let values = match boxed.downcast::<Vec<u8>>() {
             Ok(bytes) => {
-                return prf.prf_bytes_vec(Protected::new(*bytes), context, visitor);
+                return prf.prf_bytes_vec(
+                    Protected::new(*bytes),
+                    PrfEncoding::BYTES,
+                    context,
+                    visitor,
+                );
             }
             Err(values) => match values.downcast::<Vec<T>>() {
                 Ok(values) => *values,
@@ -183,7 +212,10 @@ where
     {
         let context = context.into_prf_context().into_owned();
         match self {
-            Some(value) => prf.prf_some(value, context, visitor),
+            Some(value) => {
+                let context = context.for_option_some();
+                prf.prf_some(value, context, visitor)
+            }
             None => prf.prf_none(context, visitor),
         }
     }
@@ -351,7 +383,7 @@ mod tests {
             #[test]
             fn $name() {
                 let value: $ty = 7;
-                assert_eq!(term(value), term(value.to_le_bytes()));
+                assert_ne!(term(value), term(value.to_le_bytes()));
             }
         )+};
     }
@@ -362,23 +394,21 @@ mod tests {
         u32_impl: u32,
         u64_impl: u64,
         u128_impl: u128,
-        usize_impl: usize,
         i8_impl: i8,
         i16_impl: i16,
         i32_impl: i32,
         i64_impl: i64,
         i128_impl: i128,
-        isize_impl: isize,
     );
 
     #[test]
-    fn owned_string_impl_matches_utf8_bytes() {
-        assert_eq!(term(String::from("hello")), term(b"hello".as_slice()));
+    fn owned_string_impl_matches_borrowed_str() {
+        assert_eq!(term(String::from("hello")), term("hello"));
     }
 
     #[test]
-    fn borrowed_str_impl_matches_utf8_bytes() {
-        assert_eq!(term("hello"), term(b"hello".as_slice()));
+    fn borrowed_str_impl_is_separated_from_raw_utf8_bytes() {
+        assert_ne!(term("hello"), term(b"hello".as_slice()));
     }
 
     #[test]
@@ -398,8 +428,8 @@ mod tests {
     }
 
     #[test]
-    fn option_some_impl_forwards_to_the_inner_value() {
-        assert_eq!(term(Some(String::from("present"))), term("present"));
+    fn option_some_impl_is_separated_from_the_bare_inner_value() {
+        assert_ne!(term(Some(String::from("present"))), term("present"));
     }
 
     #[test]

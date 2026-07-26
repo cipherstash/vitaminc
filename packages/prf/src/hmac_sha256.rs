@@ -12,8 +12,8 @@ use vitaminc_protected::{Controlled, Protected};
 
 use crate::visitor::ResolvedVisitor;
 use crate::{
-    traits::apply_visitor, MapPrf, Prf, PrfBuildError, PrfContext, PrfError, PrfValue, PrfVisitor,
-    ResolvedPrf, SeqPrf,
+    traits::apply_visitor, MapPrf, Prf, PrfBuildError, PrfContext, PrfEncoding, PrfError, PrfValue,
+    PrfVisitor, ResolvedPrf, SeqPrf,
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -47,7 +47,7 @@ impl<T, E> IntoFuture for ReadyPrf<T, E> {
 /// Local HMAC-SHA256 structured PRF.
 ///
 /// The key remains in a [`Protected`] allocation shared by nested drivers.
-/// Each leaf derives `HMAC-SHA256(key, PAE(context, input))`.
+/// Each leaf derives `HMAC-SHA256(key, PAE(encoding, context, input))`.
 #[derive(Clone)]
 pub struct HmacSha256Prf {
     key: Arc<Protected<Vec<u8>>>,
@@ -62,8 +62,13 @@ impl HmacSha256Prf {
         Self::new(Protected::new(key.risky_ref().to_vec()))
     }
 
-    fn derive(&self, data: &Protected<Vec<u8>>, context: &PrfContext<'_>) -> [u8; 32] {
-        let framed = PrfContext::pae(&[context.as_bytes(), data.risky_ref()]);
+    fn derive(
+        &self,
+        data: &Protected<Vec<u8>>,
+        encoding: PrfEncoding,
+        context: &PrfContext<'_>,
+    ) -> [u8; 32] {
+        let framed = PrfContext::pae(&[encoding.as_bytes(), context.as_bytes(), data.risky_ref()]);
         let mut mac = HmacSha256::new_from_slice(self.key.risky_ref())
             .expect("HMAC accepts keys of every length");
         mac.update(framed.as_bytes());
@@ -94,13 +99,14 @@ impl Prf for HmacSha256Prf {
     fn prf_bytes_vec<V>(
         self,
         data: Protected<Vec<u8>>,
+        encoding: PrfEncoding,
         context: PrfContext<'static>,
         visitor: V,
     ) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>,
     {
-        let block = self.derive(&data, &context);
+        let block = self.derive(&data, encoding, &context);
         Self::resolved(visitor.visit_block(block).map_err(PrfError::Visitor))
     }
 

@@ -16,10 +16,10 @@ use quickcheck_macros::quickcheck;
 use sha2::Sha256;
 use vitaminc_protected::{Controlled, Protected};
 
-use crate::{
-    visitor::ResolvedVisitor, BlockVisitor, HmacSha256Prf, IntoPrfContext, MapAccess, MapPrf, Prf,
-    PrfBuildError, PrfContext, PrfError, PrfValue, PrfVisitor, PrfVisitorError, ResolvedPrf,
-    SeqAccess, SeqPrf,
+use vitaminc_prf::{
+    BlockVisitor, HmacSha256Prf, IntoPrfContext, MapAccess, MapPrf, Prf, PrfBuildError, PrfContext,
+    PrfEncoding, PrfError, PrfValue, PrfVisitor, PrfVisitorError, ReadyPrf, ResolvedPrf,
+    ResolvedVisitor, SeqAccess, SeqPrf,
 };
 
 type Boxed = Box<dyn Any + Send + 'static>;
@@ -48,7 +48,7 @@ fn hex(bytes: &str) -> Vec<u8> {
 #[test]
 fn hmac_sha256_known_answer_and_byte_container_equivalence() {
     let key = Protected::new(vec![0x0b; 20]);
-    let expected = hex("e6e5240327589638c6e683a107da4ed42a1a413afd11a7f5401a40f96e967737");
+    let expected = hex("2c67c3426ca59168497f261bdcac4b78bf41e59510107906052e4dfb54a0e667");
     let array = *b"Hi There";
 
     let from_array = array
@@ -103,6 +103,26 @@ fn visitors_can_produce_equality_and_bloom_terms() {
     assert!(positions
         .iter()
         .all(|position| (0..2048).contains(position)));
+}
+
+#[test]
+fn custom_leaf_encoding_domains_are_separated() {
+    let derive = |encoding| {
+        local()
+            .prf_bytes_vec(
+                Protected::new(vec![1, 2, 3]),
+                encoding,
+                PrfContext::empty(),
+                BlockVisitor,
+            )
+            .into_result()
+            .unwrap()
+    };
+
+    assert_ne!(
+        derive(PrfEncoding::new("com.example/customer-id/v1")),
+        derive(PrfEncoding::new("com.example/order-id/v1"))
+    );
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -214,7 +234,7 @@ fn handwritten_mixed_record_resolves_heterogeneous_children() {
 }
 
 enum PendingNode {
-    Leaf(Protected<Vec<u8>>, PrfContext<'static>),
+    Leaf(Protected<Vec<u8>>, PrfEncoding, PrfContext<'static>),
     Sequence(Vec<PendingNode>),
     Map(Vec<(String, PendingNode)>),
     Absent,
@@ -281,8 +301,9 @@ impl DeferredPrf {
 
     fn resolve(&self, node: PendingNode) -> Result<Node, PrfError<Infallible>> {
         Ok(match node {
-            PendingNode::Leaf(data, context) => {
-                let framed = PrfContext::pae(&[context.as_bytes(), data.risky_ref()]);
+            PendingNode::Leaf(data, encoding, context) => {
+                let framed =
+                    PrfContext::pae(&[encoding.as_bytes(), context.as_bytes(), data.risky_ref()]);
                 let mut mac = Hmac::<Sha256>::new_from_slice(self.key.risky_ref()).unwrap();
                 mac.update(framed.as_bytes());
                 let bytes = mac.finalize().into_bytes();
@@ -322,6 +343,7 @@ impl Prf for DeferredPrf {
     fn prf_bytes_vec<V>(
         self,
         data: Protected<Vec<u8>>,
+        encoding: PrfEncoding,
         context: PrfContext<'static>,
         visitor: V,
     ) -> Self::Ok<V::Value>
@@ -330,7 +352,7 @@ impl Prf for DeferredPrf {
     {
         // The test backend is deliberately test-only and can require owned
         // visitors through this type-erased finish closure.
-        self.output(PendingNode::Leaf(data, context), visitor)
+        self.output(PendingNode::Leaf(data, encoding, context), visitor)
     }
 
     fn prf_seq(self, size_hint: Option<usize>) -> Self::SeqPrf {
@@ -598,7 +620,7 @@ fn outputs_are_into_future_and_resolved_values_are_send() {
     fn assert_into_future<T: IntoFuture>() {}
     fn assert_send<T: Send>() {}
 
-    assert_into_future::<crate::ReadyPrf<[u8; 32], Infallible>>();
+    assert_into_future::<ReadyPrf<[u8; 32], Infallible>>();
     assert_send::<Node>();
     assert_send::<DerivedRecord>();
     assert_send::<Vec<i16>>();

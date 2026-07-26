@@ -3,7 +3,9 @@ use std::{any::Any, borrow::Cow, future::IntoFuture};
 use vitaminc_protected::{Controlled, Protected};
 
 use crate::BlockVisitor;
-use crate::{IntoPrfContext, PrfContext, PrfError, PrfVisitor, PrfVisitorError, ResolvedPrf};
+use crate::{
+    IntoPrfContext, PrfContext, PrfEncoding, PrfError, PrfVisitor, PrfVisitorError, ResolvedPrf,
+};
 
 /// A type that can describe its structure to a [`Prf`] backend.
 ///
@@ -73,25 +75,36 @@ pub trait Prf: Sized {
     where
         T: Send + 'static;
 
+    /// Derive a protected byte vector in an explicit semantic `encoding`
+    /// domain. Backends must bind the encoding, context, and input with
+    /// prefix-free framing.
     fn prf_bytes_vec<V>(
         self,
         data: Protected<Vec<u8>>,
+        encoding: PrfEncoding,
         context: PrfContext<'static>,
         visitor: V,
     ) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>;
 
+    /// Fixed-array counterpart to [`prf_bytes_vec`](Prf::prf_bytes_vec).
     fn prf_bytes_array<const N: usize, V>(
         self,
         data: Protected<[u8; N]>,
+        encoding: PrfEncoding,
         context: PrfContext<'static>,
         visitor: V,
     ) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>,
     {
-        self.prf_bytes_vec(Protected::new(data.risky_ref().to_vec()), context, visitor)
+        self.prf_bytes_vec(
+            Protected::new(data.risky_ref().to_vec()),
+            encoding,
+            context,
+            visitor,
+        )
     }
 
     fn prf_seq(self, size_hint: Option<usize>) -> Self::SeqPrf;
