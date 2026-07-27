@@ -7,23 +7,28 @@ use vitaminc_aead::{
     LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator, SeqAccess,
     SeqCipher, Unspecified,
 };
-use vitaminc_protected::Protected;
+use vitaminc_protected::{Controlled, Protected};
 
 /// The recursive ciphertext container produced by [`Aes256Cipher`].
 ///
 /// The shape mirrors the structure of the plaintext that was encrypted: a
-/// single value yields [`Single`](AesCipherText::Single), a `Vec` yields
-/// [`Sequence`](AesCipherText::Sequence), a `HashMap` yields
-/// [`Map`](AesCipherText::Map). Nested structures are represented recursively.
+/// single value yields [`Single`](AesCipherText::Single), while non-empty
+/// `Vec`s and `HashMap`s yield [`Sequence`](AesCipherText::Sequence) and
+/// [`Map`](AesCipherText::Map). Empty composites use authenticated marker
+/// variants. Nested structures are represented recursively.
 #[derive(Debug)]
 pub enum AesCipherText {
     /// A single sealed value (nonce + ciphertext + tag).
     Single(LocalCipherText),
     /// A sequence of ciphertexts produced from a `Vec`-shaped plaintext.
     Sequence(Vec<AesCipherText>),
+    /// An empty sequence authenticated under domain-separated AAD.
+    EmptySequence(LocalCipherText),
     /// A map of (cleartext key, ciphertext value) pairs produced from a
     /// `HashMap`-shaped plaintext. Keys are not encrypted.
     Map(Vec<(String, AesCipherText)>),
+    /// An empty map authenticated under domain-separated AAD.
+    EmptyMap(LocalCipherText),
     /// The authenticated absent marker produced by [`Cipher::encrypt_none`].
     /// Stores a sealed empty plaintext whose tag binds the supplied AAD.
     None(LocalCipherText),
@@ -54,6 +59,35 @@ impl Aes256Cipher {
             key: key.cipher_key()?,
         })
     }
+
+    fn seal_empty_marker<'a, A>(&self, aad: A) -> Result<LocalCipherText, Unspecified>
+    where
+        A: IntoAad<'a>,
+    {
+        let nonce = self.nonce_generator.generate()?;
+        let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
+        let aad = aad.into_aad();
+
+        CipherTextBuilder::new()
+            .append_nonce(nonce)
+            .append_target_plaintext(Vec::<u8>::new())
+            .accepts_ciphertext_and_tag_ok(|mut buf| {
+                self.key
+                    .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
+                    .map(|()| buf)
+            })
+            .build()
+    }
+}
+
+fn empty_sequence_aad<'a>(aad: Aad<'a>) -> Aad<'a> {
+    let domain: &'a [u8] = b"vitaminc/aead/empty-sequence/v1";
+    (domain, aad).into_aad()
+}
+
+fn empty_map_aad<'a>(aad: Aad<'a>) -> Aad<'a> {
+    let domain: &'a [u8] = b"vitaminc/aead/empty-map/v1";
+    (domain, aad).into_aad()
 }
 
 impl<'c> Cipher for &'c Aes256Cipher {
@@ -105,20 +139,7 @@ impl<'c> Cipher for &'c Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        let nonce = self.nonce_generator.generate()?;
-        let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-        let aad = aad.into_aad();
-
-        CipherTextBuilder::new()
-            .append_nonce(nonce)
-            .append_target_plaintext(Vec::<u8>::new())
-            .accepts_ciphertext_and_tag_ok(|mut buf| {
-                self.key
-                    .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
-                    .map(|()| buf)
-            })
-            .build()
-            .map(AesCipherText::None)
+        self.seal_empty_marker(aad).map(AesCipherText::None)
     }
 
     fn passthrough<T>(self, value: T) -> Result<Self::Ok, Self::Error>
@@ -159,8 +180,18 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
         Ok(self)
     }
 
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(AesCipherText::Sequence(self.items))
+    fn end<'a, A>(self, aad: A) -> Result<Self::Ok, Self::Error>
+    where
+        A: IntoAad<'a>,
+    {
+        if self.items.is_empty() {
+            let aad = empty_sequence_aad(aad.into_aad());
+            self.cipher
+                .seal_empty_marker(aad)
+                .map(AesCipherText::EmptySequence)
+        } else {
+            Ok(AesCipherText::Sequence(self.items))
+        }
     }
 }
 
@@ -240,12 +271,22 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         Ok(self)
     }
 
-    fn end(self) -> Result<Self::Ok, Self::Error> {
+    fn end<'a, A>(self, aad: A) -> Result<Self::Ok, Self::Error>
+    where
+        A: IntoAad<'a>,
+    {
         // Finalising with a pending key would silently drop the entry.
         if self.current_key.is_some() {
             return Err(Unspecified);
         }
-        Ok(AesCipherText::Map(self.entries))
+        if self.entries.is_empty() {
+            let aad = empty_map_aad(aad.into_aad());
+            self.cipher
+                .seal_empty_marker(aad)
+                .map(AesCipherText::EmptyMap)
+        } else {
+            Ok(AesCipherText::Map(self.entries))
+        }
     }
 }
 
@@ -316,6 +357,19 @@ impl AesDecipher<'_> {
             .accepts_plaintext_ok(|data| cipher.key.open(&nonce_bytes, aad, data))
             .read()
     }
+
+    fn verify_empty_marker(
+        cipher: &Aes256Cipher,
+        ct: LocalCipherText,
+        aad: &[u8],
+    ) -> Result<(), Unspecified> {
+        let plaintext = Self::decrypt_local_ciphertext(cipher, ct, aad)?;
+        if plaintext.risky_ref().is_empty() {
+            Ok(())
+        } else {
+            Err(Unspecified)
+        }
+    }
 }
 
 impl<'c> Decipher<'c> for AesDecipher<'c> {
@@ -354,11 +408,21 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         A: IntoAad<'a>,
     {
         match self.ciphertext {
-            AesCipherText::Sequence(items) => {
+            AesCipherText::Sequence(items) if !items.is_empty() => {
                 let seq_access = AesSeqAccess {
                     cipher: self.cipher,
                     items: items.into_iter(),
                     aad: aad.into_aad(),
+                };
+                visitor.visit_seq(seq_access)
+            }
+            AesCipherText::EmptySequence(ct) => {
+                let aad = empty_sequence_aad(aad.into_aad());
+                Self::verify_empty_marker(self.cipher, ct, aad.as_bytes())?;
+                let seq_access = AesSeqAccess {
+                    cipher: self.cipher,
+                    items: Vec::new().into_iter(),
+                    aad,
                 };
                 visitor.visit_seq(seq_access)
             }
@@ -372,11 +436,21 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         A: IntoAad<'a>,
     {
         match self.ciphertext {
-            AesCipherText::Map(entries) => {
+            AesCipherText::Map(entries) if !entries.is_empty() => {
                 let map_access = AesMapAccess {
                     cipher: self.cipher,
                     entries: entries.into_iter(),
                     aad: aad.into_aad(),
+                };
+                visitor.visit_map(map_access)
+            }
+            AesCipherText::EmptyMap(ct) => {
+                let aad = empty_map_aad(aad.into_aad());
+                Self::verify_empty_marker(self.cipher, ct, aad.as_bytes())?;
+                let map_access = AesMapAccess {
+                    cipher: self.cipher,
+                    entries: Vec::new().into_iter(),
+                    aad,
                 };
                 visitor.visit_map(map_access)
             }
@@ -577,14 +651,8 @@ mod test {
 
     #[quickcheck]
     fn decrypt_seq_fails_with_wrong_aad(key: Key, plaintext: Vec<String>) -> bool {
-        // The Sequence path re-supplies the same AAD to every element, so a wrong
-        // AAD must fail the per-element authentication rather than silently
-        // decrypting (see `AesSeqAccess::next_element`). An empty sequence has no
-        // element tags to reject — the container shape itself is not
-        // AEAD-authenticated on either side — so skip it.
-        if plaintext.is_empty() {
-            return true;
-        }
+        // Non-empty sequences reject a wrong AAD at an element; empty sequences
+        // reject it at their authenticated, domain-separated marker.
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let ciphertext = plaintext
             .encrypt_with_aad(&cipher, "correct-aad")
@@ -599,10 +667,9 @@ mod test {
         // Positive counterpart to `decrypt_seq_fails_with_wrong_aad`: every element
         // must authenticate when the *correct* AAD is re-supplied per element by
         // `AesSeqAccess::next_element`. Exercises the borrowed-AAD seq path across
-        // arbitrary element counts (the empty vec has no element tags and trivially
-        // roundtrips). A wrong-AAD-fails test alone can't catch a regression where
-        // the per-element AAD is dropped or mis-borrowed so even the correct AAD
-        // fails — only this positive multi-element roundtrip does.
+        // arbitrary element counts, including the authenticated empty marker. A
+        // wrong-AAD-fails test alone can't catch a regression where the correct AAD
+        // fails — only this positive roundtrip does.
         let aad = "seq-aad";
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let ciphertext = plaintext
@@ -679,6 +746,26 @@ mod test {
             .expect("Encryption failed");
         assert!(cipher
             .decrypt_with_aad::<HashMap<String, String>, _>(ciphertext, "wrong-aad")
+            .is_err());
+    }
+
+    #[test]
+    fn empty_composites_fail_with_wrong_aad() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+
+        let empty_sequence = Vec::<String>::new()
+            .encrypt_with_aad(&cipher, "correct-aad")
+            .expect("Encryption failed");
+        assert!(cipher
+            .decrypt_with_aad::<Vec<String>, _>(empty_sequence, "wrong-aad")
+            .is_err());
+
+        let empty_map = HashMap::<String, String>::new()
+            .encrypt_with_aad(&cipher, "correct-aad")
+            .expect("Encryption failed");
+        assert!(cipher
+            .decrypt_with_aad::<HashMap<String, String>, _>(empty_map, "wrong-aad")
             .is_err());
     }
 
@@ -966,7 +1053,7 @@ mod test {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let map = (&cipher).encrypt_map().encrypt_key("pending").unwrap();
-        assert!(map.end().is_err());
+        assert!(map.end(()).is_err());
     }
 
     #[test]
@@ -977,7 +1064,7 @@ mod test {
         let ciphertext = (&cipher)
             .encrypt_map()
             .passthrough_entry("version", 1u32)
-            .and_then(|m| m.end())
+            .and_then(|m| m.end(()))
             .expect("passthrough_entry should succeed without a pending key");
         match ciphertext {
             AesCipherText::Map(entries) => {
@@ -1031,6 +1118,109 @@ mod test {
 
         let result: Result<HashMap<String, u32>, _> = cipher.decrypt(AesCipherText::Map(entries));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn renamed_map_key_with_empty_sequence_value_fails_decryption() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let mut map = HashMap::new();
+        map.insert("roles".to_string(), Vec::<String>::new());
+
+        let mut entries = match map.encrypt(&cipher).expect("Encryption failed") {
+            AesCipherText::Map(entries) => entries,
+            _ => panic!("expected Map ciphertext"),
+        };
+        entries[0].0 = "is_admin".to_string();
+
+        let result: Result<HashMap<String, Vec<String>>, _> =
+            cipher.decrypt(AesCipherText::Map(entries));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn renamed_map_key_with_empty_map_value_fails_decryption() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let mut map = HashMap::new();
+        map.insert("roles".to_string(), HashMap::<String, String>::new());
+
+        let mut entries = match map.encrypt(&cipher).expect("Encryption failed") {
+            AesCipherText::Map(entries) => entries,
+            _ => panic!("expected Map ciphertext"),
+        };
+        entries[0].0 = "is_admin".to_string();
+
+        let result: Result<HashMap<String, HashMap<String, String>>, _> =
+            cipher.decrypt(AesCipherText::Map(entries));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn unauthenticated_empty_composite_shapes_are_rejected() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+
+        assert!(cipher
+            .decrypt::<Vec<String>>(AesCipherText::Sequence(Vec::new()))
+            .is_err());
+        assert!(cipher
+            .decrypt::<HashMap<String, String>>(AesCipherText::Map(Vec::new()))
+            .is_err());
+    }
+
+    #[test]
+    fn empty_composite_markers_are_domain_separated() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+
+        let sequence_marker = match Vec::<String>::new()
+            .encrypt_with_aad(&cipher, "context")
+            .expect("Encryption failed")
+        {
+            AesCipherText::EmptySequence(marker) => marker,
+            _ => panic!("expected EmptySequence ciphertext"),
+        };
+        assert!(cipher
+            .decrypt_with_aad::<HashMap<String, String>, _>(
+                AesCipherText::EmptyMap(sequence_marker),
+                "context",
+            )
+            .is_err());
+
+        let map_marker = match HashMap::<String, String>::new()
+            .encrypt_with_aad(&cipher, "context")
+            .expect("Encryption failed")
+        {
+            AesCipherText::EmptyMap(marker) => marker,
+            _ => panic!("expected EmptyMap ciphertext"),
+        };
+        assert!(
+            cipher
+                .decrypt_with_aad::<Vec<String>, _>(
+                    AesCipherText::EmptySequence(map_marker),
+                    "context",
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn empty_composite_markers_reject_nonempty_plaintext() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let aad = empty_sequence_aad(Aad::from_slice(b"context"));
+        let marker = match "not-empty"
+            .encrypt_with_aad(&cipher, aad)
+            .expect("Encryption failed")
+        {
+            AesCipherText::Single(marker) => marker,
+            _ => panic!("expected Single ciphertext"),
+        };
+
+        assert!(cipher
+            .decrypt_with_aad::<Vec<String>, _>(AesCipherText::EmptySequence(marker), "context",)
+            .is_err());
     }
 
     #[test]
@@ -1308,7 +1498,7 @@ mod test {
             .unwrap()
             .encrypt_next("third", ())
             .unwrap()
-            .end()
+            .end(())
             .unwrap();
         match ct {
             AesCipherText::Sequence(items) => {
@@ -1335,7 +1525,7 @@ mod test {
             .unwrap()
             .passthrough_entry("schema_version", 1u32)
             .unwrap()
-            .end()
+            .end(())
             .unwrap();
         assert!(cipher.decrypt::<HashMap<String, String>>(ct).is_err());
     }
