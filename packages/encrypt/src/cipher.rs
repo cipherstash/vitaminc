@@ -734,6 +734,23 @@ mod test {
     }
 
     #[test]
+    fn roundtrip_empty_hashmap_with_aad() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let plaintext = HashMap::<String, String>::new();
+
+        let ciphertext = plaintext
+            .clone()
+            .encrypt_with_aad(&cipher, "map-context")
+            .expect("Encryption failed");
+        let decrypted: HashMap<String, String> = cipher
+            .decrypt_with_aad(ciphertext, "map-context")
+            .expect("Decryption failed");
+
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
     fn decrypt_hashmap_fails_with_wrong_aad() {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
