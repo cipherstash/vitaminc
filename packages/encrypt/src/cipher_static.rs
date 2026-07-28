@@ -4,7 +4,7 @@
 
 use crate::backend::NONCE_LEN;
 use crate::Aes256Cipher;
-use vitaminc_aead::hlist::{Absent, Encrypted, StaticCipher};
+use vitaminc_aead::hlist::{Absent, Encrypted, Entry, StaticCipher};
 use vitaminc_aead::{CipherTextBuilder, IntoAad, NonceGenerator, Unspecified};
 use vitaminc_protected::Protected;
 
@@ -27,21 +27,15 @@ impl StaticCipher for &Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        let local = seal_into_local(self, Protected::new(Vec::new()), absent_aad(aad))?;
+        // `Aad::for_none` domain-separates the absence marker from an empty
+        // `Encrypted`: both seal an empty plaintext, so without it an
+        // `Absent` slot could be swapped for an empty `Encrypted` one (and
+        // vice versa) without tripping tag verification. Shared with the
+        // dynamic path's `Cipher::encrypt_none`, so both absence markers use
+        // one wire commitment. `verify_absent` re-derives the same AAD.
+        let local = seal_into_local(self, Protected::new(Vec::new()), aad.into_aad().for_none())?;
         Ok(Absent::from_local(local))
     }
-}
-
-/// Domain-separate the absence marker from an empty [`Encrypted`].
-///
-/// Both seal an empty plaintext, so without this their `LocalCipherText` bytes
-/// would be identical under the same `(key, AAD)` and an `Absent` slot could be
-/// swapped for an empty `Encrypted` one (and vice versa) without tripping tag
-/// verification. Prefixing a fixed label binds the "absent" role into the tag
-/// (PAE-encoded via the tuple `IntoAad` impl), so the two no longer
-/// cross-validate. `verify_absent` re-derives the same wrapped AAD.
-fn absent_aad<'a, A: IntoAad<'a>>(aad: A) -> (&'a [u8], A) {
-    (b"vitaminc:absent", aad)
 }
 
 impl Aes256Cipher {
@@ -68,7 +62,39 @@ impl Aes256Cipher {
         // Sealed plaintext is empty by construction; we only care about the
         // tag verification. The returned `Protected<Vec<u8>>` drops at the
         // end of this expression. The AAD is wrapped to match `encrypt_none`.
-        open_local(self, ct.into_local(), absent_aad(aad)).map(|_| ())
+        open_local(self, ct.into_local(), aad.into_aad().for_none()).map(|_| ())
+    }
+
+    /// Open a map [`Entry`]'s encrypted value, deriving the same
+    /// [`Aad::for_map_entry`](vitaminc_aead::Aad::for_map_entry) binding
+    /// [`StaticMapBuilder::encrypt_entry`] sealed it under — so an entry
+    /// whose cleartext key was renamed or swapped fails to open.
+    ///
+    /// [`StaticMapBuilder::encrypt_entry`]: vitaminc_aead::hlist::StaticMapBuilder::encrypt_entry
+    pub fn open_entry<'a, A>(
+        &self,
+        entry: Entry<Encrypted>,
+        aad: A,
+    ) -> Result<Protected<Vec<u8>>, Unspecified>
+    where
+        A: IntoAad<'a>,
+    {
+        let entry_aad = aad.into_aad().for_map_entry(entry.key);
+        open_local(self, entry.value.into_local(), entry_aad)
+    }
+
+    /// Verify a map [`Entry`]'s absent marker, key-bound like
+    /// [`open_entry`](Aes256Cipher::open_entry).
+    pub fn verify_absent_entry<'a, A>(
+        &self,
+        entry: Entry<Absent>,
+        aad: A,
+    ) -> Result<(), Unspecified>
+    where
+        A: IntoAad<'a>,
+    {
+        let entry_aad = aad.into_aad().for_map_entry(entry.key);
+        self.verify_absent(entry.value, entry_aad)
     }
 }
 
@@ -176,22 +202,27 @@ mod test {
         // Decryption is destructuring. No downcast, no shape check, no Box.
         let Map(HCons(prefs_e, HCons(nickname_e, HCons(version_e, HCons(pw_e, HNil))))) = user_ct;
 
+        assert_eq!(pw_e.key, "password_hash");
+        assert_eq!(version_e.key, "version");
+        assert_eq!(nickname_e.key, "nickname");
+        assert_eq!(prefs_e.key, "preferences");
+
+        let version: u8 = version_e.value.0; // typed access, no fallibility
         let pw = String::from_utf8(
             cipher
-                .open(pw_e.value, AAD)
+                .open_entry(pw_e, AAD)
                 .expect("open pw")
                 .risky_unwrap(),
         )
         .unwrap();
-        let version: u8 = version_e.value.0; // typed access, no fallibility
         cipher
-            .verify_absent(nickname_e.value, AAD)
+            .verify_absent_entry(nickname_e, AAD)
             .expect("verify none");
 
         let Map(HCons(theme_e, HNil)) = prefs_e.value;
         let theme = String::from_utf8(
             cipher
-                .open(theme_e.value, INNER_AAD)
+                .open_entry(theme_e, INNER_AAD)
                 .expect("open theme")
                 .risky_unwrap(),
         )
@@ -200,10 +231,45 @@ mod test {
         assert_eq!(pw, "argon2id$hash");
         assert_eq!(version, 3u8);
         assert_eq!(theme, "midnight");
-        assert_eq!(pw_e.key, "password_hash");
-        assert_eq!(version_e.key, "version");
-        assert_eq!(nickname_e.key, "nickname");
-        assert_eq!(prefs_e.key, "preferences");
+    }
+
+    // Entry values are sealed against `Aad::for_map_entry(aad, key)`, so a
+    // stored entry whose cleartext key is renamed (the untrusted-input path a
+    // future deserializer would expose) must fail to open — the same key-swap
+    // resistance the dynamic MapCipher enforces.
+
+    #[test]
+    fn static_entry_with_renamed_key_fails_to_open() {
+        let key = Key::from([9u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("cipher init");
+        let map = (&cipher)
+            .encrypt_map()
+            .encrypt_entry("email", Protected::new(b"ada@example.com".to_vec()), AAD)
+            .expect("encrypt")
+            .end();
+        let Map(HCons(entry, HNil)) = map;
+        let renamed = Entry {
+            key: "backup_email",
+            value: entry.value,
+        };
+        assert!(cipher.open_entry(renamed, AAD).is_err());
+    }
+
+    #[test]
+    fn static_absent_entry_with_renamed_key_fails_to_verify() {
+        let key = Key::from([9u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("cipher init");
+        let map = (&cipher)
+            .encrypt_map()
+            .none_entry("nickname", AAD)
+            .expect("encrypt none")
+            .end();
+        let Map(HCons(entry, HNil)) = map;
+        let renamed = Entry {
+            key: "email",
+            value: entry.value,
+        };
+        assert!(cipher.verify_absent_entry(renamed, AAD).is_err());
     }
 
     #[test]
