@@ -260,6 +260,35 @@ mod tests {
         NapiValue::String(Protected::new(v.as_bytes().to_vec()))
     }
 
+    /// The `Debug` impl exists for assertion failures, so a passing suite
+    /// never formats one — exercise it explicitly, and pin the property that
+    /// matters: secret-bearing leaves must render redacted, so a failing
+    /// assertion in any downstream test can't spill plaintext into CI logs.
+    #[test]
+    fn debug_redacts_secret_leaves_and_renders_the_rest() {
+        assert_eq!(format!("{:?}", NapiValue::Null), "Null");
+        assert_eq!(format!("{:?}", NapiValue::Undefined), "Undefined");
+        assert_eq!(format!("{:?}", NapiValue::Bool(true)), "Bool(true)");
+        assert_eq!(format!("{:?}", NapiValue::Number(1.5)), "Number(1.5)");
+
+        // The two secret-bearing variants never show their contents.
+        let secret = format!("{:?}", s("hunter2"));
+        assert_eq!(secret, "String(<redacted>)");
+        assert!(!secret.contains("hunter2"));
+        let bytes = NapiValue::Bytes(Protected::new(vec![0xDE, 0xAD]));
+        assert_eq!(format!("{bytes:?}"), "Bytes(<redacted>)");
+
+        // Containers recurse, so nested secrets stay redacted too.
+        assert_eq!(
+            format!("{:?}", NapiValue::Array(vec![NapiValue::Null, s("secret")])),
+            "Array([Null, String(<redacted>)])"
+        );
+        let obj = NapiValue::Object(vec![("k".to_string(), s("secret"))]);
+        let rendered = format!("{obj:?}");
+        assert!(rendered.contains("String(<redacted>)"), "{rendered}");
+        assert!(!rendered.contains("secret"), "{rendered}");
+    }
+
     fn roundtrip(value: NapiValue) -> NapiValue {
         roundtrip_with_aad(value, ())
     }
