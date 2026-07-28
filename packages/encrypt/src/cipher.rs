@@ -110,19 +110,29 @@ impl<'c> Cipher for &'c Aes256Cipher {
             .map(AesCipherText::Single)
     }
 
-    fn encrypt_seq(self, size_hint: Option<usize>) -> Self::SeqCipher {
+    fn encrypt_seq<'a, A>(self, size_hint: Option<usize>, aad: A) -> Self::SeqCipher
+    where
+        A: IntoAad<'a>,
+    {
         AesSeqCipher {
             cipher: self,
             items: Vec::with_capacity(size_hint.unwrap_or(0)),
+            // Owned once here, then borrowed per element — cheaper than the
+            // per-element clone the old AAD-per-call shape required.
+            aad: aad.into_aad().into_owned(),
             encrypted: false,
         }
     }
 
-    fn encrypt_map(self) -> Self::MapCipher {
+    fn encrypt_map<'a, A>(self, aad: A) -> Self::MapCipher
+    where
+        A: IntoAad<'a>,
+    {
         AesMapCipher {
             cipher: self,
             entries: Vec::new(),
             current_key: None,
+            aad: aad.into_aad().into_owned(),
             encrypted: false,
         }
     }
@@ -151,6 +161,9 @@ impl<'c> Cipher for &'c Aes256Cipher {
 pub struct AesSeqCipher<'c> {
     cipher: &'c Aes256Cipher,
     items: Vec<AesCipherText>,
+    /// The AAD fixed at [`Cipher::encrypt_seq`], applied to every element and
+    /// to the empty marker.
+    aad: Aad<'static>,
     /// Whether at least one item was appended through the authenticated
     /// [`encrypt_next`](SeqCipher::encrypt_next) path. Passthrough items
     /// authenticate nothing, so a sequence with items but no encrypted ones
@@ -162,12 +175,12 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
     type Ok = AesCipherText;
     type Error = Unspecified;
 
-    fn encrypt_next<'a, T, A>(mut self, data: T, aad: A) -> Result<Self, Self::Error>
+    fn encrypt_next<T>(mut self, data: T) -> Result<Self, Self::Error>
     where
         T: Encrypt,
-        A: IntoAad<'a>,
     {
-        let encrypted = data.encrypt_with_aad(self.cipher, aad)?;
+        // Borrow the stored AAD — no allocation per element.
+        let encrypted = data.encrypt_with_aad(self.cipher, Aad::from_slice(self.aad.as_bytes()))?;
         self.items.push(encrypted);
         self.encrypted = true;
         Ok(self)
@@ -181,13 +194,10 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
         Ok(self)
     }
 
-    fn end<'a, A>(self, aad: A) -> Result<Self::Ok, Self::Error>
-    where
-        A: IntoAad<'a>,
-    {
+    fn end(self) -> Result<Self::Ok, Self::Error> {
         if self.items.is_empty() {
             self.cipher
-                .seal_empty_marker(aad.into_aad().for_empty_sequence())
+                .seal_empty_marker(self.aad.for_empty_sequence())
                 .map(AesCipherText::EmptySequence)
         } else if !self.encrypted {
             // Every item is a passthrough: nothing in the container
@@ -224,6 +234,10 @@ pub struct AesMapCipher<'c> {
     cipher: &'c Aes256Cipher,
     entries: Vec<(String, AesCipherText)>,
     current_key: Option<Cow<'static, str>>,
+    /// The AAD fixed at [`Cipher::encrypt_map`]. Each entry's value is sealed
+    /// against `for_map_entry` of this; the empty marker against
+    /// `for_empty_map` of it.
+    aad: Aad<'static>,
     /// Whether at least one entry was appended through the authenticated
     /// [`encrypt_value`](MapCipher::encrypt_value) path — see
     /// [`AesSeqCipher::encrypted`] and [`end`](MapCipher::end).
@@ -248,16 +262,15 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         Ok(self)
     }
 
-    fn encrypt_value<'a, U, A>(mut self, value: U, aad: A) -> Result<Self, Self::Error>
+    fn encrypt_value<U>(mut self, value: U) -> Result<Self, Self::Error>
     where
         U: Encrypt,
-        A: IntoAad<'a>,
     {
         let key = self.current_key.take().ok_or(Unspecified)?;
         // Seal against PAE(domain, aad, key) — the trait contract that makes
         // key and value inseparable. `AesMapAccess::next_entry` derives the
         // same AAD on decrypt.
-        let entry_aad = aad.into_aad().for_map_entry(&key);
+        let entry_aad = self.aad.for_map_entry(&key);
         let encrypted = value.encrypt_with_aad(self.cipher, entry_aad)?;
         self.entries.push((key.into_owned(), encrypted));
         self.encrypted = true;
@@ -283,17 +296,14 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         Ok(self)
     }
 
-    fn end<'a, A>(self, aad: A) -> Result<Self::Ok, Self::Error>
-    where
-        A: IntoAad<'a>,
-    {
+    fn end(self) -> Result<Self::Ok, Self::Error> {
         // Finalising with a pending key would silently drop the entry.
         if self.current_key.is_some() {
             return Err(Unspecified);
         }
         if self.entries.is_empty() {
             self.cipher
-                .seal_empty_marker(aad.into_aad().for_empty_map())
+                .seal_empty_marker(self.aad.for_empty_map())
                 .map(AesCipherText::EmptyMap)
         } else if !self.encrypted {
             // Every entry is a passthrough: nothing authenticates the AAD or
@@ -1081,7 +1091,7 @@ mod test {
     fn encrypt_key_twice_without_value_fails() {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let map = (&cipher).encrypt_map().encrypt_key("first").unwrap();
+        let map = (&cipher).encrypt_map(()).encrypt_key("first").unwrap();
         assert!(map.encrypt_key("second").is_err());
     }
 
@@ -1089,15 +1099,15 @@ mod test {
     fn encrypt_value_without_pending_key_fails() {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let map = (&cipher).encrypt_map();
-        assert!(map.encrypt_value("orphan-value", ()).is_err());
+        let map = (&cipher).encrypt_map(());
+        assert!(map.encrypt_value("orphan-value").is_err());
     }
 
     #[test]
     fn passthrough_entry_with_pending_key_fails() {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let map = (&cipher).encrypt_map().encrypt_key("pending").unwrap();
+        let map = (&cipher).encrypt_map(()).encrypt_key("pending").unwrap();
         // Adopting the new key here would silently drop "pending".
         assert!(map.passthrough_entry("other", 42u32).is_err());
     }
@@ -1106,8 +1116,8 @@ mod test {
     fn end_with_pending_key_fails() {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let map = (&cipher).encrypt_map().encrypt_key("pending").unwrap();
-        assert!(map.end(()).is_err());
+        let map = (&cipher).encrypt_map(()).encrypt_key("pending").unwrap();
+        assert!(map.end().is_err());
     }
 
     #[test]
@@ -1118,11 +1128,11 @@ mod test {
         // sibling is included because an all-passthrough map is rejected at
         // end() — see `all_passthrough_map_fails_to_encrypt`.
         let ciphertext = (&cipher)
-            .encrypt_map()
+            .encrypt_map(())
             .passthrough_entry("version", 1u32)
             .and_then(|m| m.encrypt_key("email"))
-            .and_then(|m| m.encrypt_value("ada@example.com", ()))
-            .and_then(|m| m.end(()))
+            .and_then(|m| m.encrypt_value("ada@example.com"))
+            .and_then(|m| m.end())
             .expect("passthrough_entry should succeed without a pending key");
         match ciphertext {
             AesCipherText::Map(entries) => {
@@ -1227,6 +1237,67 @@ mod test {
             .is_err());
     }
 
+    // --- Composite AAD is fixed at construction ---
+    //
+    // The sub-cipher captures the AAD once, so a hand-written `Encrypt` impl
+    // has no second place to supply it and cannot seal the elements and the
+    // container under different AAD. Before this shape, an impl that threaded
+    // the real AAD to `encrypt_next` but `()` to `end` round-tripped happily
+    // with data and produced an undecryptable ciphertext the first time the
+    // collection was empty.
+
+    /// A hand-written `Encrypt` impl driving the sub-cipher directly, of the
+    /// kind a derive macro would generate.
+    struct Tags(Vec<String>);
+
+    impl Encrypt for Tags {
+        fn encrypt_with_aad<'a, C, A>(self, cipher: C, aad: A) -> Result<C::Ok, C::Error>
+        where
+            C: Cipher,
+            A: IntoAad<'a>,
+        {
+            let len = self.0.len();
+            self.0
+                .into_iter()
+                .try_fold(cipher.encrypt_seq(Some(len), aad), |c, item| {
+                    c.encrypt_next(item)
+                })?
+                .end()
+        }
+    }
+
+    #[test]
+    fn hand_written_impl_roundtrips_empty_and_nonempty() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+
+        let ct = Tags(vec!["a".into(), "b".into()])
+            .encrypt_with_aad(&cipher, "user:42")
+            .expect("Encryption failed");
+        let out: Vec<String> = cipher
+            .decrypt_with_aad(ct, "user:42")
+            .expect("non-empty should decrypt");
+        assert_eq!(out, vec!["a".to_string(), "b".to_string()]);
+
+        // The case that used to break: no elements, so the marker's AAD is
+        // the only thing carrying the caller's context.
+        let ct = Tags(Vec::new())
+            .encrypt_with_aad(&cipher, "user:42")
+            .expect("Encryption failed");
+        let out: Vec<String> = cipher
+            .decrypt_with_aad(ct, "user:42")
+            .expect("empty should decrypt under the same AAD");
+        assert!(out.is_empty());
+
+        // And it is still AAD-sensitive — the marker binds "user:42".
+        let ct = Tags(Vec::new())
+            .encrypt_with_aad(&cipher, "user:42")
+            .expect("Encryption failed");
+        assert!(cipher
+            .decrypt_with_aad::<Vec<String>, _>(ct, "user:99")
+            .is_err());
+    }
+
     // --- All-passthrough composites ---
     //
     // Passthrough items authenticate nothing, so a composite containing only
@@ -1240,9 +1311,9 @@ mod test {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let result = (&cipher)
-            .encrypt_seq(Some(1))
+            .encrypt_seq(Some(1), "context")
             .passthrough_next(1u32)
-            .and_then(|s| s.end("context"));
+            .and_then(|s| s.end());
         assert!(result.is_err());
     }
 
@@ -1251,9 +1322,9 @@ mod test {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let result = (&cipher)
-            .encrypt_map()
+            .encrypt_map("context")
             .passthrough_entry("version", 1u32)
-            .and_then(|m| m.end("context"));
+            .and_then(|m| m.end());
         assert!(result.is_err());
     }
 
@@ -1642,14 +1713,14 @@ mod test {
     fn seq_cipher_accepts_mixed_encrypt_next_and_passthrough_next() {
         let cipher = Aes256Cipher::new(&Key::from([40u8; 32])).expect("Failed to create cipher");
         let ct = (&cipher)
-            .encrypt_seq(Some(3))
-            .encrypt_next("first", ())
+            .encrypt_seq(Some(3), ())
+            .encrypt_next("first")
             .unwrap()
             .passthrough_next(99u32)
             .unwrap()
-            .encrypt_next("third", ())
+            .encrypt_next("third")
             .unwrap()
-            .end(())
+            .end()
             .unwrap();
         match ct {
             AesCipherText::Sequence(items) => {
@@ -1669,14 +1740,14 @@ mod test {
         // Passthrough variant, failing the whole decode.
         let cipher = Aes256Cipher::new(&Key::from([41u8; 32])).expect("Failed to create cipher");
         let ct = (&cipher)
-            .encrypt_map()
+            .encrypt_map(())
             .encrypt_key("name")
             .unwrap()
-            .encrypt_value("Alice".to_string(), ())
+            .encrypt_value("Alice".to_string())
             .unwrap()
             .passthrough_entry("schema_version", 1u32)
             .unwrap()
-            .end(())
+            .end()
             .unwrap();
         assert!(cipher.decrypt::<HashMap<String, String>>(ct).is_err());
     }
