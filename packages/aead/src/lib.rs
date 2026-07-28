@@ -9,6 +9,7 @@ mod encrypt;
 #[cfg(feature = "hlist")]
 pub mod hlist;
 mod nonce;
+mod tree;
 
 #[doc(inline)]
 pub use aad::{Aad, IntoAad};
@@ -24,3 +25,8 @@ pub use decipher::{Decipher, DecipherVisitor, Decrypt, MapAccess, SeqAccess};
 pub use encrypt::Encrypt;
 #[doc(inline)]
 pub use nonce::{Nonce, NonceGenerator, RandomNonceGenerator};
+#[doc(inline)]
+pub use tree::{
+    CipherTree, LeafOpener, PendingLeaf, TreeCipher, TreeDecipher, TreeMap, TreeMapAccess, TreeSeq,
+    TreeSeqAccess,
+};

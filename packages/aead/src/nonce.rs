@@ -19,6 +19,15 @@ impl<const N: usize> Nonce<N> {
     pub fn into_inner(self) -> [u8; N] {
         self.0
     }
+
+    /// Borrow the nonce as a fixed-size array. Unlike
+    /// [`into_inner`](Self::into_inner) this does not consume the nonce, so the
+    /// same nonce can be used for the AEAD call and then appended to the
+    /// ciphertext. Copy the result (`*nonce.as_array()`) when an owned array is
+    /// needed — no fallible slice conversion required.
+    pub fn as_array(&self) -> &[u8; N] {
+        &self.0
+    }
 }
 
 // TODO: Make this a trait that can be implemented for a cipher rather than an associated type on the Cipher

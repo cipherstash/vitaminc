@@ -2,37 +2,21 @@ use crate::backend::{CipherKey, NONCE_LEN};
 use crate::Key;
 use std::any::Any;
 use vitaminc_aead::{
-    Aad, Cipher, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt, IntoAad,
-    LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator, SeqAccess,
-    SeqCipher, Unspecified,
+    Cipher, CipherTextBuilder, CipherTree, Decrypt, IntoAad, LeafOpener, LocalCipherText,
+    MapCipher, NonceGenerator, PendingLeaf, RandomNonceGenerator, SeqCipher, TreeCipher,
+    TreeDecipher, TreeMap, TreeSeq, Unspecified,
 };
 use vitaminc_protected::Protected;
 
 /// The recursive ciphertext container produced by [`Aes256Cipher`].
 ///
-/// The shape mirrors the structure of the plaintext that was encrypted: a
-/// single value yields [`Single`](AesCipherText::Single), a `Vec` yields
-/// [`Sequence`](AesCipherText::Sequence), a `HashMap` yields
-/// [`Map`](AesCipherText::Map). Nested structures are represented recursively.
-#[derive(Debug)]
-pub enum AesCipherText {
-    /// A single sealed value (nonce + ciphertext + tag).
-    Single(LocalCipherText),
-    /// A sequence of ciphertexts produced from a `Vec`-shaped plaintext.
-    Sequence(Vec<AesCipherText>),
-    /// A map of (cleartext key, ciphertext value) pairs produced from a
-    /// `HashMap`-shaped plaintext. Keys are not encrypted.
-    Map(Vec<(String, AesCipherText)>),
-    /// The authenticated absent marker produced by [`Cipher::encrypt_none`].
-    /// Stores a sealed empty plaintext whose tag binds the supplied AAD.
-    None(LocalCipherText),
-    /// A typed value passed through unencrypted via [`Cipher::passthrough`].
-    /// Not serializable to bytes — see
-    /// `packages/aead/src/cipher.rs` for the API-level type bound and the
-    /// runtime downcast performed by
-    /// [`Decipher::decrypt_passthrough`](vitaminc_aead::Decipher::decrypt_passthrough).
-    Passthrough(Box<dyn Any + Send + 'static>),
-}
+/// A [`CipherTree`] whose leaves are sealed [`LocalCipherText`]s. Its shape
+/// mirrors the encrypted plaintext: a single value yields
+/// [`Single`](CipherTree::Single), a `Vec` yields
+/// [`Sequence`](CipherTree::Sequence), a `HashMap` yields
+/// [`Map`](CipherTree::Map). The structural drive/walk is shared with any other
+/// cipher built on [`CipherTree`]; only the per-leaf sealing differs.
+pub type AesCipherText = CipherTree<LocalCipherText>;
 
 /// Implements AES-256-GCM. Backend is selected at compile time:
 /// `aws-lc-rs` on native targets, `aes-gcm` (RustCrypto) on `wasm32`.
@@ -53,13 +37,71 @@ impl Aes256Cipher {
             key: key.cipher_key()?,
         })
     }
+
+    /// Seal a single [`PendingLeaf`] under a fresh random nonce. This is the AES
+    /// per-leaf step the generic [`TreeCipher`] codec leaves to the cipher.
+    fn seal_leaf(&self, leaf: PendingLeaf) -> Result<LocalCipherText, Unspecified> {
+        let nonce = self.nonce_generator.generate()?;
+        // Copy the nonce bytes out without consuming the nonce (it is still
+        // appended to the ciphertext below) and without a fallible slice
+        // conversion — `Nonce<NONCE_LEN>` already wraps `[u8; NONCE_LEN]`.
+        let nonce_bytes = *nonce.as_array();
+
+        CipherTextBuilder::new()
+            .append_nonce(nonce)
+            .append_target_plaintext(leaf.plaintext)
+            .accepts_ciphertext_and_tag_ok(|mut buf| {
+                self.key
+                    .seal(&nonce_bytes, &leaf.aad, &mut buf)
+                    .map(|()| buf)
+            })
+            .build()
+    }
+
+    /// Seal every leaf of a pending tree, preserving structure. AES seals
+    /// eagerly leaf-by-leaf; a batching cipher would instead size a key request
+    /// with [`CipherTree::leaf_count`] and pull keys here. Leaves are sealed in
+    /// [`CipherTree::for_each_leaf`] order (see the `vitaminc_aead::tree`
+    /// module's "Leaf ordering contract").
+    fn seal_tree(&self, tree: CipherTree<PendingLeaf>) -> Result<AesCipherText, Unspecified> {
+        tree.try_map_leaves(&mut |leaf| self.seal_leaf(leaf))
+    }
 }
 
+/// The per-leaf opening step for [`Aes256Cipher`]: decrypt a leaf with the
+/// cipher's key and the nonce stored in the leaf. A `Copy` lookup wrapper so the
+/// generic [`TreeDecipher`] can thread it through every leaf of the structure.
+#[derive(Clone, Copy)]
+pub struct AesOpener<'c>(&'c Aes256Cipher);
+
+impl LeafOpener for AesOpener<'_> {
+    type Leaf = LocalCipherText;
+
+    fn open(self, leaf: LocalCipherText, aad: &[u8]) -> Result<Protected<Vec<u8>>, Unspecified> {
+        let (nonce, reader) = leaf.into_reader().read_nonce::<NONCE_LEN>()?;
+        let nonce_bytes = nonce.into_inner();
+        reader
+            .accepts_plaintext_ok(|data| self.0.key.open(&nonce_bytes, aad, data))
+            .read()
+    }
+}
+
+/// A [`Decipher`](vitaminc_aead::Decipher) over an [`AesCipherText`], produced by
+/// [`Aes256Cipher::decipher`]. The structural walk is shared via [`TreeDecipher`];
+/// [`AesOpener`] supplies the per-leaf decryption.
+pub type AesDecipher<'c> = TreeDecipher<AesOpener<'c>>;
+
+/// `&Aes256Cipher` is the [`Cipher`] so values can be encrypted ergonomically as
+/// `value.encrypt(&cipher)`. The structural traversal is delegated to the generic
+/// [`TreeCipher`] codec (which only *collects* leaves); this impl adds the AES
+/// seal step, sealing the collected tree before handing it back. A coherence
+/// blanket impl is impossible (it would conflict with every direct `Cipher`
+/// impl), so a future backend repeats this thin collect-then-seal shape.
 impl<'c> Cipher for &'c Aes256Cipher {
     type Ok = AesCipherText;
     type Error = Unspecified;
-    type SeqCipher = AesSeqCipher<'c>;
-    type MapCipher = AesMapCipher<'c>;
+    type SeqCipher = AesSeq<'c>;
+    type MapCipher = AesMap<'c>;
 
     fn encrypt_bytes_vec<'a, A>(
         self,
@@ -69,34 +111,20 @@ impl<'c> Cipher for &'c Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        let nonce = self.nonce_generator.generate()?;
-        let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-        let aad = aad.into_aad();
-
-        CipherTextBuilder::new()
-            .append_nonce(nonce)
-            .append_target_plaintext(data)
-            .accepts_ciphertext_and_tag_ok(|mut buf| {
-                self.key
-                    .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
-                    .map(|()| buf)
-            })
-            .build()
-            .map(AesCipherText::Single)
+        self.seal_tree(TreeCipher.encrypt_bytes_vec(data, aad)?)
     }
 
     fn encrypt_seq(self, size_hint: Option<usize>) -> Self::SeqCipher {
-        AesSeqCipher {
+        AesSeq {
+            inner: TreeCipher.encrypt_seq(size_hint),
             cipher: self,
-            items: Vec::with_capacity(size_hint.unwrap_or(0)),
         }
     }
 
     fn encrypt_map(self) -> Self::MapCipher {
-        AesMapCipher {
+        AesMap {
+            inner: TreeCipher.encrypt_map(),
             cipher: self,
-            entries: Vec::new(),
-            current_key: None,
         }
     }
 
@@ -104,49 +132,34 @@ impl<'c> Cipher for &'c Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        let nonce = self.nonce_generator.generate()?;
-        let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-        let aad = aad.into_aad();
-
-        CipherTextBuilder::new()
-            .append_nonce(nonce)
-            .append_target_plaintext(Vec::<u8>::new())
-            .accepts_ciphertext_and_tag_ok(|mut buf| {
-                self.key
-                    .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
-                    .map(|()| buf)
-            })
-            .build()
-            .map(AesCipherText::None)
+        self.seal_tree(TreeCipher.encrypt_none(aad)?)
     }
 
     fn passthrough<T>(self, value: T) -> Result<Self::Ok, Self::Error>
     where
         T: Any + Send + 'static,
     {
-        Ok(AesCipherText::Passthrough(Box::new(value)))
+        self.seal_tree(TreeCipher.passthrough(value)?)
     }
 }
 
-/// [`SeqCipher`] driver for [`Aes256Cipher`]. Encrypts each element under its
-/// own fresh nonce and accumulates the results into an
-/// [`AesCipherText::Sequence`].
-pub struct AesSeqCipher<'c> {
+/// [`SeqCipher`] for `&Aes256Cipher`: accumulates a pending tree via the generic
+/// [`TreeSeq`], then seals the whole sequence in one pass at [`end`](SeqCipher::end).
+pub struct AesSeq<'c> {
+    inner: TreeSeq,
     cipher: &'c Aes256Cipher,
-    items: Vec<AesCipherText>,
 }
 
-impl<'c> SeqCipher for AesSeqCipher<'c> {
+impl SeqCipher for AesSeq<'_> {
     type Ok = AesCipherText;
     type Error = Unspecified;
 
     fn encrypt_next<'a, T, A>(mut self, data: T, aad: A) -> Result<Self, Self::Error>
     where
-        T: Encrypt,
+        T: vitaminc_aead::Encrypt,
         A: IntoAad<'a>,
     {
-        let encrypted = data.encrypt_with_aad(self.cipher, aad)?;
-        self.items.push(encrypted);
+        self.inner = self.inner.encrypt_next(data, aad)?;
         Ok(self)
     }
 
@@ -154,59 +167,38 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
     where
         T: Any + Send + 'static,
     {
-        self.items.push(AesCipherText::Passthrough(Box::new(value)));
+        self.inner = self.inner.passthrough_next(value)?;
         Ok(self)
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(AesCipherText::Sequence(self.items))
+        self.cipher.seal_tree(self.inner.end()?)
     }
 }
 
-/// [`MapCipher`] driver for [`Aes256Cipher`]. Keys are stored in the clear;
-/// values are encrypted under their own fresh nonce and accumulated into an
-/// [`AesCipherText::Map`].
-///
-/// This driver is intended for encrypting sources that already enforce key
-/// uniqueness themselves — `HashMap`s and structs (whose field names are
-/// unique by construction). It therefore stores `entries` as a *positional
-/// list* and performs **no duplicate-key checks** of its own.
-///
-/// Implementors should be aware: if the same key is pushed by two completed
-/// `encrypt_value` / `passthrough_entry` calls, both are kept, and on decrypt
-/// the `HashMap`-shaped visitor is **last-wins**. The built-in
-/// `Encrypt for HashMap` impl never does this (the source map already dedups),
-/// so it is unreachable today; a custom encoder driving this trait directly is
-/// responsible for not emitting duplicate keys.
-pub struct AesMapCipher<'c> {
+/// [`MapCipher`] for `&Aes256Cipher`: accumulates a pending tree via the generic
+/// [`TreeMap`] (which enforces the key→value contract), then seals at
+/// [`end`](MapCipher::end).
+pub struct AesMap<'c> {
+    inner: TreeMap,
     cipher: &'c Aes256Cipher,
-    entries: Vec<(String, AesCipherText)>,
-    current_key: Option<&'static str>,
 }
 
-impl<'c> MapCipher for AesMapCipher<'c> {
+impl MapCipher for AesMap<'_> {
     type Ok = AesCipherText;
     type Error = Unspecified;
 
     fn encrypt_key(mut self, key: &'static str) -> Result<Self, Self::Error> {
-        // A key already pending means `encrypt_key` was called twice with no
-        // intervening `encrypt_value` — a trait-contract violation. Fail rather
-        // than silently drop the first key.
-        if self.current_key.is_some() {
-            return Err(Unspecified);
-        }
-        self.current_key = Some(key);
+        self.inner = self.inner.encrypt_key(key)?;
         Ok(self)
     }
 
-    fn encrypt_value<'a, U, A>(mut self, value: U, aad: A) -> Result<Self, Self::Error>
+    fn encrypt_value<'a, T, A>(mut self, value: T, aad: A) -> Result<Self, Self::Error>
     where
-        U: Encrypt,
+        T: vitaminc_aead::Encrypt,
         A: IntoAad<'a>,
     {
-        let key = self.current_key.take().ok_or(Unspecified)?;
-        let encrypted = value.encrypt_with_aad(self.cipher, aad)?;
-        self.entries.push((key.to_string(), encrypted));
+        self.inner = self.inner.encrypt_value(value, aad)?;
         Ok(self)
     }
 
@@ -214,24 +206,12 @@ impl<'c> MapCipher for AesMapCipher<'c> {
     where
         T: Any + Send + 'static,
     {
-        // A key already pending means `encrypt_key` ran without a matching
-        // `encrypt_value` — adopting it here would silently drop the pending
-        // key, which is the same trait-contract violation `encrypt_key`
-        // rejects.
-        if self.current_key.is_some() {
-            return Err(Unspecified);
-        }
-        self.entries
-            .push((key.to_string(), AesCipherText::Passthrough(Box::new(value))));
+        self.inner = self.inner.passthrough_entry(key, value)?;
         Ok(self)
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        // Finalising with a pending key would silently drop the entry.
-        if self.current_key.is_some() {
-            return Err(Unspecified);
-        }
-        Ok(AesCipherText::Map(self.entries))
+        self.cipher.seal_tree(self.inner.end()?)
     }
 }
 
@@ -264,202 +244,19 @@ impl Aes256Cipher {
         T::decrypt_with_aad(self.decipher(ciphertext), aad)
     }
 
-    /// Construct a [`Decipher`] over `ciphertext` bound to this cipher.
+    /// Construct a [`Decipher`](vitaminc_aead::Decipher) over `ciphertext` bound
+    /// to this cipher.
     ///
     /// This is the decrypt-side counterpart to passing `&cipher` (a [`Cipher`])
-    /// on the encrypt side: it hands callers a concrete [`Decipher`] they can
-    /// drive directly via [`Decrypt::decrypt_with_aad`], which is what generic
+    /// on the encrypt side: it hands callers a concrete decipher they can drive
+    /// directly via [`Decrypt::decrypt_with_aad`], which is what generic
     /// decrypt-side helpers (e.g. `ContextTag`) build on. The ergonomic
     /// [`decrypt`](Aes256Cipher::decrypt) /
     /// [`decrypt_with_aad`](Aes256Cipher::decrypt_with_aad) methods are thin
-    /// wrappers around it.
+    /// wrappers around it. The structural walk lives in [`TreeDecipher`];
+    /// [`AesOpener`] supplies the per-leaf decryption.
     pub fn decipher(&self, ciphertext: AesCipherText) -> AesDecipher<'_> {
-        AesDecipher {
-            cipher: self,
-            ciphertext,
-        }
-    }
-}
-
-/// A [`Decipher`] over a single [`AesCipherText`], produced by
-/// [`Aes256Cipher::decipher`]. Carries the cipher and ciphertext; the AAD is
-/// supplied per call by [`Decrypt::decrypt_with_aad`].
-pub struct AesDecipher<'c> {
-    cipher: &'c Aes256Cipher,
-    ciphertext: AesCipherText,
-}
-
-impl AesDecipher<'_> {
-    fn decrypt_local_ciphertext(
-        cipher: &Aes256Cipher,
-        ct: LocalCipherText,
-        aad: &[u8],
-    ) -> Result<Protected<Vec<u8>>, Unspecified> {
-        let (nonce, reader) = ct.into_reader().read_nonce::<NONCE_LEN>()?;
-        let nonce_bytes = nonce.into_inner();
-
-        reader
-            .accepts_plaintext_ok(|data| cipher.key.open(&nonce_bytes, aad, data))
-            .read()
-    }
-}
-
-impl<'c> Decipher<'c> for AesDecipher<'c> {
-    type Ok<T>
-        = Result<T, Unspecified>
-    where
-        T: Send + 'c;
-
-    fn map_ok<T, U, F>(ok: Self::Ok<T>, f: F) -> Self::Ok<U>
-    where
-        T: Send + 'c,
-        U: Send + 'c,
-        F: FnOnce(T) -> U,
-    {
-        ok.map(f)
-    }
-
-    fn decrypt_bytes<'a, V, A>(self, visitor: V, aad: A) -> Self::Ok<V::Value>
-    where
-        V: DecipherVisitor<'c> + Send + 'c,
-        A: IntoAad<'a>,
-    {
-        match self.ciphertext {
-            AesCipherText::Single(ct) => {
-                let aad = aad.into_aad();
-                let bytes = Self::decrypt_local_ciphertext(self.cipher, ct, aad.as_bytes())?;
-                visitor.visit_bytes_vec(bytes)
-            }
-            _ => Err(Unspecified),
-        }
-    }
-
-    fn decrypt_seq<'a, V, A>(self, visitor: V, aad: A) -> Self::Ok<V::Value>
-    where
-        V: DecipherVisitor<'c> + Send + 'c,
-        A: IntoAad<'a>,
-    {
-        match self.ciphertext {
-            AesCipherText::Sequence(items) => {
-                let seq_access = AesSeqAccess {
-                    cipher: self.cipher,
-                    items: items.into_iter(),
-                    aad: aad.into_aad(),
-                };
-                visitor.visit_seq(seq_access)
-            }
-            _ => Err(Unspecified),
-        }
-    }
-
-    fn decrypt_map<'a, V, A>(self, visitor: V, aad: A) -> Self::Ok<V::Value>
-    where
-        V: DecipherVisitor<'c> + Send + 'c,
-        A: IntoAad<'a>,
-    {
-        match self.ciphertext {
-            AesCipherText::Map(entries) => {
-                let map_access = AesMapAccess {
-                    cipher: self.cipher,
-                    entries: entries.into_iter(),
-                    aad: aad.into_aad(),
-                };
-                visitor.visit_map(map_access)
-            }
-            _ => Err(Unspecified),
-        }
-    }
-
-    fn decrypt_passthrough<T>(self) -> Self::Ok<T>
-    where
-        T: Any + Send + 'static,
-    {
-        match self.ciphertext {
-            AesCipherText::Passthrough(boxed) => {
-                boxed.downcast::<T>().map(|b| *b).map_err(|_| Unspecified)
-            }
-            _ => Err(Unspecified),
-        }
-    }
-
-    fn decrypt_option<'a, T, A>(self, aad: A) -> Self::Ok<Option<T>>
-    where
-        T: Decrypt<'c> + 'c,
-        A: IntoAad<'a>,
-    {
-        match self.ciphertext {
-            AesCipherText::None(ct) => {
-                // Verify the AAD-bound tag over the empty plaintext.
-                let aad = aad.into_aad();
-                Self::decrypt_local_ciphertext(self.cipher, ct, aad.as_bytes())?;
-                Ok(None)
-            }
-            // Passthrough must never be decoded as an Option payload.
-            AesCipherText::Passthrough(_) => Err(Unspecified),
-            // Any other variant is the `Some` payload: recurse into `T`. This is
-            // what lets `Option<Vec<T>>`, `Option<HashMap<K, V>>`,
-            // `Option<Protected<T>>` compose naturally.
-            //
-            // Note: there is no depth tag in the ciphertext, so the *shape* of
-            // nested options is decided by `T` at the call site, not by the
-            // bytes — `Some(Some(x))` and `Some(x)` seal to identical
-            // `Single(_)` ciphertexts. Decoding the same ciphertext as
-            // `Option<String>` yields `Some("x")` and as `Option<Option<String>>`
-            // yields `Some(Some("x"))`; both succeed. This mirrors serde's
-            // treatment of `Option` and is intentional — every caller fixes a
-            // concrete type at the call site. See `nested_option_shape_is_caller_decided`.
-            other => {
-                let inner = self.cipher.decipher(other);
-                T::decrypt_with_aad(inner, aad).map(Some)
-            }
-        }
-    }
-}
-
-struct AesSeqAccess<'c, 'a> {
-    cipher: &'c Aes256Cipher,
-    items: std::vec::IntoIter<AesCipherText>,
-    // Held as `Aad` (copy-on-write) rather than an owned `Vec<u8>` so a borrowed
-    // AAD stays borrowed. `next_element` re-supplies it per element by *borrowing*
-    // these bytes, so there is no per-element allocation in either the borrowed
-    // (`&str`/`&[u8]`) or the owned (`Vec`/PAE) case.
-    aad: Aad<'a>,
-}
-
-impl<'c, 'a> SeqAccess<'c> for AesSeqAccess<'c, 'a> {
-    type Error = Unspecified;
-
-    fn next_element<T: Decrypt<'c> + 'c>(&mut self) -> Result<Option<T>, Self::Error> {
-        let ct = match self.items.next() {
-            Some(ct) => ct,
-            None => return Ok(None),
-        };
-        let decipher = self.cipher.decipher(ct);
-        // Each element was sealed with the same AAD; re-supply it per element by
-        // *borrowing* the stored bytes — no per-element allocation, even when the
-        // AAD is owned. Mirrors `SeqCipher::encrypt_next` binding AAD per element.
-        T::decrypt_with_aad(decipher, self.aad.as_bytes()).map(Some)
-    }
-}
-
-struct AesMapAccess<'c, 'a> {
-    cipher: &'c Aes256Cipher,
-    entries: std::vec::IntoIter<(String, AesCipherText)>,
-    aad: Aad<'a>,
-}
-
-impl<'c, 'a> MapAccess<'c> for AesMapAccess<'c, 'a> {
-    type Error = Unspecified;
-
-    fn next_entry<T: Decrypt<'c> + 'c>(&mut self) -> Result<Option<(String, T)>, Self::Error> {
-        let (key, ct) = match self.entries.next() {
-            Some(entry) => entry,
-            None => return Ok(None),
-        };
-        let decipher = self.cipher.decipher(ct);
-        // Borrow the stored AAD bytes per entry — see `AesSeqAccess::next_element`.
-        let value = T::decrypt_with_aad(decipher, self.aad.as_bytes())?;
-        Ok(Some((key, value)))
+        TreeDecipher::new(AesOpener(self), ciphertext)
     }
 }
 
@@ -483,7 +280,7 @@ mod test {
     use crate::key::tests::DifferingKeyPair;
     use quickcheck_macros::quickcheck;
     use std::collections::HashMap;
-    use vitaminc_aead::Encrypt;
+    use vitaminc_aead::{Decipher, Encrypt, MapCipher, SeqCipher};
 
     #[quickcheck]
     fn roundtrip_byte_array(key: Key, plaintext: [u8; 16]) -> bool {
@@ -563,9 +360,9 @@ mod test {
     fn decrypt_seq_fails_with_wrong_aad(key: Key, plaintext: Vec<String>) -> bool {
         // The Sequence path re-supplies the same AAD to every element, so a wrong
         // AAD must fail the per-element authentication rather than silently
-        // decrypting (see `AesSeqAccess::next_element`). An empty sequence has no
-        // element tags to reject — the container shape itself is not
-        // AEAD-authenticated on either side — so skip it.
+        // decrypting. An empty sequence has no element tags to reject — the
+        // container shape itself is not AEAD-authenticated on either side — so
+        // skip it.
         if plaintext.is_empty() {
             return true;
         }
@@ -901,8 +698,7 @@ mod test {
     where
         T: Any + Send + 'static,
     {
-        let decipher = cipher.decipher(ciphertext);
-        decipher.decrypt_passthrough::<T>()
+        cipher.decipher(ciphertext).decrypt_passthrough::<T>()
     }
 
     #[quickcheck]
