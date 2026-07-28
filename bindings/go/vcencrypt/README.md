@@ -16,9 +16,9 @@ import "github.com/cipherstash/vitaminc/bindings/go/vcencrypt"
 `vitaminc-encrypt` is a **single-static-key** AES-256-GCM cipher — that is
 exactly what this package binds. Key management, rotation, and ZeroKMS envelope
 keys belong to the forthcoming stack-encrypt SDK and are deliberately **out of
-scope** here. This package exists to prove the value currency and transport
+scope** here. This package exists to prove the value model and transport
 work end-to-end through wasm; it is a reference tool, not the product surface.
-Application code that wants only the value currency (no wasm, no crypto) should
+Application code that wants only the value model (no wasm, no crypto) should
 import the sibling [`vcvalue`](../vcvalue) module.
 
 ## Usage
@@ -31,7 +31,7 @@ cipher, _ := client.NewCipher(ctx, key) // a key schedule (handle) in the guest
 defer cipher.Close(ctx)
 ```
 
-`Encrypt` takes `any` (encoded through the `vcvalue` currency); `Decrypt`
+`Encrypt` takes `any` (encoded through the `vcvalue` model); `Decrypt`
 returns the `vcvalue` decode shape. Everything below is runnable:
 
 ```sh

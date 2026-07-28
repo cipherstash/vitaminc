@@ -12,6 +12,8 @@ import (
 //
 //   - Sealed: one encrypted leaf (nonce || ciphertext || tag)
 //   - SealedNone: the authenticated absent marker
+//   - SealedEmptySeq / SealedEmptyMap: authenticated markers for empty
+//     composites, which have no element ciphertexts to bind the AAD
 //   - Plain{V: ...}: a passthrough field, readable without the key
 //   - []any: a sequence of ciphertext nodes
 //   - map[string]any: a record of named nodes. Keys travel in the clear but
@@ -34,6 +36,8 @@ const (
 	ctSeq         byte = 0x03
 	ctMap         byte = 0x04
 	ctPassthrough byte = 0x05
+	ctEmptySeq    byte = 0x06
+	ctEmptyMap    byte = 0x07
 )
 
 // MarshalCipherText encodes a ciphertext value into transport bytes. Bare
@@ -67,6 +71,12 @@ func encodeCipherText(out []byte, v any, depth int) ([]byte, error) {
 		return appendChunk(out, n)
 	case SealedNone:
 		out = append(out, ctNone)
+		return appendChunk(out, n)
+	case SealedEmptySeq:
+		out = append(out, ctEmptySeq)
+		return appendChunk(out, n)
+	case SealedEmptyMap:
+		out = append(out, ctEmptyMap)
 		return appendChunk(out, n)
 	case []any:
 		out = append(out, ctSeq)
@@ -125,7 +135,7 @@ func decodeCipherText(r *reader, depth int) (any, error) {
 		return nil, err
 	}
 	switch tag {
-	case ctSingle, ctNone:
+	case ctSingle, ctNone, ctEmptySeq, ctEmptyMap:
 		n, err := r.count()
 		if err != nil {
 			return nil, err
@@ -136,10 +146,16 @@ func decodeCipherText(r *reader, depth int) (any, error) {
 		}
 		leaf := make([]byte, len(s))
 		copy(leaf, s)
-		if tag == ctNone {
+		switch tag {
+		case ctNone:
 			return SealedNone(leaf), nil
+		case ctEmptySeq:
+			return SealedEmptySeq(leaf), nil
+		case ctEmptyMap:
+			return SealedEmptyMap(leaf), nil
+		default:
+			return Sealed(leaf), nil
 		}
-		return Sealed(leaf), nil
 	case ctSeq:
 		n, err := r.count()
 		if err != nil {

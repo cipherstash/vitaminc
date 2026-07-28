@@ -1,5 +1,5 @@
 // Package vcvalue is the durable, dependency-free module of the vitaminc Go
-// bindings: the value currency and its transport codec, with no dependency
+// bindings: the value model and its transport codec, with no dependency
 // on wazero or any crypto. A future stack-encrypt Go SDK is expected to
 // import this module for its encode/decode surface; the wasm reference
 // harness (module vcencrypt) is only one consumer of it.

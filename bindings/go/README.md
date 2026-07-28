@@ -11,7 +11,7 @@ no shared libraries, no cross-compilation matrix.
 
 This directory holds **two separate Go modules**, each with its own `go.mod`:
 
-- **[`vcvalue/`](vcvalue)** — the durable value layer: the value currency
+- **[`vcvalue/`](vcvalue)** — the durable value layer: the value model
   (encoder / `Encryptable` / reflection encode + natives decode), the transport
   codec, and the ciphertext value shape (`Sealed`/`Plain`). **Zero
   dependencies** (no wazero, no

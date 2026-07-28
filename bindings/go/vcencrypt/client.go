@@ -169,7 +169,7 @@ func (c *Client) NewCipher(ctx context.Context, key []byte) (*Cipher, error) {
 }
 
 // Encrypt seals v under this cipher. v is encoded through the vcvalue
-// currency: builtins, slices, maps and structs are handled by reflection, a
+// model: builtins, slices, maps and structs are handled by reflection, a
 // type implementing vcvalue.Encryptable controls its own encoding, and a
 // vcvalue.Plain marks a field to travel in the clear (passthrough). aad is
 // authenticated but not encrypted; the same aad must be presented to Decrypt.

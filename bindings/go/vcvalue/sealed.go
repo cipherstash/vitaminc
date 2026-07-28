@@ -42,6 +42,17 @@ func (s *Sealed) Scan(src any) error {
 // rather than being rejected or silently flattened into a Sealed.
 type SealedNone []byte
 
+// SealedEmptySeq is the authenticated marker for an empty sequence: with no
+// element ciphertexts to bind the AAD, the cipher seals an empty plaintext
+// under domain-separated AAD instead. Produced by encrypting an empty array;
+// decrypts back to an empty array.
+type SealedEmptySeq []byte
+
+// SealedEmptyMap is the authenticated marker for an empty map, the map-shaped
+// counterpart of SealedEmptySeq. Produced by encrypting an empty object;
+// decrypts back to an empty object.
+type SealedEmptyMap []byte
+
 // Value implements driver.Valuer for passthrough fields, so a map-shaped
 // ciphertext binds directly as database named parameters. Only scalar
 // natives convert; a container passthrough has no single-column form.

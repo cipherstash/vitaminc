@@ -44,14 +44,18 @@ pub const CT_MAP: u8 = 0x04;
 /// Ciphertext node kind: a passthrough value — one encoded plaintext value
 /// node travelling in the clear beside the sealed nodes.
 pub const CT_PASSTHROUGH: u8 = 0x05;
+/// Ciphertext node kind: an empty sequence's authenticated marker leaf.
+pub const CT_EMPTY_SEQ: u8 = 0x06;
+/// Ciphertext node kind: an empty map's authenticated marker leaf.
+pub const CT_EMPTY_MAP: u8 = 0x07;
 
 /// A passthrough payload the ciphertext transport can carry as an embedded
 /// plaintext value node.
 ///
-/// The generic [`CipherText<Leaf, P>`] passthrough currency `P` is opaque, but
-/// to cross this transport a passthrough value must be serializable as a value
-/// node. This trait supplies that, implemented for [`FfiValue`] — the currency
-/// the guest re-homes the Rust-native `Box<dyn Any + Send>` into (via
+/// The generic [`CipherText<Leaf, P>`] passthrough payload type `P` is opaque,
+/// but to cross this transport a passthrough value must be serializable as a
+/// value node. This trait supplies that, implemented for [`FfiValue`] — the
+/// type the guest re-homes the Rust-native `Box<dyn Any + Send>` into (via
 /// [`CipherText::map_passthrough`]) before encoding, and back into after
 /// decoding. See [`encode_ciphertext_boxed`] / [`decode_ciphertext_boxed`].
 pub trait TransportPassthrough: Sized {
@@ -109,12 +113,24 @@ impl<'a> Reader<'a> {
         Ok(u32::from_le_bytes(bytes))
     }
 
-    /// A count of items still to be decoded can never exceed the bytes
-    /// remaining (every item costs at least one byte); rejecting early
-    /// keeps a hostile count from driving a huge preallocation.
+    /// The bytes not yet consumed.
+    fn remaining(&self) -> &[u8] {
+        self.buf.get(self.pos..).unwrap_or(&[])
+    }
+
+    /// A count of items (or a byte length) still to be decoded can never
+    /// exceed the bytes remaining — every item costs at least one byte, and a
+    /// byte length costs exactly itself. Rejecting early keeps a hostile count
+    /// from driving a huge preallocation.
+    ///
+    /// Phrased against the remaining slice's length rather than
+    /// `len - pos`: arithmetic on the two cursors admits an off-by-one that no
+    /// input can distinguish (a too-large count that slips past the guard
+    /// still fails when the reader runs dry, so only the transient allocation
+    /// differs), whereas this form is exercised by every decode.
     fn count(&mut self) -> Result<usize, CodecError> {
         let n = self.u32()? as usize;
-        if n > self.buf.len() - self.pos {
+        if n > self.remaining().len() {
             return Err(CodecError);
         }
         Ok(n)
@@ -220,49 +236,14 @@ pub fn decode_value(reader: &mut Reader<'_>) -> Result<FfiValue, CodecError> {
     Ok(value)
 }
 
+/// Decode the recursive part of a value node: the container framings, which
+/// need the depth budget. Anything else is a leaf and is delegated to
+/// [`decode_leaf`], keeping each function's branch count modest.
 fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue, CodecError> {
     if depth > MAX_DEPTH {
         return Err(CodecError);
     }
     match reader.byte()? {
-        tags::NULL => Ok(FfiValue::Null),
-        tags::UNDEFINED => Ok(FfiValue::Undefined),
-        tags::BOOL_FALSE => Ok(FfiValue::Bool(false)),
-        tags::BOOL_TRUE => Ok(FfiValue::Bool(true)),
-        tags::INT32 => {
-            let bytes: [u8; 4] = reader.take(4)?.try_into().map_err(|_| CodecError)?;
-            Ok(FfiValue::Int32(i32::from_le_bytes(bytes)))
-        }
-        tags::INT64 => {
-            let bytes: [u8; 8] = reader.take(8)?.try_into().map_err(|_| CodecError)?;
-            Ok(FfiValue::Int64(i64::from_le_bytes(bytes)))
-        }
-        tags::UINT32 => {
-            let bytes: [u8; 4] = reader.take(4)?.try_into().map_err(|_| CodecError)?;
-            Ok(FfiValue::UInt32(u32::from_le_bytes(bytes)))
-        }
-        tags::UINT64 => {
-            let bytes: [u8; 8] = reader.take(8)?.try_into().map_err(|_| CodecError)?;
-            Ok(FfiValue::UInt64(u64::from_le_bytes(bytes)))
-        }
-        tags::FLOAT32 => {
-            let bits: [u8; 4] = reader.take(4)?.try_into().map_err(|_| CodecError)?;
-            Ok(FfiValue::Float32(f32::from_bits(u32::from_le_bytes(bits))))
-        }
-        tags::FLOAT64 => {
-            let bits: [u8; 8] = reader.take(8)?.try_into().map_err(|_| CodecError)?;
-            Ok(FfiValue::Float64(f64::from_bits(u64::from_le_bytes(bits))))
-        }
-        tags::STRING => {
-            let len = reader.count()?;
-            let bytes = reader.take(len)?;
-            std::str::from_utf8(bytes).map_err(|_| CodecError)?;
-            Ok(FfiValue::String(Protected::new(bytes.to_vec())))
-        }
-        tags::BYTES => {
-            let len = reader.count()?;
-            Ok(FfiValue::Bytes(Protected::new(reader.take(len)?.to_vec())))
-        }
         ARRAY => {
             let count = reader.count()?;
             let mut items = Vec::with_capacity(count);
@@ -275,10 +256,7 @@ fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue,
             let count = reader.count()?;
             let mut entries = Vec::with_capacity(count);
             for _ in 0..count {
-                let key_len = reader.count()?;
-                let key = std::str::from_utf8(reader.take(key_len)?)
-                    .map_err(|_| CodecError)?
-                    .to_owned();
+                let key = decode_key(reader)?;
                 entries.push((key, decode_value_inner(reader, depth + 1)?));
             }
             Ok(FfiValue::Object(entries))
@@ -288,14 +266,61 @@ fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue,
             let inner = decode_value_inner(reader, depth + 1)?;
             Ok(FfiValue::Passthrough(Box::new(inner)))
         }
+        tag => decode_leaf(tag, reader),
+    }
+}
+
+/// Decode a length-prefixed UTF-8 object key. Shared by the value and
+/// ciphertext decoders, which frame keys identically.
+fn decode_key(reader: &mut Reader<'_>) -> Result<String, CodecError> {
+    let len = reader.count()?;
+    Ok(std::str::from_utf8(reader.take(len)?)
+        .map_err(|_| CodecError)?
+        .to_owned())
+}
+
+/// Decode a non-container value node — the frozen scalar tag table. Split out
+/// of [`decode_value_inner`] so neither function carries the branch count of
+/// the whole tag space.
+fn decode_leaf(tag: u8, reader: &mut Reader<'_>) -> Result<FfiValue, CodecError> {
+    /// Read exactly `N` bytes as a fixed-width little-endian payload.
+    fn fixed<const N: usize>(reader: &mut Reader<'_>) -> Result<[u8; N], CodecError> {
+        reader.take(N)?.try_into().map_err(|_| CodecError)
+    }
+
+    match tag {
+        tags::NULL => Ok(FfiValue::Null),
+        tags::UNDEFINED => Ok(FfiValue::Undefined),
+        tags::BOOL_FALSE => Ok(FfiValue::Bool(false)),
+        tags::BOOL_TRUE => Ok(FfiValue::Bool(true)),
+        tags::INT32 => Ok(FfiValue::Int32(i32::from_le_bytes(fixed(reader)?))),
+        tags::INT64 => Ok(FfiValue::Int64(i64::from_le_bytes(fixed(reader)?))),
+        tags::UINT32 => Ok(FfiValue::UInt32(u32::from_le_bytes(fixed(reader)?))),
+        tags::UINT64 => Ok(FfiValue::UInt64(u64::from_le_bytes(fixed(reader)?))),
+        tags::FLOAT32 => Ok(FfiValue::Float32(f32::from_bits(u32::from_le_bytes(
+            fixed(reader)?,
+        )))),
+        tags::FLOAT64 => Ok(FfiValue::Float64(f64::from_bits(u64::from_le_bytes(
+            fixed(reader)?,
+        )))),
+        tags::STRING => {
+            let len = reader.count()?;
+            let bytes = reader.take(len)?;
+            std::str::from_utf8(bytes).map_err(|_| CodecError)?;
+            Ok(FfiValue::String(Protected::new(bytes.to_vec())))
+        }
+        tags::BYTES => {
+            let len = reader.count()?;
+            Ok(FfiValue::Bytes(Protected::new(reader.take(len)?.to_vec())))
+        }
         _ => Err(CodecError),
     }
 }
 
 /// Encode a ciphertext tree. A `Passthrough` node carries its payload as one
-/// embedded plaintext value node, so the payload currency `P` must be
+/// embedded plaintext value node, so the payload type `P` must be
 /// serializable via [`TransportPassthrough`]. The Rust-native `Box<dyn Any +
-/// Send>` currency is not — re-home it to [`FfiValue`] first (see
+/// Send>` is not — re-home it to [`FfiValue`] first (see
 /// [`encode_ciphertext_boxed`]).
 pub fn encode_ciphertext<Leaf, P>(
     ct: &CipherText<Leaf, P>,
@@ -312,6 +337,14 @@ where
         }
         CipherText::None(leaf) => {
             out.push(CT_NONE);
+            write_bytes(out, leaf.as_ref())?;
+        }
+        CipherText::EmptySequence(leaf) => {
+            out.push(CT_EMPTY_SEQ);
+            write_bytes(out, leaf.as_ref())?;
+        }
+        CipherText::EmptyMap(leaf) => {
+            out.push(CT_EMPTY_MAP);
             write_bytes(out, leaf.as_ref())?;
         }
         CipherText::Sequence(items) => {
@@ -338,7 +371,7 @@ where
 }
 
 /// Encode an `AesCipherText`-shaped tree (Rust-native `Box<dyn Any + Send>`
-/// passthrough currency) by first re-homing each passthrough payload to an
+/// passthrough payload type) by first re-homing each passthrough payload to an
 /// [`FfiValue`] value node via [`CipherText::map_passthrough`]. A boxed
 /// payload whose concrete type is not `FfiValue` (a foreign passthrough that
 /// cannot cross the transport) is rejected.
@@ -374,7 +407,7 @@ where
 }
 
 /// Decode a ciphertext tree into the `AesCipherText`-shaped `Box<dyn Any +
-/// Send>` passthrough currency, re-homing each decoded [`FfiValue`] payload
+/// Send>` passthrough payload type, re-homing each decoded [`FfiValue`] payload
 /// into a box via [`CipherText::map_passthrough`] so the tree can be handed to
 /// the Rust-native decipher.
 pub fn decode_ciphertext_boxed<Leaf>(
@@ -401,14 +434,6 @@ where
         return Err(CodecError);
     }
     match reader.byte()? {
-        CT_SINGLE => {
-            let len = reader.count()?;
-            Ok(CipherText::Single(Leaf::from(reader.take(len)?.to_vec())))
-        }
-        CT_NONE => {
-            let len = reader.count()?;
-            Ok(CipherText::None(Leaf::from(reader.take(len)?.to_vec())))
-        }
         CT_SEQ => {
             let count = reader.count()?;
             let mut items = Vec::with_capacity(count);
@@ -421,10 +446,7 @@ where
             let count = reader.count()?;
             let mut entries = Vec::with_capacity(count);
             for _ in 0..count {
-                let key_len = reader.count()?;
-                let key = std::str::from_utf8(reader.take(key_len)?)
-                    .map_err(|_| CodecError)?
-                    .to_owned();
+                let key = decode_key(reader)?;
                 entries.push((key, decode_ciphertext_inner(reader, depth + 1)?));
             }
             Ok(CipherText::Map(entries))
@@ -434,8 +456,30 @@ where
             // so a hostile nesting through passthrough stays bounded.
             Ok(CipherText::Passthrough(P::decode_node(reader, depth + 1)?))
         }
-        _ => Err(CodecError),
+        tag => decode_ciphertext_leaf(tag, reader),
     }
+}
+
+/// Decode a leaf-shaped ciphertext node — the four variants that carry one
+/// sealed byte string and no children. Split out of
+/// [`decode_ciphertext_inner`] so neither function carries every branch.
+fn decode_ciphertext_leaf<Leaf, P>(
+    tag: u8,
+    reader: &mut Reader<'_>,
+) -> Result<CipherText<Leaf, P>, CodecError>
+where
+    Leaf: From<Vec<u8>>,
+{
+    // Every leaf variant is framed identically; only the variant differs.
+    let wrap: fn(Leaf) -> CipherText<Leaf, P> = match tag {
+        CT_SINGLE => CipherText::Single,
+        CT_NONE => CipherText::None,
+        CT_EMPTY_SEQ => CipherText::EmptySequence,
+        CT_EMPTY_MAP => CipherText::EmptyMap,
+        _ => return Err(CodecError),
+    };
+    let len = reader.count()?;
+    Ok(wrap(Leaf::from(reader.take(len)?.to_vec())))
 }
 
 #[cfg(test)]
@@ -593,6 +637,145 @@ mod tests {
         assert!(decode_value(&mut Reader::new(&bytes)).is_err());
     }
 
+    /// Wrap a NULL leaf in `n` nested single-element arrays.
+    fn nested_value(n: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for _ in 0..n {
+            bytes.extend_from_slice(&[ARRAY, 1, 0, 0, 0]);
+        }
+        bytes.push(tags::NULL);
+        bytes
+    }
+
+    #[test]
+    fn value_depth_bound_is_exact() {
+        // The bound is `depth > MAX_DEPTH`, and n nested arrays put the
+        // innermost leaf at depth n — so MAX_DEPTH wrappers is the last
+        // accepted shape and one more is rejected. Pins the comparison
+        // itself, not just "deep enough fails".
+        assert!(decode_value(&mut Reader::new(&nested_value(MAX_DEPTH))).is_ok());
+        assert!(decode_value(&mut Reader::new(&nested_value(MAX_DEPTH + 1))).is_err());
+    }
+
+    /// Wrap a NULL leaf in `n` nested single-entry objects.
+    fn nested_object(n: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for _ in 0..n {
+            bytes.push(OBJECT);
+            bytes.extend_from_slice(&1u32.to_le_bytes());
+            bytes.extend_from_slice(&1u32.to_le_bytes());
+            bytes.push(b'k');
+        }
+        bytes.push(tags::NULL);
+        bytes
+    }
+
+    /// Wrap a NULL leaf in `n` nested passthrough markers.
+    fn nested_passthrough(n: usize) -> Vec<u8> {
+        let mut bytes = vec![PASSTHROUGH; n];
+        bytes.push(tags::NULL);
+        bytes
+    }
+
+    #[test]
+    fn object_nesting_counts_against_the_depth_bound() {
+        // Every container spends a level, not just arrays — an object that
+        // failed to charge its depth would be an unbounded recursion route.
+        assert!(decode_value(&mut Reader::new(&nested_object(MAX_DEPTH))).is_ok());
+        assert!(decode_value(&mut Reader::new(&nested_object(MAX_DEPTH + 1))).is_err());
+    }
+
+    #[test]
+    fn passthrough_nesting_counts_against_the_depth_bound() {
+        assert!(decode_value(&mut Reader::new(&nested_passthrough(MAX_DEPTH))).is_ok());
+        assert!(decode_value(&mut Reader::new(&nested_passthrough(MAX_DEPTH + 1))).is_err());
+    }
+
+    #[test]
+    fn value_nesting_costs_exactly_one_level_per_container() {
+        // Each container recurses at `depth + 1`; anything else (a `-`, a `*`,
+        // or a missed increment) would move the accept/reject boundary found
+        // above, so check the two adjacent shapes decode to the right depth.
+        let ok = decode_value(&mut Reader::new(&nested_value(3))).expect("codec");
+        let mut d = 0;
+        let mut cur = &ok;
+        while let FfiValue::Array(items) = cur {
+            d += 1;
+            cur = &items[0];
+        }
+        assert_eq!(d, 3);
+        assert!(matches!(cur, FfiValue::Null));
+    }
+
+    #[test]
+    fn object_key_length_is_read_per_entry() {
+        // Two entries with differently-sized keys: an arithmetic slip in the
+        // key/entry framing desynchronises the reader and fails to decode.
+        let mut bytes = vec![OBJECT, 2, 0, 0, 0];
+        for key in ["a", "bcd"] {
+            bytes.extend_from_slice(&(key.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(key.as_bytes());
+            bytes.push(tags::NULL);
+        }
+        let decoded = decode_value(&mut Reader::new(&bytes)).expect("codec");
+        match decoded {
+            FfiValue::Object(entries) => {
+                let keys: Vec<_> = entries.iter().map(|(k, _)| k.as_str()).collect();
+                assert_eq!(keys, vec!["a", "bcd"]);
+            }
+            _ => panic!("expected Object"),
+        }
+    }
+
+    #[test]
+    fn count_is_bounded_by_bytes_remaining_not_buffer_length() {
+        // `count` compares against the bytes left *after* the cursor. A count
+        // that would fit in the whole buffer but not in the remainder must
+        // still be rejected — the guard is `len - pos`, not `len`.
+        //
+        // 5 leading bytes consumed (ARRAY + count), leaving 1 byte; a claimed
+        // count of 3 fits the 6-byte buffer but not the 1-byte remainder.
+        let bytes = [ARRAY, 3, 0, 0, 0, tags::NULL];
+        assert!(decode_value(&mut Reader::new(&bytes)).is_err());
+
+        // And the in-bounds neighbour still decodes, so the guard is not just
+        // rejecting everything.
+        let ok = [ARRAY, 1, 0, 0, 0, tags::NULL];
+        assert!(decode_value(&mut Reader::new(&ok)).is_ok());
+    }
+
+    #[test]
+    fn every_scalar_tag_decodes_to_its_own_variant() {
+        // One decode per frozen tag, so deleting any single leaf arm fails
+        // here rather than silently falling through to the catch-all.
+        let cases: Vec<(Vec<u8>, FfiValue)> = vec![
+            (vec![tags::NULL], FfiValue::Null),
+            (vec![tags::UNDEFINED], FfiValue::Undefined),
+            (vec![tags::BOOL_FALSE], FfiValue::Bool(false)),
+            (vec![tags::BOOL_TRUE], FfiValue::Bool(true)),
+            (encoded(FfiValue::Int32(-7)), FfiValue::Int32(-7)),
+            (encoded(FfiValue::Int64(-8)), FfiValue::Int64(-8)),
+            (encoded(FfiValue::UInt32(9)), FfiValue::UInt32(9)),
+            (encoded(FfiValue::UInt64(10)), FfiValue::UInt64(10)),
+            (encoded(FfiValue::Float32(1.5)), FfiValue::Float32(1.5)),
+            (encoded(FfiValue::Float64(2.5)), FfiValue::Float64(2.5)),
+            (encoded(string("hi")), string("hi")),
+            (
+                encoded(FfiValue::Bytes(Protected::new(vec![1, 2]))),
+                FfiValue::Bytes(Protected::new(vec![1, 2])),
+            ),
+        ];
+        for (bytes, want) in cases {
+            let got = decode_value(&mut Reader::new(&bytes)).expect("codec");
+            assert_eq!(
+                encoded(got),
+                encoded(want),
+                "tag {:#04x} decoded to the wrong variant",
+                bytes[0]
+            );
+        }
+    }
+
     #[test]
     fn ciphertext_round_trips() {
         let ct: AesCipherText = CipherText::Map(vec![
@@ -612,6 +795,193 @@ mod tests {
         let mut out2 = Vec::new();
         encode_ciphertext_boxed(decoded, &mut out2).expect("codec");
         assert_eq!(out, out2);
+    }
+
+    /// Round-trip a ciphertext tree and return the decoded value, asserting
+    /// the encoding is stable across the trip.
+    fn ct_round_trip(ct: AesCipherText) -> AesCipherText {
+        let mut out = Vec::new();
+        encode_ciphertext_boxed(ct, &mut out).expect("codec");
+        let decoded: AesCipherText =
+            decode_ciphertext_boxed(&mut Reader::new(&out)).expect("codec");
+        let mut out2 = Vec::new();
+        encode_ciphertext_boxed(decoded, &mut out2).expect("codec");
+        assert_eq!(out, out2, "re-encode must be byte-stable");
+        decode_ciphertext_boxed(&mut Reader::new(&out2)).expect("codec")
+    }
+
+    #[test]
+    fn every_ciphertext_leaf_variant_round_trips_as_itself() {
+        // The four leaf-shaped nodes are framed identically, so only the tag
+        // distinguishes them: a dropped or swapped arm would decode one as
+        // another. Check each lands on its own variant.
+        assert!(matches!(
+            ct_round_trip(CipherText::Single(vec![1u8; 4].into())),
+            CipherText::Single(_)
+        ));
+        assert!(matches!(
+            ct_round_trip(CipherText::None(vec![2u8; 4].into())),
+            CipherText::None(_)
+        ));
+        assert!(matches!(
+            ct_round_trip(CipherText::EmptySequence(vec![3u8; 4].into())),
+            CipherText::EmptySequence(_)
+        ));
+        assert!(matches!(
+            ct_round_trip(CipherText::EmptyMap(vec![4u8; 4].into())),
+            CipherText::EmptyMap(_)
+        ));
+    }
+
+    #[test]
+    fn empty_composite_markers_keep_their_leaf_bytes() {
+        // The marker's sealed bytes are what authenticates the empty
+        // composite, so they must survive the transport verbatim.
+        let leaf = vec![7u8; 40];
+        match ct_round_trip(CipherText::EmptySequence(leaf.clone().into())) {
+            CipherText::EmptySequence(l) => assert_eq!(l.as_ref(), leaf.as_slice()),
+            other => panic!("expected EmptySequence, got {other:?}"),
+        }
+        match ct_round_trip(CipherText::EmptyMap(leaf.clone().into())) {
+            CipherText::EmptyMap(l) => assert_eq!(l.as_ref(), leaf.as_slice()),
+            other => panic!("expected EmptyMap, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn empty_markers_nest_inside_containers() {
+        // The shape a map-valued empty composite actually takes on the wire.
+        let ct: AesCipherText = CipherText::Map(vec![
+            (
+                "tags".into(),
+                CipherText::EmptySequence(vec![1u8; 8].into()),
+            ),
+            ("meta".into(), CipherText::EmptyMap(vec![2u8; 8].into())),
+            ("email".into(), CipherText::Single(vec![3u8; 40].into())),
+        ]);
+        match ct_round_trip(ct) {
+            CipherText::Map(entries) => {
+                let kinds: Vec<_> = entries
+                    .iter()
+                    .map(|(k, v)| {
+                        let kind = match v {
+                            CipherText::EmptySequence(_) => "eseq",
+                            CipherText::EmptyMap(_) => "emap",
+                            CipherText::Single(_) => "single",
+                            _ => "other",
+                        };
+                        (k.as_str(), kind)
+                    })
+                    .collect();
+                assert_eq!(
+                    kinds,
+                    vec![("tags", "eseq"), ("meta", "emap"), ("email", "single")]
+                );
+            }
+            other => panic!("expected Map, got {other:?}"),
+        }
+    }
+
+    /// Wrap a leaf ciphertext node in `n` nested single-element sequences.
+    fn nested_ciphertext(n: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for _ in 0..n {
+            bytes.push(CT_SEQ);
+            bytes.extend_from_slice(&1u32.to_le_bytes());
+        }
+        bytes.push(CT_SINGLE);
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.push(0xAB);
+        bytes
+    }
+
+    #[test]
+    fn ciphertext_depth_bound_is_exact() {
+        // Same bound as the value decoder, checked at the boundary so the
+        // comparison itself is pinned.
+        let ok = nested_ciphertext(MAX_DEPTH);
+        assert!(
+            decode_ciphertext_boxed::<vitaminc_aead::LocalCipherText>(&mut Reader::new(&ok))
+                .is_ok()
+        );
+        let too_deep = nested_ciphertext(MAX_DEPTH + 1);
+        assert!(
+            decode_ciphertext_boxed::<vitaminc_aead::LocalCipherText>(&mut Reader::new(&too_deep))
+                .is_err()
+        );
+    }
+
+    /// Wrap a leaf ciphertext node in `n` nested single-entry maps.
+    fn nested_ciphertext_map(n: usize) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for _ in 0..n {
+            bytes.push(CT_MAP);
+            bytes.extend_from_slice(&1u32.to_le_bytes());
+            bytes.extend_from_slice(&1u32.to_le_bytes());
+            bytes.push(b'k');
+        }
+        bytes.push(CT_SINGLE);
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.push(0xAB);
+        bytes
+    }
+
+    /// `n` nested value-node passthroughs behind a single ciphertext
+    /// passthrough marker — the route from the ciphertext tree into the value
+    /// decoder, which must keep charging depth.
+    fn ciphertext_passthrough_nest(n: usize) -> Vec<u8> {
+        let mut bytes = vec![CT_PASSTHROUGH];
+        bytes.extend_from_slice(&vec![PASSTHROUGH; n]);
+        bytes.push(tags::NULL);
+        bytes
+    }
+
+    #[test]
+    fn ciphertext_map_nesting_counts_against_the_depth_bound() {
+        let ok = nested_ciphertext_map(MAX_DEPTH);
+        assert!(
+            decode_ciphertext_boxed::<vitaminc_aead::LocalCipherText>(&mut Reader::new(&ok))
+                .is_ok()
+        );
+        let too_deep = nested_ciphertext_map(MAX_DEPTH + 1);
+        assert!(
+            decode_ciphertext_boxed::<vitaminc_aead::LocalCipherText>(&mut Reader::new(&too_deep))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn ciphertext_passthrough_carries_depth_into_the_value_decoder() {
+        // The passthrough payload is decoded one level deeper, so the value
+        // nesting behind it shares the ciphertext tree's budget rather than
+        // restarting it.
+        let ok = ciphertext_passthrough_nest(MAX_DEPTH - 1);
+        assert!(
+            decode_ciphertext_boxed::<vitaminc_aead::LocalCipherText>(&mut Reader::new(&ok))
+                .is_ok()
+        );
+        let too_deep = ciphertext_passthrough_nest(MAX_DEPTH);
+        assert!(
+            decode_ciphertext_boxed::<vitaminc_aead::LocalCipherText>(&mut Reader::new(&too_deep))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn ciphertext_map_keys_are_read_per_entry() {
+        // Differently-sized keys in one map: an arithmetic slip in the key
+        // framing desynchronises the reader.
+        let ct: AesCipherText = CipherText::Map(vec![
+            ("a".into(), CipherText::Single(vec![1u8; 4].into())),
+            ("bcd".into(), CipherText::Single(vec![2u8; 4].into())),
+        ]);
+        match ct_round_trip(ct) {
+            CipherText::Map(entries) => {
+                let keys: Vec<_> = entries.iter().map(|(k, _)| k.as_str()).collect();
+                assert_eq!(keys, vec!["a", "bcd"]);
+            }
+            other => panic!("expected Map, got {other:?}"),
+        }
     }
 
     // ---------------------------------------------------------------
@@ -673,7 +1043,7 @@ mod tests {
     #[test]
     fn passthrough_crosses_the_ciphertext_transport() {
         // A passthrough with an FfiValue payload round-trips through the
-        // ciphertext transport once the Box currency is re-homed.
+        // ciphertext transport once the Box payload type is re-homed.
         let ct: AesCipherText = CipherText::Map(vec![
             (
                 "id".into(),

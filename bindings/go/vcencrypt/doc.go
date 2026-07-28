@@ -1,13 +1,13 @@
 // Package vcencrypt is the demonstration binding of the vitaminc-encrypt
 // crate: it runs the Rust AEAD stack as a wasm32-wasip1 guest under wazero
-// (CGO_ENABLED=0) and drives it through the vcvalue currency end-to-end.
+// (CGO_ENABLED=0) and drives it through the vcvalue model end-to-end.
 //
 // vitaminc-encrypt is a single-static-key cipher BY DESIGN — that is exactly
 // what this package binds. Key management, rotation and ZeroKMS envelope keys
 // belong to the forthcoming stack-encrypt SDK and are out of scope here. This
-// package exists to prove the value currency and transport work end-to-end
+// package exists to prove the value model and transport work end-to-end
 // through wasm; it is a reference tool, not the product surface. Application
-// code that wants only the value currency and transport codec (with no wasm
+// code that wants only the value model and transport codec (with no wasm
 // or crypto dependency) should import the sibling vcvalue module instead.
 //
 // # Shape

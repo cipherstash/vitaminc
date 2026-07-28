@@ -105,6 +105,43 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+// Empty composites seal to authenticated marker leaves (an empty container
+// has no element ciphertexts to bind the AAD) and round-trip back to empty
+// containers.
+func TestEmptyCompositeRoundTrip(t *testing.T) {
+	cipher := newCipher(t)
+	aad := []byte("empty-composites")
+
+	value := map[string]any{
+		"tags": []any{},
+		"meta": map[string]any{},
+	}
+	ct, err := cipher.Encrypt(t.Context(), value, aad)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	m := ct.(map[string]any)
+	if _, ok := m["tags"].(vcvalue.SealedEmptySeq); !ok {
+		t.Fatalf("expected tags to be a SealedEmptySeq marker, got %#v", m["tags"])
+	}
+	if _, ok := m["meta"].(vcvalue.SealedEmptyMap); !ok {
+		t.Fatalf("expected meta to be a SealedEmptyMap marker, got %#v", m["meta"])
+	}
+
+	got, err := cipher.Decrypt(t.Context(), ct, aad)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	want := vcvalue.Object{
+		{Key: "meta", Value: vcvalue.Object{}},
+		{Key: "tags", Value: []any{}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 // person shows the Encryptable consumer UX: a user type controls its own
 // sealing in a handful of lines, the Go analog of `impl Encrypt`.
 type person struct {

@@ -87,7 +87,7 @@ fn main() {
         .encrypt_with_aad(&cipher, Aad::from_slice(AAD))
         .unwrap();
     let mut ct_bytes = Vec::new();
-    // Re-home the Box passthrough currency to FfiValue value-nodes for the wire.
+    // Re-home the Box passthrough payload type to FfiValue value-nodes for the wire.
     codec::encode_ciphertext_boxed(ct, &mut ct_bytes).unwrap();
 
     let mut val_bytes = Vec::new();

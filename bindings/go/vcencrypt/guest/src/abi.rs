@@ -212,7 +212,7 @@ fn encrypt(handle: u32, aad: &[u8], val: &[u8]) -> Result<Vec<u8>, u32> {
             .encrypt_with_aad(cipher, Aad::from_slice(aad))
             .map_err(|_| STATUS_INTERNAL)?;
         let mut out = Vec::new();
-        // Re-home the Box<dyn Any + Send> passthrough currency to FfiValue
+        // Re-home the Box<dyn Any + Send> passthrough payload type to FfiValue
         // value-nodes before encoding.
         codec::encode_ciphertext_boxed(ct, &mut out).map_err(|_| STATUS_ENCODING)?;
         Ok(out)
@@ -242,7 +242,7 @@ pub unsafe extern "C" fn vc_decrypt(
 }
 
 fn decrypt(handle: u32, aad: &[u8], ct: &[u8]) -> Result<Vec<u8>, u32> {
-    // Decode + re-home to the Box passthrough currency the decipher expects.
+    // Decode + re-home to the Box passthrough payload type the decipher expects.
     let ct: AesCipherText =
         codec::decode_ciphertext_boxed(&mut codec::Reader::new(ct)).map_err(|_| STATUS_ENCODING)?;
     with_cipher(handle, |cipher| {

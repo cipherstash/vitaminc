@@ -1,7 +1,7 @@
 # vcvalue — the durable value layer
 
 `vcvalue` is the Go materialization of vitaminc's **frozen data model**: the
-value currency (encoder / `Encryptable` / reflection encode, plus a natives
+value model (encoder / `Encryptable` / reflection encode, plus a natives
 decode), the transport codec, and the `CipherText` projection.
 
 It has **zero dependencies** — no wazero, no crypto, nothing. It is the module
