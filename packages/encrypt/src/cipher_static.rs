@@ -5,7 +5,7 @@
 use crate::backend::NONCE_LEN;
 use crate::Aes256Cipher;
 use vitaminc_aead::hlist::{Absent, Encrypted, Entry, StaticCipher};
-use vitaminc_aead::{CipherTextBuilder, IntoAad, NonceGenerator, Unspecified};
+use vitaminc_aead::{CipherTextBuilder, IntoAad, NonceGenerator, Unspecified, WIRE_VERSION};
 use vitaminc_protected::Protected;
 
 impl StaticCipher for &Aes256Cipher {
@@ -108,7 +108,9 @@ where
 {
     let nonce = cipher.nonce_generator.generate()?;
     let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-    let aad = aad.into_aad();
+    // Outermost derivation: bind the wire version the builder prefixes to
+    // the stored leaf — see `Aad::for_leaf`. Mirrors the dynamic path.
+    let aad = aad.into_aad().for_leaf(WIRE_VERSION);
 
     CipherTextBuilder::new()
         .append_nonce(nonce)
@@ -130,8 +132,9 @@ fn open_local<'a, A>(
 where
     A: IntoAad<'a>,
 {
-    let aad = aad.into_aad();
-    let (nonce, reader) = ct.into_reader().read_nonce::<NONCE_LEN>()?;
+    let aad = aad.into_aad().for_leaf(WIRE_VERSION);
+    // Version check mirrors `AesDecipher::decrypt_local_ciphertext`.
+    let (nonce, reader) = ct.into_reader().read_version()?.read_nonce::<NONCE_LEN>()?;
     let nonce_bytes = nonce.into_inner();
 
     reader
@@ -417,8 +420,9 @@ mod test {
             .into_local()
             .as_ref()
             .to_vec();
-        // Distinct ciphertexts, and specifically distinct nonce prefixes.
-        b1 != b2 && b1[..NONCE_LEN] != b2[..NONCE_LEN]
+        // Distinct ciphertexts, and specifically distinct nonces (the leaf
+        // layout is version(1) ‖ nonce ‖ ciphertext ‖ tag).
+        b1 != b2 && b1[1..1 + NONCE_LEN] != b2[1..1 + NONCE_LEN]
     }
 
     #[quickcheck]

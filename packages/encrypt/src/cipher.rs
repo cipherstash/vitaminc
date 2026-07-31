@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use vitaminc_aead::{
     Aad, Cipher, CipherText, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt,
     IntoAad, LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator,
-    SeqAccess, SeqCipher, Unspecified,
+    SeqAccess, SeqCipher, Unspecified, WIRE_VERSION,
 };
 use vitaminc_protected::{Controlled, Protected};
 
@@ -53,7 +53,9 @@ impl Aes256Cipher {
     {
         let nonce = self.nonce_generator.generate()?;
         let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-        let aad = aad.into_aad();
+        // Outermost derivation: bind the wire version the builder prefixes
+        // to the stored leaf — see `Aad::for_leaf`.
+        let aad = aad.into_aad().for_leaf(WIRE_VERSION);
 
         CipherTextBuilder::new()
             .append_nonce(nonce)
@@ -84,7 +86,8 @@ impl<'c> Cipher for &'c Aes256Cipher {
     {
         let nonce = self.nonce_generator.generate()?;
         let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-        let aad = aad.into_aad();
+        // Outermost derivation: bind the wire version — see `Aad::for_leaf`.
+        let aad = aad.into_aad().for_leaf(WIRE_VERSION);
 
         CipherTextBuilder::new()
             .append_nonce(nonce)
@@ -381,11 +384,15 @@ impl AesDecipher<'_> {
         ct: LocalCipherText,
         aad: &[u8],
     ) -> Result<Protected<Vec<u8>>, Unspecified> {
-        let (nonce, reader) = ct.into_reader().read_nonce::<NONCE_LEN>()?;
+        // `read_version` rejects unknown wire versions before any parsing;
+        // the version is *also* bound under the tag (`for_leaf`, mirroring
+        // both seal sites), so a relabeled byte that parses still fails.
+        let (nonce, reader) = ct.into_reader().read_version()?.read_nonce::<NONCE_LEN>()?;
         let nonce_bytes = nonce.into_inner();
+        let aad = Aad::from_slice(aad).for_leaf(WIRE_VERSION);
 
         reader
-            .accepts_plaintext_ok(|data| cipher.key.open(&nonce_bytes, aad, data))
+            .accepts_plaintext_ok(|data| cipher.key.open(&nonce_bytes, aad.as_bytes(), data))
             .read()
     }
 
@@ -1881,6 +1888,67 @@ mod test {
         let single = "x".to_string().encrypt(&cipher).expect("encrypt");
         let forged = AesCipherText::Sequence(vec![single]);
         assert!(cipher.decrypt::<Vec<String>>(forged).is_err());
+    }
+
+    #[test]
+    fn every_leaf_carries_the_wire_version_prefix() {
+        // The version byte is the leaf format's first byte on every
+        // leaf-bearing variant — Single, None, both empty markers, sequence
+        // elements, and map values. `wire_version` is the keyless peek
+        // migration tooling relies on.
+        use vitaminc_aead::WIRE_VERSION;
+        let cipher = Aes256Cipher::new(&Key::from([54u8; 32])).expect("Failed to create cipher");
+
+        fn leaf_versions(ct: &AesCipherText) -> Vec<Option<u8>> {
+            match ct {
+                AesCipherText::Single(l)
+                | AesCipherText::None(l)
+                | AesCipherText::EmptySequence(l)
+                | AesCipherText::EmptyMap(l) => vec![l.wire_version()],
+                AesCipherText::Sequence(items) => items.iter().flat_map(leaf_versions).collect(),
+                AesCipherText::Map(entries) => {
+                    entries.iter().flat_map(|(_, v)| leaf_versions(v)).collect()
+                }
+                AesCipherText::Passthrough(_) => vec![],
+            }
+        }
+
+        let mut map = HashMap::new();
+        map.insert("k", "v");
+        let cts = [
+            "single".to_string().encrypt(&cipher).expect("encrypt"),
+            None::<String>.encrypt(&cipher).expect("encrypt"),
+            Vec::<String>::new().encrypt(&cipher).expect("encrypt"),
+            HashMap::<&str, &str>::new()
+                .encrypt(&cipher)
+                .expect("encrypt"),
+            vec!["a".to_string(), "b".to_string()]
+                .encrypt(&cipher)
+                .expect("encrypt"),
+            map.encrypt(&cipher).expect("encrypt"),
+        ];
+        for ct in &cts {
+            let versions = leaf_versions(ct);
+            assert!(!versions.is_empty());
+            assert!(versions.iter().all(|v| *v == Some(WIRE_VERSION)));
+        }
+    }
+
+    #[test]
+    fn relabeled_wire_version_fails_decryption() {
+        // Flipping the version byte must fail — first at the parse check
+        // (unknown version), and even a version a future parser accepted
+        // would fail the tag, because the byte is bound into the leaf AAD
+        // via `Aad::for_leaf`.
+        let cipher = Aes256Cipher::new(&Key::from([55u8; 32])).expect("Failed to create cipher");
+        let leaf = match "x".to_string().encrypt(&cipher).expect("encrypt") {
+            AesCipherText::Single(leaf) => leaf,
+            _ => panic!("expected Single"),
+        };
+        let mut bytes = leaf.as_ref().to_vec();
+        bytes[0] ^= 0x02;
+        let relabeled = AesCipherText::Single(LocalCipherText::from(bytes));
+        assert!(cipher.decrypt::<String>(relabeled).is_err());
     }
 
     #[test]
