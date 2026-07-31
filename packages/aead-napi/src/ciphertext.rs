@@ -20,10 +20,12 @@
 //! ciphertexts persisted by JS applications.
 
 use napi::bindgen_prelude::{Array, Buffer, FromNapiValue, Object, ToNapiValue, Unknown};
-use napi::{sys, Env, Error, Result, Status};
+use napi::{sys, Env, Error, Result, Status, ValueType};
 use vitaminc_aead::CipherText;
 
-use crate::convert::{forbidden_key, MAX_DEPTH};
+use crate::convert::{
+    eager_capacity, forbidden_key, get_property_unknown, own_enumerable_keys, MAX_DEPTH,
+};
 
 const T_CIPHERTEXT: &str = "ct";
 const T_NONE: &str = "none";
@@ -165,16 +167,31 @@ where
         T_SEQ => {
             let arr: Array = obj.get(V_KEY)?.ok_or_else(shape_error)?;
             let len = arr.len();
-            let mut items = Vec::with_capacity(len as usize);
+            // Capacity is granted lazily: the reported length is
+            // attacker-cheap (`{t:"seq", v:new Array(2**32-1)}` materialises
+            // nothing), so reserving it up front would abort the process on
+            // allocation failure before any element is validated.
+            let mut items = Vec::with_capacity(eager_capacity(len));
             for i in 0..len {
-                let element: Object = arr.get(i)?.ok_or_else(shape_error)?;
+                // `Array::get` maps only out-of-range indices to `None`; a
+                // hole comes back as `undefined`, which is not a node
+                // object — check the type before treating it as one.
+                let element = arr.get::<Unknown>(i)?.ok_or_else(shape_error)?;
+                if element.get_type()? != ValueType::Object {
+                    return Err(shape_error());
+                }
+                let element = Object::from_unknown(element)?;
                 items.push(node_from_js(&element, depth + 1)?);
             }
             Ok(CipherText::Sequence(items))
         }
         T_MAP => {
             let map: Object = obj.get(V_KEY)?.ok_or_else(shape_error)?;
-            let keys = Object::keys(&map)?;
+            // Own keys only — `Object::keys` walks the prototype chain, so
+            // a hostile node object with enumerable prototype members would
+            // otherwise have its inherited keys become ciphertext map
+            // entries (see `own_enumerable_keys`).
+            let keys = own_enumerable_keys(&map)?;
             let mut entries = Vec::with_capacity(keys.len());
             for key in keys {
                 if forbidden_key(&key) {
@@ -189,7 +206,13 @@ where
             Ok(CipherText::Map(entries))
         }
         T_PASSTHROUGH => {
-            let value: Unknown = obj.get(V_KEY)?.ok_or_else(shape_error)?;
+            // Raw fetch, not `obj.get` — `undefined` is a *faithful*
+            // projection here (`P = ()` and `NapiValue::Undefined` both
+            // project to it, and `JSON.stringify` drops the key outright),
+            // and `Object::get` would map it to `None` and reject the
+            // crate's own output as malformed. Whether `undefined`
+            // converts is `P`'s decision.
+            let value = get_property_unknown(obj, V_KEY)?;
             let p = P::from_unknown(value)?;
             Ok(CipherText::Passthrough(p))
         }

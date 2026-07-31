@@ -49,6 +49,21 @@ changes to those two modules as unguarded by CI and review them by hand.
   JS engine and cannot be wiped from Rust.
 - Property names that would touch the prototype chain (`__proto__`,
   `constructor`, `prototype`) are rejected in both directions.
+- Only **plain objects** (prototype `Object.prototype` or `null`) are
+  accepted for encryption. `Map`, `Set`, `RegExp`, `DataView`, class
+  instances and other exotic objects keep their state in internal slots and
+  would silently encrypt as `{}` — they are rejected with an error instead.
+- Object enumeration reads **own, enumerable, string-keyed** properties
+  only, so a polluted `Object.prototype` (or inherited enumerable getters)
+  can never leak keys into — or run code during — encryption. An own
+  property explicitly set to `undefined` round-trips.
+- Sparse arrays (`[, , "x"]`, `new Array(n)`) are rejected; `[undefined]`
+  is not sparse and round-trips. A hole is detected per index via
+  `Object.hasOwn` semantics, so a polluted `Array.prototype` cannot fill
+  holes with inherited elements.
+- JS-reported array lengths are never trusted for up-front allocation
+  (a `new Array(2**32 - 1)` costs the attacker one line and materialises
+  nothing), in both the value converter and the ciphertext rebuilder.
 - Errors carry no cryptographic detail (`Unspecified` at the trait layer).
 
 [`Cipher`]: vitaminc_aead::Cipher

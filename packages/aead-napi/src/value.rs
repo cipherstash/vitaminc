@@ -121,7 +121,11 @@ impl Encrypt for NapiValue {
             NapiValue::Bytes(b) => cipher.encrypt_bytes_vec(tagged(tag::BYTES, b), aad),
             NapiValue::Array(items) => {
                 // Mirror the built-in `Vec<T>` impl: every element sealed
-                // against the same AAD, positions carried structurally.
+                // against `Aad::for_sequence_element` of the caller's AAD.
+                // Element positions are carried structurally only — order is
+                // NOT authenticated, and a tampered ciphertext with permuted
+                // elements still decrypts. See `Aad::for_sequence_element`
+                // for why the index is deliberately unbound.
                 let len = items.len();
                 items
                     .into_iter()
