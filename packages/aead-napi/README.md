@@ -28,10 +28,11 @@ cdylib/npm package.
 ## Testing the conversion layer
 
 The `Encrypt`/`Decrypt` impls and the value tree are covered by ordinary Rust
-unit tests. The four JS-boundary conversion functions — `js_to_value`,
-`value_to_js`, `node_to_js`, `node_from_js` — are **not**, and cannot be:
-each takes a live `napi_env`, `Unknown`, or `Object`, which only exists
-inside a running V8 isolate. The `napi/noop` dev-dependency stubs those
+unit tests. The JS-boundary conversion functions — `js_to_value`,
+`value_to_js`, `node_to_js`, `node_from_js` — and their helpers —
+`own_enumerable_keys`, `get_property_unknown`, `ensure_plain_object` — are
+**not**, and cannot be: each takes a live `napi_env`, `Unknown`, or `Object`,
+which only exists inside a running V8 isolate. The `napi/noop` dev-dependency stubs those
 symbols so the crate links under `cargo test`; it does not make the calls
 work. They are therefore exempted in `.cargo-crap.toml` and
 `.cargo/mutants.toml`, by name rather than by file so the rest of those

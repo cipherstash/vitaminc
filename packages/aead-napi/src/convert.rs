@@ -303,7 +303,7 @@ impl ToNapiValue for NapiValue {
 
 #[cfg(test)]
 mod tests {
-    use super::forbidden_key;
+    use super::{eager_capacity, forbidden_key, MAX_EAGER_CAPACITY};
 
     #[test]
     fn forbidden_keys_are_rejected() {
@@ -313,5 +313,25 @@ mod tests {
         assert!(!forbidden_key("proto"));
         assert!(!forbidden_key("name"));
         assert!(!forbidden_key(""));
+    }
+
+    #[test]
+    fn eager_capacity_passes_small_lengths_through() {
+        assert_eq!(eager_capacity(0), 0);
+        assert_eq!(eager_capacity(1), 1);
+        assert_eq!(eager_capacity(37), 37);
+        assert_eq!(
+            eager_capacity(MAX_EAGER_CAPACITY as u32),
+            MAX_EAGER_CAPACITY
+        );
+    }
+
+    #[test]
+    fn eager_capacity_caps_attacker_reported_lengths() {
+        assert_eq!(
+            eager_capacity(MAX_EAGER_CAPACITY as u32 + 1),
+            MAX_EAGER_CAPACITY
+        );
+        assert_eq!(eager_capacity(u32::MAX), MAX_EAGER_CAPACITY);
     }
 }
