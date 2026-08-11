@@ -44,6 +44,13 @@ type Plain struct {
 type encState struct {
 	buf []byte
 	err error
+	// nodes counts completed value nodes (terminals, and containers at their
+	// End). MapEncoder.Field and SeqEncoder.Elem record it to verify their
+	// "write exactly one value before the next entry" contract at encode
+	// time — without this, a skipped value shifts the wire (the next key
+	// parses as the missing value) and only surfaces as an opaque
+	// errMalformed at decode.
+	nodes int
 }
 
 func (s *encState) fail(err error) {
@@ -74,6 +81,7 @@ func (e Encoder) push(b ...byte) {
 func (e Encoder) Null() {
 	if e.st.err == nil {
 		e.push(tagNull)
+		e.st.nodes++
 	}
 }
 
@@ -83,6 +91,7 @@ func (e Encoder) Null() {
 func (e Encoder) Undefined() {
 	if e.st.err == nil {
 		e.push(tagUndefined)
+		e.st.nodes++
 	}
 }
 
@@ -96,6 +105,7 @@ func (e Encoder) Bool(b bool) {
 	} else {
 		e.push(tagFalse)
 	}
+	e.st.nodes++
 }
 
 // Float64 records an IEEE-754 double. Distinct from the integer channels: it
@@ -107,6 +117,7 @@ func (e Encoder) Float64(f float64) {
 	}
 	e.push(tagFloat64)
 	e.st.buf = binary.LittleEndian.AppendUint64(e.st.buf, math.Float64bits(f))
+	e.st.nodes++
 }
 
 // Float32 records an IEEE-754 single. For schema fidelity with float4 at the
@@ -117,6 +128,7 @@ func (e Encoder) Float32(f float32) {
 	}
 	e.push(tagFloat32)
 	e.st.buf = binary.LittleEndian.AppendUint32(e.st.buf, math.Float32bits(f))
+	e.st.nodes++
 }
 
 // Int32 records a signed 32-bit integer. For schema fidelity with int4 at
@@ -127,6 +139,7 @@ func (e Encoder) Int32(i int32) {
 	}
 	e.push(tagInt32)
 	e.st.buf = binary.LittleEndian.AppendUint32(e.st.buf, uint32(i))
+	e.st.nodes++
 }
 
 // Int64 records a signed 64-bit integer. Kept distinct from Float64 so
@@ -137,6 +150,7 @@ func (e Encoder) Int64(i int64) {
 	}
 	e.push(tagInt64)
 	e.st.buf = binary.LittleEndian.AppendUint64(e.st.buf, uint64(i))
+	e.st.nodes++
 }
 
 // UInt32 records an unsigned 32-bit integer. For schema fidelity with the
@@ -147,6 +161,7 @@ func (e Encoder) UInt32(u uint32) {
 	}
 	e.push(tagUint32)
 	e.st.buf = binary.LittleEndian.AppendUint32(e.st.buf, u)
+	e.st.nodes++
 }
 
 // UInt64 records an unsigned 64-bit integer. Values above math.MaxInt64 are
@@ -157,6 +172,7 @@ func (e Encoder) UInt64(u uint64) {
 	}
 	e.push(tagUint64)
 	e.st.buf = binary.LittleEndian.AppendUint64(e.st.buf, u)
+	e.st.nodes++
 }
 
 // String records a UTF-8 string. Invalid UTF-8 fails the encode.
@@ -173,6 +189,7 @@ func (e Encoder) String(s string) {
 		e.st.fail(err)
 	} else {
 		e.st.buf = buf
+		e.st.nodes++
 	}
 }
 
@@ -186,6 +203,7 @@ func (e Encoder) Bytes(b []byte) {
 		e.st.fail(err)
 	} else {
 		e.st.buf = buf
+		e.st.nodes++
 	}
 }
 
@@ -250,13 +268,22 @@ type SeqEncoder struct {
 	depth  int
 	lenOff int
 	count  int
+	// mark is st.nodes as of the last Elem call — the next Elem (or End)
+	// verifies at least one value node completed since, so a skipped element
+	// fails here at encode time instead of as errMalformed at decode.
+	mark int
 }
 
 // Elem returns an Encoder for the next element. Write the element fully
 // (one channel) before calling Elem again.
 func (s *SeqEncoder) Elem() Encoder {
 	if s.st.err == nil {
-		s.count++
+		if s.count > 0 && s.st.nodes == s.mark {
+			s.st.fail(errors.New("vcvalue: previous sequence element was never written"))
+		} else {
+			s.mark = s.st.nodes
+			s.count++
+		}
 	}
 	return Encoder{st: s.st, depth: s.depth}
 }
@@ -264,7 +291,16 @@ func (s *SeqEncoder) Elem() Encoder {
 // End finalizes the sequence, writing its element count, and returns the
 // first error recorded during the whole encode (if any).
 func (s *SeqEncoder) End() error {
-	return patchLen(s.st, s.lenOff, s.count)
+	if s.st.err == nil && s.count > 0 && s.st.nodes == s.mark {
+		s.st.fail(errors.New("vcvalue: last sequence element was never written"))
+	}
+	err := patchLen(s.st, s.lenOff, s.count)
+	if err == nil {
+		// The sequence itself is one completed value node for any enclosing
+		// container's contract check.
+		s.st.nodes++
+	}
+	return err
 }
 
 // MapEncoder records the entries of a map. The entry count is back-patched
@@ -274,6 +310,11 @@ type MapEncoder struct {
 	depth  int
 	lenOff int
 	count  int
+	// mark mirrors SeqEncoder.mark: st.nodes as of the last Field call, so a
+	// key whose value was never written fails at encode time — otherwise the
+	// wire shifts and the next key parses as the missing value, surfacing
+	// only as an opaque errMalformed at decode.
+	mark int
 }
 
 // Field writes an entry key and returns an Encoder for its value. Write the
@@ -281,12 +322,15 @@ type MapEncoder struct {
 // validated; insertion order is preserved on the wire.
 func (m *MapEncoder) Field(key string) Encoder {
 	if m.st.err == nil {
-		if !utf8.ValidString(key) {
+		if m.count > 0 && m.st.nodes == m.mark {
+			m.st.fail(fmt.Errorf("vcvalue: value for the entry before %q was never written", key))
+		} else if !utf8.ValidString(key) {
 			m.st.fail(errors.New("vcvalue: object key is not valid UTF-8"))
 		} else if buf, err := appendChunk(m.st.buf, []byte(key)); err != nil {
 			m.st.fail(err)
 		} else {
 			m.st.buf = buf
+			m.mark = m.st.nodes
 			m.count++
 		}
 	}
@@ -296,7 +340,16 @@ func (m *MapEncoder) Field(key string) Encoder {
 // End finalizes the map, writing its entry count, and returns the first
 // error recorded during the whole encode (if any).
 func (m *MapEncoder) End() error {
-	return patchLen(m.st, m.lenOff, m.count)
+	if m.st.err == nil && m.count > 0 && m.st.nodes == m.mark {
+		m.st.fail(errors.New("vcvalue: value for the last map entry was never written"))
+	}
+	err := patchLen(m.st, m.lenOff, m.count)
+	if err == nil {
+		// The map itself is one completed value node for any enclosing
+		// container's contract check.
+		m.st.nodes++
+	}
+	return err
 }
 
 func patchLen(st *encState, off, count int) error {
@@ -360,33 +413,7 @@ func encodeAny(enc Encoder, v any) {
 		enc.Null()
 		return
 	}
-	// Explicit passthrough opt-in: wrap the inner value in a passthrough
-	// marker, then encode it normally. Checked before Encryptable/reflection
-	// so a Plain is never mistaken for a plain struct.
-	if p, ok := v.(Plain); ok {
-		encodeAny(enc.Passthrough(), p.V)
-		return
-	}
-	// Object is decode-only in spirit, but a decrypt-then-re-encrypt flow
-	// legitimately feeds it back in; without this interception the reflect
-	// slice arm would encode it as a SEQ of {Key,Value} structs, silently
-	// changing the record's structure. Mirror Plain: intercept and re-encode
-	// with object framing so the round trip is shape-preserving.
-	if o, ok := v.(Object); ok {
-		encodeObject(enc, o)
-		return
-	}
-	if e, ok := v.(Encryptable); ok {
-		// A typed nil pointer still satisfies the interface assertion; calling
-		// its method would dereference nil in typical implementations. Encode
-		// the authenticated null instead, matching the reflection nil rule.
-		if rv := reflect.ValueOf(v); rv.Kind() == reflect.Pointer && rv.IsNil() {
-			enc.Null()
-			return
-		}
-		if err := e.EncryptValue(enc); err != nil {
-			enc.st.fail(err)
-		}
+	if interceptMarkers(enc, v) {
 		return
 	}
 	if b, ok := v.([]byte); ok {
@@ -394,6 +421,42 @@ func encodeAny(enc Encoder, v any) {
 		return
 	}
 	encodeReflect(enc, reflect.ValueOf(v))
+}
+
+// interceptMarkers handles the marker types both dispatchers (encodeAny for
+// interface values, encodeReflect for values reached through reflection)
+// must special-case before any reflection sees them. Returns true when v was
+// fully handled.
+//
+//   - Plain is the explicit passthrough opt-in; checked before Encryptable
+//     and the struct arm so it is never mistaken for a plain struct.
+//   - Object is decode-only in spirit, but a decrypt-then-re-encrypt flow
+//     legitimately feeds it back in; without interception the reflect slice
+//     arm would encode it as a SEQ of {Key,Value} structs, silently changing
+//     the record's structure.
+//   - Encryptable hands control to the user type — except a typed nil
+//     pointer, which still satisfies the assertion but would dereference nil
+//     in typical implementations; it encodes as Null like every other nil.
+func interceptMarkers(enc Encoder, v any) bool {
+	switch x := v.(type) {
+	case Plain:
+		encodeAny(enc.Passthrough(), x.V)
+		return true
+	case Object:
+		encodeObject(enc, x)
+		return true
+	}
+	if e, ok := v.(Encryptable); ok {
+		if ev := reflect.ValueOf(e); ev.Kind() == reflect.Pointer && ev.IsNil() {
+			enc.Null()
+			return true
+		}
+		if err := e.EncryptValue(enc); err != nil {
+			enc.st.fail(err)
+		}
+		return true
+	}
+	return false
 }
 
 // encodeObject re-encodes a decoded Object with object framing, preserving
@@ -417,28 +480,8 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 	// Re-check the explicit markers for values reached through reflection
 	// (struct fields, slice elements, map values). Plain is itself a struct,
 	// so it must be intercepted before the reflect.Struct arm below.
-	if rv.CanInterface() {
-		if p, ok := rv.Interface().(Plain); ok {
-			encodeAny(enc.Passthrough(), p.V)
-			return
-		}
-		if o, ok := rv.Interface().(Object); ok {
-			// See encodeAny: object framing, never a SEQ of Field structs.
-			encodeObject(enc, o)
-			return
-		}
-		if e, ok := rv.Interface().(Encryptable); ok {
-			// Typed-nil guard, as in encodeAny — checked on the extracted
-			// value because rv itself may be Interface-kinded here.
-			if ev := reflect.ValueOf(e); ev.Kind() == reflect.Pointer && ev.IsNil() {
-				enc.Null()
-				return
-			}
-			if err := e.EncryptValue(enc); err != nil {
-				enc.st.fail(err)
-			}
-			return
-		}
+	if rv.CanInterface() && interceptMarkers(enc, rv.Interface()) {
+		return
 	}
 
 	switch rv.Kind() {
