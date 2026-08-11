@@ -754,7 +754,7 @@ mod test {
     use crate::key::tests::DifferingKeyPair;
     use quickcheck_macros::quickcheck;
     use std::collections::HashMap;
-    use vitaminc_aead::Encrypt;
+    use vitaminc_aead::{Element, Encrypt};
 
     #[quickcheck]
     fn roundtrip_byte_array(key: Key, plaintext: [u8; 16]) -> bool {
@@ -2043,6 +2043,87 @@ mod test {
             _ => panic!("expected Sequence"),
         };
         assert!(cipher.decrypt::<String>(element).is_err());
+    }
+
+    #[test]
+    fn element_decrypts_a_stored_sequence_element() {
+        // The DX counterpart to
+        // `sequence_element_rehomed_to_top_level_fails_decryption`: a row
+        // extracted from a batch-encrypted sequence decrypts under the
+        // caller's own AAD when the caller states its element-ness in the
+        // type — `Element` derives `for_sequence_element` internally.
+        let cipher = Aes256Cipher::new(&Key::from([56u8; 32])).expect("Failed to create cipher");
+        let ct = vec!["a".to_string(), "b".to_string()]
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        let element = match ct {
+            AesCipherText::Sequence(mut items) => items.pop().expect("two elements"),
+            _ => panic!("expected Sequence"),
+        };
+        let row: Element<String> = cipher.decrypt_with_aad(element, "users").expect("decrypt");
+        assert_eq!(row.into_inner(), "b");
+    }
+
+    #[test]
+    fn element_encrypted_alone_decrypts_within_a_sequence() {
+        // The reverse interchange: a row inserted alone via `Element` seals
+        // exactly as batch encryption would have, so rows collected back into
+        // a `Sequence` decrypt as a whole `Vec`.
+        let cipher = Aes256Cipher::new(&Key::from([57u8; 32])).expect("Failed to create cipher");
+        let ct1 = Element("a".to_string())
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        let ct2 = Element("b".to_string())
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        let collected = AesCipherText::Sequence(vec![ct1, ct2]);
+        let rows: Vec<String> = cipher
+            .decrypt_with_aad(collected, "users")
+            .expect("decrypt");
+        assert_eq!(rows, ["a", "b"]);
+    }
+
+    #[test]
+    fn element_is_not_interchangeable_with_bare_values() {
+        // `Element` opts a value into collection semantics; it must not weaken
+        // the shape authentication for values that never opted in. Both
+        // crossings fail: bare ciphertext read as `Element`, and `Element`
+        // ciphertext read as a bare value.
+        let cipher = Aes256Cipher::new(&Key::from([58u8; 32])).expect("Failed to create cipher");
+        let bare = "x"
+            .to_string()
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        assert!(cipher
+            .decrypt_with_aad::<Element<String>, _>(bare, "users")
+            .is_err());
+        let element = Element("x".to_string())
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        assert!(cipher
+            .decrypt_with_aad::<String, _>(element, "users")
+            .is_err());
+    }
+
+    #[test]
+    fn vec_of_elements_double_derives_and_does_not_interchange_with_vec() {
+        // The documented footgun on `Element`: wrap the row, not the
+        // collection. `Vec<Element<T>>` seals under a double element
+        // derivation, so it round-trips symmetrically but fails closed
+        // against `Vec<T>` — it must never decrypt as one.
+        let cipher = Aes256Cipher::new(&Key::from([59u8; 32])).expect("Failed to create cipher");
+        let ct = vec![Element("a".to_string())]
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        assert!(cipher
+            .decrypt_with_aad::<Vec<String>, _>(ct, "users")
+            .is_err());
+
+        let ct = vec![Element("a".to_string())]
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        let rows: Vec<Element<String>> = cipher.decrypt_with_aad(ct, "users").expect("decrypt");
+        assert_eq!(rows, [Element("a".to_string())]);
     }
 
     #[test]
