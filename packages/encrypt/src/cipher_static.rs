@@ -135,18 +135,11 @@ mod test {
     >;
 
     const AAD: &[u8] = b"user:42";
-    const INNER_AAD: &[u8] = b"user:42/prefs";
 
     #[test]
     fn static_user_roundtrip() {
         let key = Key::from([7u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("cipher init");
-
-        let prefs = (&cipher)
-            .encrypt_map()
-            .encrypt_entry("theme", Protected::new(b"midnight".to_vec()), INNER_AAD)
-            .expect("encrypt prefs")
-            .end();
 
         let user_ct: UserCiphertext = (&cipher)
             .encrypt_map()
@@ -159,7 +152,13 @@ mod test {
             .passthrough_entry("version", 3u8)
             .none_entry("nickname", AAD)
             .expect("encrypt none")
-            .nested_entry("preferences", prefs)
+            .nested_entry("preferences", AAD, |b, aad| {
+                Ok(
+                    b.encrypt_entry("theme", Protected::new(b"midnight".to_vec()), aad)?
+                        .end(),
+                )
+            })
+            .expect("encrypt prefs")
             .end();
 
         // Decryption is destructuring. No downcast, no shape check, no Box.
@@ -182,10 +181,13 @@ mod test {
             .verify_absent_entry(nickname_e, AAD)
             .expect("verify none");
 
+        // The inner AAD is re-derived from the outer AAD and the entry's own
+        // cleartext key — the binding `nested_entry` established at build time.
+        let inner_aad = prefs_e.nested_aad(AAD);
         let Map(HCons(theme_e, HNil)) = prefs_e.value;
         let theme = String::from_utf8(
             cipher
-                .open_entry(theme_e, INNER_AAD)
+                .open_entry(theme_e, inner_aad)
                 .expect("open theme")
                 .risky_unwrap(),
         )
@@ -216,6 +218,68 @@ mod test {
             value: entry.value,
         };
         assert!(cipher.open_entry(renamed, AAD).is_err());
+    }
+
+    #[test]
+    fn static_nested_entry_with_renamed_key_fails_to_open_inner() {
+        // A nested map has no leaf of its own; its outer key is bound through
+        // the derived inner AAD. Renaming the outer key changes `nested_aad`,
+        // so every inner open fails — the same key-swap resistance leaf
+        // entries get from `for_map_entry`.
+        let key = Key::from([10u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("cipher init");
+        let map = (&cipher)
+            .encrypt_map()
+            .nested_entry("preferences", AAD, |b, aad| {
+                Ok(
+                    b.encrypt_entry("theme", Protected::new(b"midnight".to_vec()), aad)?
+                        .end(),
+                )
+            })
+            .expect("encrypt prefs")
+            .end();
+        let Map(HCons(entry, HNil)) = map;
+        let renamed = Entry {
+            key: "billing",
+            value: entry.value,
+        };
+        let inner_aad = renamed.nested_aad(AAD);
+        let Map(HCons(theme_e, HNil)) = renamed.value;
+        assert!(cipher.open_entry(theme_e, inner_aad).is_err());
+    }
+
+    #[test]
+    fn static_nested_map_spliced_from_another_record_fails_to_open_inner() {
+        // Cross-record splice: a nested map built for user:99 under the same
+        // key name must not open inside user:42's record — the inner AAD
+        // derivation includes the *record's* AAD, not just the entry key.
+        let key = Key::from([11u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("cipher init");
+        let build = |aad: &'static [u8]| {
+            let map = (&cipher)
+                .encrypt_map()
+                .nested_entry("preferences", aad, |b, inner| {
+                    Ok(
+                        b.encrypt_entry("theme", Protected::new(b"midnight".to_vec()), inner)?
+                            .end(),
+                    )
+                })
+                .expect("encrypt prefs")
+                .end();
+            let Map(HCons(entry, HNil)) = map;
+            entry
+        };
+        let victim = build(b"user:42");
+        let foreign = build(b"user:99");
+
+        // Splice user:99's nested map under user:42's entry key.
+        let spliced = Entry {
+            key: victim.key,
+            value: foreign.value,
+        };
+        let inner_aad = spliced.nested_aad(b"user:42".as_slice());
+        let Map(HCons(theme_e, HNil)) = spliced.value;
+        assert!(cipher.open_entry(theme_e, inner_aad).is_err());
     }
 
     #[test]
