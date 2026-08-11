@@ -3,9 +3,10 @@ on:
   push:
     branches:
       - main
+  # No branch filter: stacked PRs (a feature branch as base) must run this
+  # gate too — the sibling Rust workflows only fire against main, which is
+  # part of how the Go modules went unwatched.
   pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 defaults:
