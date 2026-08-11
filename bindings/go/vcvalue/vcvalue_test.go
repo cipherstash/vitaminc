@@ -1,6 +1,8 @@
 package vcvalue_test
 
 import (
+	"database/sql"
+	"database/sql/driver"
 	"math"
 	"reflect"
 	"testing"
@@ -304,5 +306,174 @@ func TestCipherTextRejectsBarePlaintext(t *testing.T) {
 	}
 	if _, err := vcvalue.MarshalCipherText([]byte{1, 2, 3}); err == nil {
 		t.Fatal("bare []byte must be rejected (use Sealed or Plain)")
+	}
+}
+
+// A struct with zero exported fields (time.Time is the canonical case) must
+// be rejected, not silently sealed as an empty map that destroys the payload.
+func TestMarshalRejectsZeroExportedFieldStruct(t *testing.T) {
+	type opaque struct {
+		hidden int //nolint:unused // unexported on purpose
+	}
+	if _, err := vcvalue.Marshal(opaque{hidden: 1}); err == nil {
+		t.Fatal("struct with no exported fields must be rejected")
+	}
+	// An all-vc:"-" struct asked for the empty encoding explicitly and stays
+	// allowed, as does the empty struct.
+	type skipped struct {
+		ID int `vc:"-"`
+	}
+	if _, err := vcvalue.Marshal(skipped{ID: 1}); err != nil {
+		t.Fatalf("all-skipped struct should encode: %v", err)
+	}
+	if _, err := vcvalue.Marshal(struct{}{}); err != nil {
+		t.Fatalf("empty struct should encode: %v", err)
+	}
+}
+
+// Object (the decode result for maps) must re-encode with object framing so
+// a decrypt-then-re-encrypt flow preserves the record's structure — both at
+// the root and nested inside other values.
+func TestObjectReencodesWithObjectFraming(t *testing.T) {
+	o := vcvalue.Object{
+		{Key: "b", Value: int64(2)},
+		{Key: "a", Value: int64(1)},
+	}
+	got := marshalUnmarshal(t, o)
+	if !reflect.DeepEqual(got, o) {
+		t.Fatalf("root Object: got %#v, want %#v", got, o)
+	}
+
+	nested := []any{o}
+	got = marshalUnmarshal(t, nested)
+	want := []any{o}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("nested Object: got %#v, want %#v", got, want)
+	}
+}
+
+// A Plain-wrapped Object inside a ciphertext must survive the passthrough
+// round trip shape-intact (PR review P1).
+func TestCipherTextPassthroughObjectRoundTrip(t *testing.T) {
+	o := vcvalue.Object{{Key: "id", Value: int64(42)}}
+	buf, err := vcvalue.MarshalCipherText(vcvalue.Plain{V: o})
+	if err != nil {
+		t.Fatalf("MarshalCipherText: %v", err)
+	}
+	got, err := vcvalue.UnmarshalCipherText(buf)
+	if err != nil {
+		t.Fatalf("UnmarshalCipherText: %v", err)
+	}
+	if !reflect.DeepEqual(got, vcvalue.Plain{V: o}) {
+		t.Fatalf("got %#v, want Plain{V: %#v}", got, o)
+	}
+}
+
+// [N]byte must take the same single-Bytes-leaf path as []byte — element-wise
+// encoding would produce a ciphertext shape no other producer emits.
+func TestByteArrayEncodesAsBytes(t *testing.T) {
+	got := marshalUnmarshal(t, [4]byte{1, 2, 3, 4})
+	if !reflect.DeepEqual(got, []byte{1, 2, 3, 4}) {
+		t.Fatalf("got %#v, want []byte{1,2,3,4}", got)
+	}
+	type hashed struct {
+		Hash [4]byte
+	}
+	got = marshalUnmarshal(t, hashed{Hash: [4]byte{9, 8, 7, 6}})
+	want := vcvalue.Object{{Key: "Hash", Value: []byte{9, 8, 7, 6}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+// nilEncryptable panics if EncryptValue is called through a nil receiver —
+// the behaviour typed-nil detection must prevent.
+type nilEncryptable struct{ n int }
+
+func (e *nilEncryptable) EncryptValue(enc vcvalue.Encoder) error {
+	enc.Int64(int64(e.n)) // dereferences e
+	return nil
+}
+
+// A typed nil pointer satisfying Encryptable must encode as Null, not invoke
+// the method on a nil receiver (PR review P2).
+func TestTypedNilEncryptableEncodesNull(t *testing.T) {
+	var p *nilEncryptable
+	if got := marshalUnmarshal(t, p); got != nil {
+		t.Fatalf("typed nil at root: got %#v, want nil", got)
+	}
+	got := marshalUnmarshal(t, []any{p})
+	if !reflect.DeepEqual(got, []any{nil}) {
+		t.Fatalf("typed nil in slice: got %#v, want []any{nil}", got)
+	}
+}
+
+// A pointer cycle must fail with an error, not recurse to stack overflow
+// (PR review P2).
+func TestMarshalRejectsPointerCycle(t *testing.T) {
+	var x any
+	x = &x
+	if _, err := vcvalue.Marshal(x); err == nil {
+		t.Fatal("pointer cycle must be rejected")
+	}
+}
+
+// MarshalCipherText must reject a passthrough whose payload sits beyond the
+// depth budget instead of emitting bytes UnmarshalCipherText is guaranteed
+// to reject (PR review P2).
+func TestMarshalCipherTextRejectsPassthroughBeyondDepthBudget(t *testing.T) {
+	// 129 nested []any push the Plain payload past maxDepth (128).
+	var deep any = vcvalue.Plain{V: int64(1)}
+	for range 129 {
+		deep = []any{deep}
+	}
+	if _, err := vcvalue.MarshalCipherText(deep); err == nil {
+		t.Fatal("over-deep passthrough must be rejected at encode time")
+	}
+
+	// One level shallower still round-trips — the bound is exact.
+	var ok any = vcvalue.Plain{V: int64(1)}
+	for range 127 {
+		ok = []any{ok}
+	}
+	buf, err := vcvalue.MarshalCipherText(ok)
+	if err != nil {
+		t.Fatalf("MarshalCipherText at the bound: %v", err)
+	}
+	if _, err := vcvalue.UnmarshalCipherText(buf); err != nil {
+		t.Fatalf("UnmarshalCipherText at the bound: %v", err)
+	}
+}
+
+// Every sealed leaf type must survive the database column round trip:
+// Value() then Scan() back into the same type.
+func TestSealedLeafTypesScanValueRoundTrip(t *testing.T) {
+	roundTrip := func(t *testing.T, value driver.Valuer, scan sql.Scanner, got func() []byte, want []byte) {
+		t.Helper()
+		v, err := value.Value()
+		if err != nil {
+			t.Fatalf("Value: %v", err)
+		}
+		if err := scan.Scan(v); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if !reflect.DeepEqual(got(), want) {
+			t.Fatalf("got %#v, want %#v", got(), want)
+		}
+	}
+
+	leaf := []byte{1, 2, 3}
+	var s vcvalue.Sealed
+	roundTrip(t, vcvalue.Sealed(leaf), &s, func() []byte { return []byte(s) }, leaf)
+	var n vcvalue.SealedNone
+	roundTrip(t, vcvalue.SealedNone(leaf), &n, func() []byte { return []byte(n) }, leaf)
+	var es vcvalue.SealedEmptySeq
+	roundTrip(t, vcvalue.SealedEmptySeq(leaf), &es, func() []byte { return []byte(es) }, leaf)
+	var em vcvalue.SealedEmptyMap
+	roundTrip(t, vcvalue.SealedEmptyMap(leaf), &em, func() []byte { return []byte(em) }, leaf)
+
+	// Non-byte sources are rejected.
+	if err := (&es).Scan("not bytes"); err == nil {
+		t.Fatal("scanning a string into SealedEmptySeq must fail")
 	}
 }

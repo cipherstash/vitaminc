@@ -70,23 +70,32 @@ no key.
 ## Ciphertexts are ordinary Go values
 
 There is no ciphertext tree type and no conversion step. A ciphertext has the
-same dynamic shape as decoded plaintext, with two marker types naming what is
+same dynamic shape as decoded plaintext, with marker types naming what is
 sealed:
 
-| value             | meaning                                              |
-| ----------------- | ---------------------------------------------------- |
-| `Sealed`          | one encrypted leaf: `nonce \|\| ciphertext \|\| tag` |
-| `SealedNone`      | the authenticated absent marker                      |
-| `Plain{V: ...}`   | a passthrough field, readable without the key        |
-| `map[string]any`  | a record of named nodes (clear keys, bound into AAD)  |
-| `[]any`           | a sequence of nodes                                  |
+| value             | meaning                                                              |
+| ----------------- | -------------------------------------------------------------------- |
+| `Sealed`          | one encrypted leaf: `version(1) \|\| nonce \|\| ciphertext \|\| tag` |
+| `SealedNone`      | the authenticated absent marker                                      |
+| `SealedEmptySeq`  | the authenticated marker for an empty sequence                       |
+| `SealedEmptyMap`  | the authenticated marker for an empty map                            |
+| `Plain{V: ...}`   | a passthrough field, readable without the key                        |
+| `map[string]any`  | a record of named nodes (clear keys, bound into AAD)                 |
+| `[]any`           | a sequence of nodes                                                  |
 
-`Sealed` implements `driver.Valuer` and `sql.Scanner`, and `Plain` implements
-`driver.Valuer`, so a record-shaped ciphertext binds straight into a database
-as named parameters and sealed columns scan straight back out — no adapter
-layer. Because a record is a plain map, any subset of its fields can be
-handed back for decryption: there is no whole-map seal, and each key is bound
-into its own value's AAD.
+Every leaf-shaped type starts with a one-byte wire version, which is also
+authenticated into the leaf's AAD — a relabeled version byte fails the tag,
+not just the parse. All four leaf types share that byte layout: the *kind* of
+a leaf is authenticated through domain-separated AAD, not written into the
+bytes, so a stored leaf's kind must be tracked by the schema (see the note on
+the marker types' `Scan`).
+
+The sealed leaf types and `Plain` implement `driver.Valuer`, and the sealed
+types `sql.Scanner`, so a record-shaped ciphertext binds straight into a
+database as named parameters and sealed columns scan straight back out — no
+adapter layer. Because a record is a plain map, any subset of its fields can
+be handed back for decryption: there is no whole-map seal, and each key is
+bound into its own value's AAD.
 
 ## Decoding
 

@@ -121,7 +121,7 @@ func decodeValue(r *reader, depth int) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		items := make([]any, 0, n)
+		items := make([]any, 0, eagerCap(n))
 		for range n {
 			item, err := decodeValue(r, depth+1)
 			if err != nil {
@@ -135,7 +135,7 @@ func decodeValue(r *reader, depth int) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		fields := make(Object, 0, n)
+		fields := make(Object, 0, eagerCap(n))
 		for range n {
 			key, err := r.str()
 			if err != nil {

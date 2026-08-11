@@ -91,7 +91,8 @@ the order of its choosing.)
 `Encrypt` returns ordinary Go values mirroring the record's structure — there
 is no dedicated ciphertext tree type and nothing to convert. A record comes
 back as a `map[string]any` holding `vcvalue.Sealed` leaves (each an
-independent `nonce || ciphertext || tag`) where fields were encrypted and
+independent `version(1) || nonce || ciphertext || tag`, the version byte
+authenticated into the leaf's AAD) where fields were encrypted and
 `vcvalue.Plain` values where they passed through:
 
 ```go

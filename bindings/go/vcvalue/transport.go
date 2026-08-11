@@ -34,16 +34,36 @@ const (
 )
 
 // maxUint32 bounds every length/count written or read (all are u32 LE).
-const maxUint32 = 1<<32 - 1
+// Typed uint64, not an untyped constant: an untyped 1<<32-1 compared against
+// an int fails to compile on 32-bit GOARCH (constant overflows int), and the
+// guard is load-bearing there — an oversized count coerced to a negative int
+// would slip past the remaining-bytes check and panic in make instead of
+// returning errMalformed. Comparisons convert the int operand to uint64
+// (always lossless for non-negative values, which the n < 0 guards ensure).
+const maxUint32 = uint64(1<<32 - 1)
 
 // maxDepth mirrors the Rust transport codec's recursion bound, keeping a
 // hostile nesting depth from overflowing the stack.
 const maxDepth = 128
 
+// maxEagerCapacity clamps the up-front reservation of a count-driven
+// allocation. The reader's count guard bounds a single reservation against
+// the bytes remaining, but not the sum of live reservations: a container
+// nesting level costs 5-9 wire bytes while a reserved slot costs many times
+// that, and up to maxDepth ancestor reservations are live at once — so ~1 MB
+// of hostile bytes could otherwise pin gigabytes. Mirrors the Rust codecs'
+// MAX_EAGER_CAPACITY. Slices still grow past the clamp on append; only the
+// initial reservation is bounded.
+const maxEagerCapacity = 1024
+
+func eagerCap(n int) int {
+	return min(n, maxEagerCapacity)
+}
+
 var errMalformed = errors.New("vcvalue: malformed transport bytes")
 
 func appendLen(out []byte, n int) ([]byte, error) {
-	if n < 0 || n > maxUint32 {
+	if n < 0 || uint64(n) > maxUint32 {
 		return nil, fmt.Errorf("vcvalue: length %d out of range", n)
 	}
 	return binary.LittleEndian.AppendUint32(out, uint32(n)), nil

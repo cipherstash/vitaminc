@@ -6,9 +6,12 @@ import (
 	"math"
 )
 
-// Sealed is one encrypted leaf: nonce || ciphertext || tag — the only frozen
-// byte format in the model. It is a named type so sealed bytes can never be
-// confused with a plaintext []byte value in the dynamic ciphertext shape.
+// Sealed is one encrypted leaf: version(1) || nonce || ciphertext || tag —
+// the only frozen byte format in the model. The leading wire-version byte is
+// itself authenticated into the leaf's AAD, so a relabeled version fails the
+// tag rather than selecting different parsing rules. Sealed is a named type
+// so sealed bytes can never be confused with a plaintext []byte value in the
+// dynamic ciphertext shape.
 //
 // Sealed implements driver.Valuer and sql.Scanner, so it stores into and
 // loads from a BLOB/BYTEA column with no conversion.
@@ -52,6 +55,59 @@ type SealedEmptySeq []byte
 // counterpart of SealedEmptySeq. Produced by encrypting an empty object;
 // decrypts back to an empty object.
 type SealedEmptyMap []byte
+
+// The marker types implement driver.Valuer and sql.Scanner like Sealed, so a
+// column holding one stores and loads without conversion.
+//
+// ⚠️ The stored bytes do NOT record which leaf kind they are — every leaf is
+// the same `version || nonce || ciphertext || tag` shape, and the kind is
+// authenticated through domain-separated AAD, not written into the bytes. A
+// marker scanned back into the wrong type (e.g. a SealedEmptySeq loaded as
+// Sealed) fails decryption with an authentication error and no further hint.
+// A column that can hold both real values and empty-composite markers needs
+// the schema (or the application) to record which kind it stored; scan into
+// the type matching that record.
+
+// Value implements driver.Valuer: the marker binds as raw bytes.
+func (s SealedNone) Value() (driver.Value, error) { return []byte(s), nil }
+
+// Scan implements sql.Scanner — see the leaf-kind caveat above.
+func (s *SealedNone) Scan(src any) error {
+	b, err := scanLeafBytes(src, "SealedNone")
+	*s = SealedNone(b)
+	return err
+}
+
+// Value implements driver.Valuer: the marker binds as raw bytes.
+func (s SealedEmptySeq) Value() (driver.Value, error) { return []byte(s), nil }
+
+// Scan implements sql.Scanner — see the leaf-kind caveat above.
+func (s *SealedEmptySeq) Scan(src any) error {
+	b, err := scanLeafBytes(src, "SealedEmptySeq")
+	*s = SealedEmptySeq(b)
+	return err
+}
+
+// Value implements driver.Valuer: the marker binds as raw bytes.
+func (s SealedEmptyMap) Value() (driver.Value, error) { return []byte(s), nil }
+
+// Scan implements sql.Scanner — see the leaf-kind caveat above.
+func (s *SealedEmptyMap) Scan(src any) error {
+	b, err := scanLeafBytes(src, "SealedEmptyMap")
+	*s = SealedEmptyMap(b)
+	return err
+}
+
+func scanLeafBytes(src any, into string) ([]byte, error) {
+	switch b := src.(type) {
+	case nil:
+		return nil, nil
+	case []byte:
+		return append([]byte(nil), b...), nil
+	default:
+		return nil, fmt.Errorf("vcvalue: cannot scan %T into %s", src, into)
+	}
+}
 
 // Value implements driver.Valuer for passthrough fields, so a map-shaped
 // ciphertext binds directly as database named parameters. Only scalar

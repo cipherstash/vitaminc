@@ -303,7 +303,7 @@ func patchLen(st *encState, off, count int) error {
 	if st.err != nil {
 		return st.err
 	}
-	if count < 0 || count > maxUint32 {
+	if count < 0 || uint64(count) > maxUint32 {
 		st.fail(fmt.Errorf("vcvalue: item count %d out of range", count))
 		return st.err
 	}
@@ -367,7 +367,23 @@ func encodeAny(enc Encoder, v any) {
 		encodeAny(enc.Passthrough(), p.V)
 		return
 	}
+	// Object is decode-only in spirit, but a decrypt-then-re-encrypt flow
+	// legitimately feeds it back in; without this interception the reflect
+	// slice arm would encode it as a SEQ of {Key,Value} structs, silently
+	// changing the record's structure. Mirror Plain: intercept and re-encode
+	// with object framing so the round trip is shape-preserving.
+	if o, ok := v.(Object); ok {
+		encodeObject(enc, o)
+		return
+	}
 	if e, ok := v.(Encryptable); ok {
+		// A typed nil pointer still satisfies the interface assertion; calling
+		// its method would dereference nil in typical implementations. Encode
+		// the authenticated null instead, matching the reflection nil rule.
+		if rv := reflect.ValueOf(v); rv.Kind() == reflect.Pointer && rv.IsNil() {
+			enc.Null()
+			return
+		}
 		if err := e.EncryptValue(enc); err != nil {
 			enc.st.fail(err)
 		}
@@ -378,6 +394,16 @@ func encodeAny(enc Encoder, v any) {
 		return
 	}
 	encodeReflect(enc, reflect.ValueOf(v))
+}
+
+// encodeObject re-encodes a decoded Object with object framing, preserving
+// its field order (Object exists precisely to preserve wire order).
+func encodeObject(enc Encoder, o Object) {
+	m := enc.Map()
+	for _, f := range o {
+		encodeAny(m.Field(f.Key), f.Value)
+	}
+	_ = m.End()
 }
 
 func encodeReflect(enc Encoder, rv reflect.Value) {
@@ -396,7 +422,18 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 			encodeAny(enc.Passthrough(), p.V)
 			return
 		}
+		if o, ok := rv.Interface().(Object); ok {
+			// See encodeAny: object framing, never a SEQ of Field structs.
+			encodeObject(enc, o)
+			return
+		}
 		if e, ok := rv.Interface().(Encryptable); ok {
+			// Typed-nil guard, as in encodeAny — checked on the extracted
+			// value because rv itself may be Interface-kinded here.
+			if ev := reflect.ValueOf(e); ev.Kind() == reflect.Pointer && ev.IsNil() {
+				enc.Null()
+				return
+			}
 			if err := e.EncryptValue(enc); err != nil {
 				enc.st.fail(err)
 			}
@@ -432,6 +469,16 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 		}
 		encodeSeq(enc, rv)
 	case reflect.Array:
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			// Byte arrays are one Bytes leaf, matching the slice arm above
+			// and Rust's single-leaf [u8; N] — element-wise encoding would
+			// seal N separate leaves and produce a ciphertext shape no other
+			// producer emits.
+			b := make([]byte, rv.Len())
+			reflect.Copy(reflect.ValueOf(b), rv)
+			enc.Bytes(b)
+			return
+		}
 		encodeSeq(enc, rv)
 	case reflect.Map:
 		encodeMap(enc, rv)
@@ -442,7 +489,14 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 			enc.Null()
 			return
 		}
-		encodeReflect(enc, rv.Elem())
+		// Charge the dereference against the shared depth budget: it writes
+		// no container framing, so without this a pointer cycle (x = &x)
+		// would recurse to stack overflow instead of failing cleanly.
+		if enc.depth+1 > maxDepth {
+			enc.st.fail(errors.New("vcvalue: value is nested too deeply"))
+			return
+		}
+		encodeReflect(Encoder{st: enc.st, depth: enc.depth + 1}, rv.Elem())
 	default:
 		enc.st.fail(fmt.Errorf("vcvalue: cannot encode value of kind %s", rv.Kind()))
 	}
@@ -475,10 +529,12 @@ func encodeMap(enc Encoder, rv reflect.Value) {
 func encodeStruct(enc Encoder, rv reflect.Value) {
 	t := rv.Type()
 	m := enc.Map()
+	encoded, unexported := 0, 0
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		if f.PkgPath != "" {
-			continue // unexported
+			unexported++
+			continue
 		}
 		name := f.Name
 		if tag, ok := f.Tag.Lookup("vc"); ok {
@@ -490,6 +546,17 @@ func encodeStruct(enc Encoder, rv reflect.Value) {
 			}
 		}
 		encodeReflect(m.Field(name), rv.Field(i))
+		encoded++
+	}
+	// A struct whose every field is unexported (time.Time is the canonical
+	// case) would seal as an empty map and the payload would be gone with no
+	// error at either end — the exact hazard the NAPI layer's
+	// ensure_plain_object guards. An all-`vc:"-"` struct is left alone: the
+	// caller asked for the empty encoding explicitly.
+	if encoded == 0 && unexported > 0 {
+		enc.st.fail(fmt.Errorf(
+			"vcvalue: struct %s has no exported fields to encode — implement Encryptable to control its sealing", t))
+		return
 	}
 	_ = m.End()
 }

@@ -10,7 +10,7 @@ import (
 // decoded plaintext — with marker types distinguishing what is sealed from
 // what travels in the clear:
 //
-//   - Sealed: one encrypted leaf (nonce || ciphertext || tag)
+//   - Sealed: one encrypted leaf (version(1) || nonce || ciphertext || tag)
 //   - SealedNone: the authenticated absent marker
 //   - SealedEmptySeq / SealedEmptyMap: authenticated markers for empty
 //     composites, which have no element ciphertexts to bind the AAD
@@ -111,6 +111,13 @@ func encodeCipherText(out []byte, v any, depth int) ([]byte, error) {
 		}
 		return out, nil
 	case Plain:
+		// The payload node sits one level deeper; reject it here because the
+		// value encoder's scalar channels never re-check depth, and emitting
+		// bytes the decoder is guaranteed to reject (decodeValue enforces the
+		// same bound) would be an asymmetric round trip.
+		if depth+1 > maxDepth {
+			return nil, errors.New("vcvalue: ciphertext is nested too deeply")
+		}
 		out = append(out, ctPassthrough)
 		// Encode the plaintext payload as one value node, sharing the
 		// recursion budget with the surrounding ciphertext (depth+1),
@@ -161,7 +168,7 @@ func decodeCipherText(r *reader, depth int) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		items := make([]any, 0, n)
+		items := make([]any, 0, eagerCap(n))
 		for range n {
 			item, err := decodeCipherText(r, depth+1)
 			if err != nil {
@@ -175,7 +182,7 @@ func decodeCipherText(r *reader, depth int) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		fields := make(map[string]any, n)
+		fields := make(map[string]any, eagerCap(n))
 		for range n {
 			key, err := r.str()
 			if err != nil {
