@@ -2,6 +2,7 @@ use crate::backend::{CipherKey, NONCE_LEN, TAG_LEN};
 use crate::Key;
 use std::any::Any;
 use std::borrow::Cow;
+use std::collections::HashSet;
 use vitaminc_aead::{
     Aad, Cipher, CipherText, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt,
     IntoAad, LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator,
@@ -186,6 +187,7 @@ impl<'c> Cipher for &'c Aes256Cipher {
         AesMapCipher {
             cipher: self,
             entries: Vec::new(),
+            seen_keys: HashSet::new(),
             current_key: None,
             aad: aad.into_aad().into_owned(),
             encrypted: false,
@@ -303,6 +305,11 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
 pub struct AesMapCipher<'c> {
     cipher: &'c Aes256Cipher,
     entries: Vec<(String, AesCipherText)>,
+    /// Every key committed so far — duplicate rejection must stay O(1) per
+    /// key because map keys can arrive from an untrusted host across the FFI
+    /// boundary, where a linear scan per key is a quadratic-work lever
+    /// (`decrypt_map` uses the same structure for the same reason).
+    seen_keys: HashSet<String>,
     current_key: Option<Cow<'static, str>>,
     /// The AAD fixed at [`Cipher::encrypt_map`]. Each entry's value is sealed
     /// against `for_map_entry` of this; the empty marker against
@@ -333,7 +340,7 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         // Reject duplicates at seal time: `decrypt_map` rejects them outright,
         // so accepting one here would produce a permanently unreadable
         // ciphertext with no error until read time.
-        if self.entries.iter().any(|(k, _)| *k == key) {
+        if !self.seen_keys.insert(key.as_ref().to_owned()) {
             return Err(Unspecified);
         }
         self.current_key = Some(key);
@@ -371,7 +378,7 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         }
         let key = key.into();
         // Same duplicate rejection as `encrypt_key` — see the type docs.
-        if self.entries.iter().any(|(k, _)| *k == key) {
+        if !self.seen_keys.insert(key.as_ref().to_owned()) {
             return Err(Unspecified);
         }
         self.entries

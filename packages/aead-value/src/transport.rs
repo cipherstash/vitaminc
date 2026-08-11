@@ -141,6 +141,23 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// Clamp for the *eager* part of a count-driven preallocation.
+///
+/// [`Reader::count`] already rejects counts exceeding the bytes remaining,
+/// but that guard bounds a single reservation, not the *sum* of live
+/// reservations: a container nesting level costs 5–9 wire bytes while a
+/// reserved element slot costs ~28, and up to [`MAX_DEPTH`] ancestor
+/// reservations are live at once — so ~1 MB of hostile bytes could otherwise
+/// pin gigabytes of reservations and abort the allocator (uncatchable in the
+/// wasm guest). Same hazard and clamp as `aead-napi`'s `MAX_EAGER_CAPACITY`.
+/// Vectors still grow past the clamp on push; only the up-front reservation
+/// is bounded.
+const MAX_EAGER_CAPACITY: usize = 1024;
+
+fn eager_capacity(count: usize) -> usize {
+    count.min(MAX_EAGER_CAPACITY)
+}
+
 fn write_len(out: &mut Vec<u8>, len: usize) -> Result<(), CodecError> {
     let len: u32 = len.try_into().map_err(|_| CodecError)?;
     out.extend_from_slice(&len.to_le_bytes());
@@ -246,7 +263,7 @@ fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue,
     match reader.byte()? {
         ARRAY => {
             let count = reader.count()?;
-            let mut items = Vec::with_capacity(count);
+            let mut items = Vec::with_capacity(eager_capacity(count));
             for _ in 0..count {
                 items.push(decode_value_inner(reader, depth + 1)?);
             }
@@ -254,7 +271,7 @@ fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue,
         }
         OBJECT => {
             let count = reader.count()?;
-            let mut entries = Vec::with_capacity(count);
+            let mut entries = Vec::with_capacity(eager_capacity(count));
             for _ in 0..count {
                 let key = decode_key(reader)?;
                 entries.push((key, decode_value_inner(reader, depth + 1)?));
@@ -438,7 +455,7 @@ where
     match reader.byte()? {
         CT_SEQ => {
             let count = reader.count()?;
-            let mut items = Vec::with_capacity(count);
+            let mut items = Vec::with_capacity(eager_capacity(count));
             for _ in 0..count {
                 items.push(decode_ciphertext_inner(reader, depth + 1)?);
             }
@@ -446,7 +463,7 @@ where
         }
         CT_MAP => {
             let count = reader.count()?;
-            let mut entries = Vec::with_capacity(count);
+            let mut entries = Vec::with_capacity(eager_capacity(count));
             for _ in 0..count {
                 let key = decode_key(reader)?;
                 entries.push((key, decode_ciphertext_inner(reader, depth + 1)?));
@@ -620,6 +637,16 @@ mod tests {
         // ARRAY claiming u32::MAX items with no bytes behind it.
         let bytes = [ARRAY, 0xFF, 0xFF, 0xFF, 0xFF];
         assert!(decode_value(&mut Reader::new(&bytes)).is_err());
+    }
+
+    #[test]
+    fn counts_beyond_the_eager_capacity_clamp_still_decode() {
+        // The clamp bounds only the up-front reservation; a genuine container
+        // larger than MAX_EAGER_CAPACITY must round-trip unchanged.
+        let count = MAX_EAGER_CAPACITY as i64 + 10;
+        let make = || FfiValue::Array((0..count).map(FfiValue::Int64).collect());
+        let decoded = decode_value(&mut Reader::new(&encoded(make()))).expect("decode");
+        assert_eq!(decoded, make());
     }
 
     #[test]
