@@ -1,0 +1,62 @@
+name: "Go bindings"
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    name: "🐹 Go bindings"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          # Single source of truth for the toolchain version.
+          go-version-file: bindings/go/vcencrypt/go.mod
+          # vcvalue has no go.sum (zero dependencies), so only the two
+          # dependency-bearing modules feed the cache key.
+          cache-dependency-path: |
+            bindings/go/vcencrypt/go.sum
+            bindings/go/vcencrypt/examples/go.sum
+
+      - name: vet (vcvalue)
+        working-directory: bindings/go/vcvalue
+        run: go vet ./...
+
+      - name: vet (vcencrypt)
+        working-directory: bindings/go/vcencrypt
+        run: go vet ./...
+
+      - name: test (vcvalue)
+        working-directory: bindings/go/vcvalue
+        run: CGO_ENABLED=0 go test ./...
+
+      - name: test (vcencrypt — embedded wasm guest under wazero)
+        working-directory: bindings/go/vcencrypt
+        run: CGO_ENABLED=0 go test ./...
+
+      - name: build check (vcvalue on 32-bit GOARCH)
+        # vcvalue is the durable layer a future stack-encrypt Go SDK imports;
+        # keep it compiling where int is 32 bits (the u32-bound guards are
+        # load-bearing there).
+        working-directory: bindings/go/vcvalue
+        run: GOOS=linux GOARCH=386 go build ./...
+
+      - name: run example (userrecord)
+        # The examples directory is its own Go module, outside every
+        # `go test ./...` sweep above — running it is the only thing that
+        # exercises the documented end-to-end recipe (sqlx + sqlite +
+        # batch-encrypt + element reads). It exits non-zero on any failure.
+        working-directory: bindings/go/vcencrypt/examples
+        run: CGO_ENABLED=0 go run ./userrecord
