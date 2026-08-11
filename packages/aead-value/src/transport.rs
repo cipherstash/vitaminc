@@ -640,6 +640,20 @@ mod tests {
     }
 
     #[test]
+    fn eager_capacity_is_identity_below_the_clamp_and_flat_above_it() {
+        // The clamp is a capacity *hint*, invisible to round-trip tests (a
+        // Vec grows on push regardless), so pin the function itself: below
+        // the threshold the honest count must pass through unchanged — a
+        // constant-0/1 replacement would silently discard the reservation —
+        // and above it the reservation must stay flat at the clamp.
+        assert_eq!(eager_capacity(0), 0);
+        assert_eq!(eager_capacity(5), 5);
+        assert_eq!(eager_capacity(MAX_EAGER_CAPACITY), MAX_EAGER_CAPACITY);
+        assert_eq!(eager_capacity(MAX_EAGER_CAPACITY + 1), MAX_EAGER_CAPACITY);
+        assert_eq!(eager_capacity(usize::MAX), MAX_EAGER_CAPACITY);
+    }
+
+    #[test]
     fn counts_beyond_the_eager_capacity_clamp_still_decode() {
         // The clamp bounds only the up-front reservation; a genuine container
         // larger than MAX_EAGER_CAPACITY must round-trip unchanged.
