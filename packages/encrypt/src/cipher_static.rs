@@ -5,7 +5,7 @@
 use crate::Aes256Cipher;
 use vitaminc_aead::hlist::{Absent, Encrypted, Entry, StaticCipher};
 use vitaminc_aead::{IntoAad, Unspecified};
-use vitaminc_protected::Protected;
+use vitaminc_protected::{Controlled, Protected};
 
 impl StaticCipher for &Aes256Cipher {
     type Error = Unspecified;
@@ -53,15 +53,24 @@ impl Aes256Cipher {
     }
 
     /// Verify an [`Absent`] marker under the supplied AAD. Returns
-    /// `Ok(())` if the tag binds `aad`, `Err(Unspecified)` otherwise.
+    /// `Ok(())` if the tag binds `aad` **and** the sealed plaintext is empty,
+    /// `Err(Unspecified)` otherwise.
     pub fn verify_absent<'a, A>(&self, ct: Absent, aad: A) -> Result<(), Unspecified>
     where
         A: IntoAad<'a>,
     {
-        // Sealed plaintext is empty by construction; we only care about the
-        // tag verification. The returned `Protected<Vec<u8>>` drops at the
-        // end of this expression. The AAD is wrapped to match `encrypt_none`.
-        open_local(self, ct.into_local(), aad.into_aad().for_none()).map(|_| ())
+        // A conforming marker seals an empty plaintext; requiring emptiness
+        // here (not just a valid tag) means a key-holding writer cannot mint
+        // a nonempty payload under the `for_none` derivation and have it
+        // verify as an absence — defense in depth for the marker's meaning,
+        // not just its authenticity. The `Protected` drops (and zeroizes) at
+        // the end of the expression. The AAD wrap matches `encrypt_none`.
+        let plaintext = open_local(self, ct.into_local(), aad.into_aad().for_none())?;
+        if plaintext.risky_ref().is_empty() {
+            Ok(())
+        } else {
+            Err(Unspecified)
+        }
     }
 
     /// Open a map [`Entry`]'s encrypted value, deriving the same
@@ -113,8 +122,7 @@ mod test {
     use crate::Key;
     use quickcheck_macros::quickcheck;
     use vitaminc_aead::hlist::{Entry, HCons, HNil, Map, Passthrough, StaticCipher};
-    use vitaminc_aead::LocalCipherText;
-    use vitaminc_protected::Controlled;
+    use vitaminc_aead::{Aad, LocalCipherText};
 
     // A worked example. In production this type alias would be generated
     // by a derive macro from the user's struct definition.
@@ -352,6 +360,23 @@ mod test {
         let cipher = Aes256Cipher::new(&key).unwrap();
         let leaf = Absent::from_local(LocalCipherText::from(bytes));
         cipher.verify_absent(leaf, b"aad".as_slice()).is_err()
+    }
+
+    #[test]
+    fn verify_absent_rejects_a_nonempty_payload_under_the_none_derivation() {
+        // Even a key-holding writer must not be able to pass a nonempty
+        // payload off as an absence marker: verify_absent requires the sealed
+        // plaintext to be empty, not merely the tag to bind `for_none(aad)`.
+        let cipher = Aes256Cipher::new(&Key::from([6u8; 32])).unwrap();
+        let aad = b"aad".as_slice();
+        let forged = (&cipher)
+            .encrypt_bytes(
+                Protected::new(b"payload".to_vec()),
+                Aad::from_slice(aad).for_none(),
+            )
+            .unwrap();
+        let as_absent = Absent::from_local(forged.into_local());
+        assert!(cipher.verify_absent(as_absent, aad).is_err());
     }
 
     // An empty `Encrypted` and an `Absent` seal the same empty plaintext; the
