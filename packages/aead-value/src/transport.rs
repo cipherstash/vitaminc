@@ -18,7 +18,7 @@
 
 use std::any::Any;
 
-use crate::{tags, FfiValue};
+use crate::{tags, FfiValue, Utf8String};
 use vitaminc_aead::CipherText;
 use vitaminc_protected::{Controlled, Protected};
 
@@ -306,8 +306,10 @@ fn decode_leaf(tag: u8, reader: &mut Reader<'_>) -> Result<FfiValue, CodecError>
         tags::STRING => {
             let len = reader.count()?;
             let bytes = reader.take(len)?;
-            std::str::from_utf8(bytes).map_err(|_| CodecError)?;
-            Ok(FfiValue::String(Protected::new(bytes.to_vec())))
+            // `Utf8String::try_from` validates — a malformed transport frame
+            // is a codec error, mirroring the decrypt visitor's rejection.
+            let s = Utf8String::try_from(Protected::new(bytes.to_vec())).map_err(|_| CodecError)?;
+            Ok(FfiValue::String(s))
         }
         tags::BYTES => {
             let len = reader.count()?;
@@ -488,7 +490,7 @@ mod tests {
     use vitaminc_encrypt::AesCipherText;
 
     fn string(s: &str) -> FfiValue {
-        FfiValue::String(Protected::new(s.as_bytes().to_vec()))
+        FfiValue::String(s.into())
     }
 
     fn sample() -> FfiValue {

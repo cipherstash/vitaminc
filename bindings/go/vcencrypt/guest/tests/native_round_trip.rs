@@ -7,7 +7,6 @@ use vitaminc_aead::{Aad, Encrypt};
 use vitaminc_aead_value::transport::{self as codec, Reader};
 use vitaminc_aead_value::FfiValue;
 use vitaminc_encrypt::{Aes256Cipher, AesCipherText, Key};
-use vitaminc_protected::Protected;
 
 fn cipher() -> Aes256Cipher {
     Aes256Cipher::new(&Key::from([7u8; 32])).unwrap()
@@ -23,15 +22,12 @@ fn sample() -> FfiValue {
         ("id".into(), passthrough(FfiValue::Int64(7))),
         (
             "created_at".into(),
-            passthrough(FfiValue::String(Protected::new(b"2026-07-25".to_vec()))),
+            passthrough(FfiValue::String("2026-07-25".into())),
         ),
         (
             "user".into(),
             FfiValue::Object(vec![
-                (
-                    "email".into(),
-                    FfiValue::String(Protected::new(b"ada@example.com".to_vec())),
-                ),
+                ("email".into(), FfiValue::String("ada@example.com".into())),
                 ("logins".into(), FfiValue::Int64(42)),
                 ("visits".into(), FfiValue::Int32(-3)),
                 ("port".into(), FfiValue::UInt32(8080)),

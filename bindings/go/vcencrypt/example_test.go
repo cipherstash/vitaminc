@@ -73,9 +73,9 @@ func Example() {
 	// Output:
 	// ciphertext:
 	//   created_at  passthrough = 2026-07-25
-	//   email       sealed (44-byte leaf)
+	//   email       sealed (45-byte leaf)
 	//   id          passthrough = 42
-	//   name        sealed (41-byte leaf)
+	//   name        sealed (42-byte leaf)
 	// decrypted:
 	//   created_at  2026-07-25 (in the clear)
 	//   email       ada@example.com

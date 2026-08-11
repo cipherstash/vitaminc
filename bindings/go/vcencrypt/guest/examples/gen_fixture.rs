@@ -29,7 +29,7 @@ use vitaminc_protected::Protected;
 const AAD: &[u8] = b"vitaminc/go-spike/fixture";
 
 fn string(s: &str) -> FfiValue {
-    FfiValue::String(Protected::new(s.as_bytes().to_vec()))
+    FfiValue::String(s.into())
 }
 
 fn passthrough(v: FfiValue) -> FfiValue {
