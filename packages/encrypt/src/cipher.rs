@@ -51,22 +51,67 @@ impl Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        let nonce = self.nonce_generator.generate()?;
-        let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-        // Outermost derivation: bind the wire version the builder prefixes
-        // to the stored leaf — see `Aad::for_leaf`.
-        let aad = aad.into_aad().for_leaf(WIRE_VERSION);
-
-        CipherTextBuilder::new()
-            .append_nonce(nonce)
-            .append_target_plaintext(Vec::<u8>::new())
-            .accepts_ciphertext_and_tag_ok(|mut buf| {
-                self.key
-                    .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
-                    .map(|()| buf)
-            })
-            .build()
+        seal_leaf(self, Protected::new(Vec::new()), aad)
     }
+}
+
+/// Seal one leaf: `version(1) ‖ nonce ‖ ciphertext ‖ tag`, with the wire
+/// version bound into the AAD via `Aad::for_leaf`.
+///
+/// This is THE leaf seal path — the dynamic [`Cipher`] impl and the static
+/// hlist cipher (`cipher_static.rs`) both go through it, so a wire-format
+/// change lands in every path at once instead of drifting between copies.
+/// The one exception is [`Cipher::encrypt_bytes_array`], which duplicates
+/// the derivation to keep its no-realloc fixed-width fast path; its output
+/// bytes are pinned equal to this path by test.
+pub(crate) fn seal_leaf<'a, A>(
+    cipher: &Aes256Cipher,
+    data: Protected<Vec<u8>>,
+    aad: A,
+) -> Result<LocalCipherText, Unspecified>
+where
+    A: IntoAad<'a>,
+{
+    let nonce = cipher.nonce_generator.generate()?;
+    let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
+    // Outermost derivation: bind the wire version the builder prefixes to
+    // the stored leaf — see `Aad::for_leaf`.
+    let aad = aad.into_aad().for_leaf(WIRE_VERSION);
+
+    CipherTextBuilder::new()
+        .append_nonce(nonce)
+        .append_target_plaintext(data)
+        .accepts_ciphertext_and_tag_ok(|mut buf| {
+            cipher
+                .key
+                .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
+                .map(|()| buf)
+        })
+        .build()
+}
+
+/// Open one leaf sealed by [`seal_leaf`] (or the equivalent array fast
+/// path): checks the wire version before parsing, then verifies with the
+/// same `Aad::for_leaf` derivation. Shared by the dynamic decipher and the
+/// static hlist path for the same anti-drift reason as [`seal_leaf`].
+pub(crate) fn open_leaf<'a, A>(
+    cipher: &Aes256Cipher,
+    ct: LocalCipherText,
+    aad: A,
+) -> Result<Protected<Vec<u8>>, Unspecified>
+where
+    A: IntoAad<'a>,
+{
+    // `read_version` rejects unknown wire versions before any parsing; the
+    // version is *also* bound under the tag (`for_leaf`, mirroring the seal
+    // side), so a relabeled byte that parses still fails.
+    let (nonce, reader) = ct.into_reader().read_version()?.read_nonce::<NONCE_LEN>()?;
+    let nonce_bytes = nonce.into_inner();
+    let aad = aad.into_aad().for_leaf(WIRE_VERSION);
+
+    reader
+        .accepts_plaintext_ok(|data| cipher.key.open(&nonce_bytes, aad.as_bytes(), data))
+        .read()
 }
 
 impl<'c> Cipher for &'c Aes256Cipher {
@@ -84,21 +129,7 @@ impl<'c> Cipher for &'c Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        let nonce = self.nonce_generator.generate()?;
-        let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-        // Outermost derivation: bind the wire version — see `Aad::for_leaf`.
-        let aad = aad.into_aad().for_leaf(WIRE_VERSION);
-
-        CipherTextBuilder::new()
-            .append_nonce(nonce)
-            .append_target_plaintext(data)
-            .accepts_ciphertext_and_tag_ok(|mut buf| {
-                self.key
-                    .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
-                    .map(|()| buf)
-            })
-            .build()
-            .map(AesCipherText::Single)
+        seal_leaf(self, data, aad).map(AesCipherText::Single)
     }
 
     fn encrypt_bytes_array<'a, const N: usize, A>(
@@ -220,8 +251,14 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
         // Borrow the stored derived AAD — no allocation per element.
         let encrypted =
             data.encrypt_with_aad(self.cipher, Aad::from_slice(self.element_aad.as_bytes()))?;
+        // A nested `Encrypt` impl may route through the passthrough channel
+        // (e.g. `FfiValue::Passthrough`), producing an unauthenticated node
+        // despite arriving via this method. Only a genuinely sealed node may
+        // satisfy `end`'s all-passthrough rejection, otherwise a container of
+        // only passthrough elements would encrypt Ok yet carry no AEAD tag
+        // (and `decrypt_seq` would refuse it forever).
+        self.encrypted |= !matches!(encrypted, AesCipherText::Passthrough(_));
         self.items.push(encrypted);
-        self.encrypted = true;
         Ok(self)
     }
 
@@ -255,19 +292,14 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
 /// renaming keys in a stored ciphertext fails decryption (passthrough
 /// entries excepted — they are unauthenticated by design).
 ///
-/// This driver is intended for encrypting sources that already enforce key
-/// uniqueness themselves — `HashMap`s and structs (whose field names are
-/// unique by construction). It therefore stores `entries` as a *positional
-/// list* and performs **no duplicate-key checks** of its own.
-///
-/// Implementors should be aware: if the same key is pushed by two completed
-/// `encrypt_value` / `passthrough_entry` calls, both are kept — and the
-/// resulting ciphertext is **unreadable**, because `decrypt_map` rejects
-/// duplicate keys outright (a verified duplicate would otherwise let an
-/// attacker splice a stale value for one field into a current ciphertext).
-/// The built-in `Encrypt for HashMap` impl never emits duplicates (the
-/// source map already dedups); a custom encoder driving this trait directly
-/// is responsible for not emitting them.
+/// Duplicate keys are rejected at encrypt time: `encrypt_key` and
+/// `passthrough_entry` fail on a key that is already present, mirroring
+/// `decrypt_map`'s outright rejection of duplicates (a verified duplicate
+/// would otherwise let an attacker splice a stale value for one field into
+/// a current ciphertext). Failing at seal time keeps the contract symmetric
+/// for every encoder — a duplicate-keyed source (e.g. a hand-built
+/// `FfiValue::Object`) errors immediately instead of producing a ciphertext
+/// that can never be read back.
 pub struct AesMapCipher<'c> {
     cipher: &'c Aes256Cipher,
     entries: Vec<(String, AesCipherText)>,
@@ -297,7 +329,14 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         if self.current_key.is_some() {
             return Err(Unspecified);
         }
-        self.current_key = Some(key.into());
+        let key = key.into();
+        // Reject duplicates at seal time: `decrypt_map` rejects them outright,
+        // so accepting one here would produce a permanently unreadable
+        // ciphertext with no error until read time.
+        if self.entries.iter().any(|(k, _)| *k == key) {
+            return Err(Unspecified);
+        }
+        self.current_key = Some(key);
         Ok(self)
     }
 
@@ -311,8 +350,11 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         // same AAD on decrypt.
         let entry_aad = self.aad.for_map_entry(&key);
         let encrypted = value.encrypt_with_aad(self.cipher, entry_aad)?;
+        // See `AesSeqCipher::encrypt_next`: a nested impl may have routed
+        // through the passthrough channel, and an unauthenticated node must
+        // not satisfy `end`'s all-passthrough rejection.
+        self.encrypted |= !matches!(encrypted, AesCipherText::Passthrough(_));
         self.entries.push((key.into_owned(), encrypted));
-        self.encrypted = true;
         Ok(self)
     }
 
@@ -327,8 +369,13 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         if self.current_key.is_some() {
             return Err(Unspecified);
         }
+        let key = key.into();
+        // Same duplicate rejection as `encrypt_key` — see the type docs.
+        if self.entries.iter().any(|(k, _)| *k == key) {
+            return Err(Unspecified);
+        }
         self.entries
-            .push((key.into().into_owned(), AesCipherText::Passthrough(value)));
+            .push((key.into_owned(), AesCipherText::Passthrough(value)));
         Ok(self)
     }
 
@@ -425,16 +472,7 @@ impl AesDecipher<'_> {
         ct: LocalCipherText,
         aad: &[u8],
     ) -> Result<Protected<Vec<u8>>, Unspecified> {
-        // `read_version` rejects unknown wire versions before any parsing;
-        // the version is *also* bound under the tag (`for_leaf`, mirroring
-        // both seal sites), so a relabeled byte that parses still fails.
-        let (nonce, reader) = ct.into_reader().read_version()?.read_nonce::<NONCE_LEN>()?;
-        let nonce_bytes = nonce.into_inner();
-        let aad = Aad::from_slice(aad).for_leaf(WIRE_VERSION);
-
-        reader
-            .accepts_plaintext_ok(|data| cipher.key.open(&nonce_bytes, aad.as_bytes(), data))
-            .read()
+        open_leaf(cipher, ct, Aad::from_slice(aad))
     }
 
     fn verify_empty_marker(

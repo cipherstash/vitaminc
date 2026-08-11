@@ -25,7 +25,7 @@
 
 use napi::bindgen_prelude::{
     Array, BigInt, Buffer, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue, Uint8Array,
-    Unknown,
+    Unknown, Utf16String,
 };
 use napi::{sys, Env, Error, Result, Status, ValueType};
 use vitaminc_aead_value::FfiValue;
@@ -184,6 +184,57 @@ fn ensure_plain_object(obj: &Object<'_>) -> Result<()> {
 // direction still projects a passthrough produced elsewhere (e.g. a value
 // written by another binding) onto its plain JS value. Follow-up: add an
 // explicit passthrough marker type to the JS API.
+/// Write `value` onto `obj` as an **own data property** (`defineProperty`
+/// semantics: writable, enumerable, configurable) rather than through
+/// [`Object::set`] (`napi_set_property`, `[[Set]]` semantics), which walks
+/// the prototype chain: a polluted inherited setter on the key would receive
+/// the decrypted plaintext (leak) and leave the result without the own
+/// property (drop). The intake side already treats prototype pollution as
+/// in-threat-model (`own_enumerable_keys`, `ensure_plain_object`); this
+/// closes the output side.
+pub(crate) fn define_own_property(
+    obj: &Object<'_>,
+    key: &str,
+    value: sys::napi_value,
+) -> Result<()> {
+    let raw = obj.value();
+    let mut js_key = std::ptr::null_mut();
+    let status = unsafe {
+        sys::napi_create_string_utf8(
+            raw.env,
+            key.as_ptr().cast(),
+            key.len() as isize,
+            &mut js_key,
+        )
+    };
+    if status != sys::Status::napi_ok {
+        return Err(Error::new(
+            Status::GenericFailure,
+            "failed to create property key",
+        ));
+    }
+    let descriptor = sys::napi_property_descriptor {
+        utf8name: std::ptr::null(),
+        name: js_key,
+        method: None,
+        getter: None,
+        setter: None,
+        value,
+        attributes: sys::PropertyAttributes::writable
+            | sys::PropertyAttributes::enumerable
+            | sys::PropertyAttributes::configurable,
+        data: std::ptr::null_mut(),
+    };
+    let status = unsafe { sys::napi_define_properties(raw.env, raw.value, 1, &descriptor) };
+    if status != sys::Status::napi_ok {
+        return Err(Error::new(
+            Status::GenericFailure,
+            "failed to define object property",
+        ));
+    }
+    Ok(())
+}
+
 fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<FfiValue> {
     if depth > MAX_DEPTH {
         return Err(depth_error());
@@ -213,11 +264,21 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<FfiValue> {
             ))
         }
         ValueType::String => {
-            // `String::from_unknown` copies out of the V8 heap; the copy is
-            // moved into `Protected` without further duplication. The V8
+            // Fetch as UTF-16 (JS's native representation) and convert with
+            // `String::from_utf16`, which errors on unpaired surrogates. The
+            // UTF-8 fetch (`napi_get_value_string_utf8`) would silently
+            // replace them with U+FFFD — sealing a *mutated* plaintext that
+            // no longer equals what the caller passed — so refuse loudly
+            // instead. The converted copy moves into `Protected`; the V8
             // original is owned by the engine and cannot be wiped from here.
-            let s = String::from_unknown(unknown)?;
-            Ok(FfiValue::String(Protected::new(s.into_bytes())))
+            let utf16 = Utf16String::from_unknown(unknown)?;
+            let s = String::from_utf16(&utf16).map_err(|_| {
+                Error::new(
+                    Status::InvalidArg,
+                    "string contains an unpaired surrogate and cannot be encrypted losslessly",
+                )
+            })?;
+            Ok(FfiValue::String(s.into()))
         }
         ValueType::Object => {
             if unknown.is_buffer()? {
@@ -307,8 +368,11 @@ fn value_to_js(env: sys::napi_env, value: FfiValue) -> Result<sys::napi_value> {
         FfiValue::Int64(i) => {
             // Exactly representable → plain number (the common case, and
             // what JS callers expect for e.g. a Python-written `30`).
-            // Beyond ±MAX_SAFE_INTEGER → BigInt, losslessly.
-            if i.abs() <= MAX_SAFE_INTEGER {
+            // Beyond ±MAX_SAFE_INTEGER → BigInt, losslessly. `unsigned_abs`
+            // (not `abs`) so `i64::MIN` — whose magnitude has no `i64`
+            // representation — takes the BigInt branch instead of panicking
+            // (debug) or wrapping negative and losing precision (release).
+            if i.unsigned_abs() <= MAX_SAFE_INTEGER as u64 {
                 unsafe { f64::to_napi_value(env, i as f64) }
             } else {
                 unsafe { BigInt::to_napi_value(env, BigInt::from(i)) }
@@ -347,14 +411,15 @@ fn value_to_js(env: sys::napi_env, value: FfiValue) -> Result<sys::napi_value> {
         }
         FfiValue::Object(entries) => {
             let raw_env = Env::from_raw(env);
-            let mut obj = Object::new(&raw_env)?;
+            let obj = Object::new(&raw_env)?;
             for (key, value) in entries {
                 // Keys decrypted from a ciphertext are attacker-influenced
                 // in principle; never assign prototype-polluting names.
                 if forbidden_key(&key) {
                     return Err(forbidden_key_error(&key));
                 }
-                obj.set(&key, ValueHandle(value))?;
+                let js_value = value_to_js(env, value)?;
+                define_own_property(&obj, &key, js_value)?;
             }
             unsafe { Object::to_napi_value(env, obj) }
         }

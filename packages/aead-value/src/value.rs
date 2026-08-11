@@ -8,7 +8,7 @@ use crate::tagged::{
 use crate::tags;
 use vitaminc_aead::{
     Cipher, Decipher, DecipherVisitor, Decrypt, Encrypt, IntoAad, MapAccess, MapCipher, SeqAccess,
-    SeqCipher, Unspecified,
+    Unspecified,
 };
 use vitaminc_protected::{Controlled, Protected};
 use zeroize::Zeroize;
@@ -77,9 +77,11 @@ pub enum FfiValue {
     /// 64-bit floating-point number. Round-trips by IEEE-754 bit pattern.
     /// This is the tag a JavaScript `number` maps to.
     Float64(f64),
-    /// String as UTF-8 bytes. Validated UTF-8 at construction; held as
-    /// bytes inside [`Protected`] so the copy is wiped on drop.
-    String(Protected<Vec<u8>>),
+    /// String as UTF-8 bytes. The [`Utf8String`] payload validates UTF-8 at
+    /// construction — a `String` leaf can never seal bytes the decrypt side
+    /// would refuse — and holds them inside [`Protected`] so the copy is
+    /// wiped on drop.
+    String(Utf8String),
     /// Binary data.
     Bytes(Protected<Vec<u8>>),
     /// Array. Encrypts via the cipher's sequence mode.
@@ -122,6 +124,57 @@ pub enum FfiValue {
 // its own; container metadata (numbers, booleans, keys) can be wiped
 // explicitly via `Zeroize` where callers need it.
 
+/// UTF-8 string payload for [`FfiValue::String`], validated at construction.
+///
+/// Wraps `Protected<Vec<u8>>` with the invariant that the bytes are valid
+/// UTF-8. The decrypt visitor only ever rebuilds one from bytes it has just
+/// validated, and every constructor here validates (or starts from a
+/// `String`, which is valid by type) — so a `String` leaf can never seal
+/// bytes the decrypt side will refuse. Without this, a hand-built
+/// `FfiValue::String` of arbitrary bytes would encrypt Ok and then fail
+/// every decrypt forever: silent data loss discovered only at read time.
+#[derive(Zeroize)]
+pub struct Utf8String(Protected<Vec<u8>>);
+
+impl Utf8String {
+    /// The validated UTF-8 bytes. Same chain-of-custody caveats as
+    /// [`Protected::risky_ref`]: the reference must not outlive its use.
+    pub fn risky_ref(&self) -> &[u8] {
+        self.0.risky_ref()
+    }
+
+    /// Unwrap to the protected byte payload (still valid UTF-8; the
+    /// invariant is dropped with the type).
+    pub fn into_inner(self) -> Protected<Vec<u8>> {
+        self.0
+    }
+}
+
+impl From<String> for Utf8String {
+    fn from(s: String) -> Self {
+        // A `String` is valid UTF-8 by construction; the bytes move into
+        // `Protected` without copying.
+        Self(Protected::new(s.into_bytes()))
+    }
+}
+
+impl From<&str> for Utf8String {
+    fn from(s: &str) -> Self {
+        Self(Protected::new(s.as_bytes().to_vec()))
+    }
+}
+
+impl TryFrom<Protected<Vec<u8>>> for Utf8String {
+    type Error = Unspecified;
+
+    /// Validates the bytes; on failure the rejected `Protected` payload is
+    /// dropped (and wiped) here.
+    fn try_from(bytes: Protected<Vec<u8>>) -> Result<Self, Self::Error> {
+        std::str::from_utf8(bytes.risky_ref()).map_err(|_| Unspecified)?;
+        Ok(Self(bytes))
+    }
+}
+
 impl Encrypt for FfiValue {
     fn encrypt_with_aad<'a, C, A>(self, cipher: C, aad: A) -> Result<C::Ok, C::Error>
     where
@@ -143,23 +196,14 @@ impl Encrypt for FfiValue {
             FfiValue::UInt64(u) => TaggedUInt64::from(u).encrypt_with_aad(cipher, aad),
             FfiValue::Float32(f) => TaggedFloat32::from(f).encrypt_with_aad(cipher, aad),
             FfiValue::Float64(f) => TaggedFloat64::from(f).encrypt_with_aad(cipher, aad),
-            FfiValue::String(s) => TaggedString::new(s).encrypt_with_aad(cipher, aad),
+            FfiValue::String(s) => TaggedString::new(s.into_inner()).encrypt_with_aad(cipher, aad),
             FfiValue::Bytes(b) => TaggedBytes::new(b).encrypt_with_aad(cipher, aad),
-            FfiValue::Array(items) => {
-                // Mirror the built-in `Vec<T>` impl: every element sealed
-                // against `Aad::for_sequence_element` of the caller's AAD.
-                // Element positions are carried structurally only — order is
-                // NOT authenticated, and a tampered ciphertext with permuted
-                // elements still decrypts. See `Aad::for_sequence_element`
-                // for why the index is deliberately unbound.
-                let len = items.len();
-                items
-                    .into_iter()
-                    .try_fold(cipher.encrypt_seq(Some(len), aad), |c, item| {
-                        c.encrypt_next(item)
-                    })?
-                    .end()
-            }
+            // Delegate to the built-in `Vec<T>` impl (`FfiValue: Encrypt`)
+            // so the sequence wire protocol has exactly one definition —
+            // element positions are carried structurally, not authenticated;
+            // see `Aad::for_sequence_element`. A nested `Passthrough`
+            // element routes identically either way, via its own arm below.
+            FfiValue::Array(items) => items.encrypt_with_aad(cipher, aad),
             FfiValue::Object(entries) => {
                 // Mirror the built-in `HashMap` impls; the cipher binds each
                 // key into its value's AAD via `Aad::for_map_entry`.
@@ -235,7 +279,7 @@ impl<'c> DecipherVisitor<'c> for FfiValueVisitor {
             (tags::STRING, utf8) => {
                 // Validate now so host conversions later are infallible.
                 std::str::from_utf8(utf8).map_err(|_| Unspecified)?;
-                Ok(FfiValue::String(Protected::new(utf8.to_vec())))
+                Ok(FfiValue::String(Utf8String(Protected::new(utf8.to_vec()))))
             }
             (tags::BYTES, raw) => Ok(FfiValue::Bytes(Protected::new(raw.to_vec()))),
             _ => Err(Unspecified),
@@ -314,8 +358,8 @@ impl PartialEq for FfiValue {
             (FfiValue::UInt64(a), FfiValue::UInt64(b)) => a == b,
             (FfiValue::Float32(a), FfiValue::Float32(b)) => a.to_bits() == b.to_bits(),
             (FfiValue::Float64(a), FfiValue::Float64(b)) => a.to_bits() == b.to_bits(),
-            (FfiValue::String(a), FfiValue::String(b))
-            | (FfiValue::Bytes(a), FfiValue::Bytes(b)) => a.risky_ref() == b.risky_ref(),
+            (FfiValue::String(a), FfiValue::String(b)) => a.risky_ref() == b.risky_ref(),
+            (FfiValue::Bytes(a), FfiValue::Bytes(b)) => a.risky_ref() == b.risky_ref(),
             (FfiValue::Array(a), FfiValue::Array(b)) => a == b,
             (FfiValue::Object(a), FfiValue::Object(b)) => a == b,
             (FfiValue::Passthrough(a), FfiValue::Passthrough(b)) => a == b,
@@ -349,6 +393,7 @@ impl std::fmt::Debug for FfiValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vitaminc_aead::SeqCipher;
     use vitaminc_encrypt::{Aes256Cipher, Key};
 
     fn cipher() -> Aes256Cipher {
@@ -356,7 +401,7 @@ mod tests {
     }
 
     fn s(v: &str) -> FfiValue {
-        FfiValue::String(Protected::new(v.as_bytes().to_vec()))
+        FfiValue::String(v.into())
     }
 
     /// The `Debug` impl exists for assertion failures, so a passing suite
@@ -1175,5 +1220,65 @@ mod tests {
             ])
         };
         assert_eq!(roundtrip(make()), make());
+    }
+
+    #[test]
+    fn all_passthrough_containers_are_rejected_at_encrypt() {
+        // A container whose every element/entry is passthrough carries no
+        // AEAD tag at all: nothing authenticates the AAD, and `decrypt_seq`/
+        // `decrypt_map` refuse such containers. Refusing at *encrypt* time
+        // means the caller learns immediately, instead of storing a
+        // ciphertext that can never be read back.
+        let cipher = cipher();
+        let arr = FfiValue::Array(vec![pt(FfiValue::Int64(1)), pt(FfiValue::Int64(2))]);
+        assert!(arr.encrypt(&cipher).is_err());
+        let obj = FfiValue::Object(vec![
+            ("a".into(), pt(FfiValue::Int64(1))),
+            ("b".into(), pt(FfiValue::Int64(2))),
+        ]);
+        assert!(obj.encrypt(&cipher).is_err());
+        // One sealed sibling makes the container authenticated again.
+        let mixed = FfiValue::Array(vec![pt(FfiValue::Int64(1)), FfiValue::Int64(2)]);
+        assert!(mixed.encrypt(&cipher).is_ok());
+    }
+
+    #[test]
+    fn duplicate_object_keys_are_rejected_at_encrypt() {
+        // `decrypt_map` rejects duplicate keys outright, so accepting one at
+        // seal time would produce a permanently unreadable ciphertext. The
+        // encrypt path now fails symmetrically.
+        let cipher = cipher();
+        let dup = FfiValue::Object(vec![
+            ("a".into(), FfiValue::Int64(1)),
+            ("a".into(), FfiValue::Int64(2)),
+        ]);
+        assert!(dup.encrypt(&cipher).is_err());
+        let distinct = FfiValue::Object(vec![
+            ("a".into(), FfiValue::Int64(1)),
+            ("b".into(), FfiValue::Int64(2)),
+        ]);
+        assert!(distinct.encrypt(&cipher).is_ok());
+        // The passthrough entry path enforces the same rejection.
+        let dup_mixed = FfiValue::Object(vec![
+            ("a".into(), FfiValue::Int64(1)),
+            ("a".into(), pt(FfiValue::Int64(2))),
+        ]);
+        assert!(dup_mixed.encrypt(&cipher).is_err());
+    }
+
+    #[test]
+    fn utf8_string_validates_at_construction() {
+        // Valid UTF-8 is accepted from raw bytes...
+        let ok = Utf8String::try_from(Protected::new("héllo".as_bytes().to_vec()));
+        assert!(ok.is_ok());
+        assert_eq!(ok.expect("valid utf-8").risky_ref(), "héllo".as_bytes());
+        // ...invalid bytes are refused at construction, so a `String` leaf
+        // can never seal a payload the decrypt side will reject.
+        assert!(Utf8String::try_from(Protected::new(vec![0xFF, 0xFE])).is_err());
+        // `From<String>`/`From<&str>` are valid by type.
+        assert_eq!(Utf8String::from("abc").risky_ref(), b"abc");
+        assert_eq!(Utf8String::from(String::from("xyz")).risky_ref(), b"xyz");
+        // `into_inner` hands back the same bytes.
+        assert_eq!(Utf8String::from("abc").into_inner().risky_ref(), b"abc");
     }
 }

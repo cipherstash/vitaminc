@@ -34,7 +34,8 @@ it is not itself loadable from Node.
 The `Encrypt`/`Decrypt` impls and the value tree are covered by ordinary Rust
 unit tests. The JS-boundary conversion functions — `js_to_value`,
 `value_to_js`, `node_to_js`, `node_from_js` — and their helpers —
-`own_enumerable_keys`, `get_property_unknown`, `ensure_plain_object` — are
+`own_enumerable_keys`, `get_property_unknown`, `ensure_plain_object`,
+`define_own_property` — are
 **not**, and cannot be: each takes a live `napi_env`, `Unknown`, or `Object`,
 which only exists inside a running V8 isolate. The `napi/noop` dev-dependency stubs those
 symbols so the crate links under `cargo test`; it does not make the calls
@@ -70,6 +71,14 @@ changes to those two modules as unguarded by CI and review them by hand.
 - JS-reported array lengths are never trusted for up-front allocation
   (a `new Array(2**32 - 1)` costs the attacker one line and materialises
   nothing), in both the value converter and the ciphertext rebuilder.
+- Strings containing unpaired UTF-16 surrogates are **rejected** rather
+  than silently normalized: the UTF-8 fetch would replace a lone surrogate
+  with U+FFFD, sealing a plaintext that no longer equals what the caller
+  passed.
+- Decrypted objects (and rebuilt ciphertext maps) are written with
+  **own-property defines** (`napi_define_properties`), not `[[Set]]`
+  assignment, so a polluted `Object.prototype` setter can never observe
+  decrypted plaintext or swallow a property.
 - Errors carry no cryptographic detail (`Unspecified` at the trait layer).
 
 [`FfiValue`]: vitaminc_aead_value::FfiValue

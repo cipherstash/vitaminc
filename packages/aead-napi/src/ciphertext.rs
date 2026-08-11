@@ -31,7 +31,8 @@ use napi::{sys, Env, Error, Result, Status, ValueType};
 use vitaminc_aead::CipherText;
 
 use crate::convert::{
-    eager_capacity, forbidden_key, get_property_unknown, own_enumerable_keys, MAX_DEPTH,
+    define_own_property, eager_capacity, forbidden_key, get_property_unknown, own_enumerable_keys,
+    MAX_DEPTH,
 };
 
 const T_CIPHERTEXT: &str = "ct";
@@ -90,7 +91,7 @@ where
         }
         CipherText::Map(entries) => {
             obj.set(T_KEY, T_MAP)?;
-            let mut map = Object::new(&raw_env)?;
+            let map = Object::new(&raw_env)?;
             for (key, value) in entries {
                 // Map keys travel in the clear inside the stored ciphertext
                 // and are therefore attacker-writable; never assign
@@ -101,7 +102,11 @@ where
                         format!("ciphertext map key is not allowed: {key}"),
                     ));
                 }
-                map.set(&key, NodeHandle(value))?;
+                // Own-property define, not `[[Set]]`: these keys are
+                // attacker-writable, so a polluted inherited setter must
+                // never run — see `convert::define_own_property`.
+                let js_value = node_to_js(env, value)?;
+                define_own_property(&map, &key, js_value)?;
             }
             obj.set(V_KEY, map)?;
         }

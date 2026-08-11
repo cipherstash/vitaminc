@@ -6,4 +6,4 @@ pub mod tags;
 mod value;
 
 pub use aad::LeafTypeAad;
-pub use value::FfiValue;
+pub use value::{FfiValue, Utf8String};

@@ -63,6 +63,7 @@ allow = [
     "node_to_js",
     "node_from_js",
     "own_enumerable_keys",
+    "define_own_property",
     "get_property_unknown",
     "ensure_plain_object",
 ]

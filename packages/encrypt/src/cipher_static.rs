@@ -2,10 +2,9 @@
 //!
 //! See `vitaminc_aead::hlist` for the design rationale.
 
-use crate::backend::NONCE_LEN;
 use crate::Aes256Cipher;
 use vitaminc_aead::hlist::{Absent, Encrypted, Entry, StaticCipher};
-use vitaminc_aead::{CipherTextBuilder, IntoAad, NonceGenerator, Unspecified, WIRE_VERSION};
+use vitaminc_aead::{IntoAad, Unspecified};
 use vitaminc_protected::Protected;
 
 impl StaticCipher for &Aes256Cipher {
@@ -98,49 +97,9 @@ impl Aes256Cipher {
     }
 }
 
-fn seal_into_local<'a, A>(
-    cipher: &Aes256Cipher,
-    data: Protected<Vec<u8>>,
-    aad: A,
-) -> Result<vitaminc_aead::LocalCipherText, Unspecified>
-where
-    A: IntoAad<'a>,
-{
-    let nonce = cipher.nonce_generator.generate()?;
-    let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-    // Outermost derivation: bind the wire version the builder prefixes to
-    // the stored leaf — see `Aad::for_leaf`. Mirrors the dynamic path.
-    let aad = aad.into_aad().for_leaf(WIRE_VERSION);
-
-    CipherTextBuilder::new()
-        .append_nonce(nonce)
-        .append_target_plaintext(data)
-        .accepts_ciphertext_and_tag_ok(|mut buf| {
-            cipher
-                .key
-                .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
-                .map(|()| buf)
-        })
-        .build()
-}
-
-fn open_local<'a, A>(
-    cipher: &Aes256Cipher,
-    ct: vitaminc_aead::LocalCipherText,
-    aad: A,
-) -> Result<Protected<Vec<u8>>, Unspecified>
-where
-    A: IntoAad<'a>,
-{
-    let aad = aad.into_aad().for_leaf(WIRE_VERSION);
-    // Version check mirrors `AesDecipher::decrypt_local_ciphertext`.
-    let (nonce, reader) = ct.into_reader().read_version()?.read_nonce::<NONCE_LEN>()?;
-    let nonce_bytes = nonce.into_inner();
-
-    reader
-        .accepts_plaintext_ok(|data| cipher.key.open(&nonce_bytes, aad.as_bytes(), data))
-        .read()
-}
+// Leaf seal/open shared with the dynamic path — see `cipher::seal_leaf` /
+// `cipher::open_leaf` for why a single copy matters.
+use crate::cipher::{open_leaf as open_local, seal_leaf as seal_into_local};
 
 // Split cfgs (not `all(test, …)`) so cargo-mutants recognises the test module
 // and skips it — see the comment on `cipher::test`.
@@ -149,6 +108,7 @@ where
 #[allow(clippy::unwrap_used)]
 mod test {
     use super::*;
+    use crate::backend::NONCE_LEN;
     use crate::key::tests::DifferingKeyPair;
     use crate::Key;
     use quickcheck_macros::quickcheck;
