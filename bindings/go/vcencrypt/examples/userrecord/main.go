@@ -119,18 +119,22 @@ func main() {
 	fmt.Printf("WHERE on passthrough column: %d rows created 2026-07-25\n", count)
 
 	// --- Read path, one column: scan the leaf, decrypt it under its name. -
+	// Each row was sealed as an *element* of the encrypted slice, so a row
+	// read back alone opens through DecryptElement — same aad, the
+	// element-ness stated in the call. (Plain Decrypt would fail: the
+	// container shape is authenticated.)
 	var leaf vcvalue.Sealed
 	if err := db.GetContext(ctx, &leaf, `SELECT email FROM users WHERE id = ?`, 42); err != nil {
 		log.Fatal(err)
 	}
-	got, err := cipher.Decrypt(ctx, map[string]any{"email": leaf}, aad)
+	got, err := cipher.DecryptElement(ctx, map[string]any{"email": leaf}, aad)
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("single-column decrypt:  email = %v\n", got.(vcvalue.Object)[0].Value)
 
 	// The same leaf under the wrong AAD fails authentication.
-	if _, err := cipher.Decrypt(ctx, map[string]any{"email": leaf}, []byte("other")); err != nil {
+	if _, err := cipher.DecryptElement(ctx, map[string]any{"email": leaf}, []byte("other")); err != nil {
 		fmt.Printf("wrong AAD:              %v\n", err)
 	}
 
@@ -140,7 +144,7 @@ func main() {
 	if err := db.GetContext(ctx, &row, `SELECT id, created_at, email, name FROM users WHERE id = ?`, 43); err != nil {
 		log.Fatal(err)
 	}
-	obj, err := cipher.Decrypt(ctx, map[string]any{"email": row.Email, "name": row.Name}, aad)
+	obj, err := cipher.DecryptElement(ctx, map[string]any{"email": row.Email, "name": row.Name}, aad)
 	if err != nil {
 		log.Fatal(err)
 	}

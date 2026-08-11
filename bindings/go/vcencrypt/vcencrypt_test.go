@@ -523,3 +523,89 @@ func TestShortKeyRejected(t *testing.T) {
 		t.Fatal("expected short key to be rejected")
 	}
 }
+
+// A row batch-encrypted as part of a slice decrypts alone through
+// DecryptElement under the collection's own aad — the workflow behind
+// "insert many rows in one Encrypt call, SELECT one back".
+func TestElementDecryptsBatchEncryptedRow(t *testing.T) {
+	cipher := newCipher(t)
+	aad := []byte("users")
+
+	rows := []map[string]string{
+		{"email": "ada@example.com"},
+		{"email": "grace@example.com"},
+	}
+	ct, err := cipher.Encrypt(t.Context(), rows, aad)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	row := ct.([]any)[1]
+
+	got, err := cipher.DecryptElement(t.Context(), row, aad)
+	if err != nil {
+		t.Fatalf("DecryptElement: %v", err)
+	}
+	want := vcvalue.Object{{Key: "email", Value: "grace@example.com"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+
+	// Plain Decrypt must keep refusing a lone element — the container shape
+	// stays authenticated; DecryptElement is the sanctioned way in.
+	if _, err := cipher.Decrypt(t.Context(), row, aad); !errors.Is(err, vcencrypt.ErrAuthentication) {
+		t.Fatalf("Decrypt of a lone element: got %v, want ErrAuthentication", err)
+	}
+}
+
+// A row inserted alone via EncryptElement interchanges with batch writes:
+// collected into a slice it decrypts as a whole sequence, and it opens
+// individually through DecryptElement.
+func TestElementEncryptInterchangesWithBatch(t *testing.T) {
+	cipher := newCipher(t)
+	aad := []byte("users")
+
+	ct1, err := cipher.EncryptElement(t.Context(), map[string]string{"email": "ada@example.com"}, aad)
+	if err != nil {
+		t.Fatalf("EncryptElement: %v", err)
+	}
+	ct2, err := cipher.EncryptElement(t.Context(), map[string]string{"email": "grace@example.com"}, aad)
+	if err != nil {
+		t.Fatalf("EncryptElement: %v", err)
+	}
+
+	got, err := cipher.Decrypt(t.Context(), []any{ct1, ct2}, aad)
+	if err != nil {
+		t.Fatalf("Decrypt of collected elements: %v", err)
+	}
+	want := []any{
+		vcvalue.Object{{Key: "email", Value: "ada@example.com"}},
+		vcvalue.Object{{Key: "email", Value: "grace@example.com"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+// Element ciphertexts and bare (top-level) ciphertexts must not interchange
+// in either direction: Element opts a value into collection semantics; it
+// does not weaken shape authentication for values that never opted in.
+func TestElementNotInterchangeableWithBareValues(t *testing.T) {
+	cipher := newCipher(t)
+	aad := []byte("users")
+
+	bare, err := cipher.Encrypt(t.Context(), "x", aad)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	if _, err := cipher.DecryptElement(t.Context(), bare, aad); !errors.Is(err, vcencrypt.ErrAuthentication) {
+		t.Fatalf("DecryptElement of a bare ciphertext: got %v, want ErrAuthentication", err)
+	}
+
+	element, err := cipher.EncryptElement(t.Context(), "x", aad)
+	if err != nil {
+		t.Fatalf("EncryptElement: %v", err)
+	}
+	if _, err := cipher.Decrypt(t.Context(), element, aad); !errors.Is(err, vcencrypt.ErrAuthentication) {
+		t.Fatalf("Decrypt of an element ciphertext: got %v, want ErrAuthentication", err)
+	}
+}

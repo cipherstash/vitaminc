@@ -38,7 +38,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use vitaminc_aead::{Aad, Encrypt};
+use vitaminc_aead::{Aad, Element, Encrypt};
 use vitaminc_aead_value::{transport as codec, FfiValue};
 use vitaminc_encrypt::{Aes256Cipher, AesCipherText, Key};
 use zeroize::Zeroize;
@@ -198,19 +198,46 @@ pub unsafe extern "C" fn vc_encrypt(
     aad_len: u32,
 ) -> u64 {
     let (aad, val) = unsafe { (input(aad_ptr, aad_len), input(val_ptr, val_len)) };
-    catch_unwind(AssertUnwindSafe(|| encrypt(handle, aad, val)))
+    catch_unwind(AssertUnwindSafe(|| encrypt(handle, aad, val, false)))
         .unwrap_or(Err(STATUS_INTERNAL))
         .map_or_else(err_status, ok_buffer)
 }
 
-fn encrypt(handle: u32, aad: &[u8], val: &[u8]) -> Result<Vec<u8>, u32> {
+/// Like [`vc_encrypt`], but seals the value as a *sequence element* — the
+/// [`Element`] wrapper's derivation, byte-identical to what batch encryption
+/// of a sequence binds per element. A row inserted through this export
+/// interchanges with rows written by encrypting a whole sequence under the
+/// same AAD.
+///
+/// # Safety
+///
+/// All pointer/length pairs must denote readable guest memory.
+#[no_mangle]
+pub unsafe extern "C" fn vc_encrypt_element(
+    handle: u32,
+    val_ptr: *const u8,
+    val_len: u32,
+    aad_ptr: *const u8,
+    aad_len: u32,
+) -> u64 {
+    let (aad, val) = unsafe { (input(aad_ptr, aad_len), input(val_ptr, val_len)) };
+    catch_unwind(AssertUnwindSafe(|| encrypt(handle, aad, val, true)))
+        .unwrap_or(Err(STATUS_INTERNAL))
+        .map_or_else(err_status, ok_buffer)
+}
+
+fn encrypt(handle: u32, aad: &[u8], val: &[u8], as_element: bool) -> Result<Vec<u8>, u32> {
     // Decode the input value first so garbage bytes surface as an encoding
     // error even for an unknown handle.
     let value = codec::decode_value(&mut codec::Reader::new(val)).map_err(|_| STATUS_ENCODING)?;
     with_cipher(handle, |cipher| {
-        let ct: AesCipherText = value
-            .encrypt_with_aad(cipher, Aad::from_slice(aad))
-            .map_err(|_| STATUS_INTERNAL)?;
+        let aad = Aad::from_slice(aad);
+        let ct: AesCipherText = if as_element {
+            Element(value).encrypt_with_aad(cipher, aad)
+        } else {
+            value.encrypt_with_aad(cipher, aad)
+        }
+        .map_err(|_| STATUS_INTERNAL)?;
         let mut out = Vec::new();
         // Re-home the Box<dyn Any + Send> passthrough payload type to FfiValue
         // value-nodes before encoding.
@@ -236,19 +263,48 @@ pub unsafe extern "C" fn vc_decrypt(
     aad_len: u32,
 ) -> u64 {
     let (aad, ct) = unsafe { (input(aad_ptr, aad_len), input(ct_ptr, ct_len)) };
-    catch_unwind(AssertUnwindSafe(|| decrypt(handle, aad, ct)))
+    catch_unwind(AssertUnwindSafe(|| decrypt(handle, aad, ct, false)))
         .unwrap_or(Err(STATUS_INTERNAL))
         .map_or_else(err_status, ok_buffer)
 }
 
-fn decrypt(handle: u32, aad: &[u8], ct: &[u8]) -> Result<Vec<u8>, u32> {
+/// Like [`vc_decrypt`], but opens the ciphertext as a *sequence element* —
+/// the read-side counterpart of [`vc_encrypt_element`]. This is how a host
+/// decrypts a single row that was batch-encrypted as part of a sequence:
+/// the caller presents the same AAD it gave the batch encrypt, and the
+/// [`Element`] wrapper derives the element AAD internally.
+///
+/// # Safety
+///
+/// All pointer/length pairs must denote readable guest memory.
+#[no_mangle]
+pub unsafe extern "C" fn vc_decrypt_element(
+    handle: u32,
+    ct_ptr: *const u8,
+    ct_len: u32,
+    aad_ptr: *const u8,
+    aad_len: u32,
+) -> u64 {
+    let (aad, ct) = unsafe { (input(aad_ptr, aad_len), input(ct_ptr, ct_len)) };
+    catch_unwind(AssertUnwindSafe(|| decrypt(handle, aad, ct, true)))
+        .unwrap_or(Err(STATUS_INTERNAL))
+        .map_or_else(err_status, ok_buffer)
+}
+
+fn decrypt(handle: u32, aad: &[u8], ct: &[u8], as_element: bool) -> Result<Vec<u8>, u32> {
     // Decode + re-home to the Box passthrough payload type the decipher expects.
     let ct: AesCipherText =
         codec::decode_ciphertext_boxed(&mut codec::Reader::new(ct)).map_err(|_| STATUS_ENCODING)?;
     with_cipher(handle, |cipher| {
-        let value: FfiValue = cipher
-            .decrypt_with_aad(ct, Aad::from_slice(aad))
-            .map_err(|_| STATUS_AUTH)?;
+        let aad = Aad::from_slice(aad);
+        let value: FfiValue = if as_element {
+            cipher
+                .decrypt_with_aad::<Element<FfiValue>, _>(ct, aad)
+                .map(Element::into_inner)
+        } else {
+            cipher.decrypt_with_aad(ct, aad)
+        }
+        .map_err(|_| STATUS_AUTH)?;
         let mut out = Vec::new();
         codec::encode_value(value, &mut out).map_err(|_| STATUS_ENCODING)?;
         Ok(out)

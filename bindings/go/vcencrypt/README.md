@@ -154,13 +154,29 @@ for _, row := range ct.([]any) { // one map[string]any per user
 }
 ```
 
-`Decrypt` of the whole slice returns `[]any` of `vcvalue.Object`. Rows are
-independent: a single element decrypts on its own (wrapped in a one-item
-sequence, or directly as the root), which suits row-at-a-time reads. The flip
-side is that the sequence itself carries no seal — element order and
-membership are **not authenticated**, just as a map has no whole-map seal. A
-caller that needs those properties must bind them itself, e.g. a per-row AAD
-carrying the row's identity.
+`Decrypt` of the whole slice returns `[]any` of `vcvalue.Object`.
+
+Each row is sealed as an **element of the collection** — a derivation of the
+collection's AAD, not the bare AAD, so the container shape is authenticated
+(a lone value can't be forged into a sequence, nor an element re-homed to
+the top level). Row-at-a-time reads therefore go through `DecryptElement`,
+which states the element-ness in the call and derives the rest internally:
+
+```go
+// SELECT email FROM users WHERE id = 42 — one row of the batch above
+got, err := cipher.DecryptElement(ctx, map[string]any{"email": leaf}, aad)
+```
+
+The write side mirrors it: `EncryptElement` seals a single row exactly as
+batch encryption would have, so rows inserted one at a time interchange
+freely with rows written by encrypting a whole slice under the same AAD.
+(Plain `Encrypt`/`Decrypt` remain the pair for values that are the root of
+their own ciphertext, like the single-record example above.)
+
+Rows are otherwise independent: the sequence itself carries no seal —
+element order and membership are **not authenticated**, just as a map has
+no whole-map seal. A caller that needs those properties must bind them
+itself, e.g. a per-row AAD carrying the row's identity.
 
 ## Error surface
 
@@ -178,8 +194,9 @@ failure *kinds* as sentinel errors (use `errors.Is`):
 
 A cipher is a **session handle** inside the guest. `NewCipher` loads the key
 once (`vc_cipher_init`), returning a handle; `Encrypt`/`Decrypt` pass that
-handle (`vc_encrypt`/`vc_decrypt`) so the key crosses the boundary a single
-time; `Close` drops it (`vc_cipher_free`). The guest zeroizes the key bytes
+handle (`vc_encrypt`/`vc_decrypt`, with `vc_encrypt_element`/
+`vc_decrypt_element` as the sequence-element variants) so the key crosses the
+boundary a single time; `Close` drops it (`vc_cipher_free`). The guest zeroizes the key bytes
 right after building the key schedule; the Go-side key copy is wiped after
 init. Neither wipe can cover copies the Go runtime may hold — treat process
 memory as sensitive.

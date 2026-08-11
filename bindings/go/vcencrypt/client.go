@@ -79,14 +79,16 @@ func compilationCache() wazero.CompilationCache {
 type Client struct {
 	runtime wazero.Runtime
 
-	mu         sync.Mutex
-	module     api.Module
-	alloc      api.Function
-	dealloc    api.Function
-	cipherInit api.Function
-	cipherFree api.Function
-	encrypt    api.Function
-	decrypt    api.Function
+	mu             sync.Mutex
+	module         api.Module
+	alloc          api.Function
+	dealloc        api.Function
+	cipherInit     api.Function
+	cipherFree     api.Function
+	encrypt        api.Function
+	decrypt        api.Function
+	encryptElement api.Function
+	decryptElement api.Function
 }
 
 // NewClient instantiates the embedded guest module, reusing a process-wide
@@ -103,17 +105,20 @@ func NewClient(ctx context.Context) (*Client, error) {
 	}
 
 	c := &Client{
-		runtime:    runtime,
-		module:     module,
-		alloc:      module.ExportedFunction("vc_alloc"),
-		dealloc:    module.ExportedFunction("vc_dealloc"),
-		cipherInit: module.ExportedFunction("vc_cipher_init"),
-		cipherFree: module.ExportedFunction("vc_cipher_free"),
-		encrypt:    module.ExportedFunction("vc_encrypt"),
-		decrypt:    module.ExportedFunction("vc_decrypt"),
+		runtime:        runtime,
+		module:         module,
+		alloc:          module.ExportedFunction("vc_alloc"),
+		dealloc:        module.ExportedFunction("vc_dealloc"),
+		cipherInit:     module.ExportedFunction("vc_cipher_init"),
+		cipherFree:     module.ExportedFunction("vc_cipher_free"),
+		encrypt:        module.ExportedFunction("vc_encrypt"),
+		decrypt:        module.ExportedFunction("vc_decrypt"),
+		encryptElement: module.ExportedFunction("vc_encrypt_element"),
+		decryptElement: module.ExportedFunction("vc_decrypt_element"),
 	}
 	if c.alloc == nil || c.dealloc == nil || c.cipherInit == nil ||
-		c.cipherFree == nil || c.encrypt == nil || c.decrypt == nil {
+		c.cipherFree == nil || c.encrypt == nil || c.decrypt == nil ||
+		c.encryptElement == nil || c.decryptElement == nil {
 		_ = runtime.Close(ctx)
 		return nil, errors.New("vcencrypt: guest is missing required exports")
 	}
@@ -202,6 +207,42 @@ func (cph *Cipher) Decrypt(ctx context.Context, ct any, aad []byte) (any, error)
 		return nil, err
 	}
 	out, err := cph.client.call(ctx, cph.client.decrypt, cph.handle, aad, encoded)
+	if err != nil {
+		return nil, err
+	}
+	return vcvalue.Unmarshal(out)
+}
+
+// EncryptElement seals v as a *sequence element* of the logical collection
+// identified by aad — byte-identical to what Encrypt of a whole slice binds
+// per element. Use it to insert a single row into a collection whose other
+// rows were (or will be) written by batch-encrypting a slice under the same
+// aad: rows from both paths interchange freely.
+func (cph *Cipher) EncryptElement(ctx context.Context, v any, aad []byte) (any, error) {
+	encoded, err := vcvalue.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	out, err := cph.client.call(ctx, cph.client.encryptElement, cph.handle, aad, encoded)
+	if err != nil {
+		return nil, err
+	}
+	return vcvalue.UnmarshalCipherText(out)
+}
+
+// DecryptElement opens a ciphertext that was sealed as a sequence element —
+// a single row of a collection encrypted with Encrypt of a slice (or with
+// EncryptElement) under the same aad. Sequence elements are authenticated
+// against a derivation of the collection's aad, not the bare aad, so Decrypt
+// cannot open a lone row; DecryptElement performs that derivation internally.
+// As with element order, *which* element (and how many) is a caller
+// obligation, not an authenticated fact.
+func (cph *Cipher) DecryptElement(ctx context.Context, ct any, aad []byte) (any, error) {
+	encoded, err := vcvalue.MarshalCipherText(ct)
+	if err != nil {
+		return nil, err
+	}
+	out, err := cph.client.call(ctx, cph.client.decryptElement, cph.handle, aad, encoded)
 	if err != nil {
 		return nil, err
 	}
