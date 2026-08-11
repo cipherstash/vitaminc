@@ -3,6 +3,7 @@ package vcvalue_test
 import (
 	"database/sql"
 	"database/sql/driver"
+	"encoding/binary"
 	"math"
 	"reflect"
 	"testing"
@@ -475,5 +476,252 @@ func TestSealedLeafTypesScanValueRoundTrip(t *testing.T) {
 	// Non-byte sources are rejected.
 	if err := (&es).Scan("not bytes"); err == nil {
 		t.Fatal("scanning a string into SealedEmptySeq must fail")
+	}
+}
+
+// --- Malformed-input coverage for the two decoders (PR #257 review gaps).
+// Raw transport bytes are hand-built here because no Go encoder produces
+// these shapes — that unreachability is exactly why the branches were
+// untested.
+
+func u32le(n int) []byte {
+	b := make([]byte, 4)
+	binary.LittleEndian.PutUint32(b, uint32(n))
+	return b
+}
+
+// ctEntry frames one ciphertext map entry: key chunk + a 1-byte ctSingle leaf.
+func ctEntry(key string) []byte {
+	e := append(u32le(len(key)), key...)
+	e = append(e, 0x01) // ctSingle
+	e = append(e, u32le(1)...)
+	return append(e, 0xAB)
+}
+
+// decodeCipherText rejects a duplicate map key — a branch only reachable
+// from hand-crafted or cross-language transport bytes (a Go map cannot
+// produce duplicates).
+func TestUnmarshalCipherTextRejectsDuplicateKey(t *testing.T) {
+	dup := []byte{0x04} // ctMap
+	dup = append(dup, u32le(2)...)
+	dup = append(dup, ctEntry("a")...)
+	dup = append(dup, ctEntry("a")...)
+	if _, err := vcvalue.UnmarshalCipherText(dup); err == nil {
+		t.Fatal("duplicate ciphertext map key must be rejected")
+	}
+
+	// Positive control: the same framing with distinct keys decodes.
+	ok := []byte{0x04}
+	ok = append(ok, u32le(2)...)
+	ok = append(ok, ctEntry("a")...)
+	ok = append(ok, ctEntry("b")...)
+	if _, err := vcvalue.UnmarshalCipherText(ok); err != nil {
+		t.Fatalf("distinct keys should decode: %v", err)
+	}
+}
+
+// Unmarshal's recursion bound and hostile-count guard on the array/object
+// routes — the Rust codec tests all three; only the passthrough depth bomb
+// was covered on the Go side.
+func TestUnmarshalRejectsArrayAndObjectBombs(t *testing.T) {
+	// Depth bomb: 130 nested single-element arrays (> maxDepth 128).
+	var deep []byte
+	for range 130 {
+		deep = append(deep, 0x10) // tagArray
+		deep = append(deep, u32le(1)...)
+	}
+	deep = append(deep, 0x00) // tagNull
+	if _, err := vcvalue.Unmarshal(deep); err == nil {
+		t.Fatal("array depth bomb must be rejected")
+	}
+
+	// Object nesting: 130 nested one-entry objects.
+	var deepObj []byte
+	for range 130 {
+		deepObj = append(deepObj, 0x11) // tagObject
+		deepObj = append(deepObj, u32le(1)...)
+		deepObj = append(deepObj, u32le(1)...)
+		deepObj = append(deepObj, 'k')
+	}
+	deepObj = append(deepObj, 0x00)
+	if _, err := vcvalue.Unmarshal(deepObj); err == nil {
+		t.Fatal("object depth bomb must be rejected")
+	}
+
+	// Hostile count: an array claiming max-u32 items with no bytes behind it.
+	if _, err := vcvalue.Unmarshal([]byte{0x10, 0xFF, 0xFF, 0xFF, 0xFF}); err == nil {
+		t.Fatal("hostile array count must be rejected")
+	}
+}
+
+// UnmarshalCipherText's own recursion bound, hostile-count guard, and
+// trailing-byte rejection — a separate recursion from the value decoder,
+// previously untested.
+func TestUnmarshalCipherTextRejectsMalformed(t *testing.T) {
+	// Depth bomb: 130 nested one-element ctSeq.
+	var deep []byte
+	for range 130 {
+		deep = append(deep, 0x03) // ctSeq
+		deep = append(deep, u32le(1)...)
+	}
+	deep = append(deep, ctEntry("")[4:]...) // a bare ctSingle leaf
+	if _, err := vcvalue.UnmarshalCipherText(deep); err == nil {
+		t.Fatal("ciphertext depth bomb must be rejected")
+	}
+
+	// Hostile count.
+	if _, err := vcvalue.UnmarshalCipherText([]byte{0x03, 0xFF, 0xFF, 0xFF, 0xFF}); err == nil {
+		t.Fatal("hostile ciphertext count must be rejected")
+	}
+
+	// Trailing bytes after a complete node.
+	leaf := append([]byte{0x01}, u32le(1)...)
+	leaf = append(leaf, 0xAB, 0xFF) // one extra byte
+	if _, err := vcvalue.UnmarshalCipherText(leaf); err == nil {
+		t.Fatal("trailing bytes must be rejected")
+	}
+
+	// Unknown tag.
+	if _, err := vcvalue.UnmarshalCipherText([]byte{0x7F}); err == nil {
+		t.Fatal("unknown ciphertext tag must be rejected")
+	}
+}
+
+// The encodeReflect default arm: kinds with no encoding (chan/func/complex)
+// error instead of panicking or emitting garbage.
+func TestMarshalRejectsUnsupportedKind(t *testing.T) {
+	if _, err := vcvalue.Marshal(make(chan int)); err == nil {
+		t.Fatal("a channel value has no encoding and must be rejected")
+	}
+	if _, err := vcvalue.Marshal(func() {}); err == nil {
+		t.Fatal("a func value has no encoding and must be rejected")
+	}
+	if _, err := vcvalue.Marshal(complex(1, 2)); err == nil {
+		t.Fatal("a complex value has no encoding and must be rejected")
+	}
+}
+
+// encodeMap rejects non-string map keys — the transport frames keys as
+// UTF-8 chunks, so there is nothing sound to write for other key types.
+func TestMarshalRejectsNonStringMapKey(t *testing.T) {
+	if _, err := vcvalue.Marshal(map[int]string{1: "a"}); err == nil {
+		t.Fatal("map with non-string keys must be rejected")
+	}
+}
+
+// The encode-side recursion guard: an over-deep Go value fails the encode.
+// The decode side has depth-bomb coverage; this drives the same bound from
+// the writing end.
+func TestMarshalRejectsDepthBomb(t *testing.T) {
+	var v any = int64(0)
+	for range 130 { // > maxDepth (128)
+		v = []any{v}
+	}
+	if _, err := vcvalue.Marshal(v); err == nil {
+		t.Fatal("over-deep value must be rejected at encode time")
+	}
+}
+
+// Plain.Value's driver conversions: width-narrowing, the uint64 overflow
+// error, and the container-has-no-column error.
+func TestPlainValueConversions(t *testing.T) {
+	cases := []struct {
+		in   any
+		want driver.Value
+	}{
+		{nil, nil},
+		{true, true},
+		{int64(7), int64(7)},
+		{"s", "s"},
+		{[]byte{1}, []byte{1}},
+		{int32(-3), int64(-3)},
+		{uint32(9), int64(9)},
+		{float32(0.5), float64(0.5)},
+		{float64(1.5), float64(1.5)},
+		{uint64(11), int64(11)},
+	}
+	for _, c := range cases {
+		got, err := vcvalue.Plain{V: c.in}.Value()
+		if err != nil {
+			t.Fatalf("Value(%#v): %v", c.in, err)
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Fatalf("Value(%#v) = %#v, want %#v", c.in, got, c.want)
+		}
+	}
+
+	if _, err := (vcvalue.Plain{V: uint64(math.MaxInt64) + 1}).Value(); err == nil {
+		t.Fatal("uint64 above MaxInt64 must not silently truncate")
+	}
+	if _, err := (vcvalue.Plain{V: []any{int64(1)}}).Value(); err == nil {
+		t.Fatal("a container passthrough has no single-column form")
+	}
+}
+
+// The remaining Sealed.Scan arms: nil source and the non-byte error arm
+// (the byte round trip is covered with the marker types above).
+func TestSealedScanNilAndErrorArms(t *testing.T) {
+	s := vcvalue.Sealed{1, 2, 3}
+	if err := s.Scan(nil); err != nil {
+		t.Fatalf("Scan(nil): %v", err)
+	}
+	if s != nil {
+		t.Fatalf("Scan(nil) should clear the leaf, got %#v", s)
+	}
+	if err := s.Scan("not bytes"); err == nil {
+		t.Fatal("scanning a string into Sealed must fail")
+	}
+}
+
+// skipsValue writes a key (or claims an element) and never writes the value —
+// the contract violation Field/Elem must now catch at encode time, where it
+// previously surfaced only as an opaque errMalformed at decode.
+type skipsValue struct{ inSeq bool }
+
+func (s skipsValue) EncryptValue(enc vcvalue.Encoder) error {
+	if s.inSeq {
+		q := enc.Seq()
+		q.Elem() // claimed, never written
+		q.Elem().Int64(1)
+		return q.End()
+	}
+	m := enc.Map()
+	m.Field("a") // key written, value never written
+	m.Field("b").Int64(1)
+	return m.End()
+}
+
+// lastValueMissing exercises the End-side check: the final entry's value is
+// the one skipped, so no later Field/Elem call can catch it.
+type lastValueMissing struct{ inSeq bool }
+
+func (s lastValueMissing) EncryptValue(enc vcvalue.Encoder) error {
+	if s.inSeq {
+		q := enc.Seq()
+		q.Elem().Int64(1)
+		q.Elem() // claimed, never written
+		return q.End()
+	}
+	m := enc.Map()
+	m.Field("a").Int64(1)
+	m.Field("b") // key written, value never written
+	return m.End()
+}
+
+func TestEncoderCatchesSkippedValuesAtEncodeTime(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		v    any
+	}{
+		{"map middle", skipsValue{}},
+		{"map last", lastValueMissing{}},
+		{"seq middle", skipsValue{inSeq: true}},
+		{"seq last", lastValueMissing{inSeq: true}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := vcvalue.Marshal(c.v); err == nil {
+				t.Fatal("a skipped value must fail the encode")
+			}
+		})
 	}
 }
