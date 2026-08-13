@@ -4,7 +4,9 @@ use std::borrow::Cow;
 /// Trait for types that can be converted to a `ProtectedRef`.
 /// Conceptually similar to the `AsRef` trait in `std` but for `Protected` types.
 /// This prevents the inner value from being accessed directly.
-/// The trait is sealed so it cannot be implemented outside of this crate.
+/// `ProtectedRef` cannot be constructed outside this crate, so downstream
+/// implementations must delegate to an existing protected source rather than
+/// wrapping an arbitrary reference.
 ///
 /// # Implementing `AsProtectedRef`
 ///

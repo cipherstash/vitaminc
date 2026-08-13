@@ -1,0 +1,5 @@
+error[E0616]: field `0` of struct `Protected` is private
+ --> tests/ui/negative_space/protected_inner_is_private.rs:5:21
+  |
+5 |     let _ = &secret.0;
+  |                     ^ private field

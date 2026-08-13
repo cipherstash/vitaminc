@@ -1,0 +1,11 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+ --> tests/ui/negative_space/protected_ref_cannot_be_constructed.rs:5:13
+  |
+5 |     let _ = ProtectedRef(&bytes);
+  |             ^^^^^^^^^^^^
+  |
+note: constructor is not visible here due to private fields
+ --> src/as_protected_ref.rs
+  |
+  | pub struct ProtectedRef<'a, T>(&'a T)
+  |                                ^^^^^ private field

@@ -1,0 +1,13 @@
+error[E0369]: binary operation `==` cannot be applied to type `Protected<String>`
+ --> tests/ui/negative_space/protected_has_no_equality.rs:6:18
+  |
+6 |     let _ = left == right;
+  |             ---- ^^ ----- Protected<String>
+  |             |
+  |             Protected<String>
+  |
+note: `Protected<String>` does not implement `PartialEq`
+ --> src/protected/mod.rs
+  |
+  | pub struct Protected<T: Zeroize>(pub(crate) T);
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Protected<String>` is defined in another crate
