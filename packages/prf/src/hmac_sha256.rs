@@ -15,7 +15,7 @@ use hmac::{
 };
 use sha2::Sha256;
 use vitaminc_protected::{Acceptable, Controlled, DefaultScope, Protected, ProtectedDigest};
-use zeroize::ZeroizeOnDrop;
+use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 use crate::visitor::ResolvedVisitor;
 use crate::{
@@ -25,10 +25,26 @@ use crate::{
 
 type PassthroughValue = Box<dyn Any + Send + 'static>;
 
-/// RustCrypto's HMAC state is transitively zeroizing when both `hmac` and
-/// `sha2` enable their `zeroize` features, but HMAC 0.13 does not propagate
-/// the `ZeroizeOnDrop` marker to its public wrapper.
-struct ZeroizingHmacSha256(Hmac<Sha256>);
+const SHA256_BLOCK_SIZE: usize = 64;
+const SHA256_OUTPUT_SIZE: usize = 32;
+const IPAD: u8 = 0x36;
+const OPAD: u8 = 0x5C;
+
+/// HMAC-SHA256 keyed without leaving unwiped copies of key material.
+///
+/// RustCrypto's `Hmac` state wipes on drop when the `hmac` and `sha2`
+/// `zeroize` features are enabled, but its constructor normalizes the key
+/// through temporaries that are never wiped: `get_der_key`'s padded block and
+/// the ipad/opad buffer in `new_from_slice`. This type performs the same
+/// RFC 2104 keying with every key-derived buffer held in a [`Zeroizing`]
+/// allocation; the two digest states wipe themselves on drop via `sha2`'s
+/// `zeroize` feature.
+struct ZeroizingHmacSha256 {
+    /// Inner hash, initialized with `key ^ ipad`.
+    digest: Sha256,
+    /// Outer hash, initialized with `key ^ opad`.
+    opad_digest: Sha256,
+}
 
 impl KeySizeUser for ZeroizingHmacSha256 {
     type KeySize = <Hmac<Sha256> as KeySizeUser>::KeySize;
@@ -36,11 +52,33 @@ impl KeySizeUser for ZeroizingHmacSha256 {
 
 impl KeyInit for ZeroizingHmacSha256 {
     fn new(key: &Key<Self>) -> Self {
-        Self(<Hmac<Sha256> as KeyInit>::new(key))
+        Self::new_from_slice(key.as_slice()).expect("HMAC-SHA256 accepts keys of any length")
     }
 
     fn new_from_slice(key: &[u8]) -> Result<Self, hmac::digest::InvalidLength> {
-        <Hmac<Sha256> as KeyInit>::new_from_slice(key).map(Self)
+        let mut block = Zeroizing::new([0_u8; SHA256_BLOCK_SIZE]);
+        if key.len() <= SHA256_BLOCK_SIZE {
+            block[..key.len()].copy_from_slice(key);
+        } else {
+            let mut hashed = Zeroizing::new([0_u8; SHA256_OUTPUT_SIZE]);
+            let mut hasher = Sha256::default();
+            Update::update(&mut hasher, key);
+            FixedOutput::finalize_into(hasher, (&mut *hashed).into());
+            block[..hashed.len()].copy_from_slice(hashed.as_slice());
+        }
+
+        block.iter_mut().for_each(|byte| *byte ^= IPAD);
+        let mut digest = Sha256::default();
+        Update::update(&mut digest, block.as_slice());
+
+        block.iter_mut().for_each(|byte| *byte ^= IPAD ^ OPAD);
+        let mut opad_digest = Sha256::default();
+        Update::update(&mut opad_digest, block.as_slice());
+
+        Ok(Self {
+            digest,
+            opad_digest,
+        })
     }
 }
 
@@ -50,13 +88,22 @@ impl OutputSizeUser for ZeroizingHmacSha256 {
 
 impl Update for ZeroizingHmacSha256 {
     fn update(&mut self, data: &[u8]) {
-        Update::update(&mut self.0, data);
+        Update::update(&mut self.digest, data);
     }
 }
 
 impl FixedOutput for ZeroizingHmacSha256 {
     fn finalize_into(self, out: &mut Output<Self>) {
-        FixedOutput::finalize_into(self.0, out);
+        let Self {
+            digest,
+            mut opad_digest,
+        } = self;
+        // The inner hash permits forgeries if disclosed, so it is buffered in
+        // a wiped allocation.
+        let mut inner = Zeroizing::new([0_u8; SHA256_OUTPUT_SIZE]);
+        FixedOutput::finalize_into(digest, (&mut *inner).into());
+        Update::update(&mut opad_digest, inner.as_slice());
+        FixedOutput::finalize_into(opad_digest, out);
     }
 }
 
@@ -385,6 +432,12 @@ impl MapPrf for HmacMapPrf {
 #[cfg(test)]
 mod tests {
     use super::ZeroizingHmacSha256;
+    use hmac::{
+        digest::{FixedOutput, KeyInit, Update},
+        Hmac, Mac,
+    };
+    use quickcheck_macros::quickcheck;
+    use sha2::Sha256;
     use vitaminc_protected::ProtectedDigest;
     use zeroize::ZeroizeOnDrop;
 
@@ -392,5 +445,42 @@ mod tests {
     fn hmac_sha256_state_zeroizes_on_drop() {
         fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
         assert_zeroize_on_drop::<ProtectedDigest<ZeroizingHmacSha256>>();
+        // The marker impl on ZeroizingHmacSha256 is honest only while its
+        // digest states wipe themselves.
+        assert_zeroize_on_drop::<Sha256>();
+    }
+
+    fn zeroizing_hmac(key: &[u8], data: &[u8]) -> [u8; 32] {
+        let mut hmac = ZeroizingHmacSha256::new_from_slice(key).unwrap();
+        Update::update(&mut hmac, data);
+        let mut out = [0_u8; 32];
+        FixedOutput::finalize_into(hmac, (&mut out).into());
+        out
+    }
+
+    #[quickcheck]
+    fn matches_rustcrypto_hmac(key: Vec<u8>, data: Vec<u8>) -> bool {
+        let reference = {
+            let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(&key).unwrap();
+            Mac::update(&mut mac, &data);
+            mac.finalize().into_bytes()
+        };
+        zeroizing_hmac(&key, &data).as_slice() == reference.as_slice()
+    }
+
+    #[test]
+    fn matches_rustcrypto_hmac_at_key_normalization_boundaries() {
+        // Exercises both branches of key normalization deterministically:
+        // block-sized-or-smaller keys are padded, larger keys are hashed.
+        for key_len in [0, 1, 63, 64, 65, 131] {
+            let key = vec![0xaa_u8; key_len];
+            let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(&key).unwrap();
+            Mac::update(&mut mac, b"boundary");
+            assert_eq!(
+                zeroizing_hmac(&key, b"boundary").as_slice(),
+                mac.finalize().into_bytes().as_slice(),
+                "key length {key_len}"
+            );
+        }
     }
 }
