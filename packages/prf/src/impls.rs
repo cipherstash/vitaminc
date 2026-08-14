@@ -321,7 +321,14 @@ where
     {
         let context = context.into_prf_context().into_owned();
         let len = self.len();
-        let map = self
+        // HashMap iteration order is nondeterministic, so entries are sorted
+        // by their derived string key to keep results stable across runs.
+        let mut entries: Vec<(Cow<'static, str>, T)> = self
+            .into_iter()
+            .map(|(key, value)| (key.into(), value))
+            .collect();
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let map = entries
             .into_iter()
             .fold(prf.prf_map(Some(len)), |map, (key, value)| {
                 map.prf_entry(key, value, context.clone())
@@ -559,6 +566,42 @@ mod tests {
             .unwrap();
         assert_eq!(terms.len(), 2);
         assert_ne!(terms["left"], terms["right"]);
+    }
+
+    struct OrderedMapVisitor;
+
+    impl<P> PrfVisitor<[u8; 32], P> for OrderedMapVisitor {
+        type Value = Vec<(String, [u8; 32])>;
+
+        fn visit_map(self, map: MapAccess<[u8; 32], P>) -> Result<Self::Value, PrfVisitorError> {
+            map.map(|(key, node)| Ok((key, node.visit(BlockVisitor)?)))
+                .collect()
+        }
+    }
+
+    #[test]
+    fn hash_map_impl_orders_entries_deterministically() {
+        let entries = [
+            (String::from("zeta"), String::from("1")),
+            (String::from("alpha"), String::from("2")),
+            (String::from("mid"), String::from("3")),
+        ];
+        let ordered = HashMap::from(entries.clone())
+            .prf_visit(backend(), OrderedMapVisitor)
+            .into_result()
+            .unwrap();
+        let from_btree = BTreeMap::from(entries)
+            .prf_visit(backend(), OrderedMapVisitor)
+            .into_result()
+            .unwrap();
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>(),
+            ["alpha", "mid", "zeta"]
+        );
+        assert_eq!(ordered, from_btree);
     }
 
     #[test]
