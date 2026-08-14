@@ -3,7 +3,7 @@ package vcvalue
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 )
 
 // A ciphertext is made of ordinary Go values — the same dynamic shape as
@@ -100,7 +100,7 @@ func encodeCipherText(out []byte, v any, depth int) ([]byte, error) {
 		for k := range n {
 			keys = append(keys, k)
 		}
-		sort.Strings(keys)
+		slices.Sort(keys)
 		for _, k := range keys {
 			if out, err = appendChunk(out, []byte(k)); err != nil {
 				return nil, err

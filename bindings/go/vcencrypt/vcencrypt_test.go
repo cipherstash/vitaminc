@@ -609,3 +609,49 @@ func TestElementNotInterchangeableWithBareValues(t *testing.T) {
 		t.Fatalf("Decrypt of an element ciphertext: got %v, want ErrAuthentication", err)
 	}
 }
+
+// TestSealedLeafWireSize pins the leaf layout the docs promise: one version
+// byte, a 12-byte nonce, the ciphertext (one transport tag byte plus the
+// string's bytes), and a 16-byte GCM tag. The Example used to pin these
+// lengths in its output; the pin lives here now so the docs stay structural
+// while a version- or framing-byte change still fails a named test.
+func TestSealedLeafWireSize(t *testing.T) {
+	const leafOverhead = 1 /* version */ + 12 /* nonce */ + 1 /* leaf tag */ + 16 /* GCM tag */
+
+	cipher := newCipher(t)
+	ct, err := cipher.Encrypt(t.Context(), map[string]any{
+		"email": "ada@example.com",
+		"name":  "Ada Lovelace",
+	}, []byte("user:42"))
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	m := ct.(map[string]any)
+	for field, plaintext := range map[string]string{
+		"email": "ada@example.com",
+		"name":  "Ada Lovelace",
+	} {
+		leaf := m[field].(vcvalue.Sealed)
+		if got, want := len(leaf), len(plaintext)+leafOverhead; got != want {
+			t.Fatalf("%s leaf: got %d bytes, want %d", field, got, want)
+		}
+	}
+}
+
+// TestContextCancellationFailsGuestCall verifies a caller can escape via
+// context cancellation instead of queueing behind the client's serialized
+// guest calls: with WithCloseOnContextDone set, a done context fails the
+// call rather than running the guest to completion.
+func TestContextCancellationFailsGuestCall(t *testing.T) {
+	client := newClient(t)
+	cipher, err := client.NewCipher(t.Context(), testKey)
+	if err != nil {
+		t.Fatalf("NewCipher: %v", err)
+	}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := cipher.Encrypt(cancelled, "value", []byte("aad")); err == nil {
+		t.Fatal("an already-cancelled context must fail the guest call")
+	}
+}

@@ -52,7 +52,7 @@ func Example() {
 		case vcvalue.Plain:
 			fmt.Printf("  %-11s passthrough = %v\n", key, node.V)
 		case vcvalue.Sealed:
-			fmt.Printf("  %-11s sealed (%d-byte leaf)\n", key, len(node))
+			fmt.Printf("  %-11s sealed\n", key)
 		}
 	}
 
@@ -73,9 +73,9 @@ func Example() {
 	// Output:
 	// ciphertext:
 	//   created_at  passthrough = 2026-07-25
-	//   email       sealed (45-byte leaf)
+	//   email       sealed
 	//   id          passthrough = 42
-	//   name        sealed (42-byte leaf)
+	//   name        sealed
 	// decrypted:
 	//   created_at  2026-07-25 (in the clear)
 	//   email       ada@example.com
