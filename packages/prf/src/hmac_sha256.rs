@@ -277,6 +277,10 @@ impl HmacMapPrf {
             self.error = Some(PrfError::Build(error));
         }
     }
+
+    fn is_duplicate_key(&self, key: &str) -> bool {
+        self.entries.iter().any(|(existing, _)| existing == key)
+    }
 }
 
 impl MapPrf for HmacMapPrf {
@@ -308,6 +312,10 @@ impl MapPrf for HmacMapPrf {
         if self.error.is_some() {
             return self;
         }
+        if self.is_duplicate_key(&key) {
+            self.set_build_error(PrfBuildError::DuplicateKey);
+            return self;
+        }
         let entry_context = context.for_map_entry(&key);
         match value
             .prf_visit_with_context(self.backend.clone(), entry_context, ResolvedVisitor)
@@ -326,8 +334,12 @@ impl MapPrf for HmacMapPrf {
         if self.pending_key.is_some() {
             self.set_build_error(PrfBuildError::KeyWithoutValue);
         } else if self.error.is_none() {
-            self.entries
-                .push((key.into().into_owned(), ResolvedPrf::Passthrough(value)));
+            let key = key.into().into_owned();
+            if self.is_duplicate_key(&key) {
+                self.set_build_error(PrfBuildError::DuplicateKey);
+            } else {
+                self.entries.push((key, ResolvedPrf::Passthrough(value)));
+            }
         }
         self
     }

@@ -9,6 +9,8 @@ pub enum PrfBuildError {
     KeyWithoutValue,
     #[error("a map ended while a key was still waiting for a value")]
     DanglingKey,
+    #[error("a map key was supplied more than once")]
+    DuplicateKey,
     #[error("the backend rejected a boxed passthrough value")]
     InvalidPassthrough,
 }

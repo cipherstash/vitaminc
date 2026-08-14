@@ -666,3 +666,31 @@ fn structural_and_visitor_errors_remain_distinct() {
         Err(PrfError::Visitor(PrfVisitorError::UnexpectedShape))
     ));
 }
+
+#[test]
+fn duplicate_map_keys_are_rejected() {
+    let duplicated = local()
+        .prf_map(None)
+        .prf_entry("email", "a@example.com", PrfContext::empty())
+        .prf_entry("email", "b@example.com", PrfContext::empty())
+        .end(ResolvedVisitor)
+        .into_result();
+    assert!(matches!(
+        duplicated,
+        Err(PrfError::Build(PrfBuildError::DuplicateKey))
+    ));
+}
+
+#[test]
+fn duplicate_passthrough_map_keys_are_rejected() {
+    let duplicated = local()
+        .prf_map(None)
+        .prf_entry("field", "value", PrfContext::empty())
+        .passthrough_entry("field", Box::new(1_u32))
+        .end(ResolvedVisitor)
+        .into_result();
+    assert!(matches!(
+        duplicated,
+        Err(PrfError::Build(PrfBuildError::DuplicateKey))
+    ));
+}
