@@ -172,9 +172,8 @@ macro_rules! protected_integer_value {
                 V: PrfVisitor<P::Block, P::Passthrough>,
                 C: IntoPrfContext<'a>,
             {
-                let bytes = Protected::new(self.risky_ref().to_le_bytes());
                 prf.prf_bytes_array(
-                    bytes,
+                    self.map(|value| value.to_le_bytes()),
                     $encoding,
                     context.into_prf_context().into_owned(),
                     visitor,

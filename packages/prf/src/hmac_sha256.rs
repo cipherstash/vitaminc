@@ -14,7 +14,7 @@ use hmac::{
     Hmac,
 };
 use sha2::Sha256;
-use vitaminc_protected::{Controlled, Protected, ProtectedDigest};
+use vitaminc_protected::{Acceptable, Controlled, DefaultScope, Protected, ProtectedDigest};
 use zeroize::ZeroizeOnDrop;
 
 use crate::visitor::ResolvedVisitor;
@@ -105,12 +105,11 @@ impl HmacSha256Prf {
         Self::new(Protected::new(key.risky_ref().to_vec()))
     }
 
-    fn derive(
-        &self,
-        data: &Protected<Vec<u8>>,
-        encoding: PrfEncoding,
-        context: &PrfContext<'_>,
-    ) -> [u8; 32] {
+    fn derive<T>(&self, data: &T, encoding: PrfEncoding, context: &PrfContext<'_>) -> [u8; 32]
+    where
+        T: Controlled + Acceptable<DefaultScope>,
+        T::Inner: AsRef<[u8]>,
+    {
         let mut hmac: ProtectedDigest<ZeroizingHmacSha256> =
             ProtectedDigest::new_with_key(self.key.as_ref())
                 .expect("HMAC-SHA256 accepts keys of any length");
@@ -122,7 +121,7 @@ impl HmacSha256Prf {
         hmac.update_public(encoding.as_bytes());
         hmac.update_public(&(context.as_bytes().len() as u64).to_le_bytes());
         hmac.update_public(context.as_bytes());
-        hmac.update_public(&(data.risky_ref().len() as u64).to_le_bytes());
+        hmac.update_public(&(data.risky_ref().as_ref().len() as u64).to_le_bytes());
         hmac.update(data);
 
         let mut block = [0_u8; 32];
@@ -151,6 +150,22 @@ impl Prf for HmacSha256Prf {
     fn prf_bytes_vec<V>(
         self,
         data: Protected<Vec<u8>>,
+        encoding: PrfEncoding,
+        context: PrfContext<'static>,
+        visitor: V,
+    ) -> Self::Ok<V::Value>
+    where
+        V: PrfVisitor<Self::Block, Self::Passthrough>,
+    {
+        let block = self.derive(&data, encoding, &context);
+        Self::resolved(visitor.visit_block(block).map_err(PrfError::Visitor))
+    }
+
+    // Overrides the Vec-copying default: fixed-size leaves stream into the
+    // digest without an intermediate heap allocation.
+    fn prf_bytes_array<const N: usize, V>(
+        self,
+        data: Protected<[u8; N]>,
         encoding: PrfEncoding,
         context: PrfContext<'static>,
         visitor: V,
