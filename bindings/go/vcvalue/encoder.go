@@ -44,13 +44,6 @@ type Plain struct {
 type encState struct {
 	buf []byte
 	err error
-	// nodes counts completed value nodes (terminals, and containers at their
-	// End). MapEncoder.Field and SeqEncoder.Elem record it to verify their
-	// "write exactly one value before the next entry" contract at encode
-	// time — without this, a skipped value shifts the wire (the next key
-	// parses as the missing value) and only surfaces as an opaque
-	// errMalformed at decode.
-	nodes int
 }
 
 func (s *encState) fail(err error) {
@@ -71,17 +64,32 @@ func (s *encState) fail(err error) {
 type Encoder struct {
 	st    *encState
 	depth int
+	// done points at the completion counter for the slot this Encoder writes
+	// into (a container's current element/entry, or the root). Terminals and
+	// container Ends increment it; the slot's owner then verifies exactly one
+	// completion. This is per-slot on purpose: a global counter would let a
+	// completed *descendant* (e.g. a terminal inside an un-Ended nested
+	// container) stand in for the slot's own value, shifting the wire and
+	// surfacing only as an opaque errMalformed at decode.
+	done *int
 }
 
 func (e Encoder) push(b ...byte) {
 	e.st.buf = append(e.st.buf, b...)
 }
 
+// complete records that this Encoder's slot received one full value.
+func (e Encoder) complete() {
+	if e.done != nil {
+		*e.done++
+	}
+}
+
 // Null records the cross-language null (Go nil, JS null, Python None).
 func (e Encoder) Null() {
 	if e.st.err == nil {
 		e.push(tagNull)
-		e.st.nodes++
+		e.complete()
 	}
 }
 
@@ -91,7 +99,7 @@ func (e Encoder) Null() {
 func (e Encoder) Undefined() {
 	if e.st.err == nil {
 		e.push(tagUndefined)
-		e.st.nodes++
+		e.complete()
 	}
 }
 
@@ -105,7 +113,7 @@ func (e Encoder) Bool(b bool) {
 	} else {
 		e.push(tagFalse)
 	}
-	e.st.nodes++
+	e.complete()
 }
 
 // Float64 records an IEEE-754 double. Distinct from the integer channels: it
@@ -117,7 +125,7 @@ func (e Encoder) Float64(f float64) {
 	}
 	e.push(tagFloat64)
 	e.st.buf = binary.LittleEndian.AppendUint64(e.st.buf, math.Float64bits(f))
-	e.st.nodes++
+	e.complete()
 }
 
 // Float32 records an IEEE-754 single. For schema fidelity with float4 at the
@@ -128,7 +136,7 @@ func (e Encoder) Float32(f float32) {
 	}
 	e.push(tagFloat32)
 	e.st.buf = binary.LittleEndian.AppendUint32(e.st.buf, math.Float32bits(f))
-	e.st.nodes++
+	e.complete()
 }
 
 // Int32 records a signed 32-bit integer. For schema fidelity with int4 at
@@ -139,7 +147,7 @@ func (e Encoder) Int32(i int32) {
 	}
 	e.push(tagInt32)
 	e.st.buf = binary.LittleEndian.AppendUint32(e.st.buf, uint32(i))
-	e.st.nodes++
+	e.complete()
 }
 
 // Int64 records a signed 64-bit integer. Kept distinct from Float64 so
@@ -150,7 +158,7 @@ func (e Encoder) Int64(i int64) {
 	}
 	e.push(tagInt64)
 	e.st.buf = binary.LittleEndian.AppendUint64(e.st.buf, uint64(i))
-	e.st.nodes++
+	e.complete()
 }
 
 // UInt32 records an unsigned 32-bit integer. For schema fidelity with the
@@ -161,7 +169,7 @@ func (e Encoder) UInt32(u uint32) {
 	}
 	e.push(tagUint32)
 	e.st.buf = binary.LittleEndian.AppendUint32(e.st.buf, u)
-	e.st.nodes++
+	e.complete()
 }
 
 // UInt64 records an unsigned 64-bit integer. Values above math.MaxInt64 are
@@ -172,7 +180,7 @@ func (e Encoder) UInt64(u uint64) {
 	}
 	e.push(tagUint64)
 	e.st.buf = binary.LittleEndian.AppendUint64(e.st.buf, u)
-	e.st.nodes++
+	e.complete()
 }
 
 // String records a UTF-8 string. Invalid UTF-8 fails the encode.
@@ -189,7 +197,7 @@ func (e Encoder) String(s string) {
 		e.st.fail(err)
 	} else {
 		e.st.buf = buf
-		e.st.nodes++
+		e.complete()
 	}
 }
 
@@ -203,7 +211,7 @@ func (e Encoder) Bytes(b []byte) {
 		e.st.fail(err)
 	} else {
 		e.st.buf = buf
-		e.st.nodes++
+		e.complete()
 	}
 }
 
@@ -225,12 +233,14 @@ func (e Encoder) Passthrough() Encoder {
 			e.push(tagPassthrough)
 		}
 	}
-	return Encoder{st: e.st, depth: e.depth + 1}
+	// The passthrough marker and its wrapped value form ONE value in this
+	// Encoder's slot, so the wrapped value completes the same counter.
+	return Encoder{st: e.st, depth: e.depth + 1, done: e.done}
 }
 
 // Seq begins a sequence. Call Elem once per element and End when done.
 func (e Encoder) Seq() *SeqEncoder {
-	s := &SeqEncoder{st: e.st, depth: e.depth + 1}
+	s := &SeqEncoder{st: e.st, depth: e.depth + 1, done: e.done}
 	if e.st.err != nil {
 		return s
 	}
@@ -247,7 +257,7 @@ func (e Encoder) Seq() *SeqEncoder {
 // Map begins a string-keyed map. Call Field once per entry and End when
 // done. Keys preserve insertion order and are UTF-8 validated.
 func (e Encoder) Map() *MapEncoder {
-	m := &MapEncoder{st: e.st, depth: e.depth + 1}
+	m := &MapEncoder{st: e.st, depth: e.depth + 1, done: e.done}
 	if e.st.err != nil {
 		return m
 	}
@@ -268,37 +278,49 @@ type SeqEncoder struct {
 	depth  int
 	lenOff int
 	count  int
-	// mark is st.nodes as of the last Elem call — the next Elem (or End)
-	// verifies at least one value node completed since, so a skipped element
-	// fails here at encode time instead of as errMalformed at decode.
-	mark int
+	// done is the enclosing slot's completion counter (see Encoder.done);
+	// End increments it — the sequence is one value in its parent's slot.
+	done *int
+	// childDone counts completions of this sequence's own element slots.
+	// Elem and End verify childDone == count, so a skipped element, an
+	// un-Ended nested container, or a doubly-written element fails here at
+	// encode time instead of as errMalformed at decode.
+	childDone int
+}
+
+// checkPrev verifies the previous element slot completed exactly once.
+func (s *SeqEncoder) checkPrev() {
+	if s.childDone > s.count {
+		s.st.fail(fmt.Errorf("vcvalue: more than one value was written for sequence element %d", s.count-1))
+	} else if s.count > 0 && s.childDone < s.count {
+		s.st.fail(fmt.Errorf("vcvalue: sequence element %d was never completed", s.count-1))
+	}
 }
 
 // Elem returns an Encoder for the next element. Write the element fully
-// (one channel) before calling Elem again.
+// (one channel, containers Ended) before calling Elem again.
 func (s *SeqEncoder) Elem() Encoder {
 	if s.st.err == nil {
-		if s.count > 0 && s.st.nodes == s.mark {
-			s.st.fail(errors.New("vcvalue: previous sequence element was never written"))
-		} else {
-			s.mark = s.st.nodes
+		s.checkPrev()
+		if s.st.err == nil {
 			s.count++
 		}
 	}
-	return Encoder{st: s.st, depth: s.depth}
+	return Encoder{st: s.st, depth: s.depth, done: &s.childDone}
 }
 
 // End finalizes the sequence, writing its element count, and returns the
 // first error recorded during the whole encode (if any).
 func (s *SeqEncoder) End() error {
-	if s.st.err == nil && s.count > 0 && s.st.nodes == s.mark {
-		s.st.fail(errors.New("vcvalue: last sequence element was never written"))
+	if s.st.err == nil {
+		s.checkPrev()
 	}
 	err := patchLen(s.st, s.lenOff, s.count)
 	if err == nil {
-		// The sequence itself is one completed value node for any enclosing
-		// container's contract check.
-		s.st.nodes++
+		// The sequence itself is one completed value in the enclosing slot.
+		if s.done != nil {
+			*s.done++
+		}
 	}
 	return err
 }
@@ -310,44 +332,62 @@ type MapEncoder struct {
 	depth  int
 	lenOff int
 	count  int
-	// mark mirrors SeqEncoder.mark: st.nodes as of the last Field call, so a
-	// key whose value was never written fails at encode time — otherwise the
-	// wire shifts and the next key parses as the missing value, surfacing
-	// only as an opaque errMalformed at decode.
-	mark int
+	// done is the enclosing slot's completion counter (see Encoder.done);
+	// End increments it — the map is one value in its parent's slot.
+	done *int
+	// childDone mirrors SeqEncoder.childDone: completions of this map's own
+	// entry slots. Field and End verify childDone == count, so a key whose
+	// value was skipped, left as an un-Ended container, or written twice
+	// fails at encode time — otherwise the wire shifts and the next key
+	// parses as the missing value, surfacing only as errMalformed at decode.
+	childDone int
+	// lastKey is the most recent Field key, kept so contract violations name
+	// the key whose value slot misbehaved.
+	lastKey string
+}
+
+// checkPrev verifies the previous entry's value slot completed exactly once.
+func (m *MapEncoder) checkPrev() {
+	if m.childDone > m.count {
+		m.st.fail(fmt.Errorf("vcvalue: more than one value was written for key %q", m.lastKey))
+	} else if m.count > 0 && m.childDone < m.count {
+		m.st.fail(fmt.Errorf("vcvalue: value for key %q was never completed", m.lastKey))
+	}
 }
 
 // Field writes an entry key and returns an Encoder for its value. Write the
-// value fully (one channel) before calling Field again. Keys are UTF-8
-// validated; insertion order is preserved on the wire.
+// value fully (one channel, containers Ended) before calling Field again.
+// Keys are UTF-8 validated; insertion order is preserved on the wire.
 func (m *MapEncoder) Field(key string) Encoder {
 	if m.st.err == nil {
-		if m.count > 0 && m.st.nodes == m.mark {
-			m.st.fail(fmt.Errorf("vcvalue: value for the entry before %q was never written", key))
-		} else if !utf8.ValidString(key) {
+		m.checkPrev()
+	}
+	if m.st.err == nil {
+		if !utf8.ValidString(key) {
 			m.st.fail(errors.New("vcvalue: object key is not valid UTF-8"))
 		} else if buf, err := appendChunk(m.st.buf, []byte(key)); err != nil {
 			m.st.fail(err)
 		} else {
 			m.st.buf = buf
-			m.mark = m.st.nodes
+			m.lastKey = key
 			m.count++
 		}
 	}
-	return Encoder{st: m.st, depth: m.depth}
+	return Encoder{st: m.st, depth: m.depth, done: &m.childDone}
 }
 
 // End finalizes the map, writing its entry count, and returns the first
 // error recorded during the whole encode (if any).
 func (m *MapEncoder) End() error {
-	if m.st.err == nil && m.count > 0 && m.st.nodes == m.mark {
-		m.st.fail(errors.New("vcvalue: value for the last map entry was never written"))
+	if m.st.err == nil {
+		m.checkPrev()
 	}
 	err := patchLen(m.st, m.lenOff, m.count)
 	if err == nil {
-		// The map itself is one completed value node for any enclosing
-		// container's contract check.
-		m.st.nodes++
+		// The map itself is one completed value in the enclosing slot.
+		if m.done != nil {
+			*m.done++
+		}
 	}
 	return err
 }
@@ -368,8 +408,15 @@ func patchLen(st *encState, off, count int) error {
 // the encode counterpart of Unmarshal and the path Client.Encrypt uses.
 func Marshal(v any) ([]byte, error) {
 	st := &encState{}
-	if err := Encode(Encoder{st: st}, v); err != nil {
+	var root int
+	if err := Encode(Encoder{st: st, done: &root}, v); err != nil {
 		return nil, err
+	}
+	// The reflection paths always write exactly one value; only an
+	// Encryptable can leave the root empty (or an un-Ended container) or
+	// write more than once.
+	if root != 1 {
+		return nil, fmt.Errorf("vcvalue: encode must complete exactly one root value, completed %d", root)
 	}
 	return st.buf, nil
 }
@@ -539,7 +586,8 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 			enc.st.fail(errors.New("vcvalue: value is nested too deeply"))
 			return
 		}
-		encodeReflect(Encoder{st: enc.st, depth: enc.depth + 1}, rv.Elem())
+		// Same slot: the dereferenced value completes the pointer's counter.
+		encodeReflect(Encoder{st: enc.st, depth: enc.depth + 1, done: enc.done}, rv.Elem())
 	default:
 		enc.st.fail(fmt.Errorf("vcvalue: cannot encode value of kind %s", rv.Kind()))
 	}

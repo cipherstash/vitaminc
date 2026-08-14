@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
@@ -708,19 +709,88 @@ func (s lastValueMissing) EncryptValue(enc vcvalue.Encoder) error {
 	return m.End()
 }
 
+// unclosedNested completes a terminal *inside* a nested container but never
+// Ends the container — the slot itself is incomplete even though a descendant
+// value finished, so a per-slot (not global) completion check is required.
+type unclosedNested struct{ inSeq bool }
+
+func (u unclosedNested) EncryptValue(enc vcvalue.Encoder) error {
+	if u.inSeq {
+		q := enc.Seq()
+		inner := q.Elem().Seq()
+		inner.Elem().Int64(1) // inner.End() never called
+		q.Elem().Int64(2)
+		return q.End()
+	}
+	m := enc.Map()
+	inner := m.Field("a").Seq()
+	inner.Elem().Int64(1) // inner.End() never called
+	m.Field("b").Int64(2)
+	return m.End()
+}
+
+// doubleWrite pushes two terminals through one element/entry Encoder,
+// producing an extra value node the container's count doesn't account for.
+type doubleWrite struct{ inSeq bool }
+
+func (d doubleWrite) EncryptValue(enc vcvalue.Encoder) error {
+	if d.inSeq {
+		q := enc.Seq()
+		e := q.Elem()
+		e.Int64(1)
+		e.Int64(2) // second value in the same element slot
+		return q.End()
+	}
+	m := enc.Map()
+	f := m.Field("a")
+	f.Int64(1)
+	f.Int64(2) // second value in the same entry slot
+	return m.End()
+}
+
+// rootMiscount writes zero or several values at the root slot.
+type rootMiscount struct{ writes int }
+
+func (r rootMiscount) EncryptValue(enc vcvalue.Encoder) error {
+	for i := 0; i < r.writes; i++ {
+		enc.Int64(int64(i))
+	}
+	return nil
+}
+
+// unclosedRoot leaves the root container un-Ended.
+type unclosedRoot struct{}
+
+func (unclosedRoot) EncryptValue(enc vcvalue.Encoder) error {
+	enc.Seq().Elem().Int64(1) // End() never called
+	return nil
+}
+
 func TestEncoderCatchesSkippedValuesAtEncodeTime(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		v    any
+		want string // substring the diagnostic must carry
 	}{
-		{"map middle", skipsValue{}},
-		{"map last", lastValueMissing{}},
-		{"seq middle", skipsValue{inSeq: true}},
-		{"seq last", lastValueMissing{inSeq: true}},
+		{"map middle", skipsValue{}, `key "a"`},
+		{"map last", lastValueMissing{}, `key "b"`},
+		{"seq middle", skipsValue{inSeq: true}, "element 0"},
+		{"seq last", lastValueMissing{inSeq: true}, "element 1"},
+		{"map unclosed nested container", unclosedNested{}, `key "a"`},
+		{"seq unclosed nested container", unclosedNested{inSeq: true}, "element 0"},
+		{"map double write", doubleWrite{}, `key "a"`},
+		{"seq double write", doubleWrite{inSeq: true}, "element 0"},
+		{"root zero values", rootMiscount{writes: 0}, "root"},
+		{"root two values", rootMiscount{writes: 2}, "root"},
+		{"root unclosed container", unclosedRoot{}, "root"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := vcvalue.Marshal(c.v); err == nil {
-				t.Fatal("a skipped value must fail the encode")
+			_, err := vcvalue.Marshal(c.v)
+			if err == nil {
+				t.Fatal("a contract violation must fail the encode")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("diagnostic %q does not name the offending slot (want substring %q)", err, c.want)
 			}
 		})
 	}

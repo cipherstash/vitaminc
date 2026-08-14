@@ -123,9 +123,13 @@ func encodeCipherText(out []byte, v any, depth int) ([]byte, error) {
 		// recursion budget with the surrounding ciphertext (depth+1),
 		// mirroring the Rust CT_PASSTHROUGH framing.
 		st := &encState{buf: out}
-		encodeAny(Encoder{st: st, depth: depth + 1}, n.V)
+		var done int
+		encodeAny(Encoder{st: st, depth: depth + 1, done: &done}, n.V)
 		if st.err != nil {
 			return nil, st.err
+		}
+		if done != 1 {
+			return nil, fmt.Errorf("vcvalue: passthrough payload must complete exactly one value, completed %d", done)
 		}
 		return st.buf, nil
 	default:
