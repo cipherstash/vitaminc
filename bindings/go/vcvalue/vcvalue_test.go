@@ -766,6 +766,42 @@ func (unclosedRoot) EncryptValue(enc vcvalue.Encoder) error {
 	return nil
 }
 
+// The passthrough payload path in encodeCipherText applies the same
+// exactly-one rule as Marshal's root slot; without this, a malformed payload
+// would emit wire bytes that UnmarshalCipherText only rejects later as an
+// opaque errMalformed.
+func TestMarshalCipherTextRejectsPayloadMiscount(t *testing.T) {
+	for _, v := range []any{
+		vcvalue.Plain{V: rootMiscount{writes: 0}},
+		vcvalue.Plain{V: rootMiscount{writes: 2}},
+		vcvalue.Plain{V: unclosedRoot{}},
+	} {
+		if _, err := vcvalue.MarshalCipherText(v); err == nil {
+			t.Fatalf("malformed passthrough payload %#v must fail the encode", v)
+		}
+	}
+}
+
+// missingPassthroughPayload writes a Passthrough marker into a sequence slot
+// but never the wrapped value — the passthrough-specific skipped-value case.
+type missingPassthroughPayload struct{}
+
+func (missingPassthroughPayload) EncryptValue(enc vcvalue.Encoder) error {
+	s := enc.Seq()
+	s.Elem().Passthrough() // marker written, payload omitted
+	return s.End()
+}
+
+func TestEncoderPassthroughRequiresWrappedValue(t *testing.T) {
+	_, err := vcvalue.Marshal(missingPassthroughPayload{})
+	if err == nil {
+		t.Fatal("passthrough without a wrapped value must fail at encode time")
+	}
+	if !strings.Contains(err.Error(), "element 0") {
+		t.Fatalf("diagnostic %q should name the offending element", err)
+	}
+}
+
 func TestEncoderCatchesSkippedValuesAtEncodeTime(t *testing.T) {
 	for _, c := range []struct {
 		name string
