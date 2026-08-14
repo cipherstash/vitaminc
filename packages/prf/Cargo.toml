@@ -12,14 +12,10 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-hmac = { version = "0.13.0", features = ["zeroize"] }
 mutants = "0.0.4"
-sha2 = { version = "0.11.0", features = ["zeroize"] }
 thiserror = { workspace = true }
 vitaminc-protected = { version = "0.2.0-pre.1", path = "../protected" }
-zeroize = { workspace = true }
 
 [dev-dependencies]
-futures = "0.3.31"
 quickcheck = "1.1.0"
 quickcheck_macros = "1.2.0"

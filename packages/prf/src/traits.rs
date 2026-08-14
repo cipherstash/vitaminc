@@ -3,9 +3,7 @@ use std::{any::Any, borrow::Cow, future::IntoFuture};
 use vitaminc_protected::{Controlled, Protected};
 
 use crate::BlockVisitor;
-use crate::{
-    IntoPrfContext, PrfContext, PrfEncoding, PrfError, PrfVisitor, PrfVisitorError, ResolvedPrf,
-};
+use crate::{IntoPrfContext, PrfContext, PrfEncoding, PrfError, PrfVisitor};
 
 /// A type that can describe its structure to a [`Prf`] backend.
 ///
@@ -214,15 +212,4 @@ pub trait MapPrf: Sized {
     fn end<V>(self, visitor: V) -> <Self::Prf as Prf>::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>;
-}
-
-/// Helper for backend implementations to apply a visitor to a resolved node.
-pub(crate) fn apply_visitor<Block, Passthrough, V>(
-    node: ResolvedPrf<Block, Passthrough>,
-    visitor: V,
-) -> Result<V::Value, PrfVisitorError>
-where
-    V: PrfVisitor<Block, Passthrough>,
-{
-    node.visit(visitor)
 }

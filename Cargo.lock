@@ -2545,15 +2545,11 @@ dependencies = [
 name = "vitaminc-prf"
 version = "0.2.0-pre.1"
 dependencies = [
- "futures",
- "hmac",
  "mutants",
  "quickcheck",
  "quickcheck_macros",
- "sha2",
  "thiserror",
  "vitaminc-protected",
- "zeroize",
 ]
 
 [[package]]

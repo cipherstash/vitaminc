@@ -368,13 +368,14 @@ mod tests {
     use vitaminc_protected::Protected;
 
     use crate::{
-        BlockVisitor, HmacSha256Prf, MapAccess, PrfValue, PrfVisitor, PrfVisitorError, SeqAccess,
+        test_backend::MockPrf, BlockVisitor, MapAccess, PrfValue, PrfVisitor, PrfVisitorError,
+        SeqAccess,
     };
 
     use super::Passthrough;
 
-    fn backend() -> HmacSha256Prf {
-        HmacSha256Prf::new(Protected::new((0_u8..32).collect()))
+    fn backend() -> MockPrf {
+        MockPrf
     }
 
     fn term<T: PrfValue>(value: T) -> [u8; 32] {
