@@ -47,6 +47,10 @@ name = "vitaminc-prf"
 version_group = "vitaminc"
 
 [[package]]
+name = "vitaminc-hmac"
+version_group = "vitaminc"
+
+[[package]]
 name = "vitaminc-protected"
 version_group = "vitaminc"
 

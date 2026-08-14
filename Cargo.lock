@@ -2440,6 +2440,7 @@ dependencies = [
  "vitaminc-aead",
  "vitaminc-async-traits",
  "vitaminc-encrypt",
+ "vitaminc-hmac",
  "vitaminc-kms",
  "vitaminc-permutation",
  "vitaminc-prf",
@@ -2502,6 +2503,20 @@ dependencies = [
  "vitaminc-protected",
  "vitaminc-random",
  "wasm-bindgen-test",
+ "zeroize",
+]
+
+[[package]]
+name = "vitaminc-hmac"
+version = "0.2.0-pre.1"
+dependencies = [
+ "futures",
+ "hmac",
+ "quickcheck",
+ "quickcheck_macros",
+ "sha2",
+ "vitaminc-prf",
+ "vitaminc-protected",
  "zeroize",
 ]
 
