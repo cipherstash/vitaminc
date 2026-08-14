@@ -1,0 +1,214 @@
+error[E0277]: the trait bound `Untrusted: vitaminc_protected::private::ControlledPrivate` is not satisfied
+  --> tests/ui/negative_space/controlled_is_sealed.rs:15:5
+   |
+15 |     fn risky_unwrap(self) -> Self::Inner { self.0 }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `vitaminc_protected::private::ControlledPrivate` is not implemented for `Untrusted`
+  --> tests/ui/negative_space/controlled_is_sealed.rs:4:1
+   |
+ 4 | struct Untrusted(Vec<u8>);
+   | ^^^^^^^^^^^^^^^^
+help: the following other types implement trait `vitaminc_protected::private::ControlledPrivate`
+  --> src/equatable/mod.rs
+   |
+   | impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Equatable<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Equatable<T>`
+   |
+  ::: src/exportable/mod.rs
+   |
+   | impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Exportable<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Exportable<T>`
+   |
+  ::: src/protected/mod.rs
+   |
+   | impl<T: Zeroize> ControlledPrivate for Protected<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Protected<T>`
+   |
+  ::: src/usage/mod.rs
+   |
+   | impl<T: ControlledPrivate, Scope> ControlledPrivate for Usage<T, Scope> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Usage<T, Scope>`
+note: required by a bound in `Controlled`
+  --> src/controlled.rs
+   |
+   | pub trait Controlled: ControlledPrivate + Zeroize {
+   |                       ^^^^^^^^^^^^^^^^^ required by this bound in `Controlled`
+   = note: `Controlled` is a "sealed trait", because to implement it you also need to implement `vitaminc_protected::private::ControlledPrivate`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it
+   = help: the following types implement the trait:
+             vitaminc_protected::Equatable<T>
+             vitaminc_protected::Exportable<T>
+             vitaminc_protected::Protected<T>
+             vitaminc_protected::Usage<T, Scope>
+
+error[E0277]: the trait bound `Untrusted: vitaminc_protected::private::ControlledPrivate` is not satisfied
+  --> tests/ui/negative_space/controlled_is_sealed.rs:16:5
+   |
+16 |     fn init_from_inner(inner: Self::Inner) -> Self { Self(inner) }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `vitaminc_protected::private::ControlledPrivate` is not implemented for `Untrusted`
+  --> tests/ui/negative_space/controlled_is_sealed.rs:4:1
+   |
+ 4 | struct Untrusted(Vec<u8>);
+   | ^^^^^^^^^^^^^^^^
+help: the following other types implement trait `vitaminc_protected::private::ControlledPrivate`
+  --> src/equatable/mod.rs
+   |
+   | impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Equatable<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Equatable<T>`
+   |
+  ::: src/exportable/mod.rs
+   |
+   | impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Exportable<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Exportable<T>`
+   |
+  ::: src/protected/mod.rs
+   |
+   | impl<T: Zeroize> ControlledPrivate for Protected<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Protected<T>`
+   |
+  ::: src/usage/mod.rs
+   |
+   | impl<T: ControlledPrivate, Scope> ControlledPrivate for Usage<T, Scope> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Usage<T, Scope>`
+note: required by a bound in `Controlled`
+  --> src/controlled.rs
+   |
+   | pub trait Controlled: ControlledPrivate + Zeroize {
+   |                       ^^^^^^^^^^^^^^^^^ required by this bound in `Controlled`
+   = note: `Controlled` is a "sealed trait", because to implement it you also need to implement `vitaminc_protected::private::ControlledPrivate`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it
+   = help: the following types implement the trait:
+             vitaminc_protected::Equatable<T>
+             vitaminc_protected::Exportable<T>
+             vitaminc_protected::Protected<T>
+             vitaminc_protected::Usage<T, Scope>
+
+error[E0277]: the trait bound `Untrusted: vitaminc_protected::private::ControlledPrivate` is not satisfied
+  --> tests/ui/negative_space/controlled_is_sealed.rs:17:5
+   |
+17 |     fn risky_ref(&self) -> &Self::Inner { &self.0 }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `vitaminc_protected::private::ControlledPrivate` is not implemented for `Untrusted`
+  --> tests/ui/negative_space/controlled_is_sealed.rs:4:1
+   |
+ 4 | struct Untrusted(Vec<u8>);
+   | ^^^^^^^^^^^^^^^^
+help: the following other types implement trait `vitaminc_protected::private::ControlledPrivate`
+  --> src/equatable/mod.rs
+   |
+   | impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Equatable<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Equatable<T>`
+   |
+  ::: src/exportable/mod.rs
+   |
+   | impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Exportable<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Exportable<T>`
+   |
+  ::: src/protected/mod.rs
+   |
+   | impl<T: Zeroize> ControlledPrivate for Protected<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Protected<T>`
+   |
+  ::: src/usage/mod.rs
+   |
+   | impl<T: ControlledPrivate, Scope> ControlledPrivate for Usage<T, Scope> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Usage<T, Scope>`
+note: required by a bound in `Controlled`
+  --> src/controlled.rs
+   |
+   | pub trait Controlled: ControlledPrivate + Zeroize {
+   |                       ^^^^^^^^^^^^^^^^^ required by this bound in `Controlled`
+   = note: `Controlled` is a "sealed trait", because to implement it you also need to implement `vitaminc_protected::private::ControlledPrivate`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it
+   = help: the following types implement the trait:
+             vitaminc_protected::Equatable<T>
+             vitaminc_protected::Exportable<T>
+             vitaminc_protected::Protected<T>
+             vitaminc_protected::Usage<T, Scope>
+
+error[E0277]: the trait bound `Untrusted: vitaminc_protected::private::ControlledPrivate` is not satisfied
+  --> tests/ui/negative_space/controlled_is_sealed.rs:18:5
+   |
+18 |     fn inner_mut(&mut self) -> &mut Self::Inner { &mut self.0 }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `vitaminc_protected::private::ControlledPrivate` is not implemented for `Untrusted`
+  --> tests/ui/negative_space/controlled_is_sealed.rs:4:1
+   |
+ 4 | struct Untrusted(Vec<u8>);
+   | ^^^^^^^^^^^^^^^^
+help: the following other types implement trait `vitaminc_protected::private::ControlledPrivate`
+  --> src/equatable/mod.rs
+   |
+   | impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Equatable<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Equatable<T>`
+   |
+  ::: src/exportable/mod.rs
+   |
+   | impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Exportable<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Exportable<T>`
+   |
+  ::: src/protected/mod.rs
+   |
+   | impl<T: Zeroize> ControlledPrivate for Protected<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Protected<T>`
+   |
+  ::: src/usage/mod.rs
+   |
+   | impl<T: ControlledPrivate, Scope> ControlledPrivate for Usage<T, Scope> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Usage<T, Scope>`
+note: required by a bound in `Controlled`
+  --> src/controlled.rs
+   |
+   | pub trait Controlled: ControlledPrivate + Zeroize {
+   |                       ^^^^^^^^^^^^^^^^^ required by this bound in `Controlled`
+   = note: `Controlled` is a "sealed trait", because to implement it you also need to implement `vitaminc_protected::private::ControlledPrivate`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it
+   = help: the following types implement the trait:
+             vitaminc_protected::Equatable<T>
+             vitaminc_protected::Exportable<T>
+             vitaminc_protected::Protected<T>
+             vitaminc_protected::Usage<T, Scope>
+
+error[E0277]: the trait bound `Untrusted: vitaminc_protected::private::ControlledPrivate` is not satisfied
+  --> tests/ui/negative_space/controlled_is_sealed.rs:12:21
+   |
+12 | impl Controlled for Untrusted {
+   |                     ^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `vitaminc_protected::private::ControlledPrivate` is not implemented for `Untrusted`
+  --> tests/ui/negative_space/controlled_is_sealed.rs:4:1
+   |
+ 4 | struct Untrusted(Vec<u8>);
+   | ^^^^^^^^^^^^^^^^
+help: the following other types implement trait `vitaminc_protected::private::ControlledPrivate`
+  --> src/equatable/mod.rs
+   |
+   | impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Equatable<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Equatable<T>`
+   |
+  ::: src/exportable/mod.rs
+   |
+   | impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Exportable<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Exportable<T>`
+   |
+  ::: src/protected/mod.rs
+   |
+   | impl<T: Zeroize> ControlledPrivate for Protected<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Protected<T>`
+   |
+  ::: src/usage/mod.rs
+   |
+   | impl<T: ControlledPrivate, Scope> ControlledPrivate for Usage<T, Scope> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Usage<T, Scope>`
+note: required by a bound in `Controlled`
+  --> src/controlled.rs
+   |
+   | pub trait Controlled: ControlledPrivate + Zeroize {
+   |                       ^^^^^^^^^^^^^^^^^ required by this bound in `Controlled`
+   = note: `Controlled` is a "sealed trait", because to implement it you also need to implement `vitaminc_protected::private::ControlledPrivate`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it
+   = help: the following types implement the trait:
+             vitaminc_protected::Equatable<T>
+             vitaminc_protected::Exportable<T>
+             vitaminc_protected::Protected<T>
+             vitaminc_protected::Usage<T, Scope>
