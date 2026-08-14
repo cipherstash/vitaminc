@@ -105,6 +105,48 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+// Sealing the same plaintext under the same key and AAD twice must produce
+// different bytes: each Encrypt draws a fresh nonce inside the guest. The
+// round-trip tests alone would keep passing if the wasm path regressed to a
+// fixed or reused nonce, which is catastrophic for AES-GCM (and degrades
+// GCM-SIV to deterministic encryption), so pin freshness directly.
+func TestRepeatedEncryptDrawsFreshNonce(t *testing.T) {
+	cipher := newCipher(t)
+	aad := []byte("nonce-freshness")
+
+	first, err := cipher.Encrypt(t.Context(), "same plaintext", aad)
+	if err != nil {
+		t.Fatalf("Encrypt #1: %v", err)
+	}
+	second, err := cipher.Encrypt(t.Context(), "same plaintext", aad)
+	if err != nil {
+		t.Fatalf("Encrypt #2: %v", err)
+	}
+
+	a, ok := first.(vcvalue.Sealed)
+	if !ok {
+		t.Fatalf("expected a Sealed leaf, got %T", first)
+	}
+	b, ok := second.(vcvalue.Sealed)
+	if !ok {
+		t.Fatalf("expected a Sealed leaf, got %T", second)
+	}
+	if bytes.Equal(a, b) {
+		t.Fatal("two encryptions of the same value produced identical bytes — nonce reuse")
+	}
+
+	// Both ciphertexts must still be valid under the shared AAD.
+	for i, ct := range []any{first, second} {
+		got, err := cipher.Decrypt(t.Context(), ct, aad)
+		if err != nil {
+			t.Fatalf("Decrypt #%d: %v", i+1, err)
+		}
+		if got != "same plaintext" {
+			t.Fatalf("Decrypt #%d = %#v, want the original string", i+1, got)
+		}
+	}
+}
+
 // Empty composites seal to authenticated marker leaves (an empty container
 // has no element ciphertexts to bind the AAD) and round-trip back to empty
 // containers.
