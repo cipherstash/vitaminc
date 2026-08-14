@@ -3,7 +3,6 @@
 
 - require `ProtectedDigest` state to implement `ZeroizeOnDrop`
 - write digest outputs directly into protected or explicitly public destinations
-- initialize keyed fixed-output functions from protected key material
 
 ### Breaking changes
 
