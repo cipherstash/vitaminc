@@ -157,10 +157,9 @@ where
 {
     fn into_prf_context(self) -> PrfContext<'a> {
         match self {
-            Some(value) => {
-                let value = value.into_prf_context();
-                PrfContext::pae(&[value.as_bytes()])
-            }
+            // Tagged with the same domain as the `PrfValue` Option path so the
+            // crate has exactly one `Some` encoding.
+            Some(value) => value.into_prf_context().for_option_some(),
             None => PrfContext::pae(&[]),
         }
     }
@@ -244,6 +243,25 @@ mod tests {
     }
 
     #[test]
+    fn option_context_shares_the_value_path_some_domain() {
+        // Both Option paths must tag `Some` through `for_option_some`. If this
+        // fails, the crate has grown a second, divergent Option encoding.
+        assert_eq!(
+            Some("value").into_prf_context(),
+            "value".into_prf_context().for_option_some()
+        );
+    }
+
+    #[quickcheck]
+    fn option_context_some_cannot_collide_with_a_bare_pae(bytes: Vec<u8>) -> bool {
+        // Guards the invariant that no other construction produces the
+        // `Some` framing: a plain single-piece PAE of the inner encoding
+        // must never equal the Option encoding.
+        let inner = bytes.clone().into_prf_context();
+        Some(bytes).into_prf_context() != PrfContext::pae(&[inner.as_bytes()])
+    }
+
+    #[test]
     fn context_value_types_are_separated() {
         assert_ne!("a".into_prf_context(), b"a".into_prf_context());
         assert_ne!(1_u8.into_prf_context(), 1_i8.into_prf_context());
@@ -267,7 +285,10 @@ mod tests {
 
         let some = Some("value").into_prf_context();
         let typed_value = PrfContext::typed(PrfEncoding::UTF8, b"value");
-        assert_eq!(some, PrfContext::pae(&[typed_value.as_bytes()]));
+        assert_eq!(
+            some,
+            PrfContext::pae(&[OPTION_SOME_DOMAIN, typed_value.as_bytes()])
+        );
         assert_eq!(None::<&str>.into_prf_context(), PrfContext::pae(&[]));
 
         let left = PrfContext::typed(PrfEncoding::UTF8, b"left");
