@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -191,16 +190,16 @@ func (c *Client) NewCipher(ctx context.Context, key []byte) (*Cipher, error) {
 
 // Encrypt seals v under this cipher. v is encoded through the vcvalue
 // model: builtins, slices, maps and structs are handled by reflection, a
-// type implementing vcvalue.Encryptable controls its own encoding, and a
-// vcvalue.Plain marks a field to travel in the clear (passthrough). aad is
+// type implementing Encryptable controls its own encoding, and a
+// Plain marks a field to travel in the clear (passthrough). aad is
 // authenticated but not encrypted; the same aad must be presented to Decrypt.
 //
 // The ciphertext comes back as ordinary Go values mirroring the plaintext's
-// structure: vcvalue.Sealed leaves where fields were encrypted, vcvalue.Plain
+// structure: Sealed leaves where fields were encrypted, Plain
 // where they passed through, map[string]any for records (directly bindable as
 // database named parameters), []any for sequences.
 func (cph *Cipher) Encrypt(ctx context.Context, v any, aad []byte) (any, error) {
-	encoded, err := vcvalue.Marshal(v)
+	encoded, err := marshal(v)
 	if err != nil {
 		return nil, err
 	}
@@ -208,17 +207,17 @@ func (cph *Cipher) Encrypt(ctx context.Context, v any, aad []byte) (any, error) 
 	if err != nil {
 		return nil, err
 	}
-	return vcvalue.UnmarshalCipherText(out)
+	return unmarshalCipherText(out)
 }
 
 // Decrypt opens a ciphertext produced by Encrypt (in any language) with the
 // same cipher and aad. ct takes the same dynamic shape Encrypt returns —
-// e.g. a map[string]any of vcvalue.Sealed leaves loaded back from database
+// e.g. a map[string]any of Sealed leaves loaded back from database
 // columns; any subset of a record's entries decrypts. The plaintext is
-// returned in vcvalue's decode shape (Go natives, vcvalue.Object for maps,
-// and vcvalue.Plain for passthrough fields).
+// returned in vcvalue's decode shape (Go natives, Object for maps,
+// and Plain for passthrough fields).
 func (cph *Cipher) Decrypt(ctx context.Context, ct any, aad []byte) (any, error) {
-	encoded, err := vcvalue.MarshalCipherText(ct)
+	encoded, err := marshalCipherText(ct)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +225,7 @@ func (cph *Cipher) Decrypt(ctx context.Context, ct any, aad []byte) (any, error)
 	if err != nil {
 		return nil, err
 	}
-	return vcvalue.Unmarshal(out)
+	return unmarshal(out)
 }
 
 // EncryptElement seals v as a *sequence element* of the logical collection
@@ -235,7 +234,7 @@ func (cph *Cipher) Decrypt(ctx context.Context, ct any, aad []byte) (any, error)
 // rows were (or will be) written by batch-encrypting a slice under the same
 // aad: rows from both paths interchange freely.
 func (cph *Cipher) EncryptElement(ctx context.Context, v any, aad []byte) (any, error) {
-	encoded, err := vcvalue.Marshal(v)
+	encoded, err := marshal(v)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +242,7 @@ func (cph *Cipher) EncryptElement(ctx context.Context, v any, aad []byte) (any, 
 	if err != nil {
 		return nil, err
 	}
-	return vcvalue.UnmarshalCipherText(out)
+	return unmarshalCipherText(out)
 }
 
 // DecryptElement opens a ciphertext that was sealed as a sequence element —
@@ -254,7 +253,7 @@ func (cph *Cipher) EncryptElement(ctx context.Context, v any, aad []byte) (any, 
 // As with element order, *which* element (and how many) is a caller
 // obligation, not an authenticated fact.
 func (cph *Cipher) DecryptElement(ctx context.Context, ct any, aad []byte) (any, error) {
-	encoded, err := vcvalue.MarshalCipherText(ct)
+	encoded, err := marshalCipherText(ct)
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +261,7 @@ func (cph *Cipher) DecryptElement(ctx context.Context, ct any, aad []byte) (any,
 	if err != nil {
 		return nil, err
 	}
-	return vcvalue.Unmarshal(out)
+	return unmarshal(out)
 }
 
 // Close frees the cipher's key schedule inside the guest. Using the Cipher

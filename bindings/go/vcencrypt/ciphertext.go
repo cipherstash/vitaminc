@@ -1,20 +1,22 @@
-package vcvalue
+package vcencrypt
 
 import (
 	"errors"
 	"fmt"
 	"slices"
+
+	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 )
 
 // A ciphertext is made of ordinary Go values — the same dynamic shape as
 // decoded plaintext — with marker types distinguishing what is sealed from
 // what travels in the clear:
 //
-//   - Sealed: one encrypted leaf (version(1) || nonce || ciphertext || tag)
-//   - SealedNone: the authenticated absent marker
-//   - SealedEmptySeq / SealedEmptyMap: authenticated markers for empty
+//   - vcvalue.Sealed: one encrypted leaf (version(1) || nonce || ciphertext || tag)
+//   - vcvalue.SealedNone: the authenticated absent marker
+//   - vcvalue.SealedEmptySeq / vcvalue.SealedEmptyMap: authenticated markers for empty
 //     composites, which have no element ciphertexts to bind the AAD
-//   - Plain{V: ...}: a passthrough field, readable without the key
+//   - vcvalue.Plain{V: ...}: a passthrough field, readable without the key
 //   - []any: a sequence of ciphertext nodes
 //   - map[string]any: a record of named nodes. Keys travel in the clear but
 //     each is cryptographically bound to its sealed value — renaming or
@@ -23,9 +25,9 @@ import (
 //     any subset of entries decrypts independently.
 //
 // There is deliberately no dedicated tree type and no conversion step: a
-// map-shaped ciphertext binds directly as database named parameters (Sealed
-// and Plain implement driver.Valuer), and leaves loaded back from columns go
-// into a map[string]any for decryption. Only the Sealed leaf bytes are a
+// map-shaped ciphertext binds directly as database named parameters (vcvalue.Sealed
+// and vcvalue.Plain implement driver.Valuer), and leaves loaded back from columns go
+// into a map[string]any for decryption. Only the vcvalue.Sealed leaf bytes are a
 // frozen format; the transport encoding crossing the FFI boundary is an
 // implementation detail.
 
@@ -40,16 +42,16 @@ const (
 	ctEmptyMap    byte = 0x07
 )
 
-// MarshalCipherText encodes a ciphertext value into transport bytes. Bare
-// plaintext values are rejected — a passthrough must be marked with Plain, so
+// marshalCipherText encodes a ciphertext value into transport bytes. Bare
+// plaintext values are rejected — a passthrough must be marked with vcvalue.Plain, so
 // a value can never end up travelling unencrypted by accident.
-func MarshalCipherText(v any) ([]byte, error) {
+func marshalCipherText(v any) ([]byte, error) {
 	return encodeCipherText(nil, v, 0)
 }
 
-// UnmarshalCipherText decodes a transport-encoded ciphertext into the dynamic
+// unmarshalCipherText decodes a transport-encoded ciphertext into the dynamic
 // shape above, requiring the whole buffer to be consumed.
-func UnmarshalCipherText(buf []byte) (any, error) {
+func unmarshalCipherText(buf []byte) (any, error) {
 	r := &reader{buf: buf}
 	ct, err := decodeCipherText(r, 0)
 	if err != nil {
@@ -63,19 +65,19 @@ func UnmarshalCipherText(buf []byte) (any, error) {
 
 func encodeCipherText(out []byte, v any, depth int) ([]byte, error) {
 	if depth > maxDepth {
-		return nil, errors.New("vcvalue: ciphertext is nested too deeply")
+		return nil, errors.New("vcencrypt: ciphertext is nested too deeply")
 	}
 	switch n := v.(type) {
-	case Sealed:
+	case vcvalue.Sealed:
 		out = append(out, ctSingle)
 		return appendChunk(out, n)
-	case SealedNone:
+	case vcvalue.SealedNone:
 		out = append(out, ctNone)
 		return appendChunk(out, n)
-	case SealedEmptySeq:
+	case vcvalue.SealedEmptySeq:
 		out = append(out, ctEmptySeq)
 		return appendChunk(out, n)
-	case SealedEmptyMap:
+	case vcvalue.SealedEmptyMap:
 		out = append(out, ctEmptyMap)
 		return appendChunk(out, n)
 	case []any:
@@ -110,13 +112,13 @@ func encodeCipherText(out []byte, v any, depth int) ([]byte, error) {
 			}
 		}
 		return out, nil
-	case Plain:
+	case vcvalue.Plain:
 		// The payload node sits one level deeper; reject it here because the
 		// value encoder's scalar channels never re-check depth, and emitting
 		// bytes the decoder is guaranteed to reject (decodeValue enforces the
 		// same bound) would be an asymmetric round trip.
 		if depth+1 > maxDepth {
-			return nil, errors.New("vcvalue: ciphertext is nested too deeply")
+			return nil, errors.New("vcencrypt: ciphertext is nested too deeply")
 		}
 		out = append(out, ctPassthrough)
 		// Encode the plaintext payload as one value node, sharing the
@@ -129,11 +131,11 @@ func encodeCipherText(out []byte, v any, depth int) ([]byte, error) {
 			return nil, st.err
 		}
 		if done != 1 {
-			return nil, fmt.Errorf("vcvalue: passthrough payload must complete exactly one value, completed %d", done)
+			return nil, fmt.Errorf("vcencrypt: passthrough payload must complete exactly one value, completed %d", done)
 		}
 		return st.buf, nil
 	default:
-		return nil, fmt.Errorf("vcvalue: %T is not a ciphertext node — wrap passthrough values in Plain", v)
+		return nil, fmt.Errorf("vcencrypt: %T is not a ciphertext node — wrap passthrough values in vcvalue.Plain", v)
 	}
 }
 
@@ -159,13 +161,13 @@ func decodeCipherText(r *reader, depth int) (any, error) {
 		copy(leaf, s)
 		switch tag {
 		case ctNone:
-			return SealedNone(leaf), nil
+			return vcvalue.SealedNone(leaf), nil
 		case ctEmptySeq:
-			return SealedEmptySeq(leaf), nil
+			return vcvalue.SealedEmptySeq(leaf), nil
 		case ctEmptyMap:
-			return SealedEmptyMap(leaf), nil
+			return vcvalue.SealedEmptyMap(leaf), nil
 		default:
-			return Sealed(leaf), nil
+			return vcvalue.Sealed(leaf), nil
 		}
 	case ctSeq:
 		n, err := r.count()
@@ -208,7 +210,7 @@ func decodeCipherText(r *reader, depth int) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return Plain{V: v}, nil
+		return vcvalue.Plain{V: v}, nil
 	default:
 		return nil, errMalformed
 	}

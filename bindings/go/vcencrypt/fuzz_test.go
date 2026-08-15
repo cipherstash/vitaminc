@@ -1,9 +1,7 @@
-package vcvalue_test
+package vcencrypt
 
 import (
 	"testing"
-
-	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 )
 
 // Unmarshal and UnmarshalCipherText are the package's entire hostile-input
@@ -25,11 +23,11 @@ func FuzzUnmarshal(f *testing.F) {
 	f.Add([]byte{0x11, 2, 0, 0, 0, 1, 0, 0, 0, 'a', 0x00}) // short object
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		v, err := vcvalue.Unmarshal(data)
+		v, err := unmarshal(data)
 		if err != nil {
 			return
 		}
-		if _, err := vcvalue.Marshal(v); err != nil {
+		if _, err := marshal(v); err != nil {
 			t.Fatalf("accepted decode failed to re-encode: %v (value %#v)", err, v)
 		}
 	})
@@ -44,11 +42,11 @@ func FuzzUnmarshalCipherText(f *testing.F) {
 	f.Add([]byte{0x03, 0xFF, 0xFF, 0xFF, 0xFF})                              // hostile count
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		v, err := vcvalue.UnmarshalCipherText(data)
+		v, err := unmarshalCipherText(data)
 		if err != nil {
 			return
 		}
-		if _, err := vcvalue.MarshalCipherText(v); err != nil {
+		if _, err := marshalCipherText(v); err != nil {
 			t.Fatalf("accepted ciphertext decode failed to re-encode: %v (value %#v)", err, v)
 		}
 	})

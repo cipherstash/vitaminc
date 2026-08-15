@@ -24,7 +24,7 @@ import (
 	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 )
 
-// User controls its own sealing via vcvalue.Encryptable: id and created_at
+// User controls its own sealing via vcencrypt.Encryptable: id and created_at
 // travel in the clear (readable and indexable without the key), email and
 // name are sealed.
 type User struct {
@@ -34,7 +34,7 @@ type User struct {
 	Name      string
 }
 
-func (u User) EncryptValue(enc vcvalue.Encoder) error {
+func (u User) EncryptValue(enc vcencrypt.Encoder) error {
 	m := enc.Map()
 	m.Field("id").Passthrough().Int64(u.ID)
 	m.Field("created_at").Passthrough().String(u.CreatedAt)

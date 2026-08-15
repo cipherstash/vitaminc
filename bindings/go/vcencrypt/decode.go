@@ -1,23 +1,13 @@
-package vcvalue
+package vcencrypt
 
 import (
 	"encoding/binary"
 	"math"
+
+	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 )
 
-// Object is the decode result for a map-mode value: an ordered list of
-// fields mirroring the wire order. Decoding uses this (rather than a Go map)
-// so entry order is preserved and results compare deterministically. Encode
-// takes any/struct/map instead — this type is decode-only.
-type Object []Field
-
-// Field is one entry of a decoded Object.
-type Field struct {
-	Key   string
-	Value any
-}
-
-// Unmarshal decodes value transport bytes into Go natives:
+// unmarshal decodes value transport bytes into Go natives:
 //
 //   - Null and Undefined → nil (Go has no undefined analog);
 //   - Bool               → bool;
@@ -30,16 +20,16 @@ type Field struct {
 //   - String             → string;
 //   - Bytes              → []byte;
 //   - Array              → []any;
-//   - Object             → Object (ordered []Field);
-//   - Passthrough        → Plain{V: <decoded value>} (the clear-field marker).
+//   - vcvalue.Object             → vcvalue.Object (ordered []Field);
+//   - Passthrough        → vcvalue.Plain{V: <decoded value>} (the clear-field marker).
 //
 // Go maps exactly in both directions — the 32-bit tags decode to int32 /
 // uint32 / float32, not widened to 64-bit — unlike JavaScript, which widens
 // every numeric tag to a JS number on decode.
 //
 // This self-describing shape is deliberately spike-scoped. A reflection-based
-// Unmarshal into caller structs (the mirror of Encode) is future work.
-func Unmarshal(buf []byte) (any, error) {
+// unmarshal into caller structs (the mirror of Encode) is future work.
+func unmarshal(buf []byte) (any, error) {
 	r := &reader{buf: buf}
 	v, err := decodeValue(r, 0)
 	if err != nil {
@@ -135,9 +125,9 @@ func decodeValue(r *reader, depth int) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		fields := make(Object, 0, eagerCap(n))
+		fields := make(vcvalue.Object, 0, eagerCap(n))
 		// Duplicate keys are rejected as on the ciphertext decode path (and
-		// both Rust decoders): an Object with duplicates cannot survive a
+		// both Rust decoders): an vcvalue.Object with duplicates cannot survive a
 		// re-encode through a Go map without silently dropping an entry.
 		seen := make(map[string]struct{}, eagerCap(n))
 		for range n {
@@ -153,18 +143,18 @@ func decodeValue(r *reader, depth int) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			fields = append(fields, Field{Key: key, Value: value})
+			fields = append(fields, vcvalue.Field{Key: key, Value: value})
 		}
 		return fields, nil
 	case tagPassthrough:
-		// A passthrough value surfaces as Plain{V: <decoded value>}, the
-		// mirror of the Encoder's Plain opt-in, so a caller can tell the
+		// A passthrough value surfaces as vcvalue.Plain{V: <decoded value>}, the
+		// mirror of the Encoder's vcvalue.Plain opt-in, so a caller can tell the
 		// field travelled in the clear.
 		inner, err := decodeValue(r, depth+1)
 		if err != nil {
 			return nil, err
 		}
-		return Plain{V: inner}, nil
+		return vcvalue.Plain{V: inner}, nil
 	default:
 		return nil, errMalformed
 	}

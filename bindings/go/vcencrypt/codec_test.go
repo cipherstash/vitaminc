@@ -1,8 +1,6 @@
-package vcvalue_test
+package vcencrypt
 
 import (
-	"database/sql"
-	"database/sql/driver"
 	"encoding/binary"
 	"math"
 	"reflect"
@@ -16,11 +14,11 @@ import (
 // transport bytes, decode back to the natives shape.
 func marshalUnmarshal(t *testing.T, v any) any {
 	t.Helper()
-	buf, err := vcvalue.Marshal(v)
+	buf, err := marshal(v)
 	if err != nil {
 		t.Fatalf("Marshal(%#v): %v", v, err)
 	}
-	got, err := vcvalue.Unmarshal(buf)
+	got, err := unmarshal(buf)
 	if err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
@@ -110,7 +108,7 @@ func TestReflectPointerDeref(t *testing.T) {
 // point uses the Encryptable extension point.
 type point struct{ X, Y int64 }
 
-func (p point) EncryptValue(enc vcvalue.Encoder) error {
+func (p point) EncryptValue(enc Encoder) error {
 	m := enc.Map()
 	m.Field("x").Int64(p.X)
 	m.Field("y").Int64(p.Y)
@@ -145,11 +143,11 @@ func TestEncryptableNested(t *testing.T) {
 
 func TestEncoderChannels(t *testing.T) {
 	// Drive the raw Encoder channels directly, including a nested Seq.
-	buf, err := vcvalue.Marshal(seqBuilder{})
+	buf, err := marshal(seqBuilder{})
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	got, err := vcvalue.Unmarshal(buf)
+	got, err := unmarshal(buf)
 	if err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
@@ -167,7 +165,7 @@ func TestEncoderChannels(t *testing.T) {
 
 type seqBuilder struct{}
 
-func (seqBuilder) EncryptValue(enc vcvalue.Encoder) error {
+func (seqBuilder) EncryptValue(enc Encoder) error {
 	s := enc.Seq()
 	s.Elem().Null()
 	s.Elem().Bool(true)
@@ -183,17 +181,17 @@ func (seqBuilder) EncryptValue(enc vcvalue.Encoder) error {
 }
 
 func TestInvalidUTF8StringRejected(t *testing.T) {
-	if _, err := vcvalue.Marshal(string([]byte{0xff})); err == nil {
+	if _, err := marshal(string([]byte{0xff})); err == nil {
 		t.Fatal("expected invalid UTF-8 string to be rejected")
 	}
 }
 
 func TestUnmarshalRejectsGarbage(t *testing.T) {
-	if _, err := vcvalue.Unmarshal([]byte{0x7f}); err == nil {
+	if _, err := unmarshal([]byte{0x7f}); err == nil {
 		t.Fatal("unknown tag must be rejected")
 	}
 	// Trailing bytes after a complete value.
-	if _, err := vcvalue.Unmarshal([]byte{0x00, 0x00}); err == nil {
+	if _, err := unmarshal([]byte{0x00, 0x00}); err == nil {
 		t.Fatal("trailing bytes must be rejected")
 	}
 }
@@ -227,7 +225,7 @@ func TestPlainPassthroughSubtree(t *testing.T) {
 // The raw Encoder.Passthrough() channel, at root/seq/map positions.
 type passthroughBuilder struct{}
 
-func (passthroughBuilder) EncryptValue(enc vcvalue.Encoder) error {
+func (passthroughBuilder) EncryptValue(enc Encoder) error {
 	s := enc.Seq()
 	s.Elem().Passthrough().Int64(7) // passthrough sequence element
 	s.Elem().String("sealed")
@@ -244,7 +242,7 @@ func TestEncoderPassthroughChannel(t *testing.T) {
 
 func TestUnmarshalRejectsTruncatedPassthrough(t *testing.T) {
 	// A passthrough marker (0x12) with no value node behind it.
-	if _, err := vcvalue.Unmarshal([]byte{0x12}); err == nil {
+	if _, err := unmarshal([]byte{0x12}); err == nil {
 		t.Fatal("truncated passthrough node must be rejected")
 	}
 }
@@ -256,7 +254,7 @@ func TestUnmarshalRejectsPassthroughDepthBomb(t *testing.T) {
 		bytes = append(bytes, 0x12)
 	}
 	bytes = append(bytes, 0x00) // NULL
-	if _, err := vcvalue.Unmarshal(bytes); err == nil {
+	if _, err := unmarshal(bytes); err == nil {
 		t.Fatal("over-deep passthrough nesting must be rejected")
 	}
 }
@@ -269,11 +267,11 @@ func TestCipherTextPassthroughTransportRoundTrip(t *testing.T) {
 		"id":    vcvalue.Plain{V: int64(42)},
 		"email": vcvalue.Sealed{9, 9, 9},
 	}
-	buf, err := vcvalue.MarshalCipherText(ct)
+	buf, err := marshalCipherText(ct)
 	if err != nil {
 		t.Fatalf("MarshalCipherText: %v", err)
 	}
-	got, err := vcvalue.UnmarshalCipherText(buf)
+	got, err := unmarshalCipherText(buf)
 	if err != nil {
 		t.Fatalf("UnmarshalCipherText: %v", err)
 	}
@@ -287,11 +285,11 @@ func TestCipherTextTransportRoundTrip(t *testing.T) {
 		"a": vcvalue.Sealed{9, 9, 9},
 		"b": []any{vcvalue.Sealed{1}, vcvalue.SealedNone{2}},
 	}
-	buf, err := vcvalue.MarshalCipherText(ct)
+	buf, err := marshalCipherText(ct)
 	if err != nil {
 		t.Fatalf("MarshalCipherText: %v", err)
 	}
-	got, err := vcvalue.UnmarshalCipherText(buf)
+	got, err := unmarshalCipherText(buf)
 	if err != nil {
 		t.Fatalf("UnmarshalCipherText: %v", err)
 	}
@@ -303,10 +301,10 @@ func TestCipherTextTransportRoundTrip(t *testing.T) {
 // A bare plaintext value in ciphertext position is rejected: passthrough must
 // be explicit (Plain), so nothing travels unencrypted by accident.
 func TestCipherTextRejectsBarePlaintext(t *testing.T) {
-	if _, err := vcvalue.MarshalCipherText(map[string]any{"x": "oops"}); err == nil {
+	if _, err := marshalCipherText(map[string]any{"x": "oops"}); err == nil {
 		t.Fatal("bare plaintext in ciphertext position must be rejected")
 	}
-	if _, err := vcvalue.MarshalCipherText([]byte{1, 2, 3}); err == nil {
+	if _, err := marshalCipherText([]byte{1, 2, 3}); err == nil {
 		t.Fatal("bare []byte must be rejected (use Sealed or Plain)")
 	}
 }
@@ -317,7 +315,7 @@ func TestMarshalRejectsZeroExportedFieldStruct(t *testing.T) {
 	type opaque struct {
 		hidden int //nolint:unused // unexported on purpose
 	}
-	if _, err := vcvalue.Marshal(opaque{hidden: 1}); err == nil {
+	if _, err := marshal(opaque{hidden: 1}); err == nil {
 		t.Fatal("struct with no exported fields must be rejected")
 	}
 	// An all-vc:"-" struct asked for the empty encoding explicitly and stays
@@ -325,10 +323,10 @@ func TestMarshalRejectsZeroExportedFieldStruct(t *testing.T) {
 	type skipped struct {
 		ID int `vc:"-"`
 	}
-	if _, err := vcvalue.Marshal(skipped{ID: 1}); err != nil {
+	if _, err := marshal(skipped{ID: 1}); err != nil {
 		t.Fatalf("all-skipped struct should encode: %v", err)
 	}
-	if _, err := vcvalue.Marshal(struct{}{}); err != nil {
+	if _, err := marshal(struct{}{}); err != nil {
 		t.Fatalf("empty struct should encode: %v", err)
 	}
 }
@@ -358,11 +356,11 @@ func TestObjectReencodesWithObjectFraming(t *testing.T) {
 // round trip shape-intact (PR review P1).
 func TestCipherTextPassthroughObjectRoundTrip(t *testing.T) {
 	o := vcvalue.Object{{Key: "id", Value: int64(42)}}
-	buf, err := vcvalue.MarshalCipherText(vcvalue.Plain{V: o})
+	buf, err := marshalCipherText(vcvalue.Plain{V: o})
 	if err != nil {
 		t.Fatalf("MarshalCipherText: %v", err)
 	}
-	got, err := vcvalue.UnmarshalCipherText(buf)
+	got, err := unmarshalCipherText(buf)
 	if err != nil {
 		t.Fatalf("UnmarshalCipherText: %v", err)
 	}
@@ -392,7 +390,7 @@ func TestByteArrayEncodesAsBytes(t *testing.T) {
 // the behaviour typed-nil detection must prevent.
 type nilEncryptable struct{ n int }
 
-func (e *nilEncryptable) EncryptValue(enc vcvalue.Encoder) error {
+func (e *nilEncryptable) EncryptValue(enc Encoder) error {
 	enc.Int64(int64(e.n)) // dereferences e
 	return nil
 }
@@ -415,7 +413,7 @@ func TestTypedNilEncryptableEncodesNull(t *testing.T) {
 func TestMarshalRejectsPointerCycle(t *testing.T) {
 	var x any
 	x = &x
-	if _, err := vcvalue.Marshal(x); err == nil {
+	if _, err := marshal(x); err == nil {
 		t.Fatal("pointer cycle must be rejected")
 	}
 }
@@ -429,7 +427,7 @@ func TestMarshalCipherTextRejectsPassthroughBeyondDepthBudget(t *testing.T) {
 	for range 129 {
 		deep = []any{deep}
 	}
-	if _, err := vcvalue.MarshalCipherText(deep); err == nil {
+	if _, err := marshalCipherText(deep); err == nil {
 		t.Fatal("over-deep passthrough must be rejected at encode time")
 	}
 
@@ -438,45 +436,12 @@ func TestMarshalCipherTextRejectsPassthroughBeyondDepthBudget(t *testing.T) {
 	for range 127 {
 		ok = []any{ok}
 	}
-	buf, err := vcvalue.MarshalCipherText(ok)
+	buf, err := marshalCipherText(ok)
 	if err != nil {
 		t.Fatalf("MarshalCipherText at the bound: %v", err)
 	}
-	if _, err := vcvalue.UnmarshalCipherText(buf); err != nil {
+	if _, err := unmarshalCipherText(buf); err != nil {
 		t.Fatalf("UnmarshalCipherText at the bound: %v", err)
-	}
-}
-
-// Every sealed leaf type must survive the database column round trip:
-// Value() then Scan() back into the same type.
-func TestSealedLeafTypesScanValueRoundTrip(t *testing.T) {
-	roundTrip := func(t *testing.T, value driver.Valuer, scan sql.Scanner, got func() []byte, want []byte) {
-		t.Helper()
-		v, err := value.Value()
-		if err != nil {
-			t.Fatalf("Value: %v", err)
-		}
-		if err := scan.Scan(v); err != nil {
-			t.Fatalf("Scan: %v", err)
-		}
-		if !reflect.DeepEqual(got(), want) {
-			t.Fatalf("got %#v, want %#v", got(), want)
-		}
-	}
-
-	leaf := []byte{1, 2, 3}
-	var s vcvalue.Sealed
-	roundTrip(t, vcvalue.Sealed(leaf), &s, func() []byte { return []byte(s) }, leaf)
-	var n vcvalue.SealedNone
-	roundTrip(t, vcvalue.SealedNone(leaf), &n, func() []byte { return []byte(n) }, leaf)
-	var es vcvalue.SealedEmptySeq
-	roundTrip(t, vcvalue.SealedEmptySeq(leaf), &es, func() []byte { return []byte(es) }, leaf)
-	var em vcvalue.SealedEmptyMap
-	roundTrip(t, vcvalue.SealedEmptyMap(leaf), &em, func() []byte { return []byte(em) }, leaf)
-
-	// Non-byte sources are rejected.
-	if err := (&es).Scan("not bytes"); err == nil {
-		t.Fatal("scanning a string into SealedEmptySeq must fail")
 	}
 }
 
@@ -507,7 +472,7 @@ func TestUnmarshalCipherTextRejectsDuplicateKey(t *testing.T) {
 	dup = append(dup, u32le(2)...)
 	dup = append(dup, ctEntry("a")...)
 	dup = append(dup, ctEntry("a")...)
-	if _, err := vcvalue.UnmarshalCipherText(dup); err == nil {
+	if _, err := unmarshalCipherText(dup); err == nil {
 		t.Fatal("duplicate ciphertext map key must be rejected")
 	}
 
@@ -516,7 +481,7 @@ func TestUnmarshalCipherTextRejectsDuplicateKey(t *testing.T) {
 	ok = append(ok, u32le(2)...)
 	ok = append(ok, ctEntry("a")...)
 	ok = append(ok, ctEntry("b")...)
-	if _, err := vcvalue.UnmarshalCipherText(ok); err != nil {
+	if _, err := unmarshalCipherText(ok); err != nil {
 		t.Fatalf("distinct keys should decode: %v", err)
 	}
 }
@@ -532,7 +497,7 @@ func TestUnmarshalRejectsArrayAndObjectBombs(t *testing.T) {
 		deep = append(deep, u32le(1)...)
 	}
 	deep = append(deep, 0x00) // tagNull
-	if _, err := vcvalue.Unmarshal(deep); err == nil {
+	if _, err := unmarshal(deep); err == nil {
 		t.Fatal("array depth bomb must be rejected")
 	}
 
@@ -545,12 +510,12 @@ func TestUnmarshalRejectsArrayAndObjectBombs(t *testing.T) {
 		deepObj = append(deepObj, 'k')
 	}
 	deepObj = append(deepObj, 0x00)
-	if _, err := vcvalue.Unmarshal(deepObj); err == nil {
+	if _, err := unmarshal(deepObj); err == nil {
 		t.Fatal("object depth bomb must be rejected")
 	}
 
 	// Hostile count: an array claiming max-u32 items with no bytes behind it.
-	if _, err := vcvalue.Unmarshal([]byte{0x10, 0xFF, 0xFF, 0xFF, 0xFF}); err == nil {
+	if _, err := unmarshal([]byte{0x10, 0xFF, 0xFF, 0xFF, 0xFF}); err == nil {
 		t.Fatal("hostile array count must be rejected")
 	}
 }
@@ -566,24 +531,24 @@ func TestUnmarshalCipherTextRejectsMalformed(t *testing.T) {
 		deep = append(deep, u32le(1)...)
 	}
 	deep = append(deep, ctEntry("")[4:]...) // a bare ctSingle leaf
-	if _, err := vcvalue.UnmarshalCipherText(deep); err == nil {
+	if _, err := unmarshalCipherText(deep); err == nil {
 		t.Fatal("ciphertext depth bomb must be rejected")
 	}
 
 	// Hostile count.
-	if _, err := vcvalue.UnmarshalCipherText([]byte{0x03, 0xFF, 0xFF, 0xFF, 0xFF}); err == nil {
+	if _, err := unmarshalCipherText([]byte{0x03, 0xFF, 0xFF, 0xFF, 0xFF}); err == nil {
 		t.Fatal("hostile ciphertext count must be rejected")
 	}
 
 	// Trailing bytes after a complete node.
 	leaf := append([]byte{0x01}, u32le(1)...)
 	leaf = append(leaf, 0xAB, 0xFF) // one extra byte
-	if _, err := vcvalue.UnmarshalCipherText(leaf); err == nil {
+	if _, err := unmarshalCipherText(leaf); err == nil {
 		t.Fatal("trailing bytes must be rejected")
 	}
 
 	// Unknown tag.
-	if _, err := vcvalue.UnmarshalCipherText([]byte{0x7F}); err == nil {
+	if _, err := unmarshalCipherText([]byte{0x7F}); err == nil {
 		t.Fatal("unknown ciphertext tag must be rejected")
 	}
 }
@@ -591,13 +556,13 @@ func TestUnmarshalCipherTextRejectsMalformed(t *testing.T) {
 // The encodeReflect default arm: kinds with no encoding (chan/func/complex)
 // error instead of panicking or emitting garbage.
 func TestMarshalRejectsUnsupportedKind(t *testing.T) {
-	if _, err := vcvalue.Marshal(make(chan int)); err == nil {
+	if _, err := marshal(make(chan int)); err == nil {
 		t.Fatal("a channel value has no encoding and must be rejected")
 	}
-	if _, err := vcvalue.Marshal(func() {}); err == nil {
+	if _, err := marshal(func() {}); err == nil {
 		t.Fatal("a func value has no encoding and must be rejected")
 	}
-	if _, err := vcvalue.Marshal(complex(1, 2)); err == nil {
+	if _, err := marshal(complex(1, 2)); err == nil {
 		t.Fatal("a complex value has no encoding and must be rejected")
 	}
 }
@@ -605,7 +570,7 @@ func TestMarshalRejectsUnsupportedKind(t *testing.T) {
 // encodeMap rejects non-string map keys — the transport frames keys as
 // UTF-8 chunks, so there is nothing sound to write for other key types.
 func TestMarshalRejectsNonStringMapKey(t *testing.T) {
-	if _, err := vcvalue.Marshal(map[int]string{1: "a"}); err == nil {
+	if _, err := marshal(map[int]string{1: "a"}); err == nil {
 		t.Fatal("map with non-string keys must be rejected")
 	}
 }
@@ -618,7 +583,7 @@ func TestMarshalRejectsDepthBomb(t *testing.T) {
 	for range 130 { // > maxDepth (128)
 		v = []any{v}
 	}
-	if _, err := vcvalue.Marshal(v); err == nil {
+	if _, err := marshal(v); err == nil {
 		t.Fatal("over-deep value must be rejected at encode time")
 	}
 }
@@ -636,7 +601,7 @@ func TestUnmarshalRejectsDuplicateObjectKey(t *testing.T) {
 	buf = append(buf, 0x00) // Null value
 	buf = append(buf, key...)
 	buf = append(buf, 0x00)
-	if _, err := vcvalue.Unmarshal(buf); err == nil {
+	if _, err := unmarshal(buf); err == nil {
 		t.Fatal("an object with a duplicate key must be rejected")
 	}
 
@@ -645,98 +610,8 @@ func TestUnmarshalRejectsDuplicateObjectKey(t *testing.T) {
 	ok = append(ok, 0x11, 2, 0, 0, 0)
 	ok = append(ok, 1, 0, 0, 0, 'a', 0x00)
 	ok = append(ok, 1, 0, 0, 0, 'b', 0x00)
-	if _, err := vcvalue.Unmarshal(ok); err != nil {
+	if _, err := unmarshal(ok); err != nil {
 		t.Fatalf("distinct keys must decode: %v", err)
-	}
-}
-
-// Every integer kind the encoder accepts must also bind through the driver:
-// Plain{V: user.ID} with ID int encodes fine, so Value() must not reject it.
-func TestPlainValueBindsEveryEncodableIntegerKind(t *testing.T) {
-	cases := []struct {
-		in   any
-		want driver.Value
-	}{
-		{int(7), int64(7)},
-		{int8(-8), int64(-8)},
-		{int16(-16), int64(-16)},
-		{int32(-32), int64(-32)},
-		{int64(-64), int64(-64)},
-		{uint8(8), int64(8)},
-		{uint16(16), int64(16)},
-		{uint32(32), int64(32)},
-		{uint(64), int64(64)},
-		{uint64(64), int64(64)},
-	}
-	for _, c := range cases {
-		got, err := vcvalue.Plain{V: c.in}.Value()
-		if err != nil {
-			t.Fatalf("Value(%T): %v", c.in, err)
-		}
-		if got != c.want {
-			t.Fatalf("Value(%T): got %#v, want %#v", c.in, got, c.want)
-		}
-	}
-
-	// The unsigned kinds that can exceed int64 must fail closed.
-	if _, err := (vcvalue.Plain{V: uint64(math.MaxInt64) + 1}).Value(); err == nil {
-		t.Fatal("uint64 above MaxInt64 must not bind")
-	}
-	if uint64(math.MaxUint) > math.MaxInt64 { // uint is 32-bit on GOARCH=386
-		if _, err := (vcvalue.Plain{V: uint(math.MaxUint)}).Value(); err == nil {
-			t.Fatal("uint above MaxInt64 must not bind")
-		}
-	}
-}
-
-// Plain.Value's driver conversions: width-narrowing, the uint64 overflow
-// error, and the container-has-no-column error.
-func TestPlainValueConversions(t *testing.T) {
-	cases := []struct {
-		in   any
-		want driver.Value
-	}{
-		{nil, nil},
-		{true, true},
-		{int64(7), int64(7)},
-		{"s", "s"},
-		{[]byte{1}, []byte{1}},
-		{int32(-3), int64(-3)},
-		{uint32(9), int64(9)},
-		{float32(0.5), float64(0.5)},
-		{float64(1.5), float64(1.5)},
-		{uint64(11), int64(11)},
-	}
-	for _, c := range cases {
-		got, err := vcvalue.Plain{V: c.in}.Value()
-		if err != nil {
-			t.Fatalf("Value(%#v): %v", c.in, err)
-		}
-		if !reflect.DeepEqual(got, c.want) {
-			t.Fatalf("Value(%#v) = %#v, want %#v", c.in, got, c.want)
-		}
-	}
-
-	if _, err := (vcvalue.Plain{V: uint64(math.MaxInt64) + 1}).Value(); err == nil {
-		t.Fatal("uint64 above MaxInt64 must not silently truncate")
-	}
-	if _, err := (vcvalue.Plain{V: []any{int64(1)}}).Value(); err == nil {
-		t.Fatal("a container passthrough has no single-column form")
-	}
-}
-
-// The remaining Sealed.Scan arms: nil source and the non-byte error arm
-// (the byte round trip is covered with the marker types above).
-func TestSealedScanNilAndErrorArms(t *testing.T) {
-	s := vcvalue.Sealed{1, 2, 3}
-	if err := s.Scan(nil); err != nil {
-		t.Fatalf("Scan(nil): %v", err)
-	}
-	if s != nil {
-		t.Fatalf("Scan(nil) should clear the leaf, got %#v", s)
-	}
-	if err := s.Scan("not bytes"); err == nil {
-		t.Fatal("scanning a string into Sealed must fail")
 	}
 }
 
@@ -745,7 +620,7 @@ func TestSealedScanNilAndErrorArms(t *testing.T) {
 // previously surfaced only as an opaque errMalformed at decode.
 type skipsValue struct{ inSeq bool }
 
-func (s skipsValue) EncryptValue(enc vcvalue.Encoder) error {
+func (s skipsValue) EncryptValue(enc Encoder) error {
 	if s.inSeq {
 		q := enc.Seq()
 		q.Elem() // claimed, never written
@@ -762,7 +637,7 @@ func (s skipsValue) EncryptValue(enc vcvalue.Encoder) error {
 // the one skipped, so no later Field/Elem call can catch it.
 type lastValueMissing struct{ inSeq bool }
 
-func (s lastValueMissing) EncryptValue(enc vcvalue.Encoder) error {
+func (s lastValueMissing) EncryptValue(enc Encoder) error {
 	if s.inSeq {
 		q := enc.Seq()
 		q.Elem().Int64(1)
@@ -780,7 +655,7 @@ func (s lastValueMissing) EncryptValue(enc vcvalue.Encoder) error {
 // value finished, so a per-slot (not global) completion check is required.
 type unclosedNested struct{ inSeq bool }
 
-func (u unclosedNested) EncryptValue(enc vcvalue.Encoder) error {
+func (u unclosedNested) EncryptValue(enc Encoder) error {
 	if u.inSeq {
 		q := enc.Seq()
 		inner := q.Elem().Seq()
@@ -799,7 +674,7 @@ func (u unclosedNested) EncryptValue(enc vcvalue.Encoder) error {
 // producing an extra value node the container's count doesn't account for.
 type doubleWrite struct{ inSeq bool }
 
-func (d doubleWrite) EncryptValue(enc vcvalue.Encoder) error {
+func (d doubleWrite) EncryptValue(enc Encoder) error {
 	if d.inSeq {
 		q := enc.Seq()
 		e := q.Elem()
@@ -817,7 +692,7 @@ func (d doubleWrite) EncryptValue(enc vcvalue.Encoder) error {
 // rootMiscount writes zero or several values at the root slot.
 type rootMiscount struct{ writes int }
 
-func (r rootMiscount) EncryptValue(enc vcvalue.Encoder) error {
+func (r rootMiscount) EncryptValue(enc Encoder) error {
 	for i := 0; i < r.writes; i++ {
 		enc.Int64(int64(i))
 	}
@@ -827,7 +702,7 @@ func (r rootMiscount) EncryptValue(enc vcvalue.Encoder) error {
 // unclosedRoot leaves the root container un-Ended.
 type unclosedRoot struct{}
 
-func (unclosedRoot) EncryptValue(enc vcvalue.Encoder) error {
+func (unclosedRoot) EncryptValue(enc Encoder) error {
 	enc.Seq().Elem().Int64(1) // End() never called
 	return nil
 }
@@ -842,7 +717,7 @@ func TestMarshalCipherTextRejectsPayloadMiscount(t *testing.T) {
 		vcvalue.Plain{V: rootMiscount{writes: 2}},
 		vcvalue.Plain{V: unclosedRoot{}},
 	} {
-		if _, err := vcvalue.MarshalCipherText(v); err == nil {
+		if _, err := marshalCipherText(v); err == nil {
 			t.Fatalf("malformed passthrough payload %#v must fail the encode", v)
 		}
 	}
@@ -852,14 +727,14 @@ func TestMarshalCipherTextRejectsPayloadMiscount(t *testing.T) {
 // but never the wrapped value — the passthrough-specific skipped-value case.
 type missingPassthroughPayload struct{}
 
-func (missingPassthroughPayload) EncryptValue(enc vcvalue.Encoder) error {
+func (missingPassthroughPayload) EncryptValue(enc Encoder) error {
 	s := enc.Seq()
 	s.Elem().Passthrough() // marker written, payload omitted
 	return s.End()
 }
 
 func TestEncoderPassthroughRequiresWrappedValue(t *testing.T) {
-	_, err := vcvalue.Marshal(missingPassthroughPayload{})
+	_, err := marshal(missingPassthroughPayload{})
 	if err == nil {
 		t.Fatal("passthrough without a wrapped value must fail at encode time")
 	}
@@ -881,7 +756,7 @@ type collidingTag struct {
 // duplicateFieldKey is the Encryptable route to the same collision.
 type duplicateFieldKey struct{}
 
-func (duplicateFieldKey) EncryptValue(enc vcvalue.Encoder) error {
+func (duplicateFieldKey) EncryptValue(enc Encoder) error {
 	m := enc.Map()
 	m.Field("a").Int64(1)
 	m.Field("a").Int64(2)
@@ -897,7 +772,7 @@ func TestEncoderRejectsDuplicateMapKeys(t *testing.T) {
 		{"encryptable double field", duplicateFieldKey{}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := vcvalue.Marshal(c.v)
+			_, err := marshal(c.v)
 			if err == nil {
 				t.Fatal("a duplicate map key must fail at encode time")
 			}
@@ -927,7 +802,7 @@ func TestEncoderCatchesSkippedValuesAtEncodeTime(t *testing.T) {
 		{"root unclosed container", unclosedRoot{}, "root"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := vcvalue.Marshal(c.v)
+			_, err := marshal(c.v)
 			if err == nil {
 				t.Fatal("a contract violation must fail the encode")
 			}
@@ -935,5 +810,29 @@ func TestEncoderCatchesSkippedValuesAtEncodeTime(t *testing.T) {
 				t.Fatalf("diagnostic %q does not name the offending slot (want substring %q)", err, c.want)
 			}
 		})
+	}
+}
+
+// innerFailsOuterReports pins the End() error contract: End returns the
+// first error of the whole encode, not one scoped to its own container, so
+// an outer End reports a failure that happened inside a sibling subtree.
+type innerFailsOuterReports struct{}
+
+func (innerFailsOuterReports) EncryptValue(enc Encoder) error {
+	m := enc.Map()
+	inner := m.Field("bad").Map()
+	inner.Field("\xff").Int64(1) // invalid UTF-8 key: the first (and only) error
+	_ = inner.End()
+	m.Field("good").Int64(2)
+	return m.End()
+}
+
+func TestEndReturnsFirstEncodeErrorNotContainerScoped(t *testing.T) {
+	_, err := marshal(innerFailsOuterReports{})
+	if err == nil {
+		t.Fatal("the inner container's error must surface from the outer End")
+	}
+	if !strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("outer End should carry the first encode error verbatim, got %q", err)
 	}
 }
