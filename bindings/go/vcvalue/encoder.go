@@ -345,6 +345,13 @@ type MapEncoder struct {
 	// lastKey is the most recent Field key, kept so contract violations name
 	// the key whose value slot misbehaved.
 	lastKey string
+	// seen rejects duplicate keys at encode time. Reflection over a Go map
+	// cannot produce duplicates, but encodeStruct can (a vc tag colliding
+	// with another field's effective name) and a hand-written Encryptable
+	// can; without this check the collision only surfaces after the
+	// plaintext has crossed the FFI boundary, as the ciphertext decoder's
+	// opaque errMalformed naming neither the struct nor the key.
+	seen map[string]struct{}
 }
 
 // checkPrev verifies the previous entry's value slot completed exactly once.
@@ -366,10 +373,16 @@ func (m *MapEncoder) Field(key string) Encoder {
 	if m.st.err == nil {
 		if !utf8.ValidString(key) {
 			m.st.fail(errors.New("vcvalue: object key is not valid UTF-8"))
+		} else if _, dup := m.seen[key]; dup {
+			m.st.fail(fmt.Errorf("vcvalue: duplicate key %q in map encoding", key))
 		} else if buf, err := appendChunk(m.st.buf, []byte(key)); err != nil {
 			m.st.fail(err)
 		} else {
 			m.st.buf = buf
+			if m.seen == nil {
+				m.seen = make(map[string]struct{})
+			}
+			m.seen[key] = struct{}{}
 			m.lastKey = key
 			m.count++
 		}

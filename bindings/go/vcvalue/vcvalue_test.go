@@ -868,6 +868,46 @@ func TestEncoderPassthroughRequiresWrappedValue(t *testing.T) {
 	}
 }
 
+// collidingTag is the reflection route to a duplicate wire key: a vc tag
+// resolving to another field's effective name. Without encode-time rejection
+// this marshals happily and only fails inside the ciphertext decoder — after
+// the plaintext crossed the FFI boundary — as an errMalformed that names
+// neither the struct nor the key.
+type collidingTag struct {
+	Name  string
+	Alias string `vc:"Name"`
+}
+
+// duplicateFieldKey is the Encryptable route to the same collision.
+type duplicateFieldKey struct{}
+
+func (duplicateFieldKey) EncryptValue(enc vcvalue.Encoder) error {
+	m := enc.Map()
+	m.Field("a").Int64(1)
+	m.Field("a").Int64(2)
+	return m.End()
+}
+
+func TestEncoderRejectsDuplicateMapKeys(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		v    any
+	}{
+		{"struct tag collision", collidingTag{Name: "n", Alias: "m"}},
+		{"encryptable double field", duplicateFieldKey{}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := vcvalue.Marshal(c.v)
+			if err == nil {
+				t.Fatal("a duplicate map key must fail at encode time")
+			}
+			if !strings.Contains(err.Error(), `"Name"`) && !strings.Contains(err.Error(), `"a"`) {
+				t.Fatalf("diagnostic %q should name the colliding key", err)
+			}
+		})
+	}
+}
+
 func TestEncoderCatchesSkippedValuesAtEncodeTime(t *testing.T) {
 	for _, c := range []struct {
 		name string
