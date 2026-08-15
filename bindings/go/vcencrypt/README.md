@@ -47,7 +47,7 @@ become dependencies of the binding itself. (There is also a testable
 
 ### Encrypting a user record with mixed fields
 
-A type controls its own sealing by implementing `vcvalue.Encryptable` (the Go
+A type controls its own sealing by implementing `vcencrypt.Encryptable` (the Go
 analog of Rust's `impl Encrypt`, since Go has no orphan impls). Non-secret
 fields opt into passthrough explicitly — they travel **unencrypted and
 unauthenticated**, so a database can read and index them without the key:
@@ -60,7 +60,7 @@ type User struct {
     Name      string
 }
 
-func (u User) EncryptValue(enc vcvalue.Encoder) error {
+func (u User) EncryptValue(enc vcencrypt.Encoder) error {
     m := enc.Map()
     m.Field("id").Passthrough().Int64(u.ID)
     m.Field("created_at").Passthrough().String(u.CreatedAt)

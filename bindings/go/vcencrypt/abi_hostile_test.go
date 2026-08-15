@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 )
 
 // These tests drive the raw vc_* exports with hostile (ptr, len) pairs the
@@ -154,7 +152,7 @@ func TestGuestRejectsNullAadWithNonzeroLength(t *testing.T) {
 	}
 	defer func() { _ = cipher.Close(ctx) }()
 
-	encoded, err := vcvalue.Marshal("attack at dawn")
+	encoded, err := marshal("attack at dawn")
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}

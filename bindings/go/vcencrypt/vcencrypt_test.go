@@ -191,7 +191,7 @@ type person struct {
 	Age  uint64
 }
 
-func (p person) EncryptValue(enc vcvalue.Encoder) error {
+func (p person) EncryptValue(enc vcencrypt.Encoder) error {
 	m := enc.Map()
 	m.Field("name").String(p.Name)
 	m.Field("age").UInt64(p.Age)
@@ -496,11 +496,11 @@ func TestCrossLanguageFixture(t *testing.T) {
 	}
 	aad, ctBytes, valBytes := chunk(), chunk(), chunk()
 
-	ct, err := vcvalue.UnmarshalCipherText(ctBytes)
+	ct, err := vcencrypt.UnmarshalCipherTextForTest(ctBytes)
 	if err != nil {
 		t.Fatalf("decoding fixture ciphertext: %v", err)
 	}
-	want, err := vcvalue.Unmarshal(valBytes)
+	want, err := vcencrypt.UnmarshalForTest(valBytes)
 	if err != nil {
 		t.Fatalf("decoding fixture expected value: %v", err)
 	}

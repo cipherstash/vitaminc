@@ -1,4 +1,4 @@
-package vcvalue
+package vcencrypt
 
 import (
 	"encoding/binary"
@@ -66,11 +66,11 @@ func eagerCap(n int) int {
 	return min(n, maxEagerCapacity)
 }
 
-var errMalformed = errors.New("vcvalue: malformed transport bytes")
+var errMalformed = errors.New("vcencrypt: malformed transport bytes")
 
 func appendLen(out []byte, n int) ([]byte, error) {
 	if n < 0 || uint64(n) > maxUint32 {
-		return nil, fmt.Errorf("vcvalue: length %d out of range", n)
+		return nil, fmt.Errorf("vcencrypt: length %d out of range", n)
 	}
 	return binary.LittleEndian.AppendUint32(out, uint32(n)), nil
 }

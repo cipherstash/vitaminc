@@ -1,4 +1,4 @@
-package vcvalue
+package vcencrypt
 
 import "testing"
 

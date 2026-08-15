@@ -47,15 +47,21 @@ jobs:
         working-directory: bindings/go/vcencrypt
         run: CGO_ENABLED=0 go test ./...
 
-      - name: test (vcvalue on 32-bit GOARCH)
-        # vcvalue is the durable layer a future stack-encrypt Go SDK imports,
-        # and the u32-bound guards are load-bearing where int is 32 bits: a
-        # hostile length prefix >= 2^31 coerces negative there and would
-        # panic make() without them. A build check cannot catch that class —
-        # the tests (including the fuzz seed corpora) must actually run on
-        # 386, which linux/amd64 runners execute natively.
-        working-directory: bindings/go/vcvalue
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=386 go test ./...
+      - name: test (32-bit GOARCH)
+        # The transport codec's u32-bound guards are load-bearing where int
+        # is 32 bits: a hostile length prefix >= 2^31 coerces negative there
+        # and would panic make() without them. A build check cannot catch
+        # that class — the tests (including the fuzz seed corpora) must
+        # actually run on 386, which linux/amd64 runners execute natively.
+        # The codec lives in vcencrypt (wazero falls back to its interpreter
+        # on 386); vcvalue is model-only but stays covered too since it is
+        # the layer a future stack-encrypt Go SDK imports.
+        # Joined with && because the configured shell (bash -l) does not set
+        # -e: with independent lines, only the last command's exit status
+        # would decide the step, hiding a vcvalue failure.
+        run: |
+          (cd bindings/go/vcvalue && CGO_ENABLED=0 GOOS=linux GOARCH=386 go test ./...) &&
+          (cd bindings/go/vcencrypt && CGO_ENABLED=0 GOOS=linux GOARCH=386 go test ./...)
 
       - name: run example (userrecord)
         # The examples directory is its own Go module, outside every
