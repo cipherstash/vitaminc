@@ -3,7 +3,7 @@
 // binding itself.
 module github.com/cipherstash/vitaminc/bindings/go/vcencrypt/examples
 
-go 1.26.5
+go 1.25.0
 
 require (
 	github.com/cipherstash/vitaminc/bindings/go/vcencrypt v0.0.0
