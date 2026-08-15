@@ -17,6 +17,7 @@
 //! All lengths and counts are `u32` little-endian. Object keys are UTF-8.
 
 use std::any::Any;
+use std::collections::HashSet;
 
 use crate::{tags, FfiValue, Utf8String};
 use vitaminc_aead::CipherText;
@@ -272,8 +273,16 @@ fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue,
         OBJECT => {
             let count = reader.count()?;
             let mut entries = Vec::with_capacity(eager_capacity(count));
+            let mut seen: HashSet<String> = HashSet::with_capacity(eager_capacity(count));
             for _ in 0..count {
                 let key = decode_key(reader)?;
+                // Duplicate keys are rejected at the codec so the invariant
+                // holds for every consumer, not just ciphers that happen to
+                // enforce it downstream (same pattern as the encrypt/decrypt
+                // paths' own HashSet guards).
+                if !seen.insert(key.clone()) {
+                    return Err(CodecError);
+                }
                 entries.push((key, decode_value_inner(reader, depth + 1)?));
             }
             Ok(FfiValue::Object(entries))
@@ -464,8 +473,13 @@ where
         CT_MAP => {
             let count = reader.count()?;
             let mut entries = Vec::with_capacity(eager_capacity(count));
+            let mut seen: HashSet<String> = HashSet::with_capacity(eager_capacity(count));
             for _ in 0..count {
                 let key = decode_key(reader)?;
+                // Mirror of the value decoder's duplicate-key rejection.
+                if !seen.insert(key.clone()) {
+                    return Err(CodecError);
+                }
                 entries.push((key, decode_ciphertext_inner(reader, depth + 1)?));
             }
             Ok(CipherText::Map(entries))
@@ -768,6 +782,57 @@ mod tests {
             }
             _ => panic!("expected Object"),
         }
+    }
+
+    #[test]
+    fn value_decoder_rejects_duplicate_object_keys() {
+        // Two entries under the same key: the codec must refuse rather than
+        // hand consumers an ambiguous tree. Distinct keys with the same
+        // framing still decode, so the guard is not rejecting everything.
+        let mut dup = vec![OBJECT, 2, 0, 0, 0];
+        for key in ["a", "a"] {
+            dup.extend_from_slice(&(key.len() as u32).to_le_bytes());
+            dup.extend_from_slice(key.as_bytes());
+            dup.push(tags::NULL);
+        }
+        assert!(decode_value(&mut Reader::new(&dup)).is_err());
+
+        let mut ok = vec![OBJECT, 2, 0, 0, 0];
+        for key in ["a", "b"] {
+            ok.extend_from_slice(&(key.len() as u32).to_le_bytes());
+            ok.extend_from_slice(key.as_bytes());
+            ok.push(tags::NULL);
+        }
+        assert!(decode_value(&mut Reader::new(&ok)).is_ok());
+    }
+
+    #[test]
+    fn ciphertext_decoder_rejects_duplicate_map_keys() {
+        // Same guard on the ciphertext side: CT_MAP with a repeated clear key
+        // must fail to decode; the distinct-key neighbour must not.
+        fn ct_map(keys: [&str; 2]) -> Vec<u8> {
+            let mut bytes = vec![CT_MAP, 2, 0, 0, 0];
+            for key in keys {
+                bytes.extend_from_slice(&(key.len() as u32).to_le_bytes());
+                bytes.extend_from_slice(key.as_bytes());
+                bytes.push(CT_SINGLE);
+                bytes.extend_from_slice(&1u32.to_le_bytes());
+                bytes.push(0xAB);
+            }
+            bytes
+        }
+        assert!(
+            decode_ciphertext_boxed::<vitaminc_aead::LocalCipherText>(&mut Reader::new(&ct_map([
+                "k", "k"
+            ])))
+            .is_err()
+        );
+        assert!(
+            decode_ciphertext_boxed::<vitaminc_aead::LocalCipherText>(&mut Reader::new(&ct_map([
+                "k", "l"
+            ])))
+            .is_ok()
+        );
     }
 
     #[test]

@@ -54,8 +54,12 @@ func statusError(status uint32) error {
 		return ErrEncoding
 	case statusBadHandle:
 		return ErrBadHandle
-	default:
+	case statusInternal:
 		return ErrInternal
+	default:
+		// A status this host doesn't know is still an internal failure, but
+		// the code is preserved so a guest/host version skew is diagnosable.
+		return fmt.Errorf("%w (unrecognized guest status %d)", ErrInternal, status)
 	}
 }
 
@@ -94,7 +98,15 @@ type Client struct {
 // NewClient instantiates the embedded guest module, reusing a process-wide
 // compilation cache so only the first client pays the compile cost.
 func NewClient(ctx context.Context) (*Client, error) {
-	config := wazero.NewRuntimeConfig().WithCompilationCache(compilationCache())
+	// WithCloseOnContextDone lets a caller's context deadline or cancellation
+	// interrupt an in-flight guest call. Without it, calls are serialized on
+	// one mutex, so a single runaway call would block every user of this
+	// Client with no escape. An interrupted call closes the module, so the
+	// Client is done afterwards — acceptable, because the alternative is a
+	// permanently wedged process.
+	config := wazero.NewRuntimeConfig().
+		WithCompilationCache(compilationCache()).
+		WithCloseOnContextDone(true)
 	runtime := wazero.NewRuntimeWithConfig(ctx, config)
 	wasi_snapshot_preview1.MustInstantiate(ctx, runtime)
 
@@ -126,8 +138,12 @@ func NewClient(ctx context.Context) (*Client, error) {
 }
 
 // Close releases the wasm runtime and all guest memory (including any cipher
-// sessions still open).
+// sessions still open). It takes the same lock as every guest call, so a
+// call already in flight completes before the runtime is torn down and later
+// calls fail with a closed-module error rather than racing the teardown.
 func (c *Client) Close(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.runtime.Close(ctx)
 }
 
@@ -166,7 +182,7 @@ func (c *Client) NewCipher(ctx context.Context, key []byte) (*Cipher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("vcencrypt: cipher init: %w", err)
 	}
-	handle, cerr := handleResult(res[0])
+	handle, cerr := packedResult(res[0])
 	if cerr != nil {
 		return nil, cerr
 	}
@@ -284,6 +300,10 @@ func (c *Client) allocWrite(ctx context.Context, data []byte) (guestBuf, error) 
 		return guestBuf{}, errors.New("vcencrypt: guest allocation failed")
 	}
 	if len(data) > 0 && !c.module.Memory().Write(buf.ptr, data) {
+		// The allocation succeeded, so release it here: the caller only ever
+		// frees buffers it received, and a zero-value return would leak the
+		// guest memory for the life of the Client.
+		c.free(ctx, buf)
 		return guestBuf{}, errors.New("vcencrypt: guest memory write out of range")
 	}
 	return buf, nil
@@ -296,9 +316,11 @@ func (c *Client) free(ctx context.Context, buf guestBuf) {
 	}
 }
 
-// handleResult decodes a vc_cipher_init result: high 32 bits are the handle
-// on success, or an error status in the low 32 bits.
-func handleResult(packed uint64) (uint32, error) {
+// packedResult decodes the guest's packed u64 convention: the high 32 bits
+// are the success value (a handle for vc_cipher_init, a buffer pointer for
+// the transform calls), and a zero high half carries an error status in the
+// low 32 bits.
+func packedResult(packed uint64) (uint32, error) {
 	if packed>>32 == 0 {
 		return 0, statusError(uint32(packed))
 	}
@@ -343,12 +365,12 @@ func (c *Client) call(ctx context.Context, fn api.Function, handle uint32, aad, 
 	if err != nil {
 		return nil, fmt.Errorf("vcencrypt: guest call: %w", err)
 	}
-	packed := res[0]
-	if packed>>32 == 0 {
-		return nil, statusError(uint32(packed))
+	ptr, cerr := packedResult(res[0])
+	if cerr != nil {
+		return nil, cerr
 	}
 
-	outBuf := guestBuf{ptr: uint32(packed >> 32), len: uint32(packed & 0xFFFFFFFF)}
+	outBuf := guestBuf{ptr: ptr, len: uint32(res[0] & 0xFFFFFFFF)}
 	bufs = append(bufs, outBuf)
 	out, ok := c.module.Memory().Read(outBuf.ptr, outBuf.len)
 	if !ok {

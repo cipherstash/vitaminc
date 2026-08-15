@@ -623,6 +623,72 @@ func TestMarshalRejectsDepthBomb(t *testing.T) {
 	}
 }
 
+// A duplicate object key in the wire bytes must be rejected exactly as the
+// ciphertext decoder rejects a duplicate ctMap key: an Object carrying
+// duplicates cannot survive re-encoding through a Go map without silently
+// dropping an entry. Only hand-built transport bytes can reach this branch —
+// the encoder sorts unique map keys.
+func TestUnmarshalRejectsDuplicateObjectKey(t *testing.T) {
+	key := []byte{1, 0, 0, 0, 'a'}
+	var buf []byte
+	buf = append(buf, 0x11, 2, 0, 0, 0) // tagObject, count 2
+	buf = append(buf, key...)
+	buf = append(buf, 0x00) // Null value
+	buf = append(buf, key...)
+	buf = append(buf, 0x00)
+	if _, err := vcvalue.Unmarshal(buf); err == nil {
+		t.Fatal("an object with a duplicate key must be rejected")
+	}
+
+	// Positive control: the same shape with distinct keys decodes.
+	var ok []byte
+	ok = append(ok, 0x11, 2, 0, 0, 0)
+	ok = append(ok, 1, 0, 0, 0, 'a', 0x00)
+	ok = append(ok, 1, 0, 0, 0, 'b', 0x00)
+	if _, err := vcvalue.Unmarshal(ok); err != nil {
+		t.Fatalf("distinct keys must decode: %v", err)
+	}
+}
+
+// Every integer kind the encoder accepts must also bind through the driver:
+// Plain{V: user.ID} with ID int encodes fine, so Value() must not reject it.
+func TestPlainValueBindsEveryEncodableIntegerKind(t *testing.T) {
+	cases := []struct {
+		in   any
+		want driver.Value
+	}{
+		{int(7), int64(7)},
+		{int8(-8), int64(-8)},
+		{int16(-16), int64(-16)},
+		{int32(-32), int64(-32)},
+		{int64(-64), int64(-64)},
+		{uint8(8), int64(8)},
+		{uint16(16), int64(16)},
+		{uint32(32), int64(32)},
+		{uint(64), int64(64)},
+		{uint64(64), int64(64)},
+	}
+	for _, c := range cases {
+		got, err := vcvalue.Plain{V: c.in}.Value()
+		if err != nil {
+			t.Fatalf("Value(%T): %v", c.in, err)
+		}
+		if got != c.want {
+			t.Fatalf("Value(%T): got %#v, want %#v", c.in, got, c.want)
+		}
+	}
+
+	// The unsigned kinds that can exceed int64 must fail closed.
+	if _, err := (vcvalue.Plain{V: uint64(math.MaxInt64) + 1}).Value(); err == nil {
+		t.Fatal("uint64 above MaxInt64 must not bind")
+	}
+	if uint64(math.MaxUint) > math.MaxInt64 { // uint is 32-bit on GOARCH=386
+		if _, err := (vcvalue.Plain{V: uint(math.MaxUint)}).Value(); err == nil {
+			t.Fatal("uint above MaxInt64 must not bind")
+		}
+	}
+}
+
 // Plain.Value's driver conversions: width-narrowing, the uint64 overflow
 // error, and the container-has-no-column error.
 func TestPlainValueConversions(t *testing.T) {

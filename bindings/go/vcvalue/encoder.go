@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"sort"
+	"slices"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -609,7 +610,7 @@ func encodeMap(enc Encoder, rv reflect.Value) {
 	keys := rv.MapKeys()
 	// Sort keys: Go map iteration is randomized; sorting makes the encrypted
 	// structure deterministic across encodes of an equal map.
-	sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
+	slices.SortFunc(keys, func(a, b reflect.Value) int { return strings.Compare(a.String(), b.String()) })
 	m := enc.Map()
 	for _, k := range keys {
 		encodeReflect(m.Field(k.String()), rv.MapIndex(k))

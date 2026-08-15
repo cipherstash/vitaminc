@@ -136,11 +136,19 @@ func decodeValue(r *reader, depth int) (any, error) {
 			return nil, err
 		}
 		fields := make(Object, 0, eagerCap(n))
+		// Duplicate keys are rejected as on the ciphertext decode path (and
+		// both Rust decoders): an Object with duplicates cannot survive a
+		// re-encode through a Go map without silently dropping an entry.
+		seen := make(map[string]struct{}, eagerCap(n))
 		for range n {
 			key, err := r.str()
 			if err != nil {
 				return nil, err
 			}
+			if _, dup := seen[key]; dup {
+				return nil, errMalformed
+			}
+			seen[key] = struct{}{}
 			value, err := decodeValue(r, depth+1)
 			if err != nil {
 				return nil, err

@@ -3,4 +3,4 @@
 // stack-encrypt Go SDK is expected to import this module directly.
 module github.com/cipherstash/vitaminc/bindings/go/vcvalue
 
-go 1.26.5
+go 1.23

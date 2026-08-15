@@ -24,15 +24,9 @@ func (s Sealed) Value() (driver.Value, error) {
 
 // Scan implements sql.Scanner: a BLOB/BYTEA column loads as a Sealed.
 func (s *Sealed) Scan(src any) error {
-	switch b := src.(type) {
-	case nil:
-		*s = nil
-	case []byte:
-		*s = append(Sealed(nil), b...)
-	default:
-		return fmt.Errorf("vcvalue: cannot scan %T into Sealed", src)
-	}
-	return nil
+	b, err := scanLeafBytes(src, "Sealed")
+	*s = Sealed(b)
+	return err
 }
 
 // SealedNone is the authenticated absent marker: a sealed empty plaintext
@@ -113,15 +107,33 @@ func scanLeafBytes(src any, into string) ([]byte, error) {
 // ciphertext binds directly as database named parameters. Only scalar
 // natives convert; a container passthrough has no single-column form.
 func (p Plain) Value() (driver.Value, error) {
+	// Every integer kind the encoder accepts must convert here too: a value
+	// that encodes must also bind, or `Plain{V: user.ID}` with `ID int` works
+	// until it reaches the database driver.
 	switch v := p.V.(type) {
 	case nil, bool, int64, float64, string, []byte:
 		return v, nil
+	case int:
+		return int64(v), nil
+	case int8:
+		return int64(v), nil
+	case int16:
+		return int64(v), nil
 	case int32:
+		return int64(v), nil
+	case uint8:
+		return int64(v), nil
+	case uint16:
 		return int64(v), nil
 	case uint32:
 		return int64(v), nil
 	case float32:
 		return float64(v), nil
+	case uint:
+		if uint64(v) > math.MaxInt64 {
+			return nil, fmt.Errorf("vcvalue: passthrough uint %d overflows the driver's int64", v)
+		}
+		return int64(v), nil
 	case uint64:
 		if v > math.MaxInt64 {
 			return nil, fmt.Errorf("vcvalue: passthrough uint64 %d overflows the driver's int64", v)

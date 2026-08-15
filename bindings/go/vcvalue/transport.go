@@ -57,6 +57,12 @@ const maxDepth = 128
 const maxEagerCapacity = 1024
 
 func eagerCap(n int) int {
+	// n < 0 is unreachable on 64-bit (u32 counts are non-negative in a 64-bit
+	// int) but load-bearing on 32-bit GOARCH, where a hostile prefix >= 2^31
+	// coerces negative and min() would pass it through to make().
+	if n < 0 {
+		return 0
+	}
 	return min(n, maxEagerCapacity)
 }
 
@@ -112,13 +118,15 @@ func (r *reader) u32() (int, error) {
 
 // count reads a u32 item count, rejecting counts that exceed the bytes
 // remaining (every item costs at least one byte) so hostile input cannot
-// drive a huge preallocation.
+// drive a huge preallocation. The n < 0 guard matches take/appendLen: on
+// 32-bit GOARCH a prefix >= 2^31 coerces to a negative int, which would slip
+// past the remaining-bytes check and panic in make.
 func (r *reader) count() (int, error) {
 	n, err := r.u32()
 	if err != nil {
 		return 0, err
 	}
-	if n > len(r.buf)-r.pos {
+	if n < 0 || n > len(r.buf)-r.pos {
 		return 0, errMalformed
 	}
 	return n, nil
