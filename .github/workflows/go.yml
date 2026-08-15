@@ -56,8 +56,11 @@ jobs:
         # The codec lives in vcencrypt (wazero falls back to its interpreter
         # on 386); vcvalue is model-only but stays covered too since it is
         # the layer a future stack-encrypt Go SDK imports.
+        # Joined with && because the configured shell (bash -l) does not set
+        # -e: with independent lines, only the last command's exit status
+        # would decide the step, hiding a vcvalue failure.
         run: |
-          (cd bindings/go/vcvalue && CGO_ENABLED=0 GOOS=linux GOARCH=386 go test ./...)
+          (cd bindings/go/vcvalue && CGO_ENABLED=0 GOOS=linux GOARCH=386 go test ./...) &&
           (cd bindings/go/vcencrypt && CGO_ENABLED=0 GOOS=linux GOARCH=386 go test ./...)
 
       - name: run example (userrecord)
