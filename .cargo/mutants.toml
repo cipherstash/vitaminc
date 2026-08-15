@@ -26,6 +26,28 @@ exclude_globs = [
     "packages/random-derives/**",
 ]
 
+# Skip mutants inside the `vitaminc-aead-napi` conversion functions and their
+# JS-boundary helpers (`own_enumerable_keys`, `get_property_unknown`,
+# `ensure_plain_object`). Each takes a live `napi_env`/`Unknown`/`Object`,
+# which only exists inside a running V8 isolate, so no Rust unit test can reach
+# them: every mutant there survives because the function is unreachable from
+# `cargo test`, not because a test is missing. Matched by name (regex against
+# `cargo mutants --list`) rather than by file, so the testable parts of those
+# modules — `forbidden_key`, `eager_capacity` and friends — stay gated.
+#
+# NOTE: a deferral, not a dismissal. This layer needs JS-level tests driving a
+# built addon; see the tracking note in packages/aead-napi/README.md.
+exclude_re = [
+    "js_to_value",
+    "value_to_js",
+    "node_to_js",
+    "node_from_js",
+    "own_enumerable_keys",
+    "define_own_property",
+    "get_property_unknown",
+    "ensure_plain_object",
+]
+
 # Property tests (quickcheck) and AEAD round-trips run slower under mutation than
 # a clean build, so give each mutant generous headroom over the measured baseline
 # before declaring a timeout — a slow-but-correct mutant must not be misreported

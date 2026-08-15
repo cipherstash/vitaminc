@@ -15,6 +15,14 @@ name = "vitaminc-aead"
 version_group = "vitaminc"
 
 [[package]]
+name = "vitaminc-aead-napi"
+version_group = "vitaminc"
+
+[[package]]
+name = "vitaminc-aead-value"
+version_group = "vitaminc"
+
+[[package]]
 name = "vitaminc-async-traits"
 version_group = "vitaminc"
 

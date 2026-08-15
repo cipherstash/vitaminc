@@ -31,9 +31,39 @@ missing = "pessimistic"
 # the score if that changes.
 exclude = ["tests/**"]
 
-# Functions to analyse but hide from the report, matched against the full path.
-# The proc-macro crates can't be measured by cargo-llvm-cov — macro expansion
-# runs at compile time, not in the instrumented test binary — so they always
-# read as 0% covered and would be permanent false-positives. They are exercised
-# in practice by the crates that use the derives.
-allow = ["**/random-derives/**", "**/protected-derive/**"]
+# Functions to analyse but hide from the report. An entry containing `/` or
+# `**` matches the defining file; otherwise it matches the function name.
+#
+# Both groups below are code cargo-llvm-cov cannot observe, so they always read
+# as 0% covered and would be permanent false-positives — not code we have
+# chosen to leave untested.
+#
+#   * The proc-macro crates: macro expansion runs at compile time, not in the
+#     instrumented test binary. Exercised in practice by the crates that use
+#     the derives.
+#
+#   * The `vitaminc-aead-napi` conversion functions and their JS-boundary
+#     helpers (`own_enumerable_keys`, `get_property_unknown`,
+#     `ensure_plain_object`): each takes a live `napi_env`/`Unknown`/`Object`,
+#     which only exists inside a running V8 isolate. `cargo test` has no Node
+#     host (the `napi/noop` dev-dependency stubs the symbols so the crate
+#     *links*, it does not make the calls work), so these cannot be reached
+#     from a Rust unit test at any coverage level. They are named individually
+#     rather than by file so the rest of those modules — `forbidden_key`,
+#     `eager_capacity` and friends — stays scored.
+#
+#     NOTE: this is a deferral, not a dismissal. The conversion layer still
+#     needs JS-level tests driving a built addon; see the tracking note in
+#     packages/aead-napi/README.md.
+allow = [
+    "**/random-derives/**",
+    "**/protected-derive/**",
+    "js_to_value",
+    "value_to_js",
+    "node_to_js",
+    "node_from_js",
+    "own_enumerable_keys",
+    "define_own_property",
+    "get_property_unknown",
+    "ensure_plain_object",
+]

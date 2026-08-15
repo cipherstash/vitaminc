@@ -1,38 +1,32 @@
-use crate::backend::{CipherKey, NONCE_LEN};
+use crate::backend::{CipherKey, NONCE_LEN, TAG_LEN};
 use crate::Key;
 use std::any::Any;
+use std::borrow::Cow;
+use std::collections::HashSet;
 use vitaminc_aead::{
-    Aad, Cipher, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt, IntoAad,
-    LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator, SeqAccess,
-    SeqCipher, Unspecified,
+    Aad, Cipher, CipherText, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt,
+    IntoAad, LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator,
+    SeqAccess, SeqCipher, Unspecified, WIRE_VERSION,
 };
-use vitaminc_protected::Protected;
+use vitaminc_protected::{Controlled, Protected};
 
-/// The recursive ciphertext container produced by [`Aes256Cipher`].
+/// The passthrough payload type used by [`Aes256Cipher`]: type-erased boxed
+/// values, downcast back to a concrete type at decrypt time via
+/// [`AesDecipher::decrypt_passthrough_as`].
+pub type BoxedPassthrough = Box<dyn Any + Send + 'static>;
+
+/// The recursive ciphertext container produced by [`Aes256Cipher`] — the
+/// shared [`CipherText`] tree instantiated with [`LocalCipherText`] leaves
+/// and [`BoxedPassthrough`] passthrough values.
 ///
 /// The shape mirrors the structure of the plaintext that was encrypted: a
-/// single value yields [`Single`](AesCipherText::Single), a `Vec` yields
-/// [`Sequence`](AesCipherText::Sequence), a `HashMap` yields
-/// [`Map`](AesCipherText::Map). Nested structures are represented recursively.
-#[derive(Debug)]
-pub enum AesCipherText {
-    /// A single sealed value (nonce + ciphertext + tag).
-    Single(LocalCipherText),
-    /// A sequence of ciphertexts produced from a `Vec`-shaped plaintext.
-    Sequence(Vec<AesCipherText>),
-    /// A map of (cleartext key, ciphertext value) pairs produced from a
-    /// `HashMap`-shaped plaintext. Keys are not encrypted.
-    Map(Vec<(String, AesCipherText)>),
-    /// The authenticated absent marker produced by [`Cipher::encrypt_none`].
-    /// Stores a sealed empty plaintext whose tag binds the supplied AAD.
-    None(LocalCipherText),
-    /// A typed value passed through unencrypted via [`Cipher::passthrough`].
-    /// Not serializable to bytes — see
-    /// `packages/aead/src/cipher.rs` for the API-level type bound and the
-    /// runtime downcast performed by
-    /// [`Decipher::decrypt_passthrough`](vitaminc_aead::Decipher::decrypt_passthrough).
-    Passthrough(Box<dyn Any + Send + 'static>),
-}
+/// single value yields [`Single`](CipherText::Single), while non-empty
+/// `Vec`s and `HashMap`s yield [`Sequence`](CipherText::Sequence) and
+/// [`Map`](CipherText::Map). Empty composites use the authenticated marker
+/// variants [`EmptySequence`](CipherText::EmptySequence) and
+/// [`EmptyMap`](CipherText::EmptyMap). Nested structures are represented
+/// recursively.
+pub type AesCipherText = CipherText<LocalCipherText, BoxedPassthrough>;
 
 /// Implements AES-256-GCM. Backend is selected at compile time:
 /// `aws-lc-rs` on native targets, `aes-gcm` (RustCrypto) on `wasm32`.
@@ -53,11 +47,78 @@ impl Aes256Cipher {
             key: key.cipher_key()?,
         })
     }
+
+    fn seal_empty_marker<'a, A>(&self, aad: A) -> Result<LocalCipherText, Unspecified>
+    where
+        A: IntoAad<'a>,
+    {
+        seal_leaf(self, Protected::new(Vec::new()), aad)
+    }
+}
+
+/// Seal one leaf: `version(1) ‖ nonce ‖ ciphertext ‖ tag`, with the wire
+/// version bound into the AAD via `Aad::for_leaf`.
+///
+/// This is THE leaf seal path — the dynamic [`Cipher`] impl and the static
+/// hlist cipher (`cipher_static.rs`) both go through it, so a wire-format
+/// change lands in every path at once instead of drifting between copies.
+/// The one exception is [`Cipher::encrypt_bytes_array`], which duplicates
+/// the derivation to keep its no-realloc fixed-width fast path; its output
+/// bytes are pinned equal to this path by test.
+pub(crate) fn seal_leaf<'a, A>(
+    cipher: &Aes256Cipher,
+    data: Protected<Vec<u8>>,
+    aad: A,
+) -> Result<LocalCipherText, Unspecified>
+where
+    A: IntoAad<'a>,
+{
+    let nonce = cipher.nonce_generator.generate()?;
+    let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
+    // Outermost derivation: bind the wire version the builder prefixes to
+    // the stored leaf — see `Aad::for_leaf`.
+    let aad = aad.into_aad().for_leaf(WIRE_VERSION);
+
+    CipherTextBuilder::new()
+        .append_nonce(nonce)
+        .append_target_plaintext(data)
+        .accepts_ciphertext_and_tag_ok(|mut buf| {
+            cipher
+                .key
+                .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
+                .map(|()| buf)
+        })
+        .build()
+}
+
+/// Open one leaf sealed by [`seal_leaf`] (or the equivalent array fast
+/// path): checks the wire version before parsing, then verifies with the
+/// same `Aad::for_leaf` derivation. Shared by the dynamic decipher and the
+/// static hlist path for the same anti-drift reason as [`seal_leaf`].
+pub(crate) fn open_leaf<'a, A>(
+    cipher: &Aes256Cipher,
+    ct: LocalCipherText,
+    aad: A,
+) -> Result<Protected<Vec<u8>>, Unspecified>
+where
+    A: IntoAad<'a>,
+{
+    // `read_version` rejects unknown wire versions before any parsing; the
+    // version is *also* bound under the tag (`for_leaf`, mirroring the seal
+    // side), so a relabeled byte that parses still fails.
+    let (nonce, reader) = ct.into_reader().read_version()?.read_nonce::<NONCE_LEN>()?;
+    let nonce_bytes = nonce.into_inner();
+    let aad = aad.into_aad().for_leaf(WIRE_VERSION);
+
+    reader
+        .accepts_plaintext_ok(|data| cipher.key.open(&nonce_bytes, aad.as_bytes(), data))
+        .read()
 }
 
 impl<'c> Cipher for &'c Aes256Cipher {
     type Ok = AesCipherText;
     type Error = Unspecified;
+    type Passthrough = BoxedPassthrough;
     type SeqCipher = AesSeqCipher<'c>;
     type MapCipher = AesMapCipher<'c>;
 
@@ -69,13 +130,31 @@ impl<'c> Cipher for &'c Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
+        seal_leaf(self, data, aad).map(AesCipherText::Single)
+    }
+
+    fn encrypt_bytes_array<'a, const N: usize, A>(
+        self,
+        data: Protected<[u8; N]>,
+        aad: A,
+    ) -> Result<Self::Ok, Self::Error>
+    where
+        A: IntoAad<'a>,
+    {
+        // Override the trait default (which does a plain `to_vec`, sized
+        // exactly `N`, forcing the in-place seal to reallocate when it appends
+        // the tag). `append_target_plaintext_array` pre-sizes the buffer to
+        // `N + TAG_LEN` so the seal appends the tag into spare capacity and the
+        // ciphertext is produced with a single heap allocation. Output bytes
+        // are identical to the default path.
         let nonce = self.nonce_generator.generate()?;
         let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-        let aad = aad.into_aad();
+        // Outermost derivation: bind the wire version — see `Aad::for_leaf`.
+        let aad = aad.into_aad().for_leaf(WIRE_VERSION);
 
         CipherTextBuilder::new()
             .append_nonce(nonce)
-            .append_target_plaintext(data)
+            .append_target_plaintext_array(data, TAG_LEN)
             .accepts_ciphertext_and_tag_ok(|mut buf| {
                 self.key
                     .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
@@ -85,18 +164,33 @@ impl<'c> Cipher for &'c Aes256Cipher {
             .map(AesCipherText::Single)
     }
 
-    fn encrypt_seq(self, size_hint: Option<usize>) -> Self::SeqCipher {
+    fn encrypt_seq<'a, A>(self, size_hint: Option<usize>, aad: A) -> Self::SeqCipher
+    where
+        A: IntoAad<'a>,
+    {
+        let aad = aad.into_aad().into_owned();
         AesSeqCipher {
             cipher: self,
             items: Vec::with_capacity(size_hint.unwrap_or(0)),
+            // Both derived once here, then borrowed per element — cheaper
+            // than the per-element clone the old AAD-per-call shape required.
+            element_aad: aad.for_sequence_element(),
+            aad,
+            encrypted: false,
         }
     }
 
-    fn encrypt_map(self) -> Self::MapCipher {
+    fn encrypt_map<'a, A>(self, aad: A) -> Self::MapCipher
+    where
+        A: IntoAad<'a>,
+    {
         AesMapCipher {
             cipher: self,
             entries: Vec::new(),
+            seen_keys: HashSet::new(),
             current_key: None,
+            aad: aad.into_aad().into_owned(),
+            encrypted: false,
         }
     }
 
@@ -104,27 +198,24 @@ impl<'c> Cipher for &'c Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        let nonce = self.nonce_generator.generate()?;
-        let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-        let aad = aad.into_aad();
-
-        CipherTextBuilder::new()
-            .append_nonce(nonce)
-            .append_target_plaintext(Vec::<u8>::new())
-            .accepts_ciphertext_and_tag_ok(|mut buf| {
-                self.key
-                    .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
-                    .map(|()| buf)
-            })
-            .build()
+        // Domain-separated so a `Single` leaf sealed under the bare AAD can
+        // never be re-tagged as an authenticated absence (and vice versa).
+        self.seal_empty_marker(aad.into_aad().for_none())
             .map(AesCipherText::None)
     }
 
-    fn passthrough<T>(self, value: T) -> Result<Self::Ok, Self::Error>
-    where
-        T: Any + Send + 'static,
-    {
-        Ok(AesCipherText::Passthrough(Box::new(value)))
+    fn passthrough(self, value: Self::Passthrough) -> Result<Self::Ok, Self::Error> {
+        Ok(AesCipherText::Passthrough(value))
+    }
+
+    fn passthrough_boxed(
+        self,
+        value: Box<dyn Any + Send + 'static>,
+    ) -> Result<Self::Ok, Self::Error> {
+        // This cipher's passthrough type *is* `Box<dyn Any + Send>` (see
+        // `BoxedPassthrough`), so the type-erased box is already the
+        // passthrough payload — store it directly.
+        self.passthrough(value)
     }
 }
 
@@ -134,85 +225,149 @@ impl<'c> Cipher for &'c Aes256Cipher {
 pub struct AesSeqCipher<'c> {
     cipher: &'c Aes256Cipher,
     items: Vec<AesCipherText>,
+    /// The AAD fixed at [`Cipher::encrypt_seq`]; the empty marker is sealed
+    /// against its `for_empty_sequence` derivation.
+    aad: Aad<'static>,
+    /// [`Aad::for_sequence_element`] of `aad`, derived once and applied to
+    /// every element. The labelled derivation is what authenticates the
+    /// container shape: a leaf sealed in element position can never verify
+    /// as a top-level `Single` (or vice versa) — see
+    /// [`Aad::for_sequence_element`].
+    element_aad: Aad<'static>,
+    /// Whether at least one item was appended through the authenticated
+    /// [`encrypt_next`](SeqCipher::encrypt_next) path. Passthrough items
+    /// authenticate nothing, so a sequence with items but no encrypted ones
+    /// would otherwise carry no AEAD tag at all — see [`end`](SeqCipher::end).
+    encrypted: bool,
 }
 
 impl<'c> SeqCipher for AesSeqCipher<'c> {
     type Ok = AesCipherText;
     type Error = Unspecified;
+    type Passthrough = BoxedPassthrough;
 
-    fn encrypt_next<'a, T, A>(mut self, data: T, aad: A) -> Result<Self, Self::Error>
+    fn encrypt_next<T>(mut self, data: T) -> Result<Self, Self::Error>
     where
         T: Encrypt,
-        A: IntoAad<'a>,
     {
-        let encrypted = data.encrypt_with_aad(self.cipher, aad)?;
+        // Borrow the stored derived AAD — no allocation per element.
+        let encrypted =
+            data.encrypt_with_aad(self.cipher, Aad::from_slice(self.element_aad.as_bytes()))?;
+        // A nested `Encrypt` impl may route through the passthrough channel
+        // (e.g. `FfiValue::Passthrough`), producing an unauthenticated node
+        // despite arriving via this method. Only a genuinely sealed node may
+        // satisfy `end`'s all-passthrough rejection, otherwise a container of
+        // only passthrough elements would encrypt Ok yet carry no AEAD tag
+        // (and `decrypt_seq` would refuse it forever).
+        self.encrypted |= !matches!(encrypted, AesCipherText::Passthrough(_));
         self.items.push(encrypted);
         Ok(self)
     }
 
-    fn passthrough_next<T>(mut self, value: T) -> Result<Self, Self::Error>
-    where
-        T: Any + Send + 'static,
-    {
-        self.items.push(AesCipherText::Passthrough(Box::new(value)));
+    fn passthrough_next(mut self, value: Self::Passthrough) -> Result<Self, Self::Error> {
+        self.items.push(AesCipherText::Passthrough(value));
         Ok(self)
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(AesCipherText::Sequence(self.items))
+        if self.items.is_empty() {
+            self.cipher
+                .seal_empty_marker(self.aad.for_empty_sequence())
+                .map(AesCipherText::EmptySequence)
+        } else if !self.encrypted {
+            // Every item is a passthrough: nothing in the container
+            // authenticates the AAD (or, when the sequence is a map value,
+            // its entry key). Such a container would decrypt under any AAD,
+            // so refuse to produce it — all-passthrough data has no business
+            // going through a cipher.
+            Err(Unspecified)
+        } else {
+            Ok(AesCipherText::Sequence(self.items))
+        }
     }
 }
 
 /// [`MapCipher`] driver for [`Aes256Cipher`]. Keys are stored in the clear;
 /// values are encrypted under their own fresh nonce and accumulated into an
-/// [`AesCipherText::Map`].
+/// [`AesCipherText::Map`]. Each value is sealed against
+/// [`Aad::for_map_entry`] of the caller's AAD and its key, so swapping or
+/// renaming keys in a stored ciphertext fails decryption (passthrough
+/// entries excepted — they are unauthenticated by design).
 ///
-/// This driver is intended for encrypting sources that already enforce key
-/// uniqueness themselves — `HashMap`s and structs (whose field names are
-/// unique by construction). It therefore stores `entries` as a *positional
-/// list* and performs **no duplicate-key checks** of its own.
-///
-/// Implementors should be aware: if the same key is pushed by two completed
-/// `encrypt_value` / `passthrough_entry` calls, both are kept, and on decrypt
-/// the `HashMap`-shaped visitor is **last-wins**. The built-in
-/// `Encrypt for HashMap` impl never does this (the source map already dedups),
-/// so it is unreachable today; a custom encoder driving this trait directly is
-/// responsible for not emitting duplicate keys.
+/// Duplicate keys are rejected at encrypt time: `encrypt_key` and
+/// `passthrough_entry` fail on a key that is already present, mirroring
+/// `decrypt_map`'s outright rejection of duplicates (a verified duplicate
+/// would otherwise let an attacker splice a stale value for one field into
+/// a current ciphertext). Failing at seal time keeps the contract symmetric
+/// for every encoder — a duplicate-keyed source (e.g. a hand-built
+/// `FfiValue::Object`) errors immediately instead of producing a ciphertext
+/// that can never be read back.
 pub struct AesMapCipher<'c> {
     cipher: &'c Aes256Cipher,
     entries: Vec<(String, AesCipherText)>,
-    current_key: Option<&'static str>,
+    /// Every key committed so far — duplicate rejection must stay O(1) per
+    /// key because map keys can arrive from an untrusted host across the FFI
+    /// boundary, where a linear scan per key is a quadratic-work lever
+    /// (`decrypt_map` uses the same structure for the same reason).
+    seen_keys: HashSet<String>,
+    current_key: Option<Cow<'static, str>>,
+    /// The AAD fixed at [`Cipher::encrypt_map`]. Each entry's value is sealed
+    /// against `for_map_entry` of this; the empty marker against
+    /// `for_empty_map` of it.
+    aad: Aad<'static>,
+    /// Whether at least one entry was appended through the authenticated
+    /// [`encrypt_value`](MapCipher::encrypt_value) path — see
+    /// [`AesSeqCipher::encrypted`] and [`end`](MapCipher::end).
+    encrypted: bool,
 }
 
 impl<'c> MapCipher for AesMapCipher<'c> {
     type Ok = AesCipherText;
     type Error = Unspecified;
+    type Passthrough = BoxedPassthrough;
 
-    fn encrypt_key(mut self, key: &'static str) -> Result<Self, Self::Error> {
+    fn encrypt_key<K>(mut self, key: K) -> Result<Self, Self::Error>
+    where
+        K: Into<Cow<'static, str>>,
+    {
         // A key already pending means `encrypt_key` was called twice with no
         // intervening `encrypt_value` — a trait-contract violation. Fail rather
         // than silently drop the first key.
         if self.current_key.is_some() {
             return Err(Unspecified);
         }
+        let key = key.into();
+        // Reject duplicates at seal time: `decrypt_map` rejects them outright,
+        // so accepting one here would produce a permanently unreadable
+        // ciphertext with no error until read time.
+        if !self.seen_keys.insert(key.as_ref().to_owned()) {
+            return Err(Unspecified);
+        }
         self.current_key = Some(key);
         Ok(self)
     }
 
-    fn encrypt_value<'a, U, A>(mut self, value: U, aad: A) -> Result<Self, Self::Error>
+    fn encrypt_value<U>(mut self, value: U) -> Result<Self, Self::Error>
     where
         U: Encrypt,
-        A: IntoAad<'a>,
     {
         let key = self.current_key.take().ok_or(Unspecified)?;
-        let encrypted = value.encrypt_with_aad(self.cipher, aad)?;
-        self.entries.push((key.to_string(), encrypted));
+        // Seal against PAE(domain, aad, key) — the trait contract that makes
+        // key and value inseparable. `AesMapAccess::next_entry` derives the
+        // same AAD on decrypt.
+        let entry_aad = self.aad.for_map_entry(&key);
+        let encrypted = value.encrypt_with_aad(self.cipher, entry_aad)?;
+        // See `AesSeqCipher::encrypt_next`: a nested impl may have routed
+        // through the passthrough channel, and an unauthenticated node must
+        // not satisfy `end`'s all-passthrough rejection.
+        self.encrypted |= !matches!(encrypted, AesCipherText::Passthrough(_));
+        self.entries.push((key.into_owned(), encrypted));
         Ok(self)
     }
 
-    fn passthrough_entry<T>(mut self, key: &'static str, value: T) -> Result<Self, Self::Error>
+    fn passthrough_entry<K>(mut self, key: K, value: Self::Passthrough) -> Result<Self, Self::Error>
     where
-        T: Any + Send + 'static,
+        K: Into<Cow<'static, str>>,
     {
         // A key already pending means `encrypt_key` ran without a matching
         // `encrypt_value` — adopting it here would silently drop the pending
@@ -221,8 +376,13 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         if self.current_key.is_some() {
             return Err(Unspecified);
         }
+        let key = key.into();
+        // Same duplicate rejection as `encrypt_key` — see the type docs.
+        if !self.seen_keys.insert(key.as_ref().to_owned()) {
+            return Err(Unspecified);
+        }
         self.entries
-            .push((key.to_string(), AesCipherText::Passthrough(Box::new(value))));
+            .push((key.into_owned(), AesCipherText::Passthrough(value)));
         Ok(self)
     }
 
@@ -231,7 +391,17 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         if self.current_key.is_some() {
             return Err(Unspecified);
         }
-        Ok(AesCipherText::Map(self.entries))
+        if self.entries.is_empty() {
+            self.cipher
+                .seal_empty_marker(self.aad.for_empty_map())
+                .map(AesCipherText::EmptyMap)
+        } else if !self.encrypted {
+            // Every entry is a passthrough: nothing authenticates the AAD or
+            // the entry keys — see `AesSeqCipher::end`.
+            Err(Unspecified)
+        } else {
+            Ok(AesCipherText::Map(self.entries))
+        }
     }
 }
 
@@ -290,17 +460,39 @@ pub struct AesDecipher<'c> {
 }
 
 impl AesDecipher<'_> {
+    /// Typed convenience over [`Decipher::decrypt_passthrough`] for this
+    /// cipher's [`BoxedPassthrough`] payload type: recovers the payload and
+    /// downcasts it to `T`, returning [`Unspecified`] if the ciphertext is not
+    /// a passthrough or the stored type does not match.
+    pub fn decrypt_passthrough_as<T>(self) -> Result<T, Unspecified>
+    where
+        T: Any + Send + 'static,
+    {
+        self.decrypt_passthrough()?
+            .downcast::<T>()
+            .map(|b| *b)
+            .map_err(|_| Unspecified)
+    }
+
     fn decrypt_local_ciphertext(
         cipher: &Aes256Cipher,
         ct: LocalCipherText,
         aad: &[u8],
     ) -> Result<Protected<Vec<u8>>, Unspecified> {
-        let (nonce, reader) = ct.into_reader().read_nonce::<NONCE_LEN>()?;
-        let nonce_bytes = nonce.into_inner();
+        open_leaf(cipher, ct, Aad::from_slice(aad))
+    }
 
-        reader
-            .accepts_plaintext_ok(|data| cipher.key.open(&nonce_bytes, aad, data))
-            .read()
+    fn verify_empty_marker(
+        cipher: &Aes256Cipher,
+        ct: LocalCipherText,
+        aad: &[u8],
+    ) -> Result<(), Unspecified> {
+        let plaintext = Self::decrypt_local_ciphertext(cipher, ct, aad)?;
+        if plaintext.risky_ref().is_empty() {
+            Ok(())
+        } else {
+            Err(Unspecified)
+        }
     }
 }
 
@@ -309,6 +501,8 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         = Result<T, Unspecified>
     where
         T: Send + 'c;
+
+    type Passthrough = BoxedPassthrough;
 
     fn map_ok<T, U, F>(ok: Self::Ok<T>, f: F) -> Self::Ok<U>
     where
@@ -340,11 +534,33 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         A: IntoAad<'a>,
     {
         match self.ciphertext {
-            AesCipherText::Sequence(items) => {
+            // At least one non-passthrough item is required: passthrough
+            // items authenticate nothing, so an all-passthrough sequence
+            // (which `AesSeqCipher::end` refuses to produce) would decrypt
+            // under any AAD. Mirrors the encrypt-side rejection.
+            AesCipherText::Sequence(items)
+                if items
+                    .iter()
+                    .any(|i| !matches!(i, AesCipherText::Passthrough(_))) =>
+            {
                 let seq_access = AesSeqAccess {
                     cipher: self.cipher,
                     items: items.into_iter(),
-                    aad: aad.into_aad(),
+                    element_aad: aad.into_aad().for_sequence_element(),
+                };
+                visitor.visit_seq(seq_access)
+            }
+            AesCipherText::EmptySequence(ct) => {
+                let aad = aad.into_aad();
+                Self::verify_empty_marker(self.cipher, ct, aad.for_empty_sequence().as_bytes())?;
+                // Store the element derivation, exactly as the non-empty arm
+                // does: the iterator is empty so it is never read today, but
+                // a divergent value here would silently break a future
+                // visitor that consulted it.
+                let seq_access = AesSeqAccess {
+                    cipher: self.cipher,
+                    items: Vec::new().into_iter(),
+                    element_aad: aad.for_sequence_element(),
                 };
                 visitor.visit_seq(seq_access)
             }
@@ -358,7 +574,24 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         A: IntoAad<'a>,
     {
         match self.ciphertext {
-            AesCipherText::Map(entries) => {
+            // At least one non-passthrough entry required — see `decrypt_seq`.
+            AesCipherText::Map(entries)
+                if entries
+                    .iter()
+                    .any(|(_, v)| !matches!(v, AesCipherText::Passthrough(_))) =>
+            {
+                // Reject duplicate keys before the visitor sees any entry.
+                // Two ciphertexts of the same logical record seal a given
+                // key's value against the identical `for_map_entry` AAD, so
+                // a stale entry appended to a current ciphertext *verifies*;
+                // with a last-wins visitor that is a single-field rollback.
+                // No legitimate flow produces the same key twice (a column
+                // projection returns a subset of *distinct* keys), so this
+                // constrains membership not at all.
+                let mut seen = std::collections::HashSet::with_capacity(entries.len());
+                if !entries.iter().all(|(key, _)| seen.insert(key.as_str())) {
+                    return Err(Unspecified);
+                }
                 let map_access = AesMapAccess {
                     cipher: self.cipher,
                     entries: entries.into_iter(),
@@ -366,18 +599,57 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
                 };
                 visitor.visit_map(map_access)
             }
+            AesCipherText::EmptyMap(ct) => {
+                let aad = aad.into_aad();
+                Self::verify_empty_marker(self.cipher, ct, aad.for_empty_map().as_bytes())?;
+                // Raw caller AAD, not the marker derivation — see `decrypt_seq`.
+                let map_access = AesMapAccess {
+                    cipher: self.cipher,
+                    entries: Vec::new().into_iter(),
+                    aad,
+                };
+                visitor.visit_map(map_access)
+            }
             _ => Err(Unspecified),
         }
     }
 
-    fn decrypt_passthrough<T>(self) -> Self::Ok<T>
+    fn decrypt_any<'a, V, A>(self, visitor: V, aad: A) -> Self::Ok<V::Value>
     where
-        T: Any + Send + 'static,
+        V: DecipherVisitor<'c> + Send + 'c,
+        A: IntoAad<'a>,
     {
-        match self.ciphertext {
-            AesCipherText::Passthrough(boxed) => {
-                boxed.downcast::<T>().map(|b| *b).map_err(|_| Unspecified)
+        let AesDecipher { cipher, ciphertext } = self;
+        match ciphertext {
+            ct @ AesCipherText::Single(_) => cipher.decipher(ct).decrypt_bytes(visitor, aad),
+            ct @ (AesCipherText::Sequence(_) | AesCipherText::EmptySequence(_)) => {
+                cipher.decipher(ct).decrypt_seq(visitor, aad)
             }
+            ct @ (AesCipherText::Map(_) | AesCipherText::EmptyMap(_)) => {
+                cipher.decipher(ct).decrypt_map(visitor, aad)
+            }
+            AesCipherText::None(ct) => {
+                // Verify the domain-separated marker (tag AND empty
+                // plaintext) before reporting absence — an unauthenticated
+                // `visit_none` would let an attacker forge "absent" values,
+                // and a bare-AAD check would let a `Single` leaf be re-tagged
+                // as one. Mirrors `decrypt_option`.
+                let aad = aad.into_aad();
+                Self::verify_empty_marker(cipher, ct, aad.for_none().as_bytes())?;
+                visitor.visit_none()
+            }
+            // A self-describing visitor recovers a passthrough via
+            // `visit_passthrough` (the payload is handed over type-erased);
+            // visitors that do not override it inherit the default rejection.
+            // The typed `decrypt_passthrough` path remains available for
+            // callers that know the shape up front.
+            AesCipherText::Passthrough(boxed) => visitor.visit_passthrough(boxed),
+        }
+    }
+
+    fn decrypt_passthrough(self) -> Self::Ok<Self::Passthrough> {
+        match self.ciphertext {
+            AesCipherText::Passthrough(boxed) => Ok(boxed),
             _ => Err(Unspecified),
         }
     }
@@ -389,9 +661,13 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
     {
         match self.ciphertext {
             AesCipherText::None(ct) => {
-                // Verify the AAD-bound tag over the empty plaintext.
+                // Verify the tag over the domain-separated marker AAD AND
+                // that the sealed plaintext is actually empty. Without both,
+                // a `Single(leaf)` sealed under the same caller AAD could be
+                // re-tagged as `None(leaf)` and decrypt as Ok(None) — silent
+                // authenticated data deletion.
                 let aad = aad.into_aad();
-                Self::decrypt_local_ciphertext(self.cipher, ct, aad.as_bytes())?;
+                Self::verify_empty_marker(self.cipher, ct, aad.for_none().as_bytes())?;
                 Ok(None)
             }
             // Passthrough must never be decoded as an Option payload.
@@ -416,17 +692,17 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
     }
 }
 
-struct AesSeqAccess<'c, 'a> {
+struct AesSeqAccess<'c> {
     cipher: &'c Aes256Cipher,
     items: std::vec::IntoIter<AesCipherText>,
-    // Held as `Aad` (copy-on-write) rather than an owned `Vec<u8>` so a borrowed
-    // AAD stays borrowed. `next_element` re-supplies it per element by *borrowing*
-    // these bytes, so there is no per-element allocation in either the borrowed
-    // (`&str`/`&[u8]`) or the owned (`Vec`/PAE) case.
-    aad: Aad<'a>,
+    /// [`Aad::for_sequence_element`] of the caller's AAD, derived once at
+    /// construction. `next_element` re-supplies it per element by *borrowing*
+    /// these bytes, so there is no per-element allocation. Mirrors
+    /// `AesSeqCipher::element_aad` on the encrypt side.
+    element_aad: Aad<'static>,
 }
 
-impl<'c, 'a> SeqAccess<'c> for AesSeqAccess<'c, 'a> {
+impl<'c> SeqAccess<'c> for AesSeqAccess<'c> {
     type Error = Unspecified;
 
     fn next_element<T: Decrypt<'c> + 'c>(&mut self) -> Result<Option<T>, Self::Error> {
@@ -435,10 +711,10 @@ impl<'c, 'a> SeqAccess<'c> for AesSeqAccess<'c, 'a> {
             None => return Ok(None),
         };
         let decipher = self.cipher.decipher(ct);
-        // Each element was sealed with the same AAD; re-supply it per element by
-        // *borrowing* the stored bytes — no per-element allocation, even when the
-        // AAD is owned. Mirrors `SeqCipher::encrypt_next` binding AAD per element.
-        T::decrypt_with_aad(decipher, self.aad.as_bytes()).map(Some)
+        // Each element was sealed against the derived element AAD; re-supply
+        // it per element by *borrowing* the stored bytes. Mirrors
+        // `SeqCipher::encrypt_next`.
+        T::decrypt_with_aad(decipher, self.element_aad.as_bytes()).map(Some)
     }
 }
 
@@ -457,8 +733,10 @@ impl<'c, 'a> MapAccess<'c> for AesMapAccess<'c, 'a> {
             None => return Ok(None),
         };
         let decipher = self.cipher.decipher(ct);
-        // Borrow the stored AAD bytes per entry — see `AesSeqAccess::next_element`.
-        let value = T::decrypt_with_aad(decipher, self.aad.as_bytes())?;
+        // Mirror `AesMapCipher::encrypt_value`: the value was sealed against
+        // PAE(domain, aad, key), so a swapped or renamed key fails here.
+        let entry_aad = self.aad.for_map_entry(&key);
+        let value = T::decrypt_with_aad(decipher, entry_aad)?;
         Ok(Some((key, value)))
     }
 }
@@ -483,7 +761,7 @@ mod test {
     use crate::key::tests::DifferingKeyPair;
     use quickcheck_macros::quickcheck;
     use std::collections::HashMap;
-    use vitaminc_aead::Encrypt;
+    use vitaminc_aead::{Element, Encrypt};
 
     #[quickcheck]
     fn roundtrip_byte_array(key: Key, plaintext: [u8; 16]) -> bool {
@@ -561,14 +839,8 @@ mod test {
 
     #[quickcheck]
     fn decrypt_seq_fails_with_wrong_aad(key: Key, plaintext: Vec<String>) -> bool {
-        // The Sequence path re-supplies the same AAD to every element, so a wrong
-        // AAD must fail the per-element authentication rather than silently
-        // decrypting (see `AesSeqAccess::next_element`). An empty sequence has no
-        // element tags to reject — the container shape itself is not
-        // AEAD-authenticated on either side — so skip it.
-        if plaintext.is_empty() {
-            return true;
-        }
+        // Non-empty sequences reject a wrong AAD at an element; empty sequences
+        // reject it at their authenticated, domain-separated marker.
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let ciphertext = plaintext
             .encrypt_with_aad(&cipher, "correct-aad")
@@ -583,10 +855,9 @@ mod test {
         // Positive counterpart to `decrypt_seq_fails_with_wrong_aad`: every element
         // must authenticate when the *correct* AAD is re-supplied per element by
         // `AesSeqAccess::next_element`. Exercises the borrowed-AAD seq path across
-        // arbitrary element counts (the empty vec has no element tags and trivially
-        // roundtrips). A wrong-AAD-fails test alone can't catch a regression where
-        // the per-element AAD is dropped or mis-borrowed so even the correct AAD
-        // fails — only this positive multi-element roundtrip does.
+        // arbitrary element counts, including the authenticated empty marker. A
+        // wrong-AAD-fails test alone can't catch a regression where the correct AAD
+        // fails — only this positive roundtrip does.
         let aad = "seq-aad";
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let ciphertext = plaintext
@@ -651,6 +922,23 @@ mod test {
     }
 
     #[test]
+    fn roundtrip_empty_hashmap_with_aad() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let plaintext = HashMap::<String, String>::new();
+
+        let ciphertext = plaintext
+            .clone()
+            .encrypt_with_aad(&cipher, "map-context")
+            .expect("Encryption failed");
+        let decrypted: HashMap<String, String> = cipher
+            .decrypt_with_aad(ciphertext, "map-context")
+            .expect("Decryption failed");
+
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
     fn decrypt_hashmap_fails_with_wrong_aad() {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
@@ -663,6 +951,26 @@ mod test {
             .expect("Encryption failed");
         assert!(cipher
             .decrypt_with_aad::<HashMap<String, String>, _>(ciphertext, "wrong-aad")
+            .is_err());
+    }
+
+    #[test]
+    fn empty_composites_fail_with_wrong_aad() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+
+        let empty_sequence = Vec::<String>::new()
+            .encrypt_with_aad(&cipher, "correct-aad")
+            .expect("Encryption failed");
+        assert!(cipher
+            .decrypt_with_aad::<Vec<String>, _>(empty_sequence, "wrong-aad")
+            .is_err());
+
+        let empty_map = HashMap::<String, String>::new()
+            .encrypt_with_aad(&cipher, "correct-aad")
+            .expect("Encryption failed");
+        assert!(cipher
+            .decrypt_with_aad::<HashMap<String, String>, _>(empty_map, "wrong-aad")
             .is_err());
     }
 
@@ -857,7 +1165,9 @@ mod test {
         // Type-laundering guard: a passthrough must not satisfy Option<T>.
         let key = Key::from([11u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let ciphertext = (&cipher).passthrough(42u32).expect("passthrough failed");
+        let ciphertext = (&cipher)
+            .passthrough(Box::new(42u32))
+            .expect("passthrough failed");
         assert!(cipher.decrypt::<Option<u32>>(ciphertext).is_err());
     }
 
@@ -865,7 +1175,9 @@ mod test {
     fn roundtrip_passthrough_u32() {
         let key = Key::from([1u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let ciphertext = (&cipher).passthrough(12345u32).expect("passthrough failed");
+        let ciphertext = (&cipher)
+            .passthrough(Box::new(12345u32))
+            .expect("passthrough failed");
         let decrypted: u32 = decrypt_passthrough_via(&cipher, ciphertext).expect("decode failed");
         assert_eq!(decrypted, 12345u32);
     }
@@ -875,7 +1187,7 @@ mod test {
         let key = Key::from([2u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let ciphertext = (&cipher)
-            .passthrough(String::from("version-tag"))
+            .passthrough(Box::new(String::from("version-tag")))
             .expect("passthrough failed");
         let decrypted: String =
             decrypt_passthrough_via(&cipher, ciphertext).expect("decode failed");
@@ -886,14 +1198,15 @@ mod test {
     fn passthrough_type_mismatch_returns_err() {
         let key = Key::from([3u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let ciphertext = (&cipher).passthrough(42u32).expect("passthrough failed");
+        let ciphertext = (&cipher)
+            .passthrough(Box::new(42u32))
+            .expect("passthrough failed");
         let result: Result<String, _> = decrypt_passthrough_via(&cipher, ciphertext);
         assert!(result.is_err());
     }
 
-    // Convenience: drive `Decipher::decrypt_passthrough` from a known
-    // ciphertext. Mirrors what a derive-generated `Decrypt` impl would do
-    // for a `#[encrypt(passthrough)]` field.
+    // Convenience: recover a typed passthrough from a known ciphertext via
+    // the decipher's `decrypt_passthrough_as` downcast helper.
     fn decrypt_passthrough_via<T>(
         cipher: &Aes256Cipher,
         ciphertext: AesCipherText,
@@ -901,8 +1214,7 @@ mod test {
     where
         T: Any + Send + 'static,
     {
-        let decipher = cipher.decipher(ciphertext);
-        decipher.decrypt_passthrough::<T>()
+        cipher.decipher(ciphertext).decrypt_passthrough_as::<T>()
     }
 
     #[quickcheck]
@@ -924,7 +1236,7 @@ mod test {
     fn encrypt_key_twice_without_value_fails() {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let map = (&cipher).encrypt_map().encrypt_key("first").unwrap();
+        let map = (&cipher).encrypt_map(()).encrypt_key("first").unwrap();
         assert!(map.encrypt_key("second").is_err());
     }
 
@@ -932,24 +1244,24 @@ mod test {
     fn encrypt_value_without_pending_key_fails() {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let map = (&cipher).encrypt_map();
-        assert!(map.encrypt_value("orphan-value", ()).is_err());
+        let map = (&cipher).encrypt_map(());
+        assert!(map.encrypt_value("orphan-value").is_err());
     }
 
     #[test]
     fn passthrough_entry_with_pending_key_fails() {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let map = (&cipher).encrypt_map().encrypt_key("pending").unwrap();
+        let map = (&cipher).encrypt_map(()).encrypt_key("pending").unwrap();
         // Adopting the new key here would silently drop "pending".
-        assert!(map.passthrough_entry("other", 42u32).is_err());
+        assert!(map.passthrough_entry("other", Box::new(42u32)).is_err());
     }
 
     #[test]
     fn end_with_pending_key_fails() {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let map = (&cipher).encrypt_map().encrypt_key("pending").unwrap();
+        let map = (&cipher).encrypt_map(()).encrypt_key("pending").unwrap();
         assert!(map.end().is_err());
     }
 
@@ -957,20 +1269,363 @@ mod test {
     fn passthrough_entry_succeeds_with_no_pending_key() {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        // Sanity: the new guard does not break the happy path.
+        // Sanity: the new guard does not break the happy path. An encrypted
+        // sibling is included because an all-passthrough map is rejected at
+        // end() — see `all_passthrough_map_fails_to_encrypt`.
         let ciphertext = (&cipher)
-            .encrypt_map()
-            .passthrough_entry("version", 1u32)
+            .encrypt_map(())
+            .passthrough_entry("version", Box::new(1u32))
+            .and_then(|m| m.encrypt_key("email"))
+            .and_then(|m| m.encrypt_value("ada@example.com"))
             .and_then(|m| m.end())
             .expect("passthrough_entry should succeed without a pending key");
         match ciphertext {
             AesCipherText::Map(entries) => {
-                assert_eq!(entries.len(), 1);
+                assert_eq!(entries.len(), 2);
                 assert_eq!(entries[0].0, "version");
                 assert!(matches!(entries[0].1, AesCipherText::Passthrough(_)));
             }
             _ => panic!("expected Map ciphertext"),
         }
+    }
+
+    // --- Map key authentication ---
+    //
+    // Each map value is sealed against `Aad::for_map_entry(aad, key)`, so key
+    // and value are cryptographically inseparable: an attacker who swaps or
+    // renames the cleartext keys inside a stored ciphertext cannot produce a
+    // map that still decrypts.
+
+    fn encrypted_two_entry_map(cipher: &Aes256Cipher) -> Vec<(String, AesCipherText)> {
+        let mut map = HashMap::new();
+        map.insert("a", 1u32);
+        map.insert("b", 2u32);
+        match map.encrypt(cipher).expect("Encryption failed") {
+            AesCipherText::Map(entries) => entries,
+            _ => panic!("expected Map ciphertext"),
+        }
+    }
+
+    #[test]
+    fn swapped_map_keys_fail_decryption() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let mut entries = encrypted_two_entry_map(&cipher);
+
+        // Exchange the cleartext keys, leaving each value in place.
+        let (k0, k1) = (entries[0].0.clone(), entries[1].0.clone());
+        entries[0].0 = k1;
+        entries[1].0 = k0;
+
+        let result: Result<HashMap<String, u32>, _> = cipher.decrypt(AesCipherText::Map(entries));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn renamed_map_key_fails_decryption() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let mut entries = encrypted_two_entry_map(&cipher);
+
+        entries[0].0 = "evil".to_string();
+
+        let result: Result<HashMap<String, u32>, _> = cipher.decrypt(AesCipherText::Map(entries));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn renamed_map_key_with_empty_sequence_value_fails_decryption() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let mut map = HashMap::new();
+        map.insert("roles".to_string(), Vec::<String>::new());
+
+        let mut entries = match map.encrypt(&cipher).expect("Encryption failed") {
+            AesCipherText::Map(entries) => entries,
+            _ => panic!("expected Map ciphertext"),
+        };
+        entries[0].0 = "is_admin".to_string();
+
+        let result: Result<HashMap<String, Vec<String>>, _> =
+            cipher.decrypt(AesCipherText::Map(entries));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn renamed_map_key_with_empty_map_value_fails_decryption() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let mut map = HashMap::new();
+        map.insert("roles".to_string(), HashMap::<String, String>::new());
+
+        let mut entries = match map.encrypt(&cipher).expect("Encryption failed") {
+            AesCipherText::Map(entries) => entries,
+            _ => panic!("expected Map ciphertext"),
+        };
+        entries[0].0 = "is_admin".to_string();
+
+        let result: Result<HashMap<String, HashMap<String, String>>, _> =
+            cipher.decrypt(AesCipherText::Map(entries));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn unauthenticated_empty_composite_shapes_are_rejected() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+
+        assert!(cipher
+            .decrypt::<Vec<String>>(AesCipherText::Sequence(Vec::new()))
+            .is_err());
+        assert!(cipher
+            .decrypt::<HashMap<String, String>>(AesCipherText::Map(Vec::new()))
+            .is_err());
+    }
+
+    // --- Composite AAD is fixed at construction ---
+    //
+    // The sub-cipher captures the AAD once, so a hand-written `Encrypt` impl
+    // has no second place to supply it and cannot seal the elements and the
+    // container under different AAD. Before this shape, an impl that threaded
+    // the real AAD to `encrypt_next` but `()` to `end` round-tripped happily
+    // with data and produced an undecryptable ciphertext the first time the
+    // collection was empty.
+
+    /// A hand-written `Encrypt` impl driving the sub-cipher directly, of the
+    /// kind a derive macro would generate.
+    struct Tags(Vec<String>);
+
+    impl Encrypt for Tags {
+        fn encrypt_with_aad<'a, C, A>(self, cipher: C, aad: A) -> Result<C::Ok, C::Error>
+        where
+            C: Cipher,
+            A: IntoAad<'a>,
+        {
+            let len = self.0.len();
+            self.0
+                .into_iter()
+                .try_fold(cipher.encrypt_seq(Some(len), aad), |c, item| {
+                    c.encrypt_next(item)
+                })?
+                .end()
+        }
+    }
+
+    #[test]
+    fn hand_written_impl_roundtrips_empty_and_nonempty() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+
+        let ct = Tags(vec!["a".into(), "b".into()])
+            .encrypt_with_aad(&cipher, "user:42")
+            .expect("Encryption failed");
+        let out: Vec<String> = cipher
+            .decrypt_with_aad(ct, "user:42")
+            .expect("non-empty should decrypt");
+        assert_eq!(out, vec!["a".to_string(), "b".to_string()]);
+
+        // The case that used to break: no elements, so the marker's AAD is
+        // the only thing carrying the caller's context.
+        let ct = Tags(Vec::new())
+            .encrypt_with_aad(&cipher, "user:42")
+            .expect("Encryption failed");
+        let out: Vec<String> = cipher
+            .decrypt_with_aad(ct, "user:42")
+            .expect("empty should decrypt under the same AAD");
+        assert!(out.is_empty());
+
+        // And it is still AAD-sensitive — the marker binds "user:42".
+        let ct = Tags(Vec::new())
+            .encrypt_with_aad(&cipher, "user:42")
+            .expect("Encryption failed");
+        assert!(cipher
+            .decrypt_with_aad::<Vec<String>, _>(ct, "user:99")
+            .is_err());
+    }
+
+    // --- All-passthrough composites ---
+    //
+    // Passthrough items authenticate nothing, so a composite containing only
+    // passthrough items would carry no AEAD tag at all: it would "decrypt"
+    // under any AAD, and as a map value its cleartext key could be renamed
+    // undetected. Both sides refuse: `end()` won't produce such a container,
+    // and the decrypt arms reject one arriving from storage.
+
+    #[test]
+    fn all_passthrough_sequence_fails_to_encrypt() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let result = (&cipher)
+            .encrypt_seq(Some(1), "context")
+            .passthrough_next(Box::new(1u32))
+            .and_then(|s| s.end());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn all_passthrough_map_fails_to_encrypt() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let result = (&cipher)
+            .encrypt_map("context")
+            .passthrough_entry("version", Box::new(1u32))
+            .and_then(|m| m.end());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn all_passthrough_composites_fail_to_decrypt() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+
+        let hostile_seq = AesCipherText::Sequence(vec![AesCipherText::Passthrough(Box::new(1u32))]);
+        assert!(cipher.decrypt::<Vec<String>>(hostile_seq).is_err());
+
+        let hostile_map = AesCipherText::Map(vec![(
+            "version".to_string(),
+            AesCipherText::Passthrough(Box::new(1u32)),
+        )]);
+        assert!(cipher
+            .decrypt::<HashMap<String, String>>(hostile_map)
+            .is_err());
+    }
+
+    // --- None marker integrity ---
+    //
+    // The None marker is sealed under `Aad::for_none` and verified to contain
+    // an empty plaintext, so a `Single` leaf can't be re-tagged as an
+    // authenticated absence (silent data deletion), nor an absence as an
+    // encrypted empty byte string.
+
+    #[test]
+    fn single_retagged_as_none_fails_to_decrypt() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let leaf = match "secret".encrypt_with_aad(&cipher, "context").unwrap() {
+            AesCipherText::Single(leaf) => leaf,
+            _ => panic!("expected Single ciphertext"),
+        };
+        let result: Result<Option<String>, _> =
+            cipher.decrypt_with_aad(AesCipherText::None(leaf), "context");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn empty_single_retagged_as_none_fails_to_decrypt() {
+        // Even an EMPTY encrypted string can't masquerade as None: the marker
+        // AAD is domain-separated, not just emptiness-checked.
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let leaf = match "".encrypt_with_aad(&cipher, "context").unwrap() {
+            AesCipherText::Single(leaf) => leaf,
+            _ => panic!("expected Single ciphertext"),
+        };
+        let result: Result<Option<String>, _> =
+            cipher.decrypt_with_aad(AesCipherText::None(leaf), "context");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn none_marker_still_roundtrips() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let ct = Option::<String>::None
+            .encrypt_with_aad(&cipher, "context")
+            .unwrap();
+        let decrypted: Option<String> = cipher.decrypt_with_aad(ct, "context").unwrap();
+        assert_eq!(decrypted, None);
+    }
+
+    #[test]
+    fn empty_composite_markers_are_domain_separated() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+
+        let sequence_marker = match Vec::<String>::new()
+            .encrypt_with_aad(&cipher, "context")
+            .expect("Encryption failed")
+        {
+            AesCipherText::EmptySequence(marker) => marker,
+            _ => panic!("expected EmptySequence ciphertext"),
+        };
+        assert!(cipher
+            .decrypt_with_aad::<HashMap<String, String>, _>(
+                AesCipherText::EmptyMap(sequence_marker),
+                "context",
+            )
+            .is_err());
+
+        let map_marker = match HashMap::<String, String>::new()
+            .encrypt_with_aad(&cipher, "context")
+            .expect("Encryption failed")
+        {
+            AesCipherText::EmptyMap(marker) => marker,
+            _ => panic!("expected EmptyMap ciphertext"),
+        };
+        assert!(
+            cipher
+                .decrypt_with_aad::<Vec<String>, _>(
+                    AesCipherText::EmptySequence(map_marker),
+                    "context",
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn empty_composite_markers_reject_nonempty_plaintext() {
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let aad = Aad::from_slice(b"context").for_empty_sequence();
+        let marker = match "not-empty"
+            .encrypt_with_aad(&cipher, aad)
+            .expect("Encryption failed")
+        {
+            AesCipherText::Single(marker) => marker,
+            _ => panic!("expected Single ciphertext"),
+        };
+
+        assert!(cipher
+            .decrypt_with_aad::<Vec<String>, _>(AesCipherText::EmptySequence(marker), "context",)
+            .is_err());
+    }
+
+    #[test]
+    fn reordered_map_entries_still_decrypt() {
+        // Reordering entries WITHOUT touching the key↔value pairing is fine —
+        // a map is unordered, and each value stays sealed against its own key.
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+        let mut entries = encrypted_two_entry_map(&cipher);
+
+        entries.swap(0, 1);
+
+        let decrypted: HashMap<String, u32> = cipher
+            .decrypt(AesCipherText::Map(entries))
+            .expect("reordered entries should decrypt");
+        assert_eq!(decrypted.len(), 2);
+    }
+
+    #[test]
+    fn runtime_string_keys_roundtrip() {
+        // Keys built at runtime (the FFI case) — exercises the
+        // `HashMap<String, T>` Encrypt impl and Cow-keyed `encrypt_key`.
+        let key = Key::from([42u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
+
+        let mut map: HashMap<String, String> = HashMap::new();
+        for id in 0..3 {
+            map.insert(format!("user:{id}"), format!("value-{id}"));
+        }
+
+        let ciphertext = map
+            .clone()
+            .encrypt_with_aad(&cipher, "context")
+            .expect("Encryption failed");
+        let decrypted: HashMap<String, String> = cipher
+            .decrypt_with_aad(ciphertext, "context")
+            .expect("Decryption failed");
+        assert_eq!(decrypted, map);
     }
 
     // --- Nonce uniqueness (fundamental AEAD property) ---
@@ -1022,7 +1677,7 @@ mod test {
         None::<String>.encrypt(cipher).expect("encrypt")
     }
     fn passthrough_ct(cipher: &Aes256Cipher) -> AesCipherText {
-        cipher.passthrough(7u32).expect("passthrough")
+        cipher.passthrough(Box::new(7u32)).expect("passthrough")
     }
 
     #[test]
@@ -1203,12 +1858,12 @@ mod test {
     fn seq_cipher_accepts_mixed_encrypt_next_and_passthrough_next() {
         let cipher = Aes256Cipher::new(&Key::from([40u8; 32])).expect("Failed to create cipher");
         let ct = (&cipher)
-            .encrypt_seq(Some(3))
-            .encrypt_next("first", ())
+            .encrypt_seq(Some(3), ())
+            .encrypt_next("first")
             .unwrap()
-            .passthrough_next(99u32)
+            .passthrough_next(Box::new(99u32))
             .unwrap()
-            .encrypt_next("third", ())
+            .encrypt_next("third")
             .unwrap()
             .end()
             .unwrap();
@@ -1230,12 +1885,12 @@ mod test {
         // Passthrough variant, failing the whole decode.
         let cipher = Aes256Cipher::new(&Key::from([41u8; 32])).expect("Failed to create cipher");
         let ct = (&cipher)
-            .encrypt_map()
+            .encrypt_map(())
             .encrypt_key("name")
             .unwrap()
-            .encrypt_value("Alice".to_string(), ())
+            .encrypt_value("Alice".to_string())
             .unwrap()
-            .passthrough_entry("schema_version", 1u32)
+            .passthrough_entry("schema_version", Box::new(1u32))
             .unwrap()
             .end()
             .unwrap();
@@ -1263,16 +1918,232 @@ mod test {
         // when the value is `Some(n)`. A passthrough sealed as `Option<u32>`
         // must only downcast back to `Option<u32>`.
         let cipher = Aes256Cipher::new(&Key::from([43u8; 32])).expect("Failed to create cipher");
-        let ct = cipher.passthrough(Some(42u32)).expect("passthrough failed");
+        let ct = cipher
+            .passthrough(Box::new(Some(42u32)))
+            .expect("passthrough failed");
         let decoded: Option<u32> =
             decrypt_passthrough_via(&cipher, ct).expect("decode as Option<u32> should succeed");
         assert_eq!(decoded, Some(42u32));
 
-        let ct2 = cipher.passthrough(Some(42u32)).expect("passthrough failed");
+        let ct2 = cipher
+            .passthrough(Box::new(Some(42u32)))
+            .expect("passthrough failed");
         assert!(
             decrypt_passthrough_via::<u32>(&cipher, ct2).is_err(),
             "Option<u32> passthrough must not downcast to u32"
         );
+    }
+
+    #[test]
+    fn duplicate_map_keys_fail_decryption() {
+        // Two ciphertexts of one logical record seal a given key's value
+        // against the identical `for_map_entry` AAD, so a stale entry
+        // appended to a current ciphertext verifies. Without the duplicate
+        // rejection, a last-wins visitor would hand back the stale value
+        // while every other field stays current — single-field rollback.
+        let cipher = Aes256Cipher::new(&Key::from([50u8; 32])).expect("Failed to create cipher");
+        let mut v1 = HashMap::new();
+        v1.insert("balance", "100");
+        v1.insert("owner", "alice");
+        let mut v2 = HashMap::new();
+        v2.insert("balance", "5");
+        v2.insert("owner", "alice");
+
+        let stale_balance = match v1.encrypt(&cipher).expect("encrypt v1") {
+            AesCipherText::Map(entries) => entries
+                .into_iter()
+                .find(|(k, _)| k == "balance")
+                .expect("balance entry"),
+            _ => panic!("expected Map"),
+        };
+        let tampered = match v2.encrypt(&cipher).expect("encrypt v2") {
+            AesCipherText::Map(mut entries) => {
+                entries.push(stale_balance);
+                AesCipherText::Map(entries)
+            }
+            _ => panic!("expected Map"),
+        };
+        assert!(cipher.decrypt::<HashMap<String, String>>(tampered).is_err());
+    }
+
+    #[test]
+    fn single_rewrapped_as_sequence_fails_decryption() {
+        // The container shape is authenticated through the element AAD
+        // derivation: a top-level `Single` is sealed against the bare AAD,
+        // a sequence element against `for_sequence_element` of it, so an
+        // attacker re-nesting `{Single}` as `Sequence([Single])` cannot get
+        // `["x"]` back where the app stored `"x"`.
+        let cipher = Aes256Cipher::new(&Key::from([51u8; 32])).expect("Failed to create cipher");
+        let single = "x".to_string().encrypt(&cipher).expect("encrypt");
+        let forged = AesCipherText::Sequence(vec![single]);
+        assert!(cipher.decrypt::<Vec<String>>(forged).is_err());
+    }
+
+    #[test]
+    fn every_leaf_carries_the_wire_version_prefix() {
+        // The version byte is the leaf format's first byte on every
+        // leaf-bearing variant — Single, None, both empty markers, sequence
+        // elements, and map values. `wire_version` is the keyless peek
+        // migration tooling relies on.
+        use vitaminc_aead::WIRE_VERSION;
+        let cipher = Aes256Cipher::new(&Key::from([54u8; 32])).expect("Failed to create cipher");
+
+        fn leaf_versions(ct: &AesCipherText) -> Vec<Option<u8>> {
+            match ct {
+                AesCipherText::Single(l)
+                | AesCipherText::None(l)
+                | AesCipherText::EmptySequence(l)
+                | AesCipherText::EmptyMap(l) => vec![l.wire_version()],
+                AesCipherText::Sequence(items) => items.iter().flat_map(leaf_versions).collect(),
+                AesCipherText::Map(entries) => {
+                    entries.iter().flat_map(|(_, v)| leaf_versions(v)).collect()
+                }
+                AesCipherText::Passthrough(_) => vec![],
+            }
+        }
+
+        let mut map = HashMap::new();
+        map.insert("k", "v");
+        let cts = [
+            "single".to_string().encrypt(&cipher).expect("encrypt"),
+            None::<String>.encrypt(&cipher).expect("encrypt"),
+            Vec::<String>::new().encrypt(&cipher).expect("encrypt"),
+            HashMap::<&str, &str>::new()
+                .encrypt(&cipher)
+                .expect("encrypt"),
+            vec!["a".to_string(), "b".to_string()]
+                .encrypt(&cipher)
+                .expect("encrypt"),
+            map.encrypt(&cipher).expect("encrypt"),
+        ];
+        for ct in &cts {
+            let versions = leaf_versions(ct);
+            assert!(!versions.is_empty());
+            assert!(versions.iter().all(|v| *v == Some(WIRE_VERSION)));
+        }
+    }
+
+    #[test]
+    fn relabeled_wire_version_fails_decryption() {
+        // Flipping the version byte must fail — first at the parse check
+        // (unknown version), and even a version a future parser accepted
+        // would fail the tag, because the byte is bound into the leaf AAD
+        // via `Aad::for_leaf`.
+        let cipher = Aes256Cipher::new(&Key::from([55u8; 32])).expect("Failed to create cipher");
+        let leaf = match "x".to_string().encrypt(&cipher).expect("encrypt") {
+            AesCipherText::Single(leaf) => leaf,
+            _ => panic!("expected Single"),
+        };
+        let mut bytes = leaf.as_ref().to_vec();
+        bytes[0] ^= 0x02;
+        let relabeled = AesCipherText::Single(LocalCipherText::from(bytes));
+        assert!(cipher.decrypt::<String>(relabeled).is_err());
+    }
+
+    #[test]
+    fn sequence_element_rehomed_to_top_level_fails_decryption() {
+        // The inverse direction: an element extracted from a stored
+        // sequence must not decrypt as a top-level value.
+        let cipher = Aes256Cipher::new(&Key::from([52u8; 32])).expect("Failed to create cipher");
+        let element = match vec!["x".to_string()].encrypt(&cipher).expect("encrypt") {
+            AesCipherText::Sequence(mut items) => items.pop().expect("one element"),
+            _ => panic!("expected Sequence"),
+        };
+        assert!(cipher.decrypt::<String>(element).is_err());
+    }
+
+    #[test]
+    fn element_decrypts_a_stored_sequence_element() {
+        // The DX counterpart to
+        // `sequence_element_rehomed_to_top_level_fails_decryption`: a row
+        // extracted from a batch-encrypted sequence decrypts under the
+        // caller's own AAD when the caller states its element-ness in the
+        // type — `Element` derives `for_sequence_element` internally.
+        let cipher = Aes256Cipher::new(&Key::from([56u8; 32])).expect("Failed to create cipher");
+        let ct = vec!["a".to_string(), "b".to_string()]
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        let element = match ct {
+            AesCipherText::Sequence(mut items) => items.pop().expect("two elements"),
+            _ => panic!("expected Sequence"),
+        };
+        let row: Element<String> = cipher.decrypt_with_aad(element, "users").expect("decrypt");
+        assert_eq!(row.into_inner(), "b");
+    }
+
+    #[test]
+    fn element_encrypted_alone_decrypts_within_a_sequence() {
+        // The reverse interchange: a row inserted alone via `Element` seals
+        // exactly as batch encryption would have, so rows collected back into
+        // a `Sequence` decrypt as a whole `Vec`.
+        let cipher = Aes256Cipher::new(&Key::from([57u8; 32])).expect("Failed to create cipher");
+        let ct1 = Element("a".to_string())
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        let ct2 = Element("b".to_string())
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        let collected = AesCipherText::Sequence(vec![ct1, ct2]);
+        let rows: Vec<String> = cipher
+            .decrypt_with_aad(collected, "users")
+            .expect("decrypt");
+        assert_eq!(rows, ["a", "b"]);
+    }
+
+    #[test]
+    fn element_is_not_interchangeable_with_bare_values() {
+        // `Element` opts a value into collection semantics; it must not weaken
+        // the shape authentication for values that never opted in. Both
+        // crossings fail: bare ciphertext read as `Element`, and `Element`
+        // ciphertext read as a bare value.
+        let cipher = Aes256Cipher::new(&Key::from([58u8; 32])).expect("Failed to create cipher");
+        let bare = "x"
+            .to_string()
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        assert!(cipher
+            .decrypt_with_aad::<Element<String>, _>(bare, "users")
+            .is_err());
+        let element = Element("x".to_string())
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        assert!(cipher
+            .decrypt_with_aad::<String, _>(element, "users")
+            .is_err());
+    }
+
+    #[test]
+    fn vec_of_elements_double_derives_and_does_not_interchange_with_vec() {
+        // The documented footgun on `Element`: wrap the row, not the
+        // collection. `Vec<Element<T>>` seals under a double element
+        // derivation, so it round-trips symmetrically but fails closed
+        // against `Vec<T>` — it must never decrypt as one.
+        let cipher = Aes256Cipher::new(&Key::from([59u8; 32])).expect("Failed to create cipher");
+        let ct = vec![Element("a".to_string())]
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        assert!(cipher
+            .decrypt_with_aad::<Vec<String>, _>(ct, "users")
+            .is_err());
+
+        let ct = vec![Element("a".to_string())]
+            .encrypt_with_aad(&cipher, "users")
+            .expect("encrypt");
+        let rows: Vec<Element<String>> = cipher.decrypt_with_aad(ct, "users").expect("decrypt");
+        assert_eq!(rows, [Element("a".to_string())]);
+    }
+
+    #[test]
+    fn empty_sequence_marker_nested_one_level_fails_decryption() {
+        // A stored top-level `EmptySequence` marker is sealed against
+        // `for_empty_sequence(aad)`; nested one level it must re-verify
+        // against `for_empty_sequence(for_sequence_element(aad))`, so the
+        // rewrap `[[]] where [] was stored` fails.
+        let cipher = Aes256Cipher::new(&Key::from([53u8; 32])).expect("Failed to create cipher");
+        let marker = Vec::<String>::new().encrypt(&cipher).expect("encrypt");
+        assert!(matches!(marker, AesCipherText::EmptySequence(_)));
+        let forged = AesCipherText::Sequence(vec![marker]);
+        assert!(cipher.decrypt::<Vec<Vec<String>>>(forged).is_err());
     }
 
     #[quickcheck]

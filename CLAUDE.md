@@ -13,7 +13,7 @@ Releases are automated with release-plz. See `RELEASING.md` for the full process
 
 - Do NOT manually edit `CHANGELOG.md` files on feature branches — release-plz manages them
 - Do NOT manually bump versions in `Cargo.toml` — release-plz handles this
-- All 12 crates release together as a single version group
+- All 14 crates release together as a single version group
 
 ## Changelogs on release PRs
 

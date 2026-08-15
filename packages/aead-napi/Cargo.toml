@@ -1,0 +1,30 @@
+[package]
+name = "vitaminc-aead-napi"
+description = "NAPI (Node-API) value bridge for the Vitamin-C AEAD encryption traits. Part of the Vitamin-C cryptographic suite."
+documentation = "https://docs.rs/vitaminc-aead-napi"
+version.workspace = true
+repository.workspace = true
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vitaminc-aead = { version = "0.2.0-pre.1", path = "../aead" }
+vitaminc-aead-value = { version = "0.2.0-pre.1", path = "../aead-value" }
+vitaminc-protected = { version = "0.2.0-pre.1", path = "../protected" }
+
+# napi5 (Node ≥ 12) is needed for Date detection; napi6 (implies napi5) for
+# BigInt and for `napi_get_all_property_names` — the only own-property
+# enumeration Node-API offers. Every supported Node release is far beyond
+# both levels.
+napi = { version = "3", default-features = false, features = ["napi6"] }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+# `noop` stubs the Node-API symbols so unit tests link without a Node host.
+# (Cipher round-trip tests live in `vitaminc-aead-value`, which this crate's
+# value type comes from.)
+napi = { version = "3", default-features = false, features = ["noop"] }

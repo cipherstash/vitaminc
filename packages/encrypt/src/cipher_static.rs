@@ -2,11 +2,10 @@
 //!
 //! See `vitaminc_aead::hlist` for the design rationale.
 
-use crate::backend::NONCE_LEN;
 use crate::Aes256Cipher;
-use vitaminc_aead::hlist::{Absent, Encrypted, StaticCipher};
-use vitaminc_aead::{CipherTextBuilder, IntoAad, NonceGenerator, Unspecified};
-use vitaminc_protected::Protected;
+use vitaminc_aead::hlist::{Absent, Encrypted, Entry, StaticCipher};
+use vitaminc_aead::{IntoAad, Unspecified};
+use vitaminc_protected::{Controlled, Protected};
 
 impl StaticCipher for &Aes256Cipher {
     type Error = Unspecified;
@@ -27,21 +26,15 @@ impl StaticCipher for &Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        let local = seal_into_local(self, Protected::new(Vec::new()), absent_aad(aad))?;
+        // `Aad::for_none` domain-separates the absence marker from an empty
+        // `Encrypted`: both seal an empty plaintext, so without it an
+        // `Absent` slot could be swapped for an empty `Encrypted` one (and
+        // vice versa) without tripping tag verification. Shared with the
+        // dynamic path's `Cipher::encrypt_none`, so both absence markers use
+        // one wire commitment. `verify_absent` re-derives the same AAD.
+        let local = seal_into_local(self, Protected::new(Vec::new()), aad.into_aad().for_none())?;
         Ok(Absent::from_local(local))
     }
-}
-
-/// Domain-separate the absence marker from an empty [`Encrypted`].
-///
-/// Both seal an empty plaintext, so without this their `LocalCipherText` bytes
-/// would be identical under the same `(key, AAD)` and an `Absent` slot could be
-/// swapped for an empty `Encrypted` one (and vice versa) without tripping tag
-/// verification. Prefixing a fixed label binds the "absent" role into the tag
-/// (PAE-encoded via the tuple `IntoAad` impl), so the two no longer
-/// cross-validate. `verify_absent` re-derives the same wrapped AAD.
-fn absent_aad<'a, A: IntoAad<'a>>(aad: A) -> (&'a [u8], A) {
-    (b"vitaminc:absent", aad)
 }
 
 impl Aes256Cipher {
@@ -60,58 +53,62 @@ impl Aes256Cipher {
     }
 
     /// Verify an [`Absent`] marker under the supplied AAD. Returns
-    /// `Ok(())` if the tag binds `aad`, `Err(Unspecified)` otherwise.
+    /// `Ok(())` if the tag binds `aad` **and** the sealed plaintext is empty,
+    /// `Err(Unspecified)` otherwise.
     pub fn verify_absent<'a, A>(&self, ct: Absent, aad: A) -> Result<(), Unspecified>
     where
         A: IntoAad<'a>,
     {
-        // Sealed plaintext is empty by construction; we only care about the
-        // tag verification. The returned `Protected<Vec<u8>>` drops at the
-        // end of this expression. The AAD is wrapped to match `encrypt_none`.
-        open_local(self, ct.into_local(), absent_aad(aad)).map(|_| ())
+        // A conforming marker seals an empty plaintext; requiring emptiness
+        // here (not just a valid tag) means a key-holding writer cannot mint
+        // a nonempty payload under the `for_none` derivation and have it
+        // verify as an absence — defense in depth for the marker's meaning,
+        // not just its authenticity. The `Protected` drops (and zeroizes) at
+        // the end of the expression. The AAD wrap matches `encrypt_none`.
+        let plaintext = open_local(self, ct.into_local(), aad.into_aad().for_none())?;
+        if plaintext.risky_ref().is_empty() {
+            Ok(())
+        } else {
+            Err(Unspecified)
+        }
+    }
+
+    /// Open a map [`Entry`]'s encrypted value, deriving the same
+    /// [`Aad::for_map_entry`](vitaminc_aead::Aad::for_map_entry) binding
+    /// [`StaticMapBuilder::encrypt_entry`] sealed it under — so an entry
+    /// whose cleartext key was renamed or swapped fails to open.
+    ///
+    /// [`StaticMapBuilder::encrypt_entry`]: vitaminc_aead::hlist::StaticMapBuilder::encrypt_entry
+    pub fn open_entry<'a, A>(
+        &self,
+        entry: Entry<Encrypted>,
+        aad: A,
+    ) -> Result<Protected<Vec<u8>>, Unspecified>
+    where
+        A: IntoAad<'a>,
+    {
+        let entry_aad = aad.into_aad().for_map_entry(entry.key);
+        open_local(self, entry.value.into_local(), entry_aad)
+    }
+
+    /// Verify a map [`Entry`]'s absent marker, key-bound like
+    /// [`open_entry`](Aes256Cipher::open_entry).
+    pub fn verify_absent_entry<'a, A>(
+        &self,
+        entry: Entry<Absent>,
+        aad: A,
+    ) -> Result<(), Unspecified>
+    where
+        A: IntoAad<'a>,
+    {
+        let entry_aad = aad.into_aad().for_map_entry(entry.key);
+        self.verify_absent(entry.value, entry_aad)
     }
 }
 
-fn seal_into_local<'a, A>(
-    cipher: &Aes256Cipher,
-    data: Protected<Vec<u8>>,
-    aad: A,
-) -> Result<vitaminc_aead::LocalCipherText, Unspecified>
-where
-    A: IntoAad<'a>,
-{
-    let nonce = cipher.nonce_generator.generate()?;
-    let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-    let aad = aad.into_aad();
-
-    CipherTextBuilder::new()
-        .append_nonce(nonce)
-        .append_target_plaintext(data)
-        .accepts_ciphertext_and_tag_ok(|mut buf| {
-            cipher
-                .key
-                .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
-                .map(|()| buf)
-        })
-        .build()
-}
-
-fn open_local<'a, A>(
-    cipher: &Aes256Cipher,
-    ct: vitaminc_aead::LocalCipherText,
-    aad: A,
-) -> Result<Protected<Vec<u8>>, Unspecified>
-where
-    A: IntoAad<'a>,
-{
-    let aad = aad.into_aad();
-    let (nonce, reader) = ct.into_reader().read_nonce::<NONCE_LEN>()?;
-    let nonce_bytes = nonce.into_inner();
-
-    reader
-        .accepts_plaintext_ok(|data| cipher.key.open(&nonce_bytes, aad.as_bytes(), data))
-        .read()
-}
+// Leaf seal/open shared with the dynamic path — see `cipher::seal_leaf` /
+// `cipher::open_leaf` for why a single copy matters.
+use crate::cipher::{open_leaf as open_local, seal_leaf as seal_into_local};
 
 // Split cfgs (not `all(test, …)`) so cargo-mutants recognises the test module
 // and skips it — see the comment on `cipher::test`.
@@ -120,12 +117,12 @@ where
 #[allow(clippy::unwrap_used)]
 mod test {
     use super::*;
+    use crate::backend::NONCE_LEN;
     use crate::key::tests::DifferingKeyPair;
     use crate::Key;
     use quickcheck_macros::quickcheck;
     use vitaminc_aead::hlist::{Entry, HCons, HNil, Map, Passthrough, StaticCipher};
-    use vitaminc_aead::LocalCipherText;
-    use vitaminc_protected::Controlled;
+    use vitaminc_aead::{Aad, LocalCipherText};
 
     // A worked example. In production this type alias would be generated
     // by a derive macro from the user's struct definition.
@@ -146,18 +143,11 @@ mod test {
     >;
 
     const AAD: &[u8] = b"user:42";
-    const INNER_AAD: &[u8] = b"user:42/prefs";
 
     #[test]
     fn static_user_roundtrip() {
         let key = Key::from([7u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("cipher init");
-
-        let prefs = (&cipher)
-            .encrypt_map()
-            .encrypt_entry("theme", Protected::new(b"midnight".to_vec()), INNER_AAD)
-            .expect("encrypt prefs")
-            .end();
 
         let user_ct: UserCiphertext = (&cipher)
             .encrypt_map()
@@ -170,28 +160,42 @@ mod test {
             .passthrough_entry("version", 3u8)
             .none_entry("nickname", AAD)
             .expect("encrypt none")
-            .nested_entry("preferences", prefs)
+            .nested_entry("preferences", AAD, |b, aad| {
+                Ok(
+                    b.encrypt_entry("theme", Protected::new(b"midnight".to_vec()), aad)?
+                        .end(),
+                )
+            })
+            .expect("encrypt prefs")
             .end();
 
         // Decryption is destructuring. No downcast, no shape check, no Box.
         let Map(HCons(prefs_e, HCons(nickname_e, HCons(version_e, HCons(pw_e, HNil))))) = user_ct;
 
+        assert_eq!(pw_e.key, "password_hash");
+        assert_eq!(version_e.key, "version");
+        assert_eq!(nickname_e.key, "nickname");
+        assert_eq!(prefs_e.key, "preferences");
+
+        let version: u8 = version_e.value.0; // typed access, no fallibility
         let pw = String::from_utf8(
             cipher
-                .open(pw_e.value, AAD)
+                .open_entry(pw_e, AAD)
                 .expect("open pw")
                 .risky_unwrap(),
         )
         .unwrap();
-        let version: u8 = version_e.value.0; // typed access, no fallibility
         cipher
-            .verify_absent(nickname_e.value, AAD)
+            .verify_absent_entry(nickname_e, AAD)
             .expect("verify none");
 
+        // The inner AAD is re-derived from the outer AAD and the entry's own
+        // cleartext key — the binding `nested_entry` established at build time.
+        let inner_aad = prefs_e.nested_aad(AAD);
         let Map(HCons(theme_e, HNil)) = prefs_e.value;
         let theme = String::from_utf8(
             cipher
-                .open(theme_e.value, INNER_AAD)
+                .open_entry(theme_e, inner_aad)
                 .expect("open theme")
                 .risky_unwrap(),
         )
@@ -200,10 +204,107 @@ mod test {
         assert_eq!(pw, "argon2id$hash");
         assert_eq!(version, 3u8);
         assert_eq!(theme, "midnight");
-        assert_eq!(pw_e.key, "password_hash");
-        assert_eq!(version_e.key, "version");
-        assert_eq!(nickname_e.key, "nickname");
-        assert_eq!(prefs_e.key, "preferences");
+    }
+
+    // Entry values are sealed against `Aad::for_map_entry(aad, key)`, so a
+    // stored entry whose cleartext key is renamed (the untrusted-input path a
+    // future deserializer would expose) must fail to open — the same key-swap
+    // resistance the dynamic MapCipher enforces.
+
+    #[test]
+    fn static_entry_with_renamed_key_fails_to_open() {
+        let key = Key::from([9u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("cipher init");
+        let map = (&cipher)
+            .encrypt_map()
+            .encrypt_entry("email", Protected::new(b"ada@example.com".to_vec()), AAD)
+            .expect("encrypt")
+            .end();
+        let Map(HCons(entry, HNil)) = map;
+        let renamed = Entry {
+            key: "backup_email",
+            value: entry.value,
+        };
+        assert!(cipher.open_entry(renamed, AAD).is_err());
+    }
+
+    #[test]
+    fn static_nested_entry_with_renamed_key_fails_to_open_inner() {
+        // A nested map has no leaf of its own; its outer key is bound through
+        // the derived inner AAD. Renaming the outer key changes `nested_aad`,
+        // so every inner open fails — the same key-swap resistance leaf
+        // entries get from `for_map_entry`.
+        let key = Key::from([10u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("cipher init");
+        let map = (&cipher)
+            .encrypt_map()
+            .nested_entry("preferences", AAD, |b, aad| {
+                Ok(
+                    b.encrypt_entry("theme", Protected::new(b"midnight".to_vec()), aad)?
+                        .end(),
+                )
+            })
+            .expect("encrypt prefs")
+            .end();
+        let Map(HCons(entry, HNil)) = map;
+        let renamed = Entry {
+            key: "billing",
+            value: entry.value,
+        };
+        let inner_aad = renamed.nested_aad(AAD);
+        let Map(HCons(theme_e, HNil)) = renamed.value;
+        assert!(cipher.open_entry(theme_e, inner_aad).is_err());
+    }
+
+    #[test]
+    fn static_nested_map_spliced_from_another_record_fails_to_open_inner() {
+        // Cross-record splice: a nested map built for user:99 under the same
+        // key name must not open inside user:42's record — the inner AAD
+        // derivation includes the *record's* AAD, not just the entry key.
+        let key = Key::from([11u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("cipher init");
+        let build = |aad: &'static [u8]| {
+            let map = (&cipher)
+                .encrypt_map()
+                .nested_entry("preferences", aad, |b, inner| {
+                    Ok(
+                        b.encrypt_entry("theme", Protected::new(b"midnight".to_vec()), inner)?
+                            .end(),
+                    )
+                })
+                .expect("encrypt prefs")
+                .end();
+            let Map(HCons(entry, HNil)) = map;
+            entry
+        };
+        let victim = build(b"user:42");
+        let foreign = build(b"user:99");
+
+        // Splice user:99's nested map under user:42's entry key.
+        let spliced = Entry {
+            key: victim.key,
+            value: foreign.value,
+        };
+        let inner_aad = spliced.nested_aad(b"user:42".as_slice());
+        let Map(HCons(theme_e, HNil)) = spliced.value;
+        assert!(cipher.open_entry(theme_e, inner_aad).is_err());
+    }
+
+    #[test]
+    fn static_absent_entry_with_renamed_key_fails_to_verify() {
+        let key = Key::from([9u8; 32]);
+        let cipher = Aes256Cipher::new(&key).expect("cipher init");
+        let map = (&cipher)
+            .encrypt_map()
+            .none_entry("nickname", AAD)
+            .expect("encrypt none")
+            .end();
+        let Map(HCons(entry, HNil)) = map;
+        let renamed = Entry {
+            key: "email",
+            value: entry.value,
+        };
+        assert!(cipher.verify_absent_entry(renamed, AAD).is_err());
     }
 
     #[test]
@@ -259,6 +360,23 @@ mod test {
         let cipher = Aes256Cipher::new(&key).unwrap();
         let leaf = Absent::from_local(LocalCipherText::from(bytes));
         cipher.verify_absent(leaf, b"aad".as_slice()).is_err()
+    }
+
+    #[test]
+    fn verify_absent_rejects_a_nonempty_payload_under_the_none_derivation() {
+        // Even a key-holding writer must not be able to pass a nonempty
+        // payload off as an absence marker: verify_absent requires the sealed
+        // plaintext to be empty, not merely the tag to bind `for_none(aad)`.
+        let cipher = Aes256Cipher::new(&Key::from([6u8; 32])).unwrap();
+        let aad = b"aad".as_slice();
+        let forged = (&cipher)
+            .encrypt_bytes(
+                Protected::new(b"payload".to_vec()),
+                Aad::from_slice(aad).for_none(),
+            )
+            .unwrap();
+        let as_absent = Absent::from_local(forged.into_local());
+        assert!(cipher.verify_absent(as_absent, aad).is_err());
     }
 
     // An empty `Encrypted` and an `Absent` seal the same empty plaintext; the
@@ -351,8 +469,9 @@ mod test {
             .into_local()
             .as_ref()
             .to_vec();
-        // Distinct ciphertexts, and specifically distinct nonce prefixes.
-        b1 != b2 && b1[..NONCE_LEN] != b2[..NONCE_LEN]
+        // Distinct ciphertexts, and specifically distinct nonces (the leaf
+        // layout is version(1) ‖ nonce ‖ ciphertext ‖ tag).
+        b1 != b2 && b1[1..1 + NONCE_LEN] != b2[1..1 + NONCE_LEN]
     }
 
     #[quickcheck]

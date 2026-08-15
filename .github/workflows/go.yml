@@ -1,0 +1,107 @@
+name: "Go bindings"
+on:
+  push:
+    branches:
+      - main
+  # No branch filter: stacked PRs (a feature branch as base) must run this
+  # gate too — the sibling Rust workflows only fire against main, which is
+  # part of how the Go modules went unwatched.
+  pull_request:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    name: "🐹 Go bindings"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          # Single source of truth for the toolchain version.
+          go-version-file: bindings/go/vcencrypt/go.mod
+          # vcvalue has no go.sum (zero dependencies), so only the two
+          # dependency-bearing modules feed the cache key.
+          cache-dependency-path: |
+            bindings/go/vcencrypt/go.sum
+            bindings/go/vcencrypt/examples/go.sum
+
+      - name: vet (vcvalue)
+        working-directory: bindings/go/vcvalue
+        run: go vet ./...
+
+      - name: vet (vcencrypt)
+        working-directory: bindings/go/vcencrypt
+        run: go vet ./...
+
+      - name: test (vcvalue)
+        working-directory: bindings/go/vcvalue
+        run: CGO_ENABLED=0 go test ./...
+
+      - name: test (vcencrypt — embedded wasm guest under wazero)
+        working-directory: bindings/go/vcencrypt
+        run: CGO_ENABLED=0 go test ./...
+
+      - name: test (32-bit GOARCH)
+        # The transport codec's u32-bound guards are load-bearing where int
+        # is 32 bits: a hostile length prefix >= 2^31 coerces negative there
+        # and would panic make() without them. A build check cannot catch
+        # that class — the tests (including the fuzz seed corpora) must
+        # actually run on 386, which linux/amd64 runners execute natively.
+        # The codec lives in vcencrypt (wazero falls back to its interpreter
+        # on 386); vcvalue is model-only but stays covered too since it is
+        # the layer a future stack-encrypt Go SDK imports.
+        # Joined with && because the configured shell (bash -l) does not set
+        # -e: with independent lines, only the last command's exit status
+        # would decide the step, hiding a vcvalue failure.
+        run: |
+          (cd bindings/go/vcvalue && CGO_ENABLED=0 GOOS=linux GOARCH=386 go test ./...) &&
+          (cd bindings/go/vcencrypt && CGO_ENABLED=0 GOOS=linux GOARCH=386 go test ./...)
+
+      - name: run example (userrecord)
+        # The examples directory is its own Go module, outside every
+        # `go test ./...` sweep above — running it is the only thing that
+        # exercises the documented end-to-end recipe (sqlx + sqlite +
+        # batch-encrypt + element reads). It exits non-zero on any failure.
+        working-directory: bindings/go/vcencrypt/examples
+        run: CGO_ENABLED=0 go run ./userrecord
+
+  guest:
+    runs-on: ubuntu-latest
+    name: "🦀 wasm guest"
+    # The guest crate is a standalone workspace deliberately excluded from
+    # the main workspace, so no native CI job lints or tests it — and it is
+    # where all the unsafe FFI code lives. This job is its only gate: clippy
+    # over the real (wasm32) ABI module, plus the native unit tests
+    # (session-handle invariants, codec round trip). The hostile
+    # pointer/length pairs themselves are driven end-to-end through wazero by
+    # vcencrypt's abi_hostile_test.go in the job above.
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: setup rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: wasm32-wasip1
+
+      - name: fmt
+        working-directory: bindings/go/vcencrypt/guest
+        run: cargo fmt --check
+
+      - name: clippy (wasm32-wasip1 — the ABI module only builds there)
+        working-directory: bindings/go/vcencrypt/guest
+        run: cargo clippy --target wasm32-wasip1 --all-targets -- -D warnings
+
+      - name: clippy (native — tests and fixture generator)
+        working-directory: bindings/go/vcencrypt/guest
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: test
+        working-directory: bindings/go/vcencrypt/guest
+        run: cargo test

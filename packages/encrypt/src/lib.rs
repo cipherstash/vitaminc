@@ -6,7 +6,7 @@ mod cipher;
 mod cipher_static;
 mod key;
 
-pub use cipher::{Aes256Cipher, AesCipherText, AesDecipher};
+pub use cipher::{Aes256Cipher, AesCipherText, AesDecipher, BoxedPassthrough};
 pub use key::Key;
 
 // Re-exports

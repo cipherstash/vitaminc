@@ -2,6 +2,8 @@
 resolver = "2"
 members = [
     "packages/aead",
+    "packages/aead-napi",
+    "packages/aead-value",
     "packages/async-traits",
     "packages/encrypt",
     "packages/kms",
