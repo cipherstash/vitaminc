@@ -24,4 +24,9 @@ func TestEagerCapClampsHostileCounts(t *testing.T) {
 	if got := eagerCap(1 << 30); got != maxEagerCapacity {
 		t.Fatalf("eagerCap(1<<30): got %d, want %d", got, maxEagerCapacity)
 	}
+	// Negative only occurs on 32-bit GOARCH (a u32 count >= 2^31 coerced to
+	// int); the clamp must not pass it through to make().
+	if got := eagerCap(-1); got != 0 {
+		t.Fatalf("eagerCap(-1): got %d, want 0", got)
+	}
 }
