@@ -20,4 +20,13 @@
 //!
 //! [`FfiValue`]: vitaminc_aead_value::FfiValue
 
+// The ABI's packed u64 results embed 32-bit pointers and its bounds checks
+// read the wasm linear-memory size, so the module only exists on wasm32
+// targets. A native cdylib build therefore exports no vc_* symbols at all —
+// failing loudly at symbol lookup — instead of exporting a silently wrong
+// ABI (the `ptr << 32` packing would truncate a 64-bit pointer).
+#[cfg(target_arch = "wasm32")]
 pub mod abi;
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) mod sessions;
+pub mod status;

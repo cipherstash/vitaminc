@@ -5,13 +5,19 @@
 //!   memory obtained from [`vc_alloc`] and releases every buffer — its own
 //!   inputs and the guest's outputs — with [`vc_dealloc`], which **zeroizes
 //!   before freeing** (transport buffers carry plaintext on both the
-//!   encrypt input and decrypt output paths).
+//!   encrypt input and decrypt output paths). The guest keeps its own
+//!   registry of every buffer it hands out, so `vc_dealloc` never trusts
+//!   the host's length: an unknown pointer (including a double-free) is a
+//!   no-op, a length mismatch refuses to free, and the wipe always covers
+//!   the true allocation.
 //! - A cipher is a **session handle**: the host calls [`vc_cipher_init`] once
 //!   with the key, then passes the returned handle to [`vc_encrypt`] /
 //!   [`vc_decrypt`], and [`vc_cipher_free`] when done. The guest owns the key
 //!   schedule for the handle's lifetime; the key bytes the host passed in are
 //!   zeroized inside the guest right after the cipher is built (the host still
-//!   wipes its own input buffer on dealloc).
+//!   wipes its own input buffer on dealloc). Handle ids are never reused: at
+//!   id exhaustion [`vc_cipher_init`] fails with [`STATUS_INTERNAL`] rather
+//!   than aliasing a live handle.
 //!
 //! # Result encoding
 //!
@@ -26,10 +32,32 @@
 //!   [`STATUS_INTERNAL`]). A valid output pointer / handle is never zero, so
 //!   the two spaces never collide.
 //!
+//! This packing embeds 32-bit pointers, and the bounds checks below read the
+//! wasm linear-memory size, so this module only exists on `wasm32` targets
+//! (see `lib.rs`) — a native build exports no `vc_*` symbols at all rather
+//! than a silently wrong ABI.
+//!
+//! # Hostile-input posture
+//!
+//! Every export validates its inputs before any unsafe construction: a
+//! pointer/length pair must lie inside the current linear memory (and under
+//! `isize::MAX`), a null pointer with a nonzero length is rejected rather
+//! than read as empty — silently treating a null AAD pointer as an empty AAD
+//! would drop the context binding — and the key length is checked at the
+//! boundary. Invalid input yields [`STATUS_ENCODING`], never a trap, so one
+//! bad call cannot poison the instance for every other open handle.
+//!
+//! The guest is built for `wasm32-wasip1`, whose panic strategy is fixed at
+//! `abort`: a panic that does occur traps and kills the instance **without
+//! running destructors**, so no drop-based wipe (key schedules, plaintext
+//! buffers) runs. The `catch_unwind` at each export is belt-and-braces for a
+//! hypothetical unwind build, not a load-bearing guarantee — the guarantee
+//! is the validation above, which keeps reachable panic sources out of the
+//! boundary code.
+//!
 //! Statuses are the only detail leaked: they distinguish an authentication
 //! failure from a malformed input or an unknown handle, but reveal nothing
-//! about the plaintext. Panics are caught at the boundary and reported as
-//! [`STATUS_INTERNAL`], never as a wasm trap.
+//! about the plaintext.
 //!
 //! Wasm modules are single-threaded; the host must serialize calls into one
 //! instance.
@@ -40,66 +68,92 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use vitaminc_aead::{Aad, Element, Encrypt};
 use vitaminc_aead_value::{transport as codec, FfiValue};
-use vitaminc_encrypt::{Aes256Cipher, AesCipherText, Key};
+use vitaminc_encrypt::{Aes256Cipher, AesCipherText};
 use zeroize::Zeroize;
 
-/// AEAD open failure: wrong key, wrong AAD, or tampered ciphertext.
-pub const STATUS_AUTH: u32 = 1;
-/// Malformed transport bytes on the encrypt input or decrypt input path.
-pub const STATUS_ENCODING: u32 = 2;
-/// The handle is unknown (never issued, or already freed).
-pub const STATUS_BAD_HANDLE: u32 = 3;
-/// A caught panic, a cipher that could not be constructed, or any other
-/// unexpected internal failure.
-pub const STATUS_INTERNAL: u32 = 4;
+use crate::sessions::{build_cipher, Sessions};
+pub use crate::status::{STATUS_AUTH, STATUS_BAD_HANDLE, STATUS_ENCODING, STATUS_INTERNAL};
 
 thread_local! {
-    // Wasm is single-threaded, so a thread-local `RefCell` is a plain owner of
-    // the session table — no `Send`/`Sync` bound on `Aes256Cipher` required.
-    static SESSIONS: RefCell<Sessions> = RefCell::new(Sessions {
-        next: 1,
-        ciphers: HashMap::new(),
-    });
-}
+    // Wasm is single-threaded, so thread-local `RefCell`s are plain owners
+    // of this state — no `Send`/`Sync` bounds required.
+    static SESSIONS: RefCell<Sessions> = RefCell::new(Sessions::new());
 
-struct Sessions {
-    // Handle ids start at 1 so a zero high-field can never be a valid handle
-    // (see the result encoding).
-    next: u32,
-    ciphers: HashMap<u32, Aes256Cipher>,
+    // Every buffer the guest has handed out and not yet reclaimed — from
+    // `vc_alloc` and from packed results — keyed by start address, holding
+    // the true length. `vc_dealloc` consults this instead of trusting the
+    // host: a wrong host length would otherwise zeroize past the allocation
+    // and free with a mismatched layout (heap corruption).
+    static BUFFERS: RefCell<HashMap<usize, usize>> = RefCell::new(HashMap::new());
 }
 
 /// Allocate `len` bytes of guest memory for the host to write into.
 /// Returns a pointer valid until passed to [`vc_dealloc`], or null if the
-/// allocation fails.
+/// allocation fails. The null branch is real: allocation goes through
+/// `try_reserve_exact`, not the aborting global-allocator error path, so an
+/// oversized request is a recoverable host-side error instead of a trap
+/// that poisons the instance.
 #[no_mangle]
 pub extern "C" fn vc_alloc(len: u32) -> *mut u8 {
-    let buf = vec![0u8; len as usize].into_boxed_slice();
-    Box::into_raw(buf) as *mut u8
+    let len = len as usize;
+    let mut buf: Vec<u8> = Vec::new();
+    if buf.try_reserve_exact(len).is_err() {
+        return core::ptr::null_mut();
+    }
+    buf.resize(len, 0);
+    register(buf)
 }
 
-/// Zeroize and free a buffer previously returned by [`vc_alloc`] or packed
-/// into a result. `len` must be the original length.
+/// Register a buffer in [`BUFFERS`] and leak it to a raw pointer for the
+/// host. The registry entry is what makes the matching [`vc_dealloc`] sound.
+fn register(buf: Vec<u8>) -> *mut u8 {
+    let boxed = buf.into_boxed_slice();
+    let len = boxed.len();
+    let ptr = Box::into_raw(boxed) as *mut u8;
+    BUFFERS.with(|b| b.borrow_mut().insert(ptr as usize, len));
+    ptr
+}
+
+/// Zeroize and free a buffer previously handed out by [`vc_alloc`] or packed
+/// into a result. The guest's own registry supplies the true length; `len`
+/// is cross-checked but never trusted. An unknown pointer (including a
+/// double-free) is a no-op; a length mismatch means the host's bookkeeping
+/// has desynced from ours, so the buffer is kept live and registered rather
+/// than freed out from under a confused host.
 ///
 /// # Safety
 ///
-/// `ptr`/`len` must denote exactly one live buffer handed out by this
-/// module; double-free or a wrong length is undefined behaviour.
+/// `ptr` should be a pointer this module handed out. The registry makes any
+/// other pointer (or a stale one) a no-op rather than undefined behaviour,
+/// but a pointer that happens to alias a *different* live registered buffer
+/// of the same length would free that buffer.
 #[no_mangle]
 pub unsafe extern "C" fn vc_dealloc(ptr: *mut u8, len: u32) {
     if ptr.is_null() {
         return;
     }
-    let mut buf = unsafe { Vec::from_raw_parts(ptr, len as usize, len as usize) };
+    let real_len = match BUFFERS.with(|b| b.borrow_mut().remove(&(ptr as usize))) {
+        Some(real_len) => real_len,
+        None => return,
+    };
+    if real_len != len as usize {
+        BUFFERS.with(|b| b.borrow_mut().insert(ptr as usize, real_len));
+        return;
+    }
+    // SAFETY: the registry guarantees `(ptr, real_len)` is exactly one live
+    // allocation this module handed out via `register`, and the entry has
+    // just been removed so it cannot be freed twice.
+    let mut buf = unsafe { Vec::from_raw_parts(ptr, real_len, real_len) };
     buf.zeroize();
 }
 
 /// Pack a buffer result: `ptr << 32 | len`. The pointer is never null for a
 /// live allocation, so the high 32 bits are non-zero (a success marker).
+/// The buffer is registered so the host's eventual [`vc_dealloc`] wipes and
+/// frees exactly what was allocated.
 fn ok_buffer(out: Vec<u8>) -> u64 {
-    let boxed = out.into_boxed_slice();
-    let len = boxed.len() as u64;
-    let ptr = Box::into_raw(boxed) as *mut u8 as usize as u64;
+    let len = out.len() as u64;
+    let ptr = register(out) as usize as u64;
     (ptr << 32) | len
 }
 
@@ -114,52 +168,55 @@ fn err_status(status: u32) -> u64 {
     status as u64
 }
 
-/// # Safety
-///
-/// All pointer/length pairs must denote readable guest memory.
-unsafe fn input<'a>(ptr: *const u8, len: u32) -> &'a [u8] {
-    if ptr.is_null() {
-        &[]
-    } else {
-        unsafe { std::slice::from_raw_parts(ptr, len as usize) }
-    }
+/// Current linear-memory size in bytes. `u64` because a full 4 GiB memory
+/// (65536 pages) overflows a 32-bit `usize`.
+fn linear_memory_bytes() -> u64 {
+    core::arch::wasm32::memory_size::<0>() as u64 * 65536
 }
 
-/// Build a cipher from raw key bytes, zeroizing the guest-side stack copy of
-/// the key material once the cipher (and its key schedule) owns it. The key
-/// schedule inside `Aes256Cipher` is wiped best-effort when the cipher is
-/// dropped in `vc_cipher_free`; that wipe is owned by the crypto backend.
-fn build_cipher(key: &[u8]) -> Result<Aes256Cipher, u32> {
-    let mut key_copy: [u8; 32] = key.try_into().map_err(|_| STATUS_INTERNAL)?;
-    let cipher = Aes256Cipher::new(&Key::from(key_copy)).map_err(|_| STATUS_INTERNAL);
-    key_copy.zeroize();
-    cipher
+/// Borrow a host-supplied `(ptr, len)` pair, validating before any slice
+/// exists: null-with-nonzero-length is rejected (treating it as empty would
+/// silently drop an AAD context binding), the length must be under
+/// `isize::MAX`, and the whole range must lie inside the current linear
+/// memory. A pair that fails validation yields [`STATUS_ENCODING`]; a pair
+/// that passes can still name the wrong bytes — the host owns its pointers —
+/// but can never fault or over-read past linear memory.
+fn input<'a>(ptr: *const u8, len: u32) -> Result<&'a [u8], u32> {
+    let len = len as usize;
+    if len == 0 {
+        return Ok(&[]);
+    }
+    if ptr.is_null() || len > isize::MAX as usize {
+        return Err(STATUS_ENCODING);
+    }
+    let end = (ptr as usize).checked_add(len).ok_or(STATUS_ENCODING)?;
+    if end as u64 > linear_memory_bytes() {
+        return Err(STATUS_ENCODING);
+    }
+    // SAFETY: non-null, in-bounds of linear memory, and under `isize::MAX`;
+    // wasm linear memory is fully initialized (fresh pages are zero), so
+    // reading the range as bytes is defined.
+    Ok(unsafe { std::slice::from_raw_parts(ptr, len) })
 }
 
 /// Initialise a cipher session from a 32-byte key, returning a handle.
 ///
 /// # Safety
 ///
-/// `key_ptr`/`key_len` must denote readable guest memory.
+/// `key_ptr`/`key_len` should name the buffer the host wrote the key into.
+/// The guest bounds-checks the range against linear memory — a bad pair
+/// returns [`STATUS_ENCODING`] instead of faulting — but cannot verify the
+/// bytes are the ones the host intended.
 #[no_mangle]
 pub unsafe extern "C" fn vc_cipher_init(key_ptr: *const u8, key_len: u32) -> u64 {
-    let key = unsafe { input(key_ptr, key_len) };
-    catch_unwind(AssertUnwindSafe(|| cipher_init(key)))
+    catch_unwind(AssertUnwindSafe(|| cipher_init(input(key_ptr, key_len)?)))
         .unwrap_or(Err(STATUS_INTERNAL))
         .map_or_else(err_status, ok_handle)
 }
 
 fn cipher_init(key: &[u8]) -> Result<u32, u32> {
     let cipher = build_cipher(key)?;
-    SESSIONS.with(|s| {
-        let mut s = s.borrow_mut();
-        let handle = s.next;
-        // Saturating rather than wrapping so an id can never wrap back onto a
-        // live handle in a long-lived instance; a spike never exhausts u32.
-        s.next = s.next.saturating_add(1);
-        s.ciphers.insert(handle, cipher);
-        Ok(handle)
-    })
+    SESSIONS.with(|s| s.borrow_mut().insert(cipher))
 }
 
 /// Drop a cipher session, wiping its key schedule (best-effort, owned by the
@@ -168,7 +225,7 @@ fn cipher_init(key: &[u8]) -> Result<u32, u32> {
 pub extern "C" fn vc_cipher_free(handle: u32) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         SESSIONS.with(|s| {
-            s.borrow_mut().ciphers.remove(&handle);
+            s.borrow_mut().remove(handle);
         });
     }));
 }
@@ -177,7 +234,7 @@ pub extern "C" fn vc_cipher_free(handle: u32) {
 fn with_cipher<R>(handle: u32, f: impl FnOnce(&Aes256Cipher) -> Result<R, u32>) -> Result<R, u32> {
     SESSIONS.with(|s| {
         let s = s.borrow();
-        let cipher = s.ciphers.get(&handle).ok_or(STATUS_BAD_HANDLE)?;
+        let cipher = s.get(handle).ok_or(STATUS_BAD_HANDLE)?;
         f(cipher)
     })
 }
@@ -188,7 +245,10 @@ fn with_cipher<R>(handle: u32, f: impl FnOnce(&Aes256Cipher) -> Result<R, u32>) 
 ///
 /// # Safety
 ///
-/// All pointer/length pairs must denote readable guest memory.
+/// Pointer/length pairs should name buffers the host wrote via [`vc_alloc`].
+/// The guest bounds-checks each range against linear memory — a bad pair
+/// returns [`STATUS_ENCODING`] instead of faulting — but cannot verify the
+/// bytes are the ones the host intended.
 #[no_mangle]
 pub unsafe extern "C" fn vc_encrypt(
     handle: u32,
@@ -197,10 +257,16 @@ pub unsafe extern "C" fn vc_encrypt(
     aad_ptr: *const u8,
     aad_len: u32,
 ) -> u64 {
-    let (aad, val) = unsafe { (input(aad_ptr, aad_len), input(val_ptr, val_len)) };
-    catch_unwind(AssertUnwindSafe(|| encrypt(handle, aad, val, false)))
-        .unwrap_or(Err(STATUS_INTERNAL))
-        .map_or_else(err_status, ok_buffer)
+    catch_unwind(AssertUnwindSafe(|| {
+        encrypt(
+            handle,
+            input(aad_ptr, aad_len)?,
+            input(val_ptr, val_len)?,
+            false,
+        )
+    }))
+    .unwrap_or(Err(STATUS_INTERNAL))
+    .map_or_else(err_status, ok_buffer)
 }
 
 /// Like [`vc_encrypt`], but seals the value as a *sequence element* — the
@@ -211,7 +277,7 @@ pub unsafe extern "C" fn vc_encrypt(
 ///
 /// # Safety
 ///
-/// All pointer/length pairs must denote readable guest memory.
+/// As for [`vc_encrypt`].
 #[no_mangle]
 pub unsafe extern "C" fn vc_encrypt_element(
     handle: u32,
@@ -220,10 +286,16 @@ pub unsafe extern "C" fn vc_encrypt_element(
     aad_ptr: *const u8,
     aad_len: u32,
 ) -> u64 {
-    let (aad, val) = unsafe { (input(aad_ptr, aad_len), input(val_ptr, val_len)) };
-    catch_unwind(AssertUnwindSafe(|| encrypt(handle, aad, val, true)))
-        .unwrap_or(Err(STATUS_INTERNAL))
-        .map_or_else(err_status, ok_buffer)
+    catch_unwind(AssertUnwindSafe(|| {
+        encrypt(
+            handle,
+            input(aad_ptr, aad_len)?,
+            input(val_ptr, val_len)?,
+            true,
+        )
+    }))
+    .unwrap_or(Err(STATUS_INTERNAL))
+    .map_or_else(err_status, ok_buffer)
 }
 
 fn encrypt(handle: u32, aad: &[u8], val: &[u8], as_element: bool) -> Result<Vec<u8>, u32> {
@@ -253,7 +325,7 @@ fn encrypt(handle: u32, aad: &[u8], val: &[u8], as_element: bool) -> Result<Vec<
 ///
 /// # Safety
 ///
-/// All pointer/length pairs must denote readable guest memory.
+/// As for [`vc_encrypt`].
 #[no_mangle]
 pub unsafe extern "C" fn vc_decrypt(
     handle: u32,
@@ -262,10 +334,16 @@ pub unsafe extern "C" fn vc_decrypt(
     aad_ptr: *const u8,
     aad_len: u32,
 ) -> u64 {
-    let (aad, ct) = unsafe { (input(aad_ptr, aad_len), input(ct_ptr, ct_len)) };
-    catch_unwind(AssertUnwindSafe(|| decrypt(handle, aad, ct, false)))
-        .unwrap_or(Err(STATUS_INTERNAL))
-        .map_or_else(err_status, ok_buffer)
+    catch_unwind(AssertUnwindSafe(|| {
+        decrypt(
+            handle,
+            input(aad_ptr, aad_len)?,
+            input(ct_ptr, ct_len)?,
+            false,
+        )
+    }))
+    .unwrap_or(Err(STATUS_INTERNAL))
+    .map_or_else(err_status, ok_buffer)
 }
 
 /// Like [`vc_decrypt`], but opens the ciphertext as a *sequence element* —
@@ -276,7 +354,7 @@ pub unsafe extern "C" fn vc_decrypt(
 ///
 /// # Safety
 ///
-/// All pointer/length pairs must denote readable guest memory.
+/// As for [`vc_encrypt`].
 #[no_mangle]
 pub unsafe extern "C" fn vc_decrypt_element(
     handle: u32,
@@ -285,10 +363,16 @@ pub unsafe extern "C" fn vc_decrypt_element(
     aad_ptr: *const u8,
     aad_len: u32,
 ) -> u64 {
-    let (aad, ct) = unsafe { (input(aad_ptr, aad_len), input(ct_ptr, ct_len)) };
-    catch_unwind(AssertUnwindSafe(|| decrypt(handle, aad, ct, true)))
-        .unwrap_or(Err(STATUS_INTERNAL))
-        .map_or_else(err_status, ok_buffer)
+    catch_unwind(AssertUnwindSafe(|| {
+        decrypt(
+            handle,
+            input(aad_ptr, aad_len)?,
+            input(ct_ptr, ct_len)?,
+            true,
+        )
+    }))
+    .unwrap_or(Err(STATUS_INTERNAL))
+    .map_or_else(err_status, ok_buffer)
 }
 
 fn decrypt(handle: u32, aad: &[u8], ct: &[u8], as_element: bool) -> Result<Vec<u8>, u32> {
