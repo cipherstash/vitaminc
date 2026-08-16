@@ -2,15 +2,27 @@
 //! It is intentionally opinionated so that developers don't have to think about what Rng they should use
 //! for cryptographic purposes.
 //!
-//! Internally it uses `ChaCha20Rng` from the RustCrypto `chacha20` crate (via `rand`), which supports zeroization.
+//! Internally it uses `ChaCha20Rng` from the RustCrypto `chacha20` crate (via `rand`), built with
+//! its `zeroize` feature so the generator's key schedule and buffered keystream are wiped on drop.
 use std::convert::Infallible;
 
 use rand::{rngs::SysRng, Rng, SeedableRng, TryCryptoRng, TryRng};
 use vitaminc_protected::Controlled;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A secure random number generator that is safe to use for cryptographic purposes.
+///
+/// Wipes its key schedule and buffered keystream on drop.
 pub struct SafeRand(rand::rngs::ChaCha20Rng);
+
+// `SafeRand` has no `Drop` of its own; the wipe is the field's drop glue,
+// which is `ChaCha20Rng`'s `ZeroizeOnDrop`. That impl exists only when
+// `chacha20` is built with its `zeroize` feature (see this crate's
+// `Cargo.toml`). The bound below fails to compile if the feature ever lapses,
+// so the marker impl can never silently become a lie.
+impl ZeroizeOnDrop for SafeRand {}
+const _: fn() = assert_zeroize_on_drop::<rand::rngs::ChaCha20Rng>;
+fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
 
 impl SafeRand {
     /// A value in `0..n`: at least `0`, strictly below `n`, uniform to
