@@ -9,14 +9,12 @@
 //! 2. **Sort**: run a Batcher odd-even mergesort network — a fixed,
 //!    data-independent schedule of compare-exchange gates — with a branchless
 //!    constant-time gate.
-//! 3. **Collision check**: if any two random keys collide, discard the whole
-//!    batch and redraw. A tie broken by the packed index would bias the
-//!    output toward identity order, and patching only the colliding keys
-//!    would leak *which* positions collided. Restart timing depends only on
-//!    the discarded randomness, which is independent of the final output —
-//!    the same argument that makes rejection sampling benign. With 56 random
-//!    bits the collision probability is ≈ N²/2⁵⁷ (≈ 2⁻⁴³ at N = 128), so
-//!    restarts essentially never happen.
+//! 3. **Collision check**: if any two random keys collide, the whole batch
+//!    is rejected and generation **fails** — the seed must be discarded and a
+//!    fresh one generated (see [`random_permutation`] for the lifecycle
+//!    argument). A tie broken by the packed index would bias the output
+//!    toward identity order, and patching only the colliding keys would leak
+//!    *which* positions collided.
 //! 4. **Strip**: the low bytes of the sorted array *are* the permutation.
 //!
 //! Instruction trace, memory trace, and per-instruction latency are functions
@@ -25,7 +23,7 @@
 //! address is ever derived from a secret value.
 
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, ConstantTimeGreater};
-use vitaminc_random::{Rng, SafeRand};
+use vitaminc_random::{RandomError, Rng, SafeRand};
 use zeroize::Zeroizing;
 
 use crate::private::IsPermutable;
@@ -123,7 +121,10 @@ where
 /// matter for collisions: the packed indices make the full words distinct,
 /// and equal keys end up adjacent after sorting. The scan accumulates into a
 /// mask so it is itself branch-free.
-fn permutation_from_words<const N: usize>(w: &mut [u64; N]) -> Option<[u8; N]>
+///
+/// The extracted permutation is itself secret key material, so it is built
+/// inside `Zeroizing` — the packed words being wiped is not enough.
+fn permutation_from_words<const N: usize>(w: &mut [u64; N]) -> Option<Zeroizing<[u8; N]>>
 where
     [u8; N]: IsPermutable,
 {
@@ -135,7 +136,7 @@ where
     if bool::from(collision) {
         return None;
     }
-    let mut out = [0u8; N];
+    let mut out: Zeroizing<[u8; N]> = Zeroizing::new([0; N]);
     for (o, x) in out.iter_mut().zip(w.iter()) {
         *o = (x & 0xFF) as u8;
     }
@@ -146,23 +147,34 @@ where
 /// (`out[j] = data[p[j]]` applies it), generated obliviously: timing and
 /// memory access patterns are independent of the result.
 ///
-/// A key collision discards the whole batch — restart timing depends only on
-/// the discarded randomness, which is independent of the final output.
-pub(crate) fn random_permutation<const N: usize>(rng: &mut SafeRand) -> [u8; N]
+/// Exactly **one** batch is attempted. On a key collision the whole batch is
+/// rejected and generation fails with [`RandomError::SeedRejected`] — the
+/// caller must discard the seed and start over with a fresh one, never retry
+/// from the same RNG stream. Two reasons:
+///
+/// - The seed is typically a long-term secret that clients retain to
+///   re-derive the permutation. A seed whose first batch collides can never
+///   produce a stable permutation, so it is unusable by definition.
+/// - Retrying in-stream would make runtime reveal whether the *retained*
+///   seed collided — a predicate of the secret seed. Failing after one batch
+///   moves the retry to the seed-generation layer, where timing reveals only
+///   how many independent, discarded seeds preceded the accepted one.
+///
+/// With 56 random bits the collision probability is ≈ N²/2⁵⁷ (≈ 2⁻⁴³ at
+/// N = 128), so honest generation essentially never fails.
+pub(crate) fn random_permutation<const N: usize>(
+    rng: &mut SafeRand,
+) -> Result<Zeroizing<[u8; N]>, RandomError>
 where
     [u8; N]: IsPermutable,
 {
     // The payload (and the schedule's gate indices) are single bytes.
     const { assert!(N <= 256, "permutation length must fit in u8") };
-    loop {
-        let mut w: Zeroizing<[u64; N]> = Zeroizing::new([0; N]);
-        for (i, slot) in w.iter_mut().enumerate() {
-            *slot = (rng.next_u64() << 8) | i as u64;
-        }
-        if let Some(out) = permutation_from_words(&mut w) {
-            return out;
-        }
+    let mut w: Zeroizing<[u64; N]> = Zeroizing::new([0; N]);
+    for (i, slot) in w.iter_mut().enumerate() {
+        *slot = (rng.next_u64() << 8) | i as u64;
     }
+    permutation_from_words(&mut w).ok_or(RandomError::SeedRejected)
 }
 
 #[cfg(test)]
@@ -235,20 +247,26 @@ mod tests {
 
     #[test]
     fn network_sorts_random_words() {
-        let mut rng = SafeRand::from_seed([42u8; 32]);
-        for _ in 0..100 {
-            let mut w: [u64; 64] = core::array::from_fn(|_| rng.next_u64());
-            let mut expected = w;
-            expected.sort_unstable();
-            sort(&mut w);
-            assert_eq!(w, expected);
-
-            let mut w: [u64; 128] = core::array::from_fn(|_| rng.next_u64());
-            let mut expected = w;
-            expected.sort_unstable();
-            sort(&mut w);
-            assert_eq!(w, expected);
+        // Every supported length: the zero-one tests only cover 8/16, and a
+        // length-specific transcription bug would otherwise go unnoticed.
+        fn check<const N: usize>(rng: &mut SafeRand)
+        where
+            [u8; N]: IsPermutable,
+        {
+            for _ in 0..100 {
+                let mut w: [u64; N] = core::array::from_fn(|_| rng.next_u64());
+                let mut expected = w;
+                expected.sort_unstable();
+                sort(&mut w);
+                assert_eq!(w, expected);
+            }
         }
+        let mut rng = SafeRand::from_seed([42u8; 32]);
+        check::<8>(&mut rng);
+        check::<16>(&mut rng);
+        check::<32>(&mut rng);
+        check::<64>(&mut rng);
+        check::<128>(&mut rng);
     }
 
     #[test]
@@ -258,7 +276,7 @@ mod tests {
             [u8; N]: IsPermutable,
         {
             for _ in 0..50 {
-                assert_is_permutation(&random_permutation::<N>(rng));
+                assert_is_permutation(&random_permutation::<N>(rng).unwrap());
             }
         }
         let mut rng = SafeRand::from_seed([9u8; 32]);
@@ -270,26 +288,26 @@ mod tests {
     }
 
     #[test]
-    fn colliding_keys_discard_the_batch() {
+    fn colliding_keys_reject_the_batch() {
         // Two equal random keys (high 56 bits) with different payloads must
         // reject the whole batch, even though the packed words are distinct.
         let mut w: [u64; 8] = core::array::from_fn(|i| ((i as u64) << 8) | i as u64);
         w[3] = (7 << 8) | 3; // same sort key as w[7], different payload
-        assert_eq!(permutation_from_words(&mut w), None);
+        assert!(permutation_from_words(&mut w).is_none());
 
         // Distinct keys must produce the payload permutation in sorted-key
         // order: descending keys reverse the payloads.
         let mut w: [u64; 8] = core::array::from_fn(|i| ((7 - i as u64) << 8) | i as u64);
         assert_eq!(
-            permutation_from_words(&mut w),
+            permutation_from_words(&mut w).map(|z| *z),
             Some([7, 6, 5, 4, 3, 2, 1, 0])
         );
     }
 
     #[test]
     fn output_is_deterministic_for_a_seed() {
-        let a = random_permutation::<64>(&mut SafeRand::from_seed([1u8; 32]));
-        let b = random_permutation::<64>(&mut SafeRand::from_seed([1u8; 32]));
-        assert_eq!(a, b);
+        let a = random_permutation::<64>(&mut SafeRand::from_seed([1u8; 32])).unwrap();
+        let b = random_permutation::<64>(&mut SafeRand::from_seed([1u8; 32])).unwrap();
+        assert_eq!(*a, *b);
     }
 }
