@@ -118,9 +118,36 @@ where
     }
 }
 
+/// Sorts a batch of packed words and extracts the permutation payload, or
+/// returns `None` if any two random sort keys collide. Only the random bits
+/// matter for collisions: the packed indices make the full words distinct,
+/// and equal keys end up adjacent after sorting. The scan accumulates into a
+/// mask so it is itself branch-free.
+fn permutation_from_words<const N: usize>(w: &mut [u64; N]) -> Option<[u8; N]>
+where
+    [u8; N]: IsPermutable,
+{
+    sort(w);
+    let mut collision = Choice::from(0u8);
+    for pair in w.windows(2) {
+        collision |= (pair[0] >> 8).ct_eq(&(pair[1] >> 8));
+    }
+    if bool::from(collision) {
+        return None;
+    }
+    let mut out = [0u8; N];
+    for (o, x) in out.iter_mut().zip(w.iter()) {
+        *o = (x & 0xFF) as u8;
+    }
+    Some(out)
+}
+
 /// Returns a uniform random permutation of `0..N` in gather form
 /// (`out[j] = data[p[j]]` applies it), generated obliviously: timing and
 /// memory access patterns are independent of the result.
+///
+/// A key collision discards the whole batch — restart timing depends only on
+/// the discarded randomness, which is independent of the final output.
 pub(crate) fn random_permutation<const N: usize>(rng: &mut SafeRand) -> [u8; N]
 where
     [u8; N]: IsPermutable,
@@ -132,20 +159,7 @@ where
         for (i, slot) in w.iter_mut().enumerate() {
             *slot = (rng.next_u64() << 8) | i as u64;
         }
-        sort(&mut w);
-        // Only the random bits matter for collisions: the packed indices make
-        // the full words distinct, and equal keys end up adjacent after
-        // sorting. Accumulate into a mask so the scan itself is branch-free;
-        // the single branch below is on discarded randomness only.
-        let mut collision = Choice::from(0u8);
-        for pair in w.windows(2) {
-            collision |= (pair[0] >> 8).ct_eq(&(pair[1] >> 8));
-        }
-        if !bool::from(collision) {
-            let mut out = [0u8; N];
-            for (o, x) in out.iter_mut().zip(w.iter()) {
-                *o = (x & 0xFF) as u8;
-            }
+        if let Some(out) = permutation_from_words(&mut w) {
             return out;
         }
     }
@@ -253,6 +267,23 @@ mod tests {
         check::<32>(&mut rng);
         check::<64>(&mut rng);
         check::<128>(&mut rng);
+    }
+
+    #[test]
+    fn colliding_keys_discard_the_batch() {
+        // Two equal random keys (high 56 bits) with different payloads must
+        // reject the whole batch, even though the packed words are distinct.
+        let mut w: [u64; 8] = core::array::from_fn(|i| ((i as u64) << 8) | i as u64);
+        w[3] = (7 << 8) | 3; // same sort key as w[7], different payload
+        assert_eq!(permutation_from_words(&mut w), None);
+
+        // Distinct keys must produce the payload permutation in sorted-key
+        // order: descending keys reverse the payloads.
+        let mut w: [u64; 8] = core::array::from_fn(|i| ((7 - i as u64) << 8) | i as u64);
+        assert_eq!(
+            permutation_from_words(&mut w),
+            Some([7, 6, 5, 4, 3, 2, 1, 0])
+        );
     }
 
     #[test]
