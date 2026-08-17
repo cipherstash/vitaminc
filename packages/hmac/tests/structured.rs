@@ -27,12 +27,18 @@ type Boxed = Box<dyn Any + Send + 'static>;
 type Node = ResolvedPrf<[u8; 32], Boxed>;
 type Finish<T> = Box<dyn FnOnce(Node) -> Result<T, PrfError<Infallible>>>;
 
+fn key_bytes() -> [u8; 32] {
+    std::array::from_fn(|index| index as u8)
+}
+
+/// The same key material as [`key_bytes`], for backends that take a
+/// runtime-length key.
 fn key() -> Protected<Vec<u8>> {
-    Protected::new((0_u8..32).collect())
+    Protected::new(key_bytes().to_vec())
 }
 
 fn local() -> HmacSha256Prf {
-    HmacSha256Prf::new(key())
+    HmacSha256Prf::new(Protected::new(key_bytes()))
 }
 
 fn hex(bytes: &str) -> Vec<u8> {
@@ -48,17 +54,17 @@ fn hex(bytes: &str) -> Vec<u8> {
 
 #[test]
 fn hmac_sha256_known_answer_and_byte_container_equivalence() {
-    let key = Protected::new(vec![0x0b; 20]);
-    let expected = hex("2c67c3426ca59168497f261bdcac4b78bf41e59510107906052e4dfb54a0e667");
+    let key = [0x0b; 32];
+    let expected = hex("a192f4fccf3cbb90b845a1db9dfc42baa68ee612ff6d019a1168a1f74eb75230");
     let array = *b"Hi There";
 
     let from_array = array
-        .prf(HmacSha256Prf::new(key.clone()))
+        .prf(HmacSha256Prf::new(Protected::new(key)))
         .into_result()
         .unwrap();
     let from_vec = array
         .to_vec()
-        .prf(HmacSha256Prf::new(key))
+        .prf(HmacSha256Prf::new(Protected::new(key)))
         .into_result()
         .unwrap();
 
@@ -72,7 +78,7 @@ fn hmac_sha256_normalizes_keys_larger_than_one_hash_block() {
     let input = b"long HMAC key".to_vec();
     let local = input
         .clone()
-        .prf(HmacSha256Prf::new(Protected::new(key_bytes.clone())))
+        .prf(HmacSha256Prf::try_from_bytes(Protected::new(key_bytes.clone())).unwrap())
         .into_result()
         .unwrap();
     let reference = block_on(
@@ -593,20 +599,58 @@ fn sequence_order_and_shape_are_preserved(values: Vec<Vec<u8>>) -> bool {
 }
 
 #[quickcheck]
-fn derivation_is_deterministic(key_bytes: Vec<u8>, context: Vec<u8>, input: Vec<u8>) -> bool {
+fn derivation_is_deterministic(key_suffix: Vec<u8>, context: Vec<u8>, input: Vec<u8>) -> bool {
+    // Arbitrary key material, lengthened past the minimum the constructor
+    // enforces so that every generated case reaches the derivation.
+    let key_bytes = [key_bytes().to_vec(), key_suffix].concat();
     let first = input
         .clone()
         .prf_with_context(
-            HmacSha256Prf::new(Protected::new(key_bytes.clone())),
+            HmacSha256Prf::try_from_bytes(Protected::new(key_bytes.clone())).unwrap(),
             context.clone(),
         )
         .into_result()
         .unwrap();
     let second = input
-        .prf_with_context(HmacSha256Prf::new(Protected::new(key_bytes)), context)
+        .prf_with_context(
+            HmacSha256Prf::try_from_bytes(Protected::new(key_bytes)).unwrap(),
+            context,
+        )
         .into_result()
         .unwrap();
     first == second
+}
+
+#[test]
+fn short_keys_are_rejected() {
+    for len in 0..vitaminc_hmac::MIN_KEY_LEN {
+        let error = HmacSha256Prf::try_from_bytes(Protected::new(vec![0x0b; len]))
+            .err()
+            .unwrap_or_else(|| panic!("a {len}-byte key must be rejected"));
+        assert_eq!(error.len(), len);
+        assert_eq!(error.is_empty(), len == 0);
+    }
+
+    assert!(
+        HmacSha256Prf::try_from_bytes(Protected::new(vec![0x0b; vitaminc_hmac::MIN_KEY_LEN]))
+            .is_ok()
+    );
+}
+
+#[test]
+fn both_constructors_agree_on_the_same_key() {
+    let input = b"same key, same derivation".to_vec();
+    let from_array = input
+        .clone()
+        .prf(HmacSha256Prf::new(Protected::new(key_bytes())))
+        .into_result()
+        .unwrap();
+    let from_bytes = input
+        .prf(HmacSha256Prf::try_from_bytes(key()).unwrap())
+        .into_result()
+        .unwrap();
+
+    assert_eq!(from_array, from_bytes);
 }
 
 #[quickcheck]

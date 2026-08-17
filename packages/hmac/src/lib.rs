@@ -26,6 +26,43 @@ const SHA256_OUTPUT_SIZE: usize = 32;
 const IPAD: u8 = 0x36;
 const OPAD: u8 = 0x5C;
 
+/// Length of the key accepted by [`HmacSha256Prf::new`].
+pub const KEY_LEN: usize = 32;
+
+/// Shortest key accepted by [`HmacSha256Prf::try_from_bytes`].
+pub const MIN_KEY_LEN: usize = KEY_LEN;
+
+/// Key material offered to [`HmacSha256Prf::try_from_bytes`] was too short to
+/// key the PRF safely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WeakKeyError {
+    len: usize,
+}
+
+impl WeakKeyError {
+    /// Length of the rejected key, in bytes.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Whether the rejected key was empty.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+impl std::fmt::Display for WeakKeyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "HMAC-SHA256 PRF key must be at least {MIN_KEY_LEN} bytes, got {}",
+            self.len
+        )
+    }
+}
+
+impl std::error::Error for WeakKeyError {}
+
 /// HMAC-SHA256 keyed without leaving unwiped copies of key material.
 ///
 /// RustCrypto's `Hmac` state wipes on drop when the `hmac` and `sha2`
@@ -115,12 +152,31 @@ pub struct HmacSha256Prf {
 }
 
 impl HmacSha256Prf {
-    pub fn new(key: Protected<Vec<u8>>) -> Self {
-        Self { key: Arc::new(key) }
+    /// Key the PRF with a full-strength key.
+    ///
+    /// The array type carries the length guarantee, so this cannot fail.
+    pub fn new(key: Protected<[u8; KEY_LEN]>) -> Self {
+        Self::from_vec(Protected::new(key.risky_ref().to_vec()))
     }
 
-    pub fn from_key_array<const N: usize>(key: Protected<[u8; N]>) -> Self {
-        Self::new(Protected::new(key.risky_ref().to_vec()))
+    /// Key the PRF with key material whose length is only known at runtime,
+    /// such as a KMS response or an environment variable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WeakKeyError`] if the key is shorter than [`MIN_KEY_LEN`].
+    /// HMAC itself accepts any key length, including an empty one, which
+    /// would silently produce derivations that anybody can recompute.
+    pub fn try_from_bytes(key: Protected<Vec<u8>>) -> Result<Self, WeakKeyError> {
+        let len = key.risky_ref().len();
+        if len < MIN_KEY_LEN {
+            return Err(WeakKeyError { len });
+        }
+        Ok(Self::from_vec(key))
+    }
+
+    fn from_vec(key: Protected<Vec<u8>>) -> Self {
+        Self { key: Arc::new(key) }
     }
 
     fn derive<T>(&self, data: &T, encoding: PrfEncoding, context: &PrfContext<'_>) -> [u8; 32]

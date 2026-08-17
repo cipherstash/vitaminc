@@ -10,6 +10,29 @@ buffer in a wiped allocation, so no unwiped copy of the key material is left
 behind by construction. Each leaf derives
 `HMAC-SHA256(key, PAE(encoding, context, input))`.
 
+## Keying
+
+`HmacSha256Prf::new` takes a `Protected<[u8; 32]>`, so the key length is
+guaranteed by the type and construction cannot fail. Key material whose length
+is only known at runtime — a KMS response, an environment variable — goes
+through `try_from_bytes`, which rejects anything shorter than `MIN_KEY_LEN`
+with a `WeakKeyError`. HMAC itself accepts a key of any length, including an
+empty one, which would silently produce derivations anybody can recompute.
+
+```rust
+use vitaminc_hmac::{HmacSha256Prf, WeakKeyError};
+use vitaminc_protected::Protected;
+
+# fn example() -> Result<(), Box<dyn std::error::Error>> {
+let from_kms: Vec<u8> = vec![7; 32];
+let prf = HmacSha256Prf::try_from_bytes(Protected::new(from_kms))?;
+
+let too_short = HmacSha256Prf::try_from_bytes(Protected::new(vec![7; 16]));
+assert!(too_short.is_err());
+# Ok(())
+# }
+```
+
 ## Deriving a block
 
 Built-in values return the backend's raw block through `prf`. Use
@@ -21,7 +44,7 @@ use vitaminc_hmac::HmacSha256Prf;
 use vitaminc_protected::Protected;
 
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-let prf = HmacSha256Prf::new(Protected::new(vec![7; 32]));
+let prf = HmacSha256Prf::new(Protected::new([7; 32]));
 let term = "alice@example.com"
     .prf_with_context(prf, "users/email/exact/v1")
     .await?;
@@ -60,7 +83,7 @@ impl<P> PrfVisitor<[u8; 32], P> for BloomPositions {
 }
 
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-let prf = HmacSha256Prf::new(Protected::new(vec![7; 32]));
+let prf = HmacSha256Prf::new(Protected::new([7; 32]));
 let positions = "alice@example.com"
     .prf_visit(
         prf,
@@ -160,7 +183,7 @@ let user = User {
     email: "alice@example.com".into(),
     aliases: vec!["alice".into(), "a.smith".into()],
 };
-let prf = HmacSha256Prf::new(Protected::new(vec![7; 32]));
+let prf = HmacSha256Prf::new(Protected::new([7; 32]));
 let terms = user
     .prf_visit_with_context(prf, "tenant/acme/users/v1", UserTermsVisitor)
     .await?;
