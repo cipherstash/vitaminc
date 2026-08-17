@@ -5,6 +5,7 @@ use crate::PrfEncoding;
 const MAP_ENTRY_DOMAIN: &[u8] = b"vitaminc/prf/map-entry/v1";
 const CONTEXT_VALUE_DOMAIN: &[u8] = b"vitaminc/prf/context-value/v1";
 const OPTION_SOME_DOMAIN: &[u8] = b"vitaminc/prf/option-some/v1";
+const REFINE_DOMAIN: &[u8] = b"vitaminc/prf/refine/v1";
 
 /// Owned or borrowed domain-separation context for a PRF derivation.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -51,12 +52,17 @@ impl<'a> PrfContext<'a> {
     }
 
     /// Add a domain component without allowing concatenation ambiguities.
+    ///
+    /// The leading domain tag keeps caller-refined contexts disjoint from the
+    /// contexts this crate assigns automatically. Without it, a context built
+    /// as `PrfContext::from_slice(OPTION_SOME_DOMAIN).refine(x)` would encode
+    /// identically to the one derived for `Some(x)`.
     pub fn refine<'b, C>(&self, component: C) -> PrfContext<'static>
     where
         C: IntoPrfContext<'b>,
     {
         let component = component.into_prf_context();
-        Self::pae(&[self.as_bytes(), component.as_bytes()])
+        Self::pae(&[REFINE_DOMAIN, self.as_bytes(), component.as_bytes()])
     }
 
     /// Context automatically assigned to a string-keyed map entry.
@@ -210,11 +216,28 @@ mod tests {
     fn refine_frames_the_parent_and_component() {
         let parent = PrfContext::from_slice(b"parent");
         let expected = PrfContext::pae(&[
+            REFINE_DOMAIN,
             b"parent",
             PrfContext::typed(PrfEncoding::UTF8, b"child").as_bytes(),
         ]);
 
         assert_eq!(parent.refine("child"), expected);
+    }
+
+    #[test]
+    fn refine_is_disjoint_from_the_automatic_domains() {
+        // Without a domain tag of its own, `refine` on a context that happens
+        // to equal a reserved constant collides with the derivation that
+        // constant names.
+        let forged = PrfContext::from_slice(OPTION_SOME_DOMAIN).refine("child");
+        let assigned = PrfContext::from_slice(b"child").for_option_some();
+
+        assert_ne!(forged, assigned);
+
+        let forged = PrfContext::from_slice(MAP_ENTRY_DOMAIN).refine("child");
+        let assigned = PrfContext::from_slice(b"parent").for_map_entry("child");
+
+        assert_ne!(forged, assigned);
     }
 
     #[quickcheck]
