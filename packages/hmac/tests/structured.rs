@@ -42,11 +42,12 @@ fn local() -> HmacSha256Prf {
 }
 
 fn hex(bytes: &str) -> Vec<u8> {
-    bytes
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            let pair = std::str::from_utf8(pair).unwrap();
+    let digits = bytes.as_bytes();
+    // Pair up the digits, ignoring a trailing odd one as `chunks_exact` would.
+    (0..digits.len().saturating_sub(1))
+        .step_by(2)
+        .map(|i| {
+            let pair = std::str::from_utf8(&digits[i..i + 2]).unwrap();
             u8::from_str_radix(pair, 16).unwrap()
         })
         .collect()
@@ -101,10 +102,10 @@ impl<P> PrfVisitor<[u8; 32], P> for BloomVisitor {
     type Value = Vec<i16>;
 
     fn visit_block(self, block: [u8; 32]) -> Result<Self::Value, PrfVisitorError> {
-        Ok(block
-            .chunks_exact(2)
+        Ok((0..block.len())
+            .step_by(2)
             .take(self.positions)
-            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]).rem_euclid(self.modulus))
+            .map(|i| i16::from_le_bytes([block[i], block[i + 1]]).rem_euclid(self.modulus))
             .collect())
     }
 }
