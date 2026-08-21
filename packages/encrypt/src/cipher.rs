@@ -596,6 +596,7 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
                     cipher: self.cipher,
                     entries: entries.into_iter(),
                     aad: aad.into_aad(),
+                    pending: None,
                 };
                 visitor.visit_map(map_access)
             }
@@ -607,6 +608,7 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
                     cipher: self.cipher,
                     entries: Vec::new().into_iter(),
                     aad,
+                    pending: None,
                 };
                 visitor.visit_map(map_access)
             }
@@ -722,22 +724,41 @@ struct AesMapAccess<'c, 'a> {
     cipher: &'c Aes256Cipher,
     entries: std::vec::IntoIter<(String, AesCipherText)>,
     aad: Aad<'a>,
+    /// The entry handed out by `next_key` and not yet consumed by
+    /// `next_value`. Holding the ciphertext here (rather than decrypting it
+    /// up front) is what lets the caller choose the plaintext type *after*
+    /// seeing the key — see [`MapAccess::next_key`].
+    pending: Option<(String, AesCipherText)>,
 }
 
-impl<'c, 'a> MapAccess<'c> for AesMapAccess<'c, 'a> {
+impl<'c> MapAccess<'c> for AesMapAccess<'c, '_> {
     type Error = Unspecified;
 
-    fn next_entry<T: Decrypt<'c> + 'c>(&mut self) -> Result<Option<(String, T)>, Self::Error> {
-        let (key, ct) = match self.entries.next() {
-            Some(entry) => entry,
-            None => return Ok(None),
-        };
+    fn next_key(&mut self) -> Result<Option<String>, Self::Error> {
+        // A still-pending entry means the caller skipped a value. Skipping is
+        // refused rather than tolerated: an entry whose value is never
+        // decrypted is an entry whose AAD binding is never verified, so a
+        // lenient decoder here would silently accept a tampered field it
+        // chose not to look at.
+        if self.pending.is_some() {
+            return Err(Unspecified);
+        }
+        match self.entries.next() {
+            Some((key, ct)) => {
+                self.pending = Some((key.clone(), ct));
+                Ok(Some(key))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn next_value<T: Decrypt<'c> + 'c>(&mut self) -> Result<T, Self::Error> {
+        let (key, ct) = self.pending.take().ok_or(Unspecified)?;
         let decipher = self.cipher.decipher(ct);
         // Mirror `AesMapCipher::encrypt_value`: the value was sealed against
         // PAE(domain, aad, key), so a swapped or renamed key fails here.
         let entry_aad = self.aad.for_map_entry(&key);
-        let value = T::decrypt_with_aad(decipher, entry_aad)?;
-        Ok(Some((key, value)))
+        T::decrypt_with_aad(decipher, entry_aad)
     }
 }
 
