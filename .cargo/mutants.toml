@@ -22,6 +22,7 @@ additional_cargo_args = ["--all-features"]
 # there (they'd survive spuriously). This mirrors the cargo-crap `allow` list;
 # the derives are exercised in practice by the crates that use them.
 exclude_globs = [
+    "packages/aead-derive/**",
     "packages/protected-derive/**",
     "packages/random-derives/**",
 ]
