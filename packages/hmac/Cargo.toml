@@ -1,0 +1,24 @@
+[package]
+name = "vitaminc-hmac"
+description = "Local HMAC-SHA256 backend for VitaminC structured pseudorandom functions."
+documentation = "https://docs.rs/vitaminc-hmac"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+hmac = { version = "0.13.0", features = ["zeroize"] }
+sha2 = { version = "0.11.0", features = ["zeroize"] }
+vitaminc-prf = { version = "0.2.0-pre.1", path = "../prf" }
+vitaminc-protected = { version = "0.2.0-pre.1", path = "../protected" }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+futures = "0.3.31"
+quickcheck = "1.1.0"
+quickcheck_macros = "1.2.0"

@@ -1469,6 +1469,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mutants"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "add0ac067452ff1aca8c5002111bd6b1c895baee6e45fcbc44e0193aea17be56"
+
+[[package]]
 name = "napi"
 version = "3.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2434,8 +2440,10 @@ dependencies = [
  "vitaminc-aead",
  "vitaminc-async-traits",
  "vitaminc-encrypt",
+ "vitaminc-hmac",
  "vitaminc-kms",
  "vitaminc-permutation",
+ "vitaminc-prf",
  "vitaminc-protected",
  "vitaminc-random",
  "vitaminc-traits",
@@ -2499,6 +2507,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "vitaminc-hmac"
+version = "0.2.0-pre.1"
+dependencies = [
+ "futures",
+ "hmac",
+ "quickcheck",
+ "quickcheck_macros",
+ "sha2",
+ "vitaminc-prf",
+ "vitaminc-protected",
+ "zeroize",
+]
+
+[[package]]
 name = "vitaminc-kms"
 version = "0.2.0-pre.1"
 dependencies = [
@@ -2532,6 +2554,17 @@ dependencies = [
  "vitaminc-protected",
  "vitaminc-random",
  "zeroize",
+]
+
+[[package]]
+name = "vitaminc-prf"
+version = "0.2.0-pre.1"
+dependencies = [
+ "mutants",
+ "quickcheck",
+ "quickcheck_macros",
+ "thiserror",
+ "vitaminc-protected",
 ]
 
 [[package]]

@@ -129,7 +129,10 @@ fn non_sensitive_attr_skips_masking() {
             value: "ok-to-print".into(),
         }
     );
-    assert_eq!(out, format!("opaque_debug_runtime::non_sensitive_attr_skips_masking::HasNonSensitiveField {{ sensitive: \"***\", value: \"ok-to-print\" }}"));
+    assert_eq!(
+        out,
+        "opaque_debug_runtime::non_sensitive_attr_skips_masking::HasNonSensitiveField { sensitive: \"***\", value: \"ok-to-print\" }"
+    );
 }
 
 #[test]
@@ -149,7 +152,10 @@ fn non_sensitive_attr_fails_to_skip_if_type_is_redacted() {
             value: Redacted::new("ok-to-print".into()),
         }
     );
-    assert_eq!(out, format!("opaque_debug_runtime::non_sensitive_attr_fails_to_skip_if_type_is_redacted::HasNonSensitiveField {{ sensitive: \"***\", value: Redacted<alloc::string::String ***> }}"));
+    assert_eq!(
+        out,
+        "opaque_debug_runtime::non_sensitive_attr_fails_to_skip_if_type_is_redacted::HasNonSensitiveField { sensitive: \"***\", value: Redacted<alloc::string::String ***> }"
+    );
 }
 
 #[test]

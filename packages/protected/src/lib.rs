@@ -26,6 +26,9 @@ pub use zeroed::Zeroed;
 // Exports
 pub use controlled::Controlled;
 pub use digest::ProtectedDigest;
+// Re-exported so callers can name the error from `ProtectedDigest::new_with_key`
+// without taking their own version-matched dependency on `digest`.
+pub use ::digest::InvalidLength;
 pub use equatable::{ConstantTimeEq, Equatable};
 pub use exportable::{Exportable, SafeDeserialize, SafeSerialize};
 pub use protected::{flatten_array, Protected};

@@ -21,6 +21,14 @@ pub use vitaminc_kms as aws_kms;
 #[cfg_attr(docsrs, doc(cfg(feature = "permutation")))]
 pub use vitaminc_permutation as permutation;
 
+#[cfg(feature = "prf")]
+#[cfg_attr(docsrs, doc(cfg(feature = "prf")))]
+pub use vitaminc_prf as prf;
+
+#[cfg(feature = "hmac")]
+#[cfg_attr(docsrs, doc(cfg(feature = "hmac")))]
+pub use vitaminc_hmac as hmac;
+
 #[cfg(feature = "protected")]
 #[cfg_attr(docsrs, doc(cfg(feature = "protected")))]
 pub use vitaminc_protected as protected;

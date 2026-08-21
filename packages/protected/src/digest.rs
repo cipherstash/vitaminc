@@ -3,38 +3,62 @@ use std::marker::PhantomData;
 use crate::{Acceptable, Controlled, DefaultScope, Scope};
 use digest::array::Array;
 use digest::Digest;
+use digest::FixedOutput;
 use digest::FixedOutputReset;
+use digest::InvalidLength;
+use digest::KeyInit;
 use digest::Output;
 use digest::OutputSizeUser;
 use digest::Reset;
+use digest::Update;
 use zeroize::ZeroizeOnDrop;
 
-/// A digest whose implementation wipes its internal state on drop.
+/// A fixed-output cryptographic state whose implementation wipes itself on
+/// drop.
 ///
-/// Secret inputs enter through [`update`](Self::update) and secret outputs are
-/// written directly into a [`Controlled`] destination by
-/// [`finalize_into`](Self::finalize_into). Public input and output crossings
-/// use explicitly named methods.
+/// Unkeyed digests use [`new`](Self::new), while keyed fixed-output functions
+/// use [`new_with_key`](Self::new_with_key) so their keys cross the API boundary
+/// in a [`Controlled`] container. Secret inputs enter through
+/// [`update`](Self::update) and secret outputs are written directly into a
+/// [`Controlled`] destination by [`finalize_into`](Self::finalize_into). Public
+/// input and output crossings use explicitly named methods.
 pub struct ProtectedDigest<D, InputScope = DefaultScope>(D, PhantomData<InputScope>)
 where
-    D: Digest + ZeroizeOnDrop;
+    D: FixedOutput + ZeroizeOnDrop;
 
 // TODO: Implement Usage scopes
 impl<D, InputScope> ProtectedDigest<D, InputScope>
 where
-    D: Digest + ZeroizeOnDrop,
+    D: FixedOutput + ZeroizeOnDrop,
     InputScope: Scope,
 {
-    pub fn new() -> Self {
-        Self(D::new(), PhantomData)
+    pub fn new() -> Self
+    where
+        D: Digest + FixedOutput,
+    {
+        Self(<D as Digest>::new(), PhantomData)
     }
 
     pub fn new_with_prefix<T>(data: &T) -> Self
     where
+        D: Digest + FixedOutput,
         T: Controlled + Acceptable<InputScope>,
         T::Inner: AsRef<[u8]>,
     {
-        Self(D::new_with_prefix(data.risky_ref()), PhantomData)
+        Self(
+            <D as Digest>::new_with_prefix(data.risky_ref()),
+            PhantomData,
+        )
+    }
+
+    /// Initialize a keyed fixed-output function from protected key material.
+    pub fn new_with_key<T>(key: &T) -> Result<Self, InvalidLength>
+    where
+        D: KeyInit,
+        T: Controlled + Acceptable<InputScope>,
+        T::Inner: AsRef<[u8]>,
+    {
+        D::new_from_slice(key.risky_ref().as_ref()).map(|digest| Self(digest, PhantomData))
     }
 
     pub fn update<T>(&mut self, data: &T)
@@ -42,7 +66,7 @@ where
         T: Controlled + Acceptable<InputScope>,
         T::Inner: AsRef<[u8]>,
     {
-        self.0.update(data.risky_ref())
+        Update::update(&mut self.0, data.risky_ref().as_ref())
     }
 
     /// Add bytes that are intentionally public.
@@ -50,7 +74,7 @@ where
     /// This is an explicit escape from the protected-input channel for domain
     /// separators, framing, and other non-secret protocol data.
     pub fn update_public(&mut self, data: &[u8]) {
-        self.0.update(data)
+        Update::update(&mut self.0, data)
     }
 
     /// Finalize directly into a protected destination without creating an
@@ -61,7 +85,7 @@ where
         &'m mut Array<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T::Inner>,
     {
         let target: &mut Output<D> = out.inner_mut().into();
-        self.0.finalize_into(target);
+        FixedOutput::finalize_into(self.0, target);
     }
 
     /// Finalize directly into an intentionally public destination.
@@ -70,7 +94,7 @@ where
         &'m mut Array<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T>,
     {
         let target: &mut Output<D> = out.into();
-        self.0.finalize_into(target);
+        FixedOutput::finalize_into(self.0, target);
     }
 
     /// Finalize directly into a protected destination, then reset the digest.
@@ -81,7 +105,7 @@ where
         &'m mut Array<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T::Inner>,
     {
         let target: &mut Output<D> = out.inner_mut().into();
-        Digest::finalize_into_reset(&mut self.0, target);
+        FixedOutputReset::finalize_into_reset(&mut self.0, target);
     }
 
     /// Finalize directly into an intentionally public destination, then reset
@@ -92,24 +116,24 @@ where
         &'m mut Array<u8, <D as OutputSizeUser>::OutputSize>: From<&'m mut T>,
     {
         let target: &mut Output<D> = out.into();
-        Digest::finalize_into_reset(&mut self.0, target);
+        FixedOutputReset::finalize_into_reset(&mut self.0, target);
     }
 
     pub fn reset(&mut self)
     where
         D: Reset,
     {
-        Digest::reset(&mut self.0);
+        Reset::reset(&mut self.0);
     }
 
     pub fn output_size() -> usize {
-        <D as Digest>::output_size()
+        <D as OutputSizeUser>::output_size()
     }
 }
 
 impl<D, InputScope> Default for ProtectedDigest<D, InputScope>
 where
-    D: Digest + ZeroizeOnDrop,
+    D: Digest + FixedOutput + ZeroizeOnDrop,
     InputScope: Scope,
 {
     fn default() -> Self {
@@ -119,7 +143,7 @@ where
 
 impl<D, InputScope> ZeroizeOnDrop for ProtectedDigest<D, InputScope>
 where
-    D: Digest + ZeroizeOnDrop,
+    D: FixedOutput + ZeroizeOnDrop,
     InputScope: Scope,
 {
 }
@@ -187,8 +211,8 @@ mod tests {
         digest.finalize_public_into(&mut output);
 
         let mut reference = Sha256::new();
-        reference.update(b"domain");
-        reference.update(b"secret");
+        Digest::update(&mut reference, b"domain");
+        Digest::update(&mut reference, b"secret");
         assert_eq!(output.as_slice(), reference.finalize().as_slice());
     }
 

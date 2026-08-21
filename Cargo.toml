@@ -11,6 +11,8 @@ members = [
     "packages/protected-derive",
     "packages/password",
     "packages/permutation",
+    "packages/prf",
+    "packages/hmac",
     "packages/random",
     "packages/random-derives",
     "packages/traits",

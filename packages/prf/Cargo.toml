@@ -1,0 +1,21 @@
+[package]
+name = "vitaminc-prf"
+description = "Structured pseudorandom functions for the VitaminC cryptographic suite."
+documentation = "https://docs.rs/vitaminc-prf"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+mutants = "0.0.4"
+thiserror = { workspace = true }
+vitaminc-protected = { version = "0.2.0-pre.1", path = "../protected" }
+
+[dev-dependencies]
+quickcheck = "1.1.0"
+quickcheck_macros = "1.2.0"
