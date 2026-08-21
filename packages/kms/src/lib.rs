@@ -41,6 +41,10 @@ where
         }
     }
 
+    // `aws_sdk_kms::Error` is large and we re-export it as-is through our own
+    // `Error`, so shrinking it would mean boxing a public variant. Not worth a
+    // breaking change for an error on a network round-trip.
+    #[allow(clippy::result_large_err)]
     async fn generate_mac(&self) -> Result<Blob, Error> {
         self.client
             .generate_mac()
