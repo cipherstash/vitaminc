@@ -629,6 +629,15 @@ fn short_keys_are_rejected() {
             .unwrap_or_else(|| panic!("a {len}-byte key must be rejected"));
         assert_eq!(error.len(), len);
         assert_eq!(error.is_empty(), len == 0);
+        // The rejection has to say what was wrong and what is required, so
+        // that a caller wiring up key material can act on it.
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "HMAC-SHA256 PRF key must be at least {} bytes, got {len}",
+                vitaminc_hmac::MIN_KEY_LEN
+            )
+        );
     }
 
     assert!(
