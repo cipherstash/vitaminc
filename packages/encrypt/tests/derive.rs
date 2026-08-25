@@ -539,3 +539,211 @@ fn roundtrip_non_usize_const_generic() {
 
     assert_eq!(decrypted.value, "x");
 }
+
+/// A row carrying searchable encrypted metadata: an index term derived from
+/// the value, stored in the clear so a query can use it without the key, and
+/// bound into the associated data so it cannot be substituted.
+#[derive(Encrypt, Decrypt, Debug, PartialEq)]
+struct Indexed {
+    #[aead(aad)]
+    ore_term: Vec<u8>,
+    #[aead(passthrough)]
+    id: i64,
+    ssn: String,
+}
+
+/// Same fields and same keys, but the term is a plain passthrough — used to
+/// show the two ciphertexts are not interchangeable.
+#[derive(Encrypt, Decrypt, Debug, PartialEq)]
+struct Unindexed {
+    #[aead(passthrough)]
+    ore_term: Vec<u8>,
+    #[aead(passthrough)]
+    id: i64,
+    ssn: String,
+}
+
+fn indexed() -> Indexed {
+    Indexed {
+        ore_term: vec![1, 2, 3, 4],
+        id: 7,
+        ssn: "123-45-6789".to_string(),
+    }
+}
+
+#[test]
+fn roundtrip_with_an_aad_field() {
+    let cipher = cipher();
+
+    let ciphertext = indexed().encrypt(&cipher).expect("encryption failed");
+    let decrypted: Indexed = cipher.decrypt(ciphertext).expect("decryption failed");
+
+    assert_eq!(decrypted, indexed());
+}
+
+/// An `aad` field is still stored in the clear — a query has to be able to read
+/// the term without the key, which is the entire reason it is not encrypted.
+#[test]
+fn an_aad_field_is_readable_without_the_key() {
+    let cipher = cipher();
+    let ciphertext = indexed().encrypt(&cipher).expect("encryption failed");
+
+    let entries = match &ciphertext {
+        vitaminc_aead::CipherText::Map(entries) => entries,
+        other => panic!("expected a Map ciphertext, got {other:?}"),
+    };
+    let term = entries
+        .iter()
+        .find(|(k, _)| k == "ore_term")
+        .map(|(_, v)| v)
+        .expect("ore_term entry missing");
+
+    match term {
+        vitaminc_aead::CipherText::Passthrough(value) => {
+            let value = value.downcast_ref::<Vec<u8>>().expect("wrong payload type");
+            assert_eq!(value, &vec![1, 2, 3, 4]);
+        }
+        other => panic!("expected a Passthrough node, got {other:?}"),
+    }
+}
+
+/// The property `#[aead(aad)]` exists for: substituting the index term in
+/// storage makes the value it indexes fail to open.
+#[test]
+fn substituting_an_aad_field_breaks_decryption() {
+    let cipher = cipher();
+    let ciphertext = indexed().encrypt(&cipher).expect("encryption failed");
+
+    let tampered = rewrite_entry(
+        ciphertext,
+        "ore_term",
+        vitaminc_aead::CipherText::Passthrough(Box::new(vec![9u8, 9, 9, 9])),
+    );
+
+    assert!(cipher.decrypt::<Indexed>(tampered).is_err());
+}
+
+/// The contrast that shows the binding is doing the work: the same edit to a
+/// plain `passthrough` field in the same struct is accepted, because nothing
+/// binds it.
+#[test]
+fn substituting_a_plain_passthrough_field_does_not() {
+    let cipher = cipher();
+    let ciphertext = indexed().encrypt(&cipher).expect("encryption failed");
+
+    let rewritten = rewrite_entry(
+        ciphertext,
+        "id",
+        vitaminc_aead::CipherText::Passthrough(Box::new(99i64)),
+    );
+
+    let decrypted: Indexed = cipher.decrypt(rewritten).expect("decryption failed");
+    assert_eq!(decrypted.id, 99);
+    assert_eq!(decrypted.ssn, "123-45-6789");
+}
+
+/// Deleting the term is not a way around the binding: the value that depends
+/// on it has nothing to verify against.
+#[test]
+fn deleting_an_aad_field_breaks_decryption() {
+    let cipher = cipher();
+    let ciphertext = indexed().encrypt(&cipher).expect("encryption failed");
+
+    let truncated = match ciphertext {
+        vitaminc_aead::CipherText::Map(entries) => vitaminc_aead::CipherText::Map(
+            entries
+                .into_iter()
+                .filter(|(k, _)| k != "ore_term")
+                .collect(),
+        ),
+        other => panic!("expected a Map ciphertext, got {other:?}"),
+    };
+
+    assert!(cipher.decrypt::<Indexed>(truncated).is_err());
+}
+
+/// `for_map_entry_with_context` carries its own domain label, so a value
+/// sealed against a context cannot be read as one sealed without — the
+/// binding cannot be dropped by decoding into a type that ignores it.
+#[test]
+fn a_bound_ciphertext_cannot_be_read_as_an_unbound_one() {
+    let cipher = cipher();
+
+    let bound = indexed().encrypt(&cipher).expect("encryption failed");
+    assert!(cipher.decrypt::<Unindexed>(bound).is_err());
+
+    let unbound = Unindexed {
+        ore_term: vec![1, 2, 3, 4],
+        id: 7,
+        ssn: "123-45-6789".to_string(),
+    }
+    .encrypt(&cipher)
+    .expect("encryption failed");
+    assert!(cipher.decrypt::<Indexed>(unbound).is_err());
+}
+
+#[derive(Encrypt, Decrypt, Debug, PartialEq)]
+struct TwoTerms {
+    #[aead(aad)]
+    first: Vec<u8>,
+    #[aead(aad)]
+    second: Vec<u8>,
+    ssn: String,
+}
+
+/// The context binds each value to its own key, so two terms of equal length
+/// cannot be transposed in storage — the same property the map shape gives
+/// encrypted fields, extended to the cleartext ones.
+#[test]
+fn transposing_two_aad_fields_breaks_decryption() {
+    let cipher = cipher();
+
+    let ciphertext = TwoTerms {
+        first: vec![1, 1, 1, 1],
+        second: vec![2, 2, 2, 2],
+        ssn: "123-45-6789".to_string(),
+    }
+    .encrypt(&cipher)
+    .expect("encryption failed");
+
+    let swapped = match ciphertext {
+        vitaminc_aead::CipherText::Map(entries) => vitaminc_aead::CipherText::Map(
+            entries
+                .into_iter()
+                .map(|(k, v)| match k.as_str() {
+                    "first" => ("second".to_string(), v),
+                    "second" => ("first".to_string(), v),
+                    _ => (k, v),
+                })
+                .collect(),
+        ),
+        other => panic!("expected a Map ciphertext, got {other:?}"),
+    };
+
+    assert!(cipher.decrypt::<TwoTerms>(swapped).is_err());
+}
+
+/// `MapAccess` cannot skip ahead, so an `aad` field has to arrive before the
+/// values bound to it. The derive writes cleartext entries first; a ciphertext
+/// reordered in storage fails to decrypt rather than decoding against a
+/// context it cannot yet build. That is a denial of service, not a forgery —
+/// entry order was never authenticated.
+#[test]
+fn an_encrypted_entry_before_its_aad_field_is_refused() {
+    let cipher = cipher();
+    let ciphertext = indexed().encrypt(&cipher).expect("encryption failed");
+
+    let reordered = match ciphertext {
+        vitaminc_aead::CipherText::Map(entries) => {
+            let mut entries = entries;
+            // Longest key last, which puts the encrypted `ssn` first.
+            entries.sort_by_key(|(k, _)| std::cmp::Reverse(k.len()));
+            assert_eq!(entries[0].0, "ore_term", "expected the term to sort first");
+            entries.reverse();
+            vitaminc_aead::CipherText::Map(entries)
+        }
+        other => panic!("expected a Map ciphertext, got {other:?}"),
+    };
+
+    assert!(cipher.decrypt::<Indexed>(reordered).is_err());
+}

@@ -39,12 +39,16 @@ pub(crate) struct FieldAttrs {
     /// `#[aead(passthrough)]`. The value is neither encrypted nor
     /// authenticated — see the crate docs.
     pub(crate) passthrough: bool,
+    /// Store this field in the clear *and* bind it into the associated data
+    /// every encrypted field is sealed against, from `#[aead(aad)]`.
+    pub(crate) aad: bool,
 }
 
 impl FieldAttrs {
     pub(crate) fn parse(attrs: &[Attribute]) -> Result<Self> {
         let mut rename: Option<String> = None;
         let mut passthrough = false;
+        let mut aad = false;
 
         for attr in attrs.iter().filter(|a| a.path().is_ident("aead")) {
             attr.parse_nested_meta(|meta| {
@@ -57,8 +61,13 @@ impl FieldAttrs {
                     passthrough = true;
                     return Ok(());
                 }
+                if meta.path.is_ident("aad") {
+                    aad = true;
+                    return Ok(());
+                }
                 Err(meta.error(
-                    "unsupported field attribute; expected `rename = \"...\"` or `passthrough`",
+                    "unsupported field attribute; expected `rename = \"...\"`, `passthrough` \
+                     or `aad`",
                 ))
             })?;
         }
@@ -66,6 +75,7 @@ impl FieldAttrs {
         Ok(Self {
             rename,
             passthrough,
+            aad,
         })
     }
 }

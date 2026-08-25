@@ -289,6 +289,26 @@ pub trait MapAccess<'c> {
     /// implementations must return an error.
     fn next_value<T: Decrypt<'c> + 'c>(&mut self) -> Result<T, Self::Error>;
 
+    /// Decrypt the value for the most recently returned key, additionally
+    /// binding `context` — the decrypt-side counterpart of
+    /// [`MapCipher::encrypt_value_with_context`](crate::MapCipher::encrypt_value_with_context).
+    ///
+    /// Implementations must derive the effective AAD through
+    /// [`Aad::for_map_entry_with_context`](crate::Aad::for_map_entry_with_context),
+    /// mirroring the encrypt side exactly. Because that derivation carries its
+    /// own domain label, passing the wrong `context` — or reading a
+    /// context-bearing entry through
+    /// [`next_value`](MapAccess::next_value), or the reverse — fails
+    /// authentication rather than returning a value built from the wrong
+    /// assumptions.
+    ///
+    /// Calling this without a pending key is a contract violation;
+    /// implementations must return an error.
+    fn next_value_with_context<T: Decrypt<'c> + 'c>(
+        &mut self,
+        context: &[u8],
+    ) -> Result<T, Self::Error>;
+
     /// Take the value belonging to the key most recently returned by
     /// [`next_key`](MapAccess::next_key) as a **passthrough** payload,
     /// consuming the pending entry.

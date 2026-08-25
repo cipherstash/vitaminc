@@ -137,6 +137,13 @@ impl MapCipher for UnusedMap {
         Ok(self)
     }
 
+    fn encrypt_value_with_context<T>(self, _value: T, _context: &[u8]) -> Result<Self, Self::Error>
+    where
+        T: Encrypt,
+    {
+        Ok(self)
+    }
+
     fn passthrough_entry_boxed<K>(
         self,
         _key: K,
@@ -293,6 +300,16 @@ impl<'c> MapAccess<'c> for MockMapAccess {
         let payload = self.pending.take().ok_or(Unspecified)?;
         let decipher = MockDecipher::new(payload);
         T::decrypt_with_aad(&decipher, crate::Aad::empty())
+    }
+
+    /// The mock authenticates nothing, so context is accepted and ignored —
+    /// what it exists to exercise is the `MapAccess` call sequence, not the
+    /// AAD derivation, which `AesMapAccess` covers.
+    fn next_value_with_context<T: crate::Decrypt<'c> + 'c>(
+        &mut self,
+        _context: &[u8],
+    ) -> Result<T, Self::Error> {
+        self.next_value::<T>()
     }
 
     /// The mock stores every entry as an encrypted payload, so there is no

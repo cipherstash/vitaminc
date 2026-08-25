@@ -582,6 +582,17 @@ mod tests {
                 Err(Unspecified)
             }
 
+            fn encrypt_value_with_context<T>(
+                self,
+                _value: T,
+                _context: &[u8],
+            ) -> Result<Self, Self::Error>
+            where
+                T: Encrypt,
+            {
+                Ok(self)
+            }
+
             fn passthrough_entry_boxed<K>(
                 self,
                 _key: K,
