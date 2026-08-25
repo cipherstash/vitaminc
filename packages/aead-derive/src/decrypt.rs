@@ -110,6 +110,8 @@ pub(crate) fn derive(input: DeriveInput) -> Result<TokenStream> {
 /// would be wrong; matching on the key is also what makes heterogeneous field
 /// types possible at all.
 fn visit_map_body(krate: &syn::Path, name: &syn::Ident, fields: &[FieldInfo]) -> TokenStream {
+    let aad_fields: Vec<&FieldInfo> = fields.iter().filter(|field| field.aad).collect();
+
     let slots = fields.iter().map(|field| {
         let local = &field.local;
         let ty = &field.ty;
@@ -130,7 +132,7 @@ fn visit_map_body(krate: &syn::Path, name: &syn::Ident, fields: &[FieldInfo]) ->
                 return ::core::result::Result::Err(#krate::Unspecified);
             }
         };
-        let read = if field.passthrough {
+        let read = if field.is_cleartext() {
             // Nothing here is verified — no tag covers a passthrough entry and
             // nothing binds its key — so this value is untrusted input, exactly
             // as the column it came from is. The downcast is the only check:
@@ -141,10 +143,43 @@ fn visit_map_body(krate: &syn::Path, name: &syn::Ident, fields: &[FieldInfo]) ->
                     .downcast::<#ty>()
                     .map_err(|_| #krate::Unspecified)?
             }
-        } else {
+        } else if aad_fields.is_empty() {
             quote! {
                 <__M as #krate::MapAccess<'__c>>::next_value::<#ty>(&mut __map)
                     .map_err(|_| #krate::Unspecified)?
+            }
+        } else {
+            let pieces = aad_fields.iter().map(|field| {
+                let key = &field.key;
+                let local = &field.local;
+                quote! {
+                    (
+                        #key,
+                        ::core::convert::AsRef::<[u8]>::as_ref(
+                            // Every `aad` field has to be in hand already: its
+                            // bytes are part of what this value verifies
+                            // against, and `MapAccess` cannot skip ahead to
+                            // fetch one. The encrypt side writes them first, so
+                            // a conforming ciphertext arrives in that order and
+                            // a reordered one fails here.
+                            #local.as_ref().ok_or(#krate::Unspecified)?,
+                        ),
+                    )
+                }
+            });
+            // Rebuilt per encrypted field rather than cached: the borrow would
+            // have to outlive the match arm that produced it, and a handful of
+            // PAE encodings over a struct's cleartext is not worth the
+            // contortion.
+            quote! {
+                {
+                    let __context = #krate::Aad::field_context(&[#(#pieces),*]);
+                    <__M as #krate::MapAccess<'__c>>::next_value_with_context::<#ty>(
+                        &mut __map,
+                        #krate::Aad::as_bytes(&__context),
+                    )
+                    .map_err(|_| #krate::Unspecified)?
+                }
             }
         };
         quote! {
@@ -317,6 +352,48 @@ mod tests {
                 return ::core::result::Result::Err(::vitaminc_aead::Unspecified);
             }),
         );
+    }
+
+    /// The context is rebuilt from the `aad` slots, which must already be
+    /// filled — that `ok_or` is what refuses a ciphertext whose encrypted
+    /// entries arrive before the field they are bound to.
+    #[test]
+    fn an_encrypted_field_is_read_against_the_aad_context() {
+        let out = expand(parse_quote! {
+            struct Indexed {
+                #[aead(aad)]
+                ore_term: Vec<u8>,
+                ssn: String,
+            }
+        });
+
+        assert_contains(
+            &out,
+            quote!(let __context = ::vitaminc_aead::Aad::field_context(&[(
+                "ore_term",
+                ::core::convert::AsRef::<[u8]>::as_ref(
+                    __field_0.as_ref().ok_or(::vitaminc_aead::Unspecified)?,
+                ),
+            )]);),
+        );
+        assert_contains(&out, quote!(::next_value_with_context::<String>));
+        // The term is read through the unauthenticated path — nothing covers it.
+        assert_contains(&out, quote!(::next_passthrough(&mut __map)));
+    }
+
+    /// With no `aad` field the read must be the plain one, so ciphertexts
+    /// written before the attribute existed still decode.
+    #[test]
+    fn without_an_aad_field_the_plain_read_is_used() {
+        let out = expand(parse_quote! {
+            struct User {
+                name: String,
+            }
+        });
+
+        assert_contains(&out, quote!(::next_value::<String>(&mut __map)));
+        assert_lacks(&out, quote!(next_value_with_context));
+        assert_lacks(&out, quote!(::vitaminc_aead::Aad::field_context));
     }
 
     /// Mirrors the `Encrypt` side: a newtype decrypts as its inner type and is

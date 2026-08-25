@@ -9,6 +9,7 @@ option is one the author believes is in effect.
 | `crate = "path"` | container | Name the path to `vitaminc_aead` in the generated code |
 | `rename = "name"` | field | Store the field under `name` instead of its own name |
 | `passthrough` | field | Store the field **in the clear**, unencrypted and unauthenticated |
+| `aad` | field | Store the field **in the clear**, bound into every encrypted field's AAD |
 
 ## `#[aead(crate = "...")]`
 
@@ -80,10 +81,9 @@ That independence is bought by giving up everything, and the trade is total:
 So: non-sensitive, non-security-deciding data only. Never a field the program
 then trusts to make an authorization choice.
 
-A cleartext field that must be tamper-evident needs to be bound into the AAD
-instead of passed through — and note that binding couples the two, so any
-independent write to that column would break decryption of every encrypted
-field beside it. That coupling is precisely what `passthrough` exists to avoid.
+A cleartext field that must be tamper-evident wants [`aad`](#aeadaad) instead —
+but read the coupling it introduces first. `passthrough` exists precisely to
+avoid that coupling.
 
 ### Requirements
 
@@ -100,3 +100,68 @@ Two shapes are rejected at compile time:
 - **`passthrough` on a newtype.** A newtype is transparent and opens no map, so
   there is no entry to store in the clear; honouring the attribute would mean
   the whole value travelled unencrypted.
+
+## `#[aead(aad)]`
+
+Stores a field in the clear like `passthrough`, and additionally binds its bytes
+into the associated data every encrypted field is sealed against. Editing the
+cleartext therefore stops those fields opening.
+
+The case it is for is searchable encrypted metadata: an index term derived from
+a value and stored beside it, so a query can use the term without the key.
+
+```ignore
+#[derive(Encrypt, Decrypt)]
+struct Row {
+    #[aead(aad)]
+    ore_term: Vec<u8>,   // clear, so a query can read it
+    ssn: String,         // encrypted, and bound to the term above
+}
+```
+
+Substituting `ore_term` in storage, deleting it, or transposing it with another
+`aad` field all make `ssn` fail to decrypt. The context is a labelled
+`PAE(domain, key, bytes, …)` over the `aad` fields in **declaration** order, so
+permuting the stored map cannot change it, and each value is bound to its own
+key.
+
+### ⚠️ The field is still cleartext, and now everything depends on it
+
+`aad` makes the field *tamper-evident*, not confidential or trustworthy on its
+own:
+
+- It is **not encrypted** — anyone who can read the ciphertext can read it.
+- Nothing detects a change to it *in isolation*; what happens is that the
+  encrypted fields stop decrypting. That is a loud failure, not a silent one,
+  but it is the only signal.
+
+And the coupling runs both ways. **Anything that rewrites the field
+independently breaks decryption of every encrypted field beside it.** A column
+some other process updates on its own is a `passthrough` field, never an `aad`
+one. `aad` fits a value *derived from* the encrypted data and rewritten only
+when that data is — which is exactly what an index term is.
+
+### Consequences
+
+- **Adding or removing an `aad` field is wire-breaking.** The derivation carries
+  its own domain label, so a ciphertext written with context cannot be read
+  without it, or the reverse. Existing data does not decode after the change.
+- **The decode becomes order-dependent.** An encrypted entry cannot be opened
+  until every `aad` field has been read, and `MapAccess` cannot skip ahead to
+  fetch one. The derive writes cleartext entries first, so its own ciphertexts
+  are fine; a map reordered in storage fails to decrypt. That is a denial of
+  service, not a forgery — entry order was never authenticated.
+
+### Requirements
+
+An `aad` field's type must be `AsRef<[u8]>`, which supplies the bytes that go
+into the context, as well as the `Any + Send + 'static` that storing it in the
+clear requires. `Vec<u8>`, `String`, and byte-array newtypes qualify; an integer
+does not — give it a byte encoding you are willing to commit to.
+
+`aad` and `passthrough` on one field is a compile error: `aad` already stores
+the value in the clear. `aad` on a newtype is rejected for the same reason
+`passthrough` is, with the addition that a newtype has no sibling field for the
+value to be bound to. A struct whose fields are *all* cleartext is rejected
+whichever attribute is used — an `aad` field needs at least one encrypted field
+to bind.

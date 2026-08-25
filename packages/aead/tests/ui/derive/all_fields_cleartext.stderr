@@ -1,5 +1,5 @@
 error: every field is stored in the clear (`#[aead(passthrough)]` or `#[aead(aad)]`), so nothing would be encrypted and the ciphertext would carry no tag — neither the associated data nor the entry keys would be authenticated. An `aad` field binds encrypted fields to itself, so it needs at least one to bind. Encrypt at least one field, or do not derive Encrypt for this struct at all.
- --> tests/ui/derive/all_fields_passthrough.rs:7:8
+ --> tests/ui/derive/all_fields_cleartext.rs:6:8
   |
-7 | struct Row {
+6 | struct Row {
   |        ^^^

@@ -1,0 +1,5 @@
+error: `#[aead(aad)]` is meaningless on a newtype struct: a newtype is transparent, so there is no map entry to store the value in the clear and no other field for it to be bound to. Give the struct a named field instead.
+ --> tests/ui/derive/aad_on_newtype.rs:6:8
+  |
+6 | struct Term(#[aead(aad)] Vec<u8>);
+  |        ^^^^

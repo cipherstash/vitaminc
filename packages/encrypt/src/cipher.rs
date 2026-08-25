@@ -365,6 +365,26 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         Ok(self)
     }
 
+    fn encrypt_value_with_context<U>(
+        mut self,
+        value: U,
+        context: &[u8],
+    ) -> Result<Self, Self::Error>
+    where
+        U: Encrypt,
+    {
+        let key = self.current_key.take().ok_or(Unspecified)?;
+        // Same binding as `encrypt_value`, plus the map's cleartext context —
+        // and under a distinct domain label, so these entries cannot be read
+        // back as context-free ones. `AesMapAccess::next_value_with_context`
+        // derives the identical AAD.
+        let entry_aad = self.aad.for_map_entry_with_context(&key, context);
+        let encrypted = value.encrypt_with_aad(self.cipher, entry_aad)?;
+        self.encrypted |= !matches!(encrypted, AesCipherText::Passthrough(_));
+        self.entries.push((key.into_owned(), encrypted));
+        Ok(self)
+    }
+
     fn passthrough_entry<K>(mut self, key: K, value: Self::Passthrough) -> Result<Self, Self::Error>
     where
         K: Into<Cow<'static, str>>,
@@ -772,6 +792,17 @@ impl<'c> MapAccess<'c> for AesMapAccess<'c, '_> {
         // Mirror `AesMapCipher::encrypt_value`: the value was sealed against
         // PAE(domain, aad, key), so a swapped or renamed key fails here.
         let entry_aad = self.aad.for_map_entry(&key);
+        T::decrypt_with_aad(decipher, entry_aad)
+    }
+
+    fn next_value_with_context<T: Decrypt<'c> + 'c>(
+        &mut self,
+        context: &[u8],
+    ) -> Result<T, Self::Error> {
+        let (key, ct) = self.pending.take().ok_or(Unspecified)?;
+        let decipher = self.cipher.decipher(ct);
+        // Mirror `AesMapCipher::encrypt_value_with_context`.
+        let entry_aad = self.aad.for_map_entry_with_context(&key, context);
         T::decrypt_with_aad(decipher, entry_aad)
     }
 

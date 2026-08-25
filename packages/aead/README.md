@@ -134,6 +134,14 @@ impl<'c> MapCipher for MyMapCipher<'c> {
         T: vitaminc_aead::Encrypt,
     { unimplemented!() }
 
+    // Same binding as `encrypt_value`, plus cleartext context the whole map's
+    // encrypted entries are bound to — derive it through
+    // `Aad::for_map_entry_with_context`, which carries its own domain label.
+    fn encrypt_value_with_context<T>(self, _value: T, _context: &[u8]) -> Result<Self, Self::Error>
+    where
+        T: vitaminc_aead::Encrypt,
+    { unimplemented!() }
+
     fn passthrough_entry<K>(self, _key: K, _value: Self::Passthrough) -> Result<Self, Self::Error>
     where
         K: Into<std::borrow::Cow<'static, str>>,

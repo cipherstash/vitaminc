@@ -81,6 +81,59 @@ impl<'a> Aad<'a> {
         pae::encode(&[MAP_ENTRY_DOMAIN, self.as_bytes(), key.as_bytes()])
     }
 
+    /// Derives the AAD a map entry's value must be sealed against when the map
+    /// also carries **cleartext context** that every encrypted entry is bound
+    /// to — a searchable index term stored beside the value it was derived
+    /// from, say.
+    ///
+    /// Where [`for_map_entry`](Aad::for_map_entry) binds only the entry's own
+    /// key, this additionally binds `context`, so editing the cleartext the
+    /// context was built from makes every value sealed against it fail to
+    /// open. The caller is responsible for `context` being an unambiguous
+    /// encoding of that cleartext — [`pae`](Aad::pae) over the contributing
+    /// (key, value) pairs in a fixed order is the intended construction, since
+    /// a positional or concatenated encoding would let two fields trade
+    /// content undetected.
+    ///
+    /// The encoding is `PAE(domain, aad, key, context)` under a **different**
+    /// domain label from `for_map_entry`. That separation is the point: a
+    /// ciphertext sealed with context can never verify as one sealed without
+    /// it, so the context-bearing entries cannot be stripped out and read as
+    /// an ordinary map.
+    pub fn for_map_entry_with_context(&self, key: &str, context: &[u8]) -> Aad<'static> {
+        const MAP_ENTRY_CONTEXT_DOMAIN: &[u8] = b"vitaminc/aead/map-entry-context/v1";
+        pae::encode(&[
+            MAP_ENTRY_CONTEXT_DOMAIN,
+            self.as_bytes(),
+            key.as_bytes(),
+            context,
+        ])
+    }
+
+    /// Builds the `context` argument for
+    /// [`for_map_entry_with_context`](Aad::for_map_entry_with_context) from the
+    /// cleartext fields that contribute to it, given as `(key, bytes)` pairs.
+    ///
+    /// The encoding is a labelled `PAE(domain, key, bytes, key, bytes, …)`.
+    /// PAE length-prefixes every piece, so no two different field sets encode
+    /// alike: two fields cannot trade contents, and no run of bytes can be
+    /// re-split across the key/value boundary.
+    ///
+    /// **Order is part of the encoding.** Callers must pass the fields in an
+    /// order fixed by something other than the stored ciphertext — a struct's
+    /// declaration order, say — or a stored map could be permuted to change
+    /// the context, and with it what every value verifies against.
+    pub fn field_context(fields: &[(&str, &[u8])]) -> Aad<'static> {
+        const FIELD_CONTEXT_DOMAIN: &[u8] = b"vitaminc/aead/field-context/v1";
+        let mut pieces: Vec<&[u8]> = Vec::with_capacity(fields.len() * 2 + 1);
+        pieces.push(FIELD_CONTEXT_DOMAIN);
+        for (key, bytes) in fields {
+            pieces.push(key.as_bytes());
+            pieces.push(bytes);
+        }
+        pae::encode(&pieces)
+    }
+
     /// Derives the AAD a structural marker must be sealed against.
     ///
     /// Markers are sealed empty plaintexts whose tag is the only thing
@@ -286,6 +339,92 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The whole reason `for_map_entry_with_context` carries its own domain
+    /// label: an entry sealed with context must not verify as one sealed
+    /// without it, or the context-bearing entries could be stripped from a
+    /// stored ciphertext and read as an ordinary map.
+    #[test]
+    fn context_entries_are_disjoint_from_plain_entries() {
+        let aad = Aad::from_slice(b"tenant:1");
+        assert_ne!(
+            aad.for_map_entry("ssn").as_bytes(),
+            aad.for_map_entry_with_context("ssn", b"").as_bytes(),
+        );
+    }
+
+    /// Changing the context changes the AAD, which is what makes editing the
+    /// cleartext it was built from break every value sealed against it.
+    #[test]
+    fn a_different_context_derives_a_different_aad() {
+        let aad = Aad::from_slice(b"tenant:1");
+        assert_ne!(
+            aad.for_map_entry_with_context("ssn", b"term-a").as_bytes(),
+            aad.for_map_entry_with_context("ssn", b"term-b").as_bytes(),
+        );
+    }
+
+    /// The key stays bound too, so an entry cannot be moved to another key
+    /// just because both share a context.
+    #[test]
+    fn the_entry_key_is_still_bound_alongside_the_context() {
+        let aad = Aad::from_slice(b"tenant:1");
+        assert_ne!(
+            aad.for_map_entry_with_context("ssn", b"term").as_bytes(),
+            aad.for_map_entry_with_context("dob", b"term").as_bytes(),
+        );
+    }
+
+    /// PAE is length-prefixed per piece, so a key/context split cannot be
+    /// shifted to produce the same encoding from different inputs.
+    #[test]
+    fn the_key_and_context_boundary_is_unambiguous() {
+        let aad = Aad::empty();
+        assert_ne!(
+            aad.for_map_entry_with_context("ab", b"c").as_bytes(),
+            aad.for_map_entry_with_context("a", b"bc").as_bytes(),
+        );
+    }
+
+    /// Two fields trading contents must not encode alike, or a stored map
+    /// could have its cleartext shuffled without any value noticing.
+    #[test]
+    fn field_context_binds_each_value_to_its_own_key() {
+        assert_ne!(
+            Aad::field_context(&[("a", b"1"), ("b", b"2")]).as_bytes(),
+            Aad::field_context(&[("a", b"2"), ("b", b"1")]).as_bytes(),
+        );
+    }
+
+    /// Order is part of the encoding — callers fix it from something the
+    /// stored ciphertext cannot influence.
+    #[test]
+    fn field_context_is_order_sensitive() {
+        assert_ne!(
+            Aad::field_context(&[("a", b"1"), ("b", b"2")]).as_bytes(),
+            Aad::field_context(&[("b", b"2"), ("a", b"1")]).as_bytes(),
+        );
+    }
+
+    /// PAE length-prefixes every piece, so a boundary cannot be shifted to
+    /// produce one encoding from two different field sets.
+    #[test]
+    fn field_context_boundaries_are_unambiguous() {
+        assert_ne!(
+            Aad::field_context(&[("ab", b"c")]).as_bytes(),
+            Aad::field_context(&[("a", b"bc")]).as_bytes(),
+        );
+        assert_ne!(
+            Aad::field_context(&[("a", b""), ("b", b"")]).as_bytes(),
+            Aad::field_context(&[("ab", b"")]).as_bytes(),
+        );
+    }
+
+    /// No fields is still a domain-labelled encoding, not the empty string.
+    #[test]
+    fn an_empty_field_context_is_not_empty_bytes() {
+        assert!(!Aad::field_context(&[]).is_empty());
+    }
 
     #[test]
     fn test_aad() {

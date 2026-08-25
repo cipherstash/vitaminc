@@ -289,6 +289,43 @@ pub trait MapCipher: Sized {
         self.encrypt_key(key).and_then(|mc| mc.encrypt_value(value))
     }
 
+    /// Encrypt the value for the most recently supplied key, additionally
+    /// binding `context` — cleartext carried elsewhere in the same map that
+    /// every encrypted entry must be inseparable from.
+    ///
+    /// Implementations must derive the effective AAD through
+    /// [`Aad::for_map_entry_with_context`](crate::Aad::for_map_entry_with_context)
+    /// rather than [`for_map_entry`](crate::Aad::for_map_entry). The two use
+    /// different domain labels, so entries sealed with context and entries
+    /// sealed without it are mutually unreadable — a map cannot have its
+    /// context-bearing values quietly reinterpreted as plain ones.
+    ///
+    /// The motivating case is searchable encrypted metadata: an index term
+    /// derived from a value and stored in the clear beside it, so a query can
+    /// use it without the key. Binding the term into the value's AAD means a
+    /// term substituted in storage does not go unnoticed — the value it
+    /// indexes stops opening.
+    fn encrypt_value_with_context<T>(self, value: T, context: &[u8]) -> Result<Self, Self::Error>
+    where
+        T: Encrypt;
+
+    /// Convenience for [`encrypt_key`](MapCipher::encrypt_key) followed by
+    /// [`encrypt_value_with_context`](MapCipher::encrypt_value_with_context).
+    fn encrypt_entry_with_context<K, T>(
+        self,
+        key: K,
+        value: T,
+        context: &[u8],
+    ) -> Result<Self, Self::Error>
+    where
+        K: Into<Cow<'static, str>>,
+        T: Encrypt,
+        Self: Sized,
+    {
+        self.encrypt_key(key)
+            .and_then(|mc| mc.encrypt_value_with_context(value, context))
+    }
+
     /// Insert a passthrough (unencrypted) entry under `key`. Equivalent to
     /// [`encrypt_key`](MapCipher::encrypt_key) followed by storing the value
     /// without AEAD treatment.

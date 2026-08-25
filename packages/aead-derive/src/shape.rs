@@ -22,6 +22,10 @@ pub(crate) struct FieldInfo {
     /// `#[aead(passthrough)]`: stored in the clear, never encrypted and never
     /// authenticated.
     pub(crate) passthrough: bool,
+    /// `#[aead(aad)]`: stored in the clear like a passthrough, but also bound
+    /// into the associated data every encrypted field is sealed against, so
+    /// editing it stops those fields opening.
+    pub(crate) aad: bool,
     /// Whether [`key`](FieldInfo::key) came from `#[aead(rename = "...")]`
     /// rather than the field's own name. Only the newtype guard needs this —
     /// everywhere else the rename has already been folded into `key`.
@@ -78,8 +82,18 @@ impl Shape {
         }
 
         reject_duplicate_keys(&fields, input)?;
-        reject_all_passthrough(&fields, input)?;
+        reject_conflicting_cleartext_attrs(&fields, input)?;
+        reject_all_cleartext(&fields, input)?;
         Ok(Shape::Map(fields))
+    }
+}
+
+impl FieldInfo {
+    /// Whether the field is stored in the clear rather than encrypted. Both
+    /// `passthrough` and `aad` fields are; they differ only in whether the
+    /// stored bytes are bound into the encrypted fields' associated data.
+    pub(crate) fn is_cleartext(&self) -> bool {
+        self.passthrough || self.aad
     }
 }
 
@@ -100,6 +114,7 @@ fn collect(fields: &Fields) -> Result<Vec<FieldInfo>> {
                 local: Ident::new(&format!("__field_{index}"), Span::call_site()),
                 ty: field.ty.clone(),
                 passthrough: attrs.passthrough,
+                aad: attrs.aad,
                 renamed,
             })
         })
@@ -153,6 +168,14 @@ fn reject_newtype_field_attrs(field: &FieldInfo, input: &DeriveInput) -> Result<
              would be encrypted at all. Give the struct a named field instead.",
         ));
     }
+    if field.aad {
+        return Err(syn::Error::new_spanned(
+            &input.ident,
+            "`#[aead(aad)]` is meaningless on a newtype struct: a newtype is transparent, \
+             so there is no map entry to store the value in the clear and no other field \
+             for it to be bound to. Give the struct a named field instead.",
+        ));
+    }
     Ok(())
 }
 
@@ -160,15 +183,35 @@ fn reject_newtype_field_attrs(field: &FieldInfo, input: &DeriveInput) -> Result<
 /// authenticates the map's AAD, and nothing binds the entry keys — so
 /// `MapCipher::end` rejects one at seal time. Catch it here, where the error
 /// names the struct instead of surfacing as a runtime encrypt failure.
-fn reject_all_passthrough(fields: &[FieldInfo], input: &DeriveInput) -> Result<()> {
-    if fields.iter().all(|field| field.passthrough) {
+fn reject_all_cleartext(fields: &[FieldInfo], input: &DeriveInput) -> Result<()> {
+    if fields.iter().all(FieldInfo::is_cleartext) {
         return Err(syn::Error::new_spanned(
             &input.ident,
-            "every field is `#[aead(passthrough)]`, so nothing would be encrypted and the \
-             ciphertext would carry no tag — neither the associated data nor the entry keys \
-             would be authenticated. Encrypt at least one field, or do not derive Encrypt for \
-             this struct at all.",
+            "every field is stored in the clear (`#[aead(passthrough)]` or `#[aead(aad)]`), so \
+             nothing would be encrypted and the ciphertext would carry no tag — neither the \
+             associated data nor the entry keys would be authenticated. An `aad` field binds \
+             encrypted fields to itself, so it needs at least one to bind. Encrypt at least \
+             one field, or do not derive Encrypt for this struct at all.",
         ));
+    }
+    Ok(())
+}
+
+/// `aad` already stores the field in the clear — it is `passthrough` plus the
+/// binding. Accepting both would leave the author guessing which won.
+fn reject_conflicting_cleartext_attrs(fields: &[FieldInfo], input: &DeriveInput) -> Result<()> {
+    for field in fields {
+        if field.passthrough && field.aad {
+            return Err(syn::Error::new_spanned(
+                &input.ident,
+                format!(
+                    "field `{}` is both `#[aead(passthrough)]` and `#[aead(aad)]`: `aad` \
+                     already stores the value in the clear, and additionally binds it into \
+                     the associated data. Use one or the other.",
+                    field.key
+                ),
+            ));
+        }
     }
     Ok(())
 }
@@ -244,6 +287,50 @@ mod tests {
         );
         let err = Shape::parse(&input).expect_err("renamed newtype should be rejected");
         assert!(err.to_string().contains("no effect on a newtype"));
+    }
+
+    /// `aad` is `passthrough` plus a binding, so asking for both leaves the
+    /// author guessing which won.
+    #[test]
+    fn aad_and_passthrough_on_one_field_is_rejected() {
+        let input: DeriveInput = parse_quote! {
+            struct Row {
+                #[aead(aad, passthrough)]
+                term: Vec<u8>,
+                ssn: String,
+            }
+        };
+        let err = Shape::parse(&input).expect_err("conflicting attributes should be rejected");
+        assert!(err
+            .to_string()
+            .contains("already stores the value in the clear"));
+    }
+
+    /// An `aad` field binds encrypted fields to itself, so a struct of nothing
+    /// but cleartext has neither anything to bind nor any tag at all.
+    #[test]
+    fn a_struct_of_only_cleartext_fields_is_rejected() {
+        let input: DeriveInput = parse_quote! {
+            struct Row {
+                #[aead(aad)]
+                term: Vec<u8>,
+                #[aead(passthrough)]
+                id: i64,
+            }
+        };
+        let err = Shape::parse(&input).expect_err("all-cleartext struct should be rejected");
+        assert!(err.to_string().contains("nothing would be encrypted"));
+    }
+
+    /// A newtype is transparent: nothing is stored under a key, and there is no
+    /// sibling field for the value to be bound to.
+    #[test]
+    fn aad_on_a_newtype_is_rejected() {
+        let input: DeriveInput = parse_quote!(
+            struct Term(#[aead(aad)] Vec<u8>);
+        );
+        let err = Shape::parse(&input).expect_err("aad newtype should be rejected");
+        assert!(err.to_string().contains("meaningless on a newtype"));
     }
 
     /// A newtype is transparent, so there is no map entry for a passthrough to

@@ -1,0 +1,5 @@
+error: field `term` is both `#[aead(passthrough)]` and `#[aead(aad)]`: `aad` already stores the value in the clear, and additionally binds it into the associated data. Use one or the other.
+ --> tests/ui/derive/aad_and_passthrough_conflict.rs:6:8
+  |
+6 | struct Row {
+  |        ^^^

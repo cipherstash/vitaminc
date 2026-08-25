@@ -57,14 +57,16 @@ fn newtype_body(krate: &syn::Path, field: &FieldInfo) -> TokenStream {
 }
 
 fn map_body(krate: &syn::Path, fields: &[FieldInfo]) -> TokenStream {
-    let entries = fields.iter().map(|field| {
+    let aad_fields: Vec<&FieldInfo> = fields.iter().filter(|field| field.aad).collect();
+    let context = context_binding(krate, &aad_fields);
+
+    let entry = |field: &FieldInfo| {
         let key = &field.key;
         let member = &field.member;
-        if field.passthrough {
-            // Stored in the clear and bound to nothing — not the value, not
-            // even its key. That is what lets the entry be an ordinary
-            // database column other queries read and write independently of
-            // the encrypted ones.
+        if field.is_cleartext() {
+            // Stored in the clear. For an `aad` field the bytes are also in
+            // `__context` by now, which is what makes editing this entry break
+            // every encrypted one.
             quote! {
                 let __map = #krate::MapCipher::passthrough_entry_boxed(
                     __map,
@@ -72,20 +74,58 @@ fn map_body(krate: &syn::Path, fields: &[FieldInfo]) -> TokenStream {
                     ::std::boxed::Box::new(self.#member),
                 )?;
             }
-        } else {
+        } else if aad_fields.is_empty() {
             quote! {
                 let __map = #krate::MapCipher::encrypt_entry(__map, #key, self.#member)?;
             }
+        } else {
+            quote! {
+                let __map = #krate::MapCipher::encrypt_entry_with_context(
+                    __map,
+                    #key,
+                    self.#member,
+                    __context,
+                )?;
+            }
         }
-    });
+    };
+
+    // Cleartext entries are written first so a decoder meets every `aad` field
+    // before the values bound to it: `MapAccess` cannot skip ahead to fetch one
+    // later. Entry order is not authenticated, so grouping them costs nothing.
+    let cleartext = fields.iter().filter(|f| f.is_cleartext()).map(entry);
+    let encrypted = fields.iter().filter(|f| !f.is_cleartext()).map(entry);
 
     quote! {
+        #context
         // The AAD is captured once by `encrypt_map`; `encrypt_entry` binds
         // each field's key into the AAD its value is sealed against, so a
         // stored field cannot be renamed or moved to another key undetected.
         let __map = #krate::Cipher::encrypt_map(__cipher, __aad);
-        #(#entries)*
+        #(#cleartext)*
+        #(#encrypted)*
         #krate::MapCipher::end(__map)
+    }
+}
+
+/// Builds the context every encrypted field is bound to, from the `#[aead(aad)]`
+/// fields' bytes. Empty when there are none, leaving the expansion byte-identical
+/// to what it was before the attribute existed.
+///
+/// Evaluated before any field is moved into the map, and ordered by the struct's
+/// declaration — never by the stored map, whose order an attacker controls.
+fn context_binding(krate: &syn::Path, aad_fields: &[&FieldInfo]) -> TokenStream {
+    if aad_fields.is_empty() {
+        return quote!();
+    }
+    let pieces = aad_fields.iter().map(|field| {
+        let key = &field.key;
+        let member = &field.member;
+        quote!((#key, ::core::convert::AsRef::<[u8]>::as_ref(&self.#member)))
+    });
+    quote! {
+        let __context = #krate::Aad::field_context(&[#(#pieces),*]);
+        let __context = #krate::Aad::as_bytes(&__context);
     }
 }
 
@@ -212,6 +252,93 @@ mod tests {
                 __map,
                 "tenant",
                 self.tenant
+            )),
+        );
+    }
+
+    /// An `aad` field is stored in the clear like a passthrough, and its bytes
+    /// additionally become the context every encrypted entry is sealed
+    /// against. The context is built before any field is moved into the map.
+    #[test]
+    fn an_aad_field_becomes_the_context_for_every_encrypted_field() {
+        let out = expand(parse_quote! {
+            struct Indexed {
+                #[aead(aad)]
+                ore_term: Vec<u8>,
+                ssn: String,
+                dob: String,
+            }
+        });
+
+        assert_contains(
+            &out,
+            quote!(let __context = ::vitaminc_aead::Aad::field_context(&[(
+                "ore_term",
+                ::core::convert::AsRef::<[u8]>::as_ref(&self.ore_term)
+            )]);),
+        );
+        assert_contains(
+            &out,
+            quote!(::vitaminc_aead::MapCipher::encrypt_entry_with_context(
+                __map, "ssn", self.ssn, __context,
+            )),
+        );
+        assert_contains(
+            &out,
+            quote!(::vitaminc_aead::MapCipher::encrypt_entry_with_context(
+                __map, "dob", self.dob, __context,
+            )),
+        );
+        // The term itself is written in the clear, not encrypted.
+        assert_contains(
+            &out,
+            quote!(::vitaminc_aead::MapCipher::passthrough_entry_boxed(
+                __map,
+                "ore_term",
+                ::std::boxed::Box::new(self.ore_term),
+            )),
+        );
+    }
+
+    /// A decoder cannot skip ahead to fetch an `aad` field, so the entries it
+    /// needs must already have gone by. Cleartext entries are written first
+    /// regardless of where they were declared.
+    #[test]
+    fn cleartext_entries_are_written_before_encrypted_ones() {
+        let out = expand(parse_quote! {
+            struct Indexed {
+                ssn: String,
+                #[aead(aad)]
+                ore_term: Vec<u8>,
+            }
+        });
+
+        let term = out
+            .find("\"ore_term\" , :: std :: boxed")
+            .expect("term entry");
+        let ssn = out.find("\"ssn\"").expect("ssn entry");
+        assert!(
+            term < ssn,
+            "cleartext entry should be written first:\n{out}"
+        );
+    }
+
+    /// With no `aad` field the expansion must be exactly what it was before the
+    /// attribute existed — no context, and the plain `encrypt_entry` call.
+    #[test]
+    fn without_an_aad_field_no_context_is_built() {
+        let out = expand(parse_quote! {
+            struct User {
+                name: String,
+            }
+        });
+
+        assert_lacks(&out, quote!(::vitaminc_aead::Aad::field_context));
+        assert_lacks(&out, quote!(encrypt_entry_with_context));
+        assert_contains(
+            &out,
+            quote!(::vitaminc_aead::MapCipher::encrypt_entry(
+                __map, "name", self.name
             )),
         );
     }
