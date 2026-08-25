@@ -296,3 +296,224 @@ fn wrong_aad_fails() {
         .decrypt_with_aad::<User, _>(ciphertext, "tenant:2".as_bytes())
         .is_err());
 }
+
+/// A database row: two columns stored in the clear so other queries can read
+/// and write them independently, one encrypted column alongside.
+#[derive(Encrypt, Decrypt, Debug, PartialEq)]
+struct Row {
+    #[aead(passthrough)]
+    id: i64,
+    #[aead(passthrough)]
+    tenant: String,
+    ssn: String,
+}
+
+fn a_row() -> Row {
+    Row {
+        id: 7,
+        tenant: "acme".to_string(),
+        ssn: "123-45-6789".to_string(),
+    }
+}
+
+/// Replace the payload stored under `key`, leaving the rest of the map alone —
+/// what an `UPDATE` touching a single column does to the stored value.
+fn rewrite_entry(
+    ciphertext: vitaminc_encrypt::AesCipherText,
+    key: &str,
+    payload: vitaminc_encrypt::AesCipherText,
+) -> vitaminc_encrypt::AesCipherText {
+    match ciphertext {
+        vitaminc_aead::CipherText::Map(entries) => {
+            let mut payload = Some(payload);
+            vitaminc_aead::CipherText::Map(
+                entries
+                    .into_iter()
+                    .map(|(k, v)| match k == key {
+                        true => (k, payload.take().expect("key appears more than once")),
+                        false => (k, v),
+                    })
+                    .collect(),
+            )
+        }
+        other => panic!("expected a Map ciphertext, got {other:?}"),
+    }
+}
+
+#[test]
+fn roundtrip_mixed_passthrough_and_encrypted() {
+    let cipher = cipher();
+
+    let ciphertext = a_row().encrypt(&cipher).expect("encryption failed");
+    let decrypted: Row = cipher.decrypt(ciphertext).expect("decryption failed");
+
+    assert_eq!(decrypted, a_row());
+}
+
+/// The whole point of passthrough: the value is readable straight out of the
+/// stored ciphertext with no key at all, so it can be an ordinary column.
+#[test]
+fn a_passthrough_column_is_readable_without_the_key() {
+    let cipher = cipher();
+    let ciphertext = a_row().encrypt(&cipher).expect("encryption failed");
+
+    let entries = match &ciphertext {
+        vitaminc_aead::CipherText::Map(entries) => entries,
+        other => panic!("expected a Map ciphertext, got {other:?}"),
+    };
+
+    let tenant = entries
+        .iter()
+        .find(|(k, _)| k == "tenant")
+        .map(|(_, v)| v)
+        .expect("tenant entry missing");
+    match tenant {
+        vitaminc_aead::CipherText::Passthrough(value) => {
+            let value = value.downcast_ref::<String>().expect("wrong payload type");
+            assert_eq!(value, "acme");
+        }
+        other => panic!("expected a Passthrough node, got {other:?}"),
+    }
+
+    // The encrypted column is *not* readable the same way.
+    let ssn = entries
+        .iter()
+        .find(|(k, _)| k == "ssn")
+        .map(|(_, v)| v)
+        .expect("ssn entry missing");
+    assert!(matches!(ssn, vitaminc_aead::CipherText::Single(_)));
+}
+
+/// A passthrough column carries no tag and its key is bound into nothing, so
+/// an independent write to it — the `UPDATE tenant = …` this shape exists to
+/// allow — leaves the row decryptable and simply reads back the new value.
+///
+/// Stated the other way, which is the security-relevant reading: a passthrough
+/// column is attacker-modifiable, and nothing about the ciphertext detects it.
+#[test]
+fn rewriting_a_passthrough_column_is_undetectable_by_design() {
+    let cipher = cipher();
+    let ciphertext = a_row().encrypt(&cipher).expect("encryption failed");
+
+    let rewritten = rewrite_entry(
+        ciphertext,
+        "tenant",
+        vitaminc_aead::CipherText::Passthrough(Box::new("evilcorp".to_string())),
+    );
+
+    let decrypted: Row = cipher.decrypt(rewritten).expect("decryption failed");
+    assert_eq!(decrypted.tenant, "evilcorp");
+    // The encrypted column is untouched by the substitution.
+    assert_eq!(decrypted.ssn, "123-45-6789");
+}
+
+/// Passthrough entries must not weaken the entries around them: the encrypted
+/// column keeps its per-key AAD binding.
+#[test]
+fn an_encrypted_column_still_fails_when_tampered() {
+    let cipher = cipher();
+
+    let ciphertext = a_row().encrypt(&cipher).expect("encryption failed");
+    let other = Row {
+        ssn: "999-99-9999".to_string(),
+        ..a_row()
+    }
+    .encrypt(&cipher)
+    .expect("encryption failed");
+
+    // Lift the encrypted `ssn` node out of the second ciphertext and graft it
+    // onto the first — a value sealed under the same key and the same AAD.
+    let grafted_ssn = match other {
+        vitaminc_aead::CipherText::Map(entries) => entries
+            .into_iter()
+            .find(|(k, _)| k == "ssn")
+            .map(|(_, v)| v)
+            .expect("ssn entry missing"),
+        other => panic!("expected a Map ciphertext, got {other:?}"),
+    };
+
+    let grafted = rewrite_entry(ciphertext, "ssn", grafted_ssn);
+
+    // The graft *does* decrypt — same key, same AAD — which is exactly why the
+    // encrypted column must not be relied on to authenticate the row as a
+    // whole. What it proves is narrower: the entry is bound to its own key.
+    let decrypted: Row = cipher.decrypt(grafted).expect("decryption failed");
+    assert_eq!(decrypted.ssn, "999-99-9999");
+
+    // Moving that same node onto a different key breaks the binding.
+    let ciphertext = a_row().encrypt(&cipher).expect("encryption failed");
+    let moved = match ciphertext {
+        vitaminc_aead::CipherText::Map(entries) => vitaminc_aead::CipherText::Map(
+            entries
+                .into_iter()
+                .map(|(k, v)| match k.as_str() {
+                    "ssn" => ("tenant".to_string(), v),
+                    _ => (k, v),
+                })
+                .collect(),
+        ),
+        other => panic!("expected a Map ciphertext, got {other:?}"),
+    };
+    assert!(cipher.decrypt::<Row>(moved).is_err());
+}
+
+/// The downcast is the only check a passthrough read performs. It catches a
+/// payload of the wrong type — a type confusion, not a tamper — rather than
+/// handing the struct a field it cannot hold.
+#[test]
+fn a_passthrough_payload_of_the_wrong_type_is_rejected() {
+    let cipher = cipher();
+    let ciphertext = a_row().encrypt(&cipher).expect("encryption failed");
+
+    let confused = rewrite_entry(
+        ciphertext,
+        "tenant",
+        vitaminc_aead::CipherText::Passthrough(Box::new(42u8)),
+    );
+
+    assert!(cipher.decrypt::<Row>(confused).is_err());
+}
+
+/// Deleting a passthrough entry cannot be detected cryptographically, so the
+/// decode falls back on the same strictness every other field gets: a missing
+/// field is a rejection, not a default.
+#[test]
+fn a_deleted_passthrough_column_is_rejected_as_a_missing_field() {
+    let cipher = cipher();
+    let ciphertext = a_row().encrypt(&cipher).expect("encryption failed");
+
+    let truncated = match ciphertext {
+        vitaminc_aead::CipherText::Map(entries) => vitaminc_aead::CipherText::Map(
+            entries.into_iter().filter(|(k, _)| k != "tenant").collect(),
+        ),
+        other => panic!("expected a Map ciphertext, got {other:?}"),
+    };
+
+    assert!(cipher.decrypt::<Row>(truncated).is_err());
+}
+
+/// An encrypted entry must not be readable through the passthrough path: that
+/// would hand back a payload whose tag was never checked.
+#[test]
+fn an_encrypted_entry_cannot_be_read_as_a_passthrough() {
+    let cipher = cipher();
+    let ciphertext = a_row().encrypt(&cipher).expect("encryption failed");
+
+    // `ssn` is sealed; relabel it as the `tenant` key, which `Row` decodes
+    // through `next_passthrough`.
+    let swapped = match ciphertext {
+        vitaminc_aead::CipherText::Map(entries) => vitaminc_aead::CipherText::Map(
+            entries
+                .into_iter()
+                .filter(|(k, _)| k != "tenant")
+                .map(|(k, v)| match k.as_str() {
+                    "ssn" => ("tenant".to_string(), v),
+                    _ => (k, v),
+                })
+                .collect(),
+        ),
+        other => panic!("expected a Map ciphertext, got {other:?}"),
+    };
+
+    assert!(cipher.decrypt::<Row>(swapped).is_err());
+}

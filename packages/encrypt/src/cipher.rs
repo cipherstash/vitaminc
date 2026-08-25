@@ -386,6 +386,20 @@ impl<'c> MapCipher for AesMapCipher<'c> {
         Ok(self)
     }
 
+    fn passthrough_entry_boxed<K>(
+        self,
+        key: K,
+        value: Box<dyn Any + Send + 'static>,
+    ) -> Result<Self, Self::Error>
+    where
+        K: Into<Cow<'static, str>>,
+    {
+        // This cipher's passthrough type *is* `Box<dyn Any + Send>` (see
+        // `BoxedPassthrough`), so the type-erased box is already the payload —
+        // store it directly, exactly as `passthrough_boxed` does.
+        self.passthrough_entry(key, value)
+    }
+
     fn end(self) -> Result<Self::Ok, Self::Error> {
         // Finalising with a pending key would silently drop the entry.
         if self.current_key.is_some() {
@@ -759,6 +773,18 @@ impl<'c> MapAccess<'c> for AesMapAccess<'c, '_> {
         // PAE(domain, aad, key), so a swapped or renamed key fails here.
         let entry_aad = self.aad.for_map_entry(&key);
         T::decrypt_with_aad(decipher, entry_aad)
+    }
+
+    fn next_passthrough(&mut self) -> Result<Box<dyn Any + Send + 'static>, Self::Error> {
+        let (_key, ct) = self.pending.take().ok_or(Unspecified)?;
+        match ct {
+            AesCipherText::Passthrough(value) => Ok(value),
+            // Refuse to hand back a sealed value with its tag unchecked. The
+            // caller asked for a passthrough; a stored ciphertext that supplies
+            // an encrypted node under that key is not one, and quietly
+            // unwrapping it would skip the verification `next_value` performs.
+            _ => Err(Unspecified),
+        }
     }
 }
 

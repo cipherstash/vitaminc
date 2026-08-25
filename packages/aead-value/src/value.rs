@@ -581,6 +581,17 @@ mod tests {
                 Err(Unspecified)
             }
 
+            fn passthrough_entry_boxed<K>(
+                self,
+                _key: K,
+                _value: Box<dyn std::any::Any + Send + 'static>,
+            ) -> Result<Self, Self::Error>
+            where
+                K: Into<std::borrow::Cow<'static, str>>,
+            {
+                Ok(self)
+            }
+
             fn end(self) -> Result<Self::Ok, Self::Error> {
                 Err(Unspecified)
             }
