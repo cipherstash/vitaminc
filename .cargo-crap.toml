@@ -28,8 +28,9 @@ missing = "pessimistic"
 
 # Files skipped at walk time, relative to each workspace member's root.
 # Defensive: integration tests aren't walked today, but this keeps them out of
-# the score if that changes.
-exclude = ["tests/**"]
+# the score if that changes. `test_support.rs` holds `#[cfg(test)]` assertion
+# helpers — test code, not shipped risk, so it does not belong in the report.
+exclude = ["tests/**", "src/test_support.rs"]
 
 # Functions to analyse but hide from the report. An entry containing `/` or
 # `**` matches the defining file; otherwise it matches the function name.
@@ -38,9 +39,17 @@ exclude = ["tests/**"]
 # as 0% covered and would be permanent false-positives — not code we have
 # chosen to leave untested.
 #
-#   * The proc-macro crates: macro expansion runs at compile time, not in the
-#     instrumented test binary. Exercised in practice by the crates that use
-#     the derives.
+#   * `random-derives` and `protected-derive`: their expansion logic lives in
+#     the `#[proc_macro_derive]` entry points themselves, which run at compile
+#     time rather than in the instrumented test binary, so llvm-cov always
+#     reads them as 0%.
+#
+#     NOTE: this is a deferral, not a dismissal — and not a property of
+#     proc-macro crates in general. `aead-derive` shows the way out: keep the
+#     entry point a trivial shim and put the expansion in an ordinary
+#     `fn(DeriveInput) -> Result<TokenStream>`, which unit tests call directly
+#     and llvm-cov scores like any other function. Splitting these two the same
+#     way would let them come off this list.
 #
 #   * The `vitaminc-aead-napi` conversion functions and their JS-boundary
 #     helpers (`own_enumerable_keys`, `get_property_unknown`,

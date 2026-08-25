@@ -17,14 +17,20 @@
 # only because the gating feature was off, not because a test is missing.
 additional_cargo_args = ["--all-features"]
 
-# Skip the proc-macro derive crates: their logic runs at compile time, not in the
-# instrumented test binary, so cargo-mutants cannot meaningfully test mutants
-# there (they'd survive spuriously). This mirrors the cargo-crap `allow` list;
-# the derives are exercised in practice by the crates that use them.
+# Skip `random-derives` and `protected-derive`: their expansion logic lives in
+# the `#[proc_macro_derive]` entry points, which run at compile time rather than
+# in the instrumented test binary, so every mutant there survives spuriously.
+# This mirrors the cargo-crap `allow` list, and the same note applies: splitting
+# the expansion out of the entry point — as `aead-derive` does — makes the logic
+# directly testable, and mutable, so these two could come off this list.
 exclude_globs = [
-    "packages/aead-derive/**",
     "packages/protected-derive/**",
     "packages/random-derives/**",
+    # `aead-derive` keeps only its two `#[proc_macro_derive]` shims in lib.rs —
+    # those same-compile-time entry points, and nothing else. The expansion each
+    # one delegates to lives in `encrypt.rs`/`decrypt.rs` and is mutated
+    # normally: 14 of the crate's mutants are caught by its unit tests.
+    "packages/aead-derive/src/lib.rs",
 ]
 
 # Skip mutants inside the `vitaminc-aead-napi` conversion functions and their
