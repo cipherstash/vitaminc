@@ -2458,6 +2458,7 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "serde",
+ "trybuild",
  "vitaminc-aead-derive",
  "vitaminc-protected",
  "vitaminc-random",

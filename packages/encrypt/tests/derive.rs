@@ -517,3 +517,25 @@ fn an_encrypted_entry_cannot_be_read_as_a_passthrough() {
 
     assert!(cipher.decrypt::<Row>(swapped).is_err());
 }
+
+/// Const parameters are passed to the visitor through the value type, so a
+/// parameter that is not a `usize` derives like any other. Naming them
+/// individually — as an array length, say — would quietly require `usize`.
+#[derive(Encrypt, Decrypt, Debug, PartialEq)]
+struct ConstGeneric<const N: u32> {
+    value: String,
+}
+
+#[test]
+fn roundtrip_non_usize_const_generic() {
+    let cipher = cipher();
+
+    let ciphertext = ConstGeneric::<7> {
+        value: "x".to_string(),
+    }
+    .encrypt(&cipher)
+    .expect("encryption failed");
+    let decrypted: ConstGeneric<7> = cipher.decrypt(ciphertext).expect("decryption failed");
+
+    assert_eq!(decrypted.value, "x");
+}
