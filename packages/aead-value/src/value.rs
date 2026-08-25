@@ -88,7 +88,8 @@ pub enum FfiValue {
     Array(Vec<FfiValue>),
     /// String-keyed object/map. Encrypts via the cipher's map mode: keys
     /// travel in the clear (bound into each value's AAD — see
-    /// [`Aad::for_map_entry`]); values are sealed.
+    /// [`Aad::for_map_entry`](vitaminc_aead::Aad::for_map_entry)); values are
+    /// sealed.
     Object(Vec<(String, FfiValue)>),
     /// A subtree that travels alongside the ciphertext **unencrypted and
     /// unauthenticated**, via the cipher's passthrough channel (see

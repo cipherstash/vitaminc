@@ -9,7 +9,7 @@
 //! any 8 bytes parse equally as a valid `i64`, `u64`, or `f64`, so a bare
 //! payload gives the decrypt side no way to tell which. Each scalar
 //! [`FfiValue`](crate::FfiValue) therefore seals as a one-byte type tag
-//! followed by its payload (`[tag] ++ payload`, see [`tags`](crate::tags)) —
+//! followed by its payload (`[tag] ++ payload`, see [`crate::tags`]) —
 //! the tag rides *inside* the AEAD envelope, so it is authenticated and the
 //! value describes its own type on the way back out.
 //!

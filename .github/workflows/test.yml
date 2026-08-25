@@ -59,6 +59,14 @@ jobs:
       - name: format
         run: cargo fmt -- --check
 
+      # Broken intra-doc links are invisible without this: rustdoc warns and
+      # exits 0, so a link to a renamed or newly-private item rots silently and
+      # ships to docs.rs. `--no-deps` keeps the gate to our own crates.
+      - name: docs (intra-doc links)
+        run: cargo doc --workspace --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
       - name: test (default — aws-lc-rs backend)
         run: cargo test
 
