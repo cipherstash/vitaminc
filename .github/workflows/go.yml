@@ -102,6 +102,15 @@ jobs:
         working-directory: bindings/go/vcencrypt/guest
         run: cargo clippy --all-targets -- -D warnings
 
+      # Matches the workspace docs gate in test.yml. This crate is a standalone
+      # workspace, so that job does not reach it — without this step its
+      # intra-doc links are checked by nothing.
+      - name: docs (intra-doc links)
+        working-directory: bindings/go/vcencrypt/guest
+        run: cargo doc --target wasm32-wasip1 --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
       - name: test
         working-directory: bindings/go/vcencrypt/guest
         run: cargo test

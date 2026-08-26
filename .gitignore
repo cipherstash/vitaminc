@@ -8,3 +8,6 @@
 .rtx
 .DS_Store
 .vscode
+
+# Raw coverage profiles dropped by `cargo llvm-cov` / `mise run crap`.
+*.profraw

@@ -88,7 +88,8 @@ pub enum FfiValue {
     Array(Vec<FfiValue>),
     /// String-keyed object/map. Encrypts via the cipher's map mode: keys
     /// travel in the clear (bound into each value's AAD — see
-    /// [`Aad::for_map_entry`]); values are sealed.
+    /// [`Aad::for_map_entry`](vitaminc_aead::Aad::for_map_entry)); values are
+    /// sealed.
     Object(Vec<(String, FfiValue)>),
     /// A subtree that travels alongside the ciphertext **unencrypted and
     /// unauthenticated**, via the cipher's passthrough channel (see
@@ -579,6 +580,17 @@ mod tests {
                 K: Into<Cow<'static, str>>,
             {
                 Err(Unspecified)
+            }
+
+            fn passthrough_entry_boxed<K>(
+                self,
+                _key: K,
+                _value: Box<dyn std::any::Any + Send + 'static>,
+            ) -> Result<Self, Self::Error>
+            where
+                K: Into<std::borrow::Cow<'static, str>>,
+            {
+                Ok(self)
             }
 
             fn end(self) -> Result<Self::Ok, Self::Error> {

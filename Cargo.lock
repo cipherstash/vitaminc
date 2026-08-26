@@ -2458,9 +2458,20 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "serde",
+ "trybuild",
+ "vitaminc-aead-derive",
  "vitaminc-protected",
  "vitaminc-random",
  "zeroize",
+]
+
+[[package]]
+name = "vitaminc-aead-derive"
+version = "0.2.0-pre.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
 ]
 
 [[package]]
