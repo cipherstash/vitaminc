@@ -1,12 +1,17 @@
 use crate::backend::CipherKey;
-use vitaminc_aead::{Cipher, Encrypt, IntoAad, Unspecified};
+use vitaminc_aead::{Encrypt, Unspecified};
 use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::{Generatable, RandomError, SafeRand};
 
 /// 256-bit key type for use with symmetric encryption algorithms like AES-256-GCM.
 /// Vitaminc does not support smaller key sizes to ensure quantum security and compatibility with AWS-LC.
+///
+/// `Encrypt` is derived: a newtype is transparent, so a `Key` seals exactly as
+/// its `Protected<[u8; 32]>` does — which reaches the cipher's array entry
+/// point still wrapped (see `Encrypt::encrypt_protected`). The 32 bytes are
+/// never exposed as a bare `[u8; 32]` on the way in.
 // SAFETY: Safe to implement Debug because the inner type is Protected, which does not leak sensitive data.
-#[derive(Debug)]
+#[derive(Debug, Encrypt)]
 #[cfg_attr(test, derive(Clone))]
 pub struct Key(Protected<[u8; 32]>);
 
@@ -29,18 +34,6 @@ impl From<[u8; 32]> for Key {
 impl Generatable for Key {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         Generatable::random(rng).map(Self)
-    }
-}
-
-impl Encrypt for Key {
-    fn encrypt_with_aad<'a, C, A>(self, cipher: C, aad: A) -> Result<C::Ok, C::Error>
-    where
-        C: Cipher,
-        A: IntoAad<'a>,
-    {
-        // The 32-byte key material stays inside `Protected` all the way to
-        // the cipher boundary — it is never exposed as a bare `[u8; 32]`.
-        cipher.encrypt_bytes_array(self.0, aad)
     }
 }
 

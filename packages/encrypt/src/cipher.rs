@@ -1438,8 +1438,9 @@ mod test {
     // with data and produced an undecryptable ciphertext the first time the
     // collection was empty.
 
-    /// A hand-written `Encrypt` impl driving the sub-cipher directly, of the
-    /// kind a derive macro would generate.
+    /// A hand-written `Encrypt` impl driving the sequence sub-cipher directly
+    /// — the shape a custom impl takes when it wants something other than the
+    /// derive's map layout.
     struct Tags(Vec<String>);
 
     impl Encrypt for Tags {
