@@ -70,6 +70,10 @@ jobs:
 
       - name: setup rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          # The unmutated baseline runs the trybuild negative-space suite, whose
+          # const-eval snapshots only match with rust-src installed — see test.yml.
+          components: rust-src
 
       - name: Start LocalStack
         # The unmutated baseline runs the whole test suite, and vitaminc-kms'
@@ -203,9 +207,12 @@ jobs:
             [ -s "$out/timeout.txt" ] && cat "$out/timeout.txt"
             exit 1
           fi
-          # cargo-mutants failed before producing results (e.g. baseline tests
-          # failed) — surface that as a gate failure rather than a false pass.
-          if [ "${{ steps.mutants.outputs.exit_code }}" != "0" ] && [ ! -f "$out/outcomes.json" ]; then
+          # cargo-mutants failed before testing any mutant (exit 4: the
+          # unmutated baseline failed to build or test, or the tool itself
+          # errored). It still writes outcomes.json for the baseline attempt, so
+          # key on the exit code, not the file — otherwise a broken baseline
+          # passes the gate with a 0/0/0/0 report.
+          if [ "${{ steps.mutants.outputs.exit_code }}" = "4" ] || { [ "${{ steps.mutants.outputs.exit_code }}" != "0" ] && [ ! -f "$out/outcomes.json" ]; }; then
             echo "::error::cargo-mutants did not complete (exit ${{ steps.mutants.outputs.exit_code }}) — check the run logs."
             exit 1
           fi
