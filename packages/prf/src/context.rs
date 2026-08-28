@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use vitaminc_protected::{IsEmpty, NonEmpty};
+
 use crate::PrfEncoding;
 
 const MAP_ENTRY_DOMAIN: &[u8] = b"vitaminc/prf/map-entry/v1";
@@ -79,8 +81,28 @@ impl<'a> PrfContext<'a> {
     }
 }
 
+/// An already-encoded context is judged on its bytes. Framing makes most
+/// encoded contexts non-empty even when built from an empty value; check the
+/// value *before* encoding (see [`NonEmpty`]) when that distinction matters.
+impl IsEmpty for PrfContext<'_> {
+    fn is_empty(&self) -> bool {
+        PrfContext::is_empty(self)
+    }
+}
+
 pub trait IntoPrfContext<'a> {
     fn into_prf_context(self) -> PrfContext<'a>;
+}
+
+/// `NonEmpty<T>` is transparent: it encodes exactly as `T` does. The wrapper
+/// changes what the type promises, never the bytes derived from it.
+impl<'a, T> IntoPrfContext<'a> for NonEmpty<T>
+where
+    T: IntoPrfContext<'a>,
+{
+    fn into_prf_context(self) -> PrfContext<'a> {
+        self.into_inner().into_prf_context()
+    }
 }
 
 impl<'a> IntoPrfContext<'a> for PrfContext<'a> {
@@ -282,6 +304,39 @@ mod tests {
         // must never equal the Option encoding.
         let inner = bytes.clone().into_prf_context();
         Some(bytes).into_prf_context() != PrfContext::pae(&[inner.as_bytes()])
+    }
+
+    #[test]
+    fn non_empty_is_transparent_to_the_encoding() {
+        assert_eq!(
+            NonEmpty::new("users/email").unwrap().into_prf_context(),
+            "users/email".into_prf_context()
+        );
+        assert_eq!(
+            Some(NonEmpty::new("users/email").unwrap()).into_prf_context(),
+            Some("users/email").into_prf_context()
+        );
+        assert_eq!(
+            NonEmpty::new(("users", "email"))
+                .unwrap()
+                .into_prf_context(),
+            ("users", "email").into_prf_context()
+        );
+        assert_eq!(
+            vitaminc_protected::nonempty!("users/email").into_prf_context(),
+            "users/email".into_prf_context()
+        );
+    }
+
+    #[test]
+    fn encoded_contexts_are_judged_on_their_bytes() {
+        assert!(IsEmpty::is_empty(&PrfContext::empty()));
+        assert!(!IsEmpty::is_empty(&PrfContext::from_slice(b"raw")));
+        // Framing makes an encoded empty value non-empty as bytes; the
+        // structural check belongs before encoding.
+        assert!(!IsEmpty::is_empty(&"".into_prf_context()));
+        assert!(NonEmpty::new(PrfContext::empty()).is_err());
+        assert!(NonEmpty::new(PrfContext::from_slice(b"raw")).is_ok());
     }
 
     #[test]

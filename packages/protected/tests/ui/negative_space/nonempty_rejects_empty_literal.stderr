@@ -1,0 +1,16 @@
+error[E0080]: evaluation panicked: a non-empty context cannot be empty
+ --> tests/ui/negative_space/nonempty_rejects_empty_literal.rs:4:13
+  |
+4 |     let _ = nonempty!("");
+  |             ^^^^^^^^^^^^^ evaluation of `main::CONTEXT` failed inside this call
+  |
+note: inside `NonEmpty::<&'static str>::from_static`
+ --> $RUST/core/src/panic.rs
+  |
+  |         $crate::panicking::panic_fmt($crate::const_format_args!($($t)+));
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the failure occurred here
+  |
+ ::: src/non_empty.rs
+  |
+  |         assert!(!value.is_empty(), "a non-empty context cannot be empty");
+  |         ----------------------------------------------------------------- in this macro invocation

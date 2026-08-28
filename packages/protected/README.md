@@ -163,6 +163,22 @@ assert_ne!(output.risky_ref(), &[0u8; 32]);
 
 Beyond the adapters above, the crate exports `TimingSafeEq` and `Choice` (timing-safe comparison), `OpaqueDebug` and `Redacted` (leak-resistant `Debug`), `ProtectedDigest`, `Zeroed`, and `AsProtectedRef` — see the [docs.rs API reference](https://docs.rs/vitaminc-protected) for details.
 
+### Non-empty contexts
+
+An AEAD associated-data value or PRF context can legitimately be empty, but a caller that uses one value to domain-separate fields needs it *not* to be. `NonEmpty<T>` carries that invariant in the type, checked once at construction: `nonempty!("users/email")` is checked at compile time (an empty literal does not compile), and `NonEmpty::new(value)` checks a dynamic value structurally — `""`, `None`, `Some("")` and `("", "")` are all rejected, without parsing any encoding. Bound an API on `TryIntoNonEmpty` to accept both a plain `"users/email"` and a proven `NonEmpty` at the same call site.
+
+```rust
+use vitaminc_protected::{nonempty, EmptyError, NonEmpty, TryIntoNonEmpty};
+
+fn bind<C: TryIntoNonEmpty>(context: C) -> Result<NonEmpty<C::Inner>, EmptyError> {
+    context.try_into_non_empty()
+}
+
+assert!(bind(nonempty!("users/email")).is_ok());
+assert!(bind("users/email").is_ok());
+assert_eq!(bind(("", None::<&str>)).unwrap_err(), EmptyError);
+```
+
 ### Generators
 
 `Protected` supports generating new values from functions that return the inner value.

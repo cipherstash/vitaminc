@@ -8,6 +8,7 @@ mod debug;
 mod digest;
 mod equatable;
 mod exportable;
+mod non_empty;
 mod ops;
 mod protected;
 mod timing_safe;
@@ -31,6 +32,7 @@ pub use digest::ProtectedDigest;
 pub use ::digest::InvalidLength;
 pub use equatable::{ConstantTimeEq, Equatable};
 pub use exportable::{Exportable, SafeDeserialize, SafeSerialize};
+pub use non_empty::{EmptyError, IsEmpty, NonEmpty, TryIntoNonEmpty};
 pub use protected::{flatten_array, Protected};
 pub use usage::{Acceptable, DefaultScope, Scope, Usage};
 
