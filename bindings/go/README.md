@@ -7,17 +7,25 @@ no shared libraries, no cross-compilation matrix.
 
 **Status: spike.** The API shape and transport encoding are not stable.
 
-## Two modules, on purpose
+## Three modules, on purpose
 
-This directory holds **two separate Go modules**, each with its own `go.mod`:
+This directory holds **three separate Go modules**, each with its own `go.mod`:
 
-- **[`vcvalue/`](vcvalue)** — the durable value layer: the value model
-  (encoder / `Encryptable` / reflection encode + natives decode), the transport
-  codec, and the ciphertext value shape (`Sealed`/`Plain`). **Zero
-  dependencies** (no wazero, no
-  crypto). This is the module a future stack-encrypt Go SDK is expected to
-  import.
+- **[`vcvalue/`](vcvalue)** — the durable value layer: the value model — the
+  types application code holds and stores (`Sealed` and the marker leaves,
+  `Plain`, the ordered `Object` decode shape). **Zero dependencies** (no
+  wazero, no crypto, no wire format). This is the module a stack-encrypt Go
+  SDK imports for the model.
   Module path: `github.com/cipherstash/vitaminc/bindings/go/vcvalue`.
+
+- **[`vcffi/`](vcffi)** — the shared FFI transport codec: the wire encoding
+  that carries value and ciphertext trees across a wasm boundary, plus the
+  `Encryptable`/`Encoder` extension point. Depends only on `vcvalue`. One
+  codec for every binding that owns such a boundary — the encoding must
+  never fork per binding. Its ciphertext decoder is parameterised over a
+  `LeafSet`, so each binding materializes its **own** sealed-leaf types (a
+  stack-encrypt leaf is not a `vcvalue.Sealed`).
+  Module path: `github.com/cipherstash/vitaminc/bindings/go/vcffi`.
 
 - **[`vcencrypt/`](vcencrypt)** — the demonstration binding of the
   `vitaminc-encrypt` crate specifically: the wazero `Client`, the embedded
@@ -26,26 +34,29 @@ This directory holds **two separate Go modules**, each with its own `go.mod`:
   belongs to stack-encrypt, out of scope here.
   Module path: `github.com/cipherstash/vitaminc/bindings/go/vcencrypt`.
 
-`vcencrypt` depends on `vcvalue`. Both live in this repo and neither is
-published, so `vcencrypt/go.mod` resolves the dependency with a local
-`replace` directive:
+`vcencrypt` depends on `vcffi` and `vcvalue`; `vcffi` depends on `vcvalue`.
+All three live in this repo and none is published, so the dependencies
+resolve with local `replace` directives:
 
 ```
+replace github.com/cipherstash/vitaminc/bindings/go/vcffi => ../vcffi
 replace github.com/cipherstash/vitaminc/bindings/go/vcvalue => ../vcvalue
 ```
 
-That is self-contained — `go test ./...` works from either module directory
+That is self-contained — `go test ./...` works from any module directory
 with no `go.work` file required.
 
-### Why two modules, not two packages
+### Why modules, not packages
 
 `vcvalue` **is not a binding at all** — it is the Go materialization of the
 frozen data model, which real applications (via stack-encrypt) will depend on
 directly. `vcencrypt` is a reference tool that proves the model works
 end-to-end through wasm. A hard module boundary is what guarantees the
 wazero/crypto dependencies of the reference tool can never leak into the layer
-applications ship. This is the sharpened form of the earlier "two layers"
-rationale: one of the two is not a binding, so it gets its own module.
+applications ship. `vcffi` sits between them for the same reason from the
+other side: the codec must be shared across bindings (one implementation, one
+hostile-input suite, one fuzz corpus) without pulling transport machinery
+into the model module or wazero into codec consumers.
 
 ## Design decisions and non-decisions
 

@@ -13,6 +13,7 @@ require (
 )
 
 require (
+	github.com/cipherstash/vitaminc/bindings/go/vcffi v0.0.0-00010101000000-000000000000 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -27,5 +28,7 @@ require (
 )
 
 replace github.com/cipherstash/vitaminc/bindings/go/vcencrypt => ../
+
+replace github.com/cipherstash/vitaminc/bindings/go/vcffi => ../../vcffi
 
 replace github.com/cipherstash/vitaminc/bindings/go/vcvalue => ../../vcvalue

@@ -1,4 +1,4 @@
-package vcencrypt
+package vcffi
 
 import (
 	"encoding/binary"
@@ -7,7 +7,7 @@ import (
 	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 )
 
-// unmarshal decodes value transport bytes into Go natives:
+// Unmarshal decodes value transport bytes into Go natives:
 //
 //   - Null and Undefined → nil (Go has no undefined analog);
 //   - Bool               → bool;
@@ -29,21 +29,21 @@ import (
 //
 // This self-describing shape is deliberately spike-scoped. A reflection-based
 // unmarshal into caller structs (the mirror of Encode) is future work.
-func unmarshal(buf []byte) (any, error) {
+func Unmarshal(buf []byte) (any, error) {
 	r := &reader{buf: buf}
 	v, err := decodeValue(r, 0)
 	if err != nil {
 		return nil, err
 	}
 	if !r.finished() {
-		return nil, errMalformed
+		return nil, ErrMalformed
 	}
 	return v, nil
 }
 
 func decodeValue(r *reader, depth int) (any, error) {
 	if depth > maxDepth {
-		return nil, errMalformed
+		return nil, ErrMalformed
 	}
 	tag, err := r.byteTag()
 	if err != nil {
@@ -136,7 +136,7 @@ func decodeValue(r *reader, depth int) (any, error) {
 				return nil, err
 			}
 			if _, dup := seen[key]; dup {
-				return nil, errMalformed
+				return nil, ErrMalformed
 			}
 			seen[key] = struct{}{}
 			value, err := decodeValue(r, depth+1)
@@ -156,6 +156,6 @@ func decodeValue(r *reader, depth int) (any, error) {
 		}
 		return vcvalue.Plain{V: inner}, nil
 	default:
-		return nil, errMalformed
+		return nil, ErrMalformed
 	}
 }

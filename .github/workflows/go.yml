@@ -25,8 +25,8 @@ jobs:
         with:
           # Single source of truth for the toolchain version.
           go-version-file: bindings/go/vcencrypt/go.mod
-          # vcvalue has no go.sum (zero dependencies), so only the two
-          # dependency-bearing modules feed the cache key.
+          # vcvalue and vcffi have no go.sum (no module-proxy dependencies),
+          # so only the two dependency-bearing modules feed the cache key.
           cache-dependency-path: |
             bindings/go/vcencrypt/go.sum
             bindings/go/vcencrypt/examples/go.sum
@@ -35,12 +35,20 @@ jobs:
         working-directory: bindings/go/vcvalue
         run: go vet ./...
 
+      - name: vet (vcffi)
+        working-directory: bindings/go/vcffi
+        run: go vet ./...
+
       - name: vet (vcencrypt)
         working-directory: bindings/go/vcencrypt
         run: go vet ./...
 
       - name: test (vcvalue)
         working-directory: bindings/go/vcvalue
+        run: CGO_ENABLED=0 go test ./...
+
+      - name: test (vcffi — the shared transport codec, fuzz seed corpora included)
+        working-directory: bindings/go/vcffi
         run: CGO_ENABLED=0 go test ./...
 
       - name: test (vcencrypt — embedded wasm guest under wazero)
@@ -53,14 +61,16 @@ jobs:
         # and would panic make() without them. A build check cannot catch
         # that class — the tests (including the fuzz seed corpora) must
         # actually run on 386, which linux/amd64 runners execute natively.
-        # The codec lives in vcencrypt (wazero falls back to its interpreter
-        # on 386); vcvalue is model-only but stays covered too since it is
-        # the layer a future stack-encrypt Go SDK imports.
+        # The codec lives in vcffi; vcencrypt exercises it end-to-end (wazero
+        # falls back to its interpreter on 386), and vcvalue is model-only
+        # but stays covered too since it is the layer a stack-encrypt Go SDK
+        # imports.
         # Joined with && because the configured shell (bash -l) does not set
         # -e: with independent lines, only the last command's exit status
-        # would decide the step, hiding a vcvalue failure.
+        # would decide the step, hiding an earlier module's failure.
         run: |
           (cd bindings/go/vcvalue && CGO_ENABLED=0 GOOS=linux GOARCH=386 go test ./...) &&
+          (cd bindings/go/vcffi && CGO_ENABLED=0 GOOS=linux GOARCH=386 go test ./...) &&
           (cd bindings/go/vcencrypt && CGO_ENABLED=0 GOOS=linux GOARCH=386 go test ./...)
 
       - name: run example (userrecord)

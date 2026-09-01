@@ -23,12 +23,12 @@
 // # What is deliberately NOT here
 //
 // The transport codec — the wire encoding that carries a value tree across
-// an FFI boundary — is an unexported detail of the consumer that owns the
-// boundary (module vcencrypt, for the wasm harness). It is not a storage
-// format, so this module does not export it: the only bytes an application
-// should ever persist are the sealed leaves above. The Encryptable/Encoder
-// extension point for custom encodings lives with the codec in vcencrypt
-// for the same reason.
+// an FFI boundary — lives in the sibling module vcffi, shared by the
+// bindings that own such a boundary (vcencrypt, the stack-encrypt Go SDK).
+// It is not a storage format, so this module does not carry it: the only
+// bytes an application should ever persist are the sealed leaves above. The
+// Encryptable/Encoder extension point for custom encodings lives with the
+// codec in vcffi for the same reason.
 //
 // The cross-language contract is the frozen tag table plus the sealed leaf
 // encodings defined in the Rust crate vitaminc-aead-value — the model, not

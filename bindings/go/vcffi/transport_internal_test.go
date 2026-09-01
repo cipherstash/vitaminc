@@ -1,4 +1,4 @@
-package vcencrypt
+package vcffi
 
 import "testing"
 

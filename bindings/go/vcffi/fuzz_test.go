@@ -1,4 +1,4 @@
-package vcencrypt
+package vcffi
 
 import (
 	"testing"
@@ -23,11 +23,11 @@ func FuzzUnmarshal(f *testing.F) {
 	f.Add([]byte{0x11, 2, 0, 0, 0, 1, 0, 0, 0, 'a', 0x00}) // short object
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		v, err := unmarshal(data)
+		v, err := Unmarshal(data)
 		if err != nil {
 			return
 		}
-		if _, err := marshal(v); err != nil {
+		if _, err := Marshal(v); err != nil {
 			t.Fatalf("accepted decode failed to re-encode: %v (value %#v)", err, v)
 		}
 	})
@@ -42,11 +42,11 @@ func FuzzUnmarshalCipherText(f *testing.F) {
 	f.Add([]byte{0x03, 0xFF, 0xFF, 0xFF, 0xFF})                              // hostile count
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		v, err := unmarshalCipherText(data)
+		v, err := UnmarshalCipherText(VCValueLeaves, data)
 		if err != nil {
 			return
 		}
-		if _, err := marshalCipherText(v); err != nil {
+		if _, err := MarshalCipherText(VCValueLeaves, v); err != nil {
 			t.Fatalf("accepted ciphertext decode failed to re-encode: %v (value %#v)", err, v)
 		}
 	})

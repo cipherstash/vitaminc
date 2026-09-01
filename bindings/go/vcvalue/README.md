@@ -25,12 +25,13 @@ when a value class cannot be represented in the existing model, and needs a
 defined decode mapping in every supported language before it ships.
 
 The transport codec — the wire encoding that hands a tree across an FFI
-boundary in one copy — is **not part of this module**. It is an unexported
-detail of whichever consumer owns the boundary (`vcencrypt` for the wasm
-harness), because it is transport-only and carries no storage commitment:
-the only bytes an application should ever persist are the sealed leaves.
-The `Encryptable`/`Encoder` encoding extension point lives with the codec in
-`vcencrypt` for the same reason.
+boundary in one copy — is **not part of this module**. It lives in the
+sibling module `vcffi`, shared by the bindings that own such a boundary
+(`vcencrypt` for the wasm harness, the stack-encrypt Go SDK), because it is
+transport-only and carries no storage commitment: the only bytes an
+application should ever persist are the sealed leaves. The
+`Encryptable`/`Encoder` encoding extension point lives with the codec in
+`vcffi` for the same reason.
 
 ## Passthrough — fields in the clear
 
