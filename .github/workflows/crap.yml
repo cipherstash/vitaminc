@@ -64,9 +64,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           # llvm-tools-preview is required by cargo-llvm-cov to produce coverage.
-          # rust-src keeps the trybuild negative-space snapshots identical to the
-          # dev machines that bless them — see test.yml.
-          components: llvm-tools-preview, rust-src
+          components: llvm-tools-preview
 
       - name: Start LocalStack
         # Mirrors the test.yml gate: vitaminc-kms' tests call a KMS endpoint on
