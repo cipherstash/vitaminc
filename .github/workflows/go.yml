@@ -31,6 +31,13 @@ jobs:
             bindings/go/vcencrypt/go.sum
             bindings/go/vcencrypt/examples/go.sum
 
+      - name: fmt
+        # gofmt exits 0 even when files need formatting; -l lists them, so
+        # fail on any output and print the offenders.
+        run: |
+          out=$(gofmt -l bindings/go) &&
+          if [ -n "$out" ]; then echo "gofmt needed:"; echo "$out"; exit 1; fi
+
       - name: vet (vcvalue)
         working-directory: bindings/go/vcvalue
         run: go vet ./...
