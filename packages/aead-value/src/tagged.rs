@@ -18,9 +18,12 @@
 //!
 //! - [`TaggedFixed`] for the fixed-width leaves (the numeric family and the
 //!   payloadless Null/Undefined/Bool tags). The header byte is written into a
-//!   stack array — **no heap allocation** — and sealed directly through the
+//!   stack array — **no heap allocation** here — and sealed through the
 //!   cipher's [`encrypt_bytes_array`](vitaminc_aead::Cipher::encrypt_bytes_array)
-//!   entry point.
+//!   entry point. Whether that stays allocation-free is the cipher's call:
+//!   `Aes256Cipher` overrides the method to seal the array in place, while a
+//!   cipher on the trait default copies it into a heap buffer that stays
+//!   inside `Protected`.
 //! - [`TaggedVariable`] for the variable-length leaves (String, Bytes). It
 //!   allocates the `1 + len` buffer once and seals through
 //!   [`encrypt_bytes_vec`](vitaminc_aead::Cipher::encrypt_bytes_vec).
@@ -57,9 +60,11 @@ use vitaminc_protected::{Controlled, Protected};
 /// docs for why the payload arithmetic is hidden behind the type aliases.
 ///
 /// [`Encrypt`] is derived: the newtype is transparent, so it seals exactly as
-/// `Protected<[u8; N]>` does — straight through the cipher's
+/// `Protected<[u8; N]>` does — through the cipher's
 /// [`encrypt_bytes_array`](vitaminc_aead::Cipher::encrypt_bytes_array) entry
-/// point, still wrapped, with no `to_vec` detour and no bare stack copy.
+/// point, still wrapped, with no bare stack copy. (`Aes256Cipher` overrides
+/// that entry point to seal without an intermediate copy; a cipher on the
+/// trait default copies into a heap buffer that stays inside `Protected`.)
 #[derive(Encrypt)]
 pub struct TaggedFixed<const HDR: u8, const N: usize>(Protected<[u8; N]>);
 

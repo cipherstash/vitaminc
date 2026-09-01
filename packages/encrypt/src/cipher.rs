@@ -2197,10 +2197,12 @@ mod test {
     #[quickcheck]
     fn decrypt_byte_array_ciphertext_as_vec_u8(key: Key, bytes: [u8; 16]) -> bool {
         // `Decrypt for Vec<u8>` reads the bytes pipeline (`Single`), not a
-        // `Sequence`. There is no `Encrypt for Vec<u8>` (no `Encrypt for u8`),
-        // so a `[u8; N]` ciphertext is the canonical `Single` producer
-        // decodable as `Vec<u8>`. Pins the otherwise-unexercised impl across
-        // arbitrary byte payloads.
+        // `Sequence`. `Encrypt for Vec<u8>` is the byte-leaf impl producing
+        // the same shape — coherent with the generic `Vec<T>` sequence impl
+        // only because there is no `Encrypt for u8`, and the leaf is what
+        // keeps it that way. A `[u8; N]` ciphertext is another `Single`
+        // producer decodable as `Vec<u8>`; pins that read across arbitrary
+        // byte payloads.
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
         let ct = bytes.encrypt(&cipher).expect("Encryption failed");
         let decoded: Vec<u8> = cipher.decrypt(ct).expect("Decryption failed");
