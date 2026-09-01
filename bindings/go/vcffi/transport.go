@@ -73,6 +73,12 @@ func eagerCap(n int) int {
 // malformed.
 var ErrMalformed = errors.New("vcffi: malformed transport bytes")
 
+// ErrTooDeep is returned by the encoders when a value or ciphertext tree
+// exceeds the recursion bound (the decoders fold over-deep input into
+// [ErrMalformed] — hostile bytes stay unspecific by design, but a too-deep
+// value handed in by the caller's own code is worth matching on).
+var ErrTooDeep = errors.New("vcffi: value is nested too deeply")
+
 func appendLen(out []byte, n int) ([]byte, error) {
 	if n < 0 || uint64(n) > maxUint32 {
 		return nil, fmt.Errorf("vcffi: length %d out of range", n)

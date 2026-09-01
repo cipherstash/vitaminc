@@ -42,11 +42,11 @@ func FuzzUnmarshalCipherText(f *testing.F) {
 	f.Add([]byte{0x03, 0xFF, 0xFF, 0xFF, 0xFF})                              // hostile count
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		v, err := UnmarshalCipherText(VCValueLeaves, data)
+		v, err := UnmarshalCipherText(VCValueLeaves(), data)
 		if err != nil {
 			return
 		}
-		if _, err := MarshalCipherText(VCValueLeaves, v); err != nil {
+		if _, err := MarshalCipherText(VCValueLeaves(), v); err != nil {
 			t.Fatalf("accepted ciphertext decode failed to re-encode: %v (value %#v)", err, v)
 		}
 	})

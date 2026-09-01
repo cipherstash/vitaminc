@@ -75,6 +75,12 @@ a leaf is authenticated through domain-separated AAD, not written into the
 bytes, so a stored leaf's kind must be tracked by the schema (see the note on
 the marker types' `Scan`).
 
+The `Sealed` family here is **vitaminc-encrypt's** materialization of the
+model. Another binding — a stack-encrypt SDK, say — defines its own distinct
+sealed-leaf types and wires them to the codec via `vcffi.LeafSet`, so its
+leaves can never scan or marshal where these belong: a stack-encrypt leaf is
+never a `vcvalue.Sealed`.
+
 The sealed leaf types and `Plain` implement `driver.Valuer`, and the sealed
 types `sql.Scanner`, so a record-shaped ciphertext binds straight into a
 database as named parameters and sealed columns scan straight back out — no

@@ -12,7 +12,10 @@
 //   - Sealed is one encrypted leaf (version || nonce || ciphertext || tag),
 //     the only frozen byte format in the model. SealedNone, SealedEmptySeq
 //     and SealedEmptyMap are its authenticated marker siblings for absent
-//     values and empty composites.
+//     values and empty composites. This sealed family is vitaminc-encrypt's
+//     materialization of the model: another binding (a stack-encrypt SDK,
+//     say) defines its own distinct sealed-leaf types and wires them to the
+//     codec via vcffi's LeafSet — a stack-encrypt leaf is never a Sealed.
 //   - Object is the ordered map-decode shape (entry order preserved, so
 //     results compare deterministically); Field is one entry of it.
 //

@@ -49,7 +49,10 @@ func (s *encState) fail(err error) {
 //
 // Encoder is passed and stored by value; all instances handed out for one
 // encode share the same underlying buffer and first-error via a pointer, so
-// copying an Encoder is cheap and safe.
+// copying an Encoder is cheap and safe. The zero Encoder is not usable and
+// its methods panic: usable Encoders are only the one handed to
+// [Encryptable.EncryptValue] and those returned by Passthrough, Elem and
+// Field.
 type Encoder struct {
 	st    *encState
 	depth int
@@ -217,7 +220,7 @@ func (e Encoder) Bytes(b []byte) {
 func (e Encoder) Passthrough() Encoder {
 	if e.st.err == nil {
 		if e.depth+1 > maxDepth {
-			e.st.fail(errors.New("vcffi: value is nested too deeply"))
+			e.st.fail(ErrTooDeep)
 		} else {
 			e.push(tagPassthrough)
 		}
@@ -234,7 +237,7 @@ func (e Encoder) Seq() *SeqEncoder {
 		return s
 	}
 	if e.depth+1 > maxDepth {
-		e.st.fail(errors.New("vcffi: value is nested too deeply"))
+		e.st.fail(ErrTooDeep)
 		return s
 	}
 	e.push(tagArray)
@@ -251,7 +254,7 @@ func (e Encoder) Map() *MapEncoder {
 		return m
 	}
 	if e.depth+1 > maxDepth {
-		e.st.fail(errors.New("vcffi: value is nested too deeply"))
+		e.st.fail(ErrTooDeep)
 		return m
 	}
 	e.push(tagObject)
@@ -593,7 +596,7 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 		// no container framing, so without this a pointer cycle (x = &x)
 		// would recurse to stack overflow instead of failing cleanly.
 		if enc.depth+1 > maxDepth {
-			enc.st.fail(errors.New("vcffi: value is nested too deeply"))
+			enc.st.fail(ErrTooDeep)
 			return
 		}
 		// Same slot: the dereferenced value completes the pointer's counter.

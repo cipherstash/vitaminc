@@ -497,7 +497,7 @@ func TestCrossLanguageFixture(t *testing.T) {
 	}
 	aad, ctBytes, valBytes := chunk(), chunk(), chunk()
 
-	ct, err := vcffi.UnmarshalCipherText(vcffi.VCValueLeaves, ctBytes)
+	ct, err := vcffi.UnmarshalCipherText(vcffi.VCValueLeaves(), ctBytes)
 	if err != nil {
 		t.Fatalf("decoding fixture ciphertext: %v", err)
 	}

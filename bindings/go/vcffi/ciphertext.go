@@ -69,11 +69,15 @@ const (
 // the codec this pair of translations:
 //
 //   - Classify reports whether v is one of the binding's leaf values,
-//     returning its kind and bytes. Values it does not claim fall through to
-//     the structural arms (sequences, maps, passthrough) — and, if nothing
-//     matches, to the bare-plaintext rejection.
+//     returning its kind and bytes. The codec's structural node types
+//     ([]any, map[string]any, vcvalue.Plain) are never offered to Classify,
+//     so a LeafSet cannot claim a subtree; values Classify does not claim
+//     fall through to the bare-plaintext rejection.
 //   - Make constructs the binding's leaf value for a kind decoded off the
 //     wire. The bytes slice is freshly allocated and owned by the callee.
+//     Returning nil rejects the kind: the decoder turns it into an error, so
+//     a LeafSet that materializes only some kinds fails loudly instead of
+//     injecting nil nodes into the decoded tree.
 //
 // [VCValueLeaves] is the set for the vcvalue model types.
 type LeafSet struct {
@@ -81,9 +85,17 @@ type LeafSet struct {
 	Make     func(kind LeafKind, bytes []byte) any
 }
 
-// VCValueLeaves is the [LeafSet] of the vcvalue model: vcvalue.Sealed,
+// VCValueLeaves returns the [LeafSet] of the vcvalue model: vcvalue.Sealed,
 // vcvalue.SealedNone, vcvalue.SealedEmptySeq and vcvalue.SealedEmptyMap.
-var VCValueLeaves = LeafSet{
+// These are the leaf types the vitaminc-encrypt binding materializes; other
+// bindings define their own set so their leaves stay a distinct Go type. A
+// function rather than an exported var, so no importer can reassign the set
+// out from under every other consumer in the process.
+func VCValueLeaves() LeafSet {
+	return vcValueLeaves
+}
+
+var vcValueLeaves = LeafSet{
 	Classify: func(v any) (LeafKind, []byte, bool) {
 		switch n := v.(type) {
 		case vcvalue.Sealed:
@@ -100,6 +112,8 @@ var VCValueLeaves = LeafSet{
 	},
 	Make: func(kind LeafKind, bytes []byte) any {
 		switch kind {
+		case LeafSingle:
+			return vcvalue.Sealed(bytes)
 		case LeafNone:
 			return vcvalue.SealedNone(bytes)
 		case LeafEmptySeq:
@@ -107,7 +121,9 @@ var VCValueLeaves = LeafSet{
 		case LeafEmptyMap:
 			return vcvalue.SealedEmptyMap(bytes)
 		default:
-			return vcvalue.Sealed(bytes)
+			// An unlisted kind is rejected (nil), mirroring leafTag on the
+			// encode side — a future fifth kind must not silently mint Sealed.
+			return nil
 		}
 	},
 }
@@ -121,20 +137,32 @@ func (l LeafSet) check() error {
 	return nil
 }
 
+// leafTags is the single source of truth for the LeafKind ↔ wire-tag
+// correspondence; leafTag and leafKind are its two directions, so a new leaf
+// kind cannot be wired into one direction and missed in the other.
+var leafTags = [...]byte{
+	LeafSingle:   ctSingle,
+	LeafNone:     ctNone,
+	LeafEmptySeq: ctEmptySeq,
+	LeafEmptyMap: ctEmptyMap,
+}
+
 // leafTag maps a classified kind to its wire tag.
 func leafTag(kind LeafKind) (byte, error) {
-	switch kind {
-	case LeafSingle:
-		return ctSingle, nil
-	case LeafNone:
-		return ctNone, nil
-	case LeafEmptySeq:
-		return ctEmptySeq, nil
-	case LeafEmptyMap:
-		return ctEmptyMap, nil
-	default:
+	if int(kind) >= len(leafTags) {
 		return 0, fmt.Errorf("vcffi: LeafSet classified an unknown LeafKind %d", kind)
 	}
+	return leafTags[kind], nil
+}
+
+// leafKind maps a wire tag back to its leaf kind — the decode direction.
+func leafKind(tag byte) (LeafKind, bool) {
+	for kind, t := range leafTags {
+		if t == tag {
+			return LeafKind(kind), true
+		}
+	}
+	return 0, false
 }
 
 // MarshalCipherText encodes a ciphertext value into transport bytes; leaves
@@ -168,16 +196,11 @@ func UnmarshalCipherText(leaves LeafSet, buf []byte) (any, error) {
 
 func encodeCipherText(leaves LeafSet, out []byte, v any, depth int) ([]byte, error) {
 	if depth > maxDepth {
-		return nil, errors.New("vcffi: ciphertext is nested too deeply")
+		return nil, ErrTooDeep
 	}
-	if kind, bytes, ok := leaves.Classify(v); ok {
-		tag, err := leafTag(kind)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, tag)
-		return appendChunk(out, bytes)
-	}
+	// The structural arms come first: the codec's own node types are never
+	// offered to Classify, so a LeafSet cannot claim a whole subtree as one
+	// leaf chunk — only non-structural values reach it (in the default arm).
 	switch n := v.(type) {
 	case []any:
 		out = append(out, ctSeq)
@@ -217,7 +240,7 @@ func encodeCipherText(leaves LeafSet, out []byte, v any, depth int) ([]byte, err
 		// bytes the decoder is guaranteed to reject (decodeValue enforces the
 		// same bound) would be an asymmetric round trip.
 		if depth+1 > maxDepth {
-			return nil, errors.New("vcffi: ciphertext is nested too deeply")
+			return nil, ErrTooDeep
 		}
 		out = append(out, ctPassthrough)
 		// Encode the plaintext payload as one value node, sharing the
@@ -234,6 +257,14 @@ func encodeCipherText(leaves LeafSet, out []byte, v any, depth int) ([]byte, err
 		}
 		return st.buf, nil
 	default:
+		if kind, bytes, ok := leaves.Classify(v); ok {
+			tag, err := leafTag(kind)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, tag)
+			return appendChunk(out, bytes)
+		}
 		return nil, fmt.Errorf("vcffi: %T is not a ciphertext node — wrap passthrough values in vcvalue.Plain", v)
 	}
 }
@@ -246,8 +277,7 @@ func decodeCipherText(leaves LeafSet, r *reader, depth int) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	switch tag {
-	case ctSingle, ctNone, ctEmptySeq, ctEmptyMap:
+	if kind, ok := leafKind(tag); ok {
 		n, err := r.count()
 		if err != nil {
 			return nil, err
@@ -258,16 +288,16 @@ func decodeCipherText(leaves LeafSet, r *reader, depth int) (any, error) {
 		}
 		leaf := make([]byte, len(s))
 		copy(leaf, s)
-		switch tag {
-		case ctNone:
-			return leaves.Make(LeafNone, leaf), nil
-		case ctEmptySeq:
-			return leaves.Make(LeafEmptySeq, leaf), nil
-		case ctEmptyMap:
-			return leaves.Make(LeafEmptyMap, leaf), nil
-		default:
-			return leaves.Make(LeafSingle, leaf), nil
+		node := leaves.Make(kind, leaf)
+		if node == nil {
+			// A LeafSet that does not materialize this kind is a wiring
+			// mistake in the binding, not malformed input — name it, instead
+			// of injecting a nil node the caller only trips over later.
+			return nil, fmt.Errorf("vcffi: LeafSet.Make returned no value for LeafKind %d", kind)
 		}
+		return node, nil
+	}
+	switch tag {
 	case ctSeq:
 		n, err := r.count()
 		if err != nil {

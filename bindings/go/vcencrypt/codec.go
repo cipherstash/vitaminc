@@ -32,18 +32,14 @@ func Encode(enc Encoder, v any) error {
 	return vcffi.Encode(enc, v)
 }
 
-func marshal(v any) ([]byte, error) {
-	return vcffi.Marshal(v)
-}
-
-func unmarshal(buf []byte) (any, error) {
-	return vcffi.Unmarshal(buf)
-}
+// Plaintext value trees cross the boundary through vcffi.Marshal/Unmarshal
+// directly — no wrapper, so there is exactly one spelling in this package.
+// The ciphertext pair below earns its wrappers by binding the vcvalue leaves.
 
 func marshalCipherText(v any) ([]byte, error) {
-	return vcffi.MarshalCipherText(vcffi.VCValueLeaves, v)
+	return vcffi.MarshalCipherText(vcffi.VCValueLeaves(), v)
 }
 
 func unmarshalCipherText(buf []byte) (any, error) {
-	return vcffi.UnmarshalCipherText(vcffi.VCValueLeaves, buf)
+	return vcffi.UnmarshalCipherText(vcffi.VCValueLeaves(), buf)
 }
