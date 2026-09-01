@@ -4,12 +4,11 @@
 //! derive `Encrypt` around `Protected<[u8; N]>` / `Protected<Vec<u8>>`.
 
 use vitaminc_aead::Encrypt;
-use vitaminc_encrypt::{Aes256Cipher, Key};
+use vitaminc_encrypt::Key;
 use vitaminc_protected::{Controlled, Protected};
 
-fn cipher() -> Aes256Cipher {
-    Aes256Cipher::new(&Key::from([42u8; 32])).expect("failed to create cipher")
-}
+mod common;
+use common::cipher;
 
 #[test]
 fn vec_u8_is_a_byte_leaf_that_roundtrips() {
