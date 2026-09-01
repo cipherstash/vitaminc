@@ -32,7 +32,7 @@ pub use digest::ProtectedDigest;
 pub use ::digest::InvalidLength;
 pub use equatable::{ConstantTimeEq, Equatable};
 pub use exportable::{Exportable, SafeDeserialize, SafeSerialize};
-pub use non_empty::{EmptyError, IsEmpty, NonEmpty, TryIntoNonEmpty};
+pub use non_empty::{EmptyError, IsEmpty, NonEmpty};
 pub use protected::{flatten_array, Protected};
 pub use usage::{Acceptable, DefaultScope, Scope, Usage};
 

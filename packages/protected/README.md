@@ -165,18 +165,17 @@ Beyond the adapters above, the crate exports `TimingSafeEq` and `Choice` (timing
 
 ### Non-empty contexts
 
-An AEAD associated-data value or PRF context can legitimately be empty, but a caller that uses one value to domain-separate fields needs it *not* to be. `NonEmpty<T>` carries that invariant in the type, checked once at construction: `nonempty!("users/email")` is checked at compile time (an empty literal does not compile), and `NonEmpty::new(value)` checks a dynamic value structurally — `""`, `None`, `Some("")` and `("", "")` are all rejected, without parsing any encoding. Bound an API on `TryIntoNonEmpty` to accept both a plain `"users/email"` and a proven `NonEmpty` at the same call site.
+An AEAD associated-data value or PRF context can legitimately be empty, but a caller that uses one value to domain-separate fields needs it *not* to be. `NonEmpty<T>` carries that invariant in the type, checked once at construction: `nonempty!("users/email")` is checked at compile time (an empty literal does not compile), and `NonEmpty::new(value)` checks a dynamic value structurally — `""`, `None`, `Some("")` and `("", "")` are all rejected, without parsing any encoding. An API that requires the invariant takes `NonEmpty<T>` directly; a bare `&str` argument cannot be value-checked at compile time, so there is deliberately no implicit conversion from one.
 
 ```rust
-use vitaminc_protected::{nonempty, EmptyError, NonEmpty, TryIntoNonEmpty};
+use vitaminc_protected::{nonempty, EmptyError, NonEmpty};
 
-fn bind<C: TryIntoNonEmpty>(context: C) -> Result<NonEmpty<C::Inner>, EmptyError> {
-    context.try_into_non_empty()
-}
+// Compile-time checked: nonempty!("") does not compile.
+assert_eq!(nonempty!("users/email").get(), &"users/email");
 
-assert!(bind(nonempty!("users/email")).is_ok());
-assert!(bind("users/email").is_ok());
-assert_eq!(bind(("", None::<&str>)).unwrap_err(), EmptyError);
+// Runtime checked, once, for dynamic values.
+assert!(NonEmpty::new(String::from("users/email")).is_ok());
+assert_eq!(NonEmpty::new(("", None::<&str>)).unwrap_err(), EmptyError);
 ```
 
 ### Generators

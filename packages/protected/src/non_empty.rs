@@ -153,8 +153,7 @@ pub struct EmptyError;
 /// forcing the invariant on anyone who wants an empty context. It follows the
 /// `NonZero` pattern: the check ([`IsEmpty`]) happens exactly once, at
 /// construction, and after that the type carries the invariant, so an API can
-/// take a `NonEmpty<C>` (or bound on [`TryIntoNonEmpty`]) instead of
-/// re-checking on every use.
+/// take a `NonEmpty<C>` instead of re-checking on every use.
 ///
 /// `NonEmpty<T>` is transparent to the vitaminc context traits: wrapping a
 /// value changes nothing about how it is encoded, only what the type promises.
@@ -167,31 +166,33 @@ pub struct EmptyError;
 ///
 /// # Two ways to build one
 ///
-/// Literals are checked at compile time with [`nonempty!`](crate::nonempty);
-/// dynamic values are checked at runtime with [`NonEmpty::new`]. A plain
-/// `&'static str` cannot be value-checked at compile time — `""` and
-/// `"users/email"` are the same type — so an API that wants both a
-/// compile-time guarantee for literals *and* a plain-string call site bounds
-/// on [`TryIntoNonEmpty`], which accepts either form, and converts once on the
-/// way in:
+/// Literals are checked at compile time with [`nonempty!`](crate::nonempty) —
+/// an empty one fails to compile — and dynamic values are checked at runtime,
+/// once, with [`NonEmpty::new`]. There is no third path: a bare `&'static str`
+/// argument cannot be value-checked at compile time, because `""` and
+/// `"users/email"` are the same type, so an API accepting one directly could
+/// only downgrade to a runtime check while appearing to promise more. An API
+/// that requires the invariant therefore takes `NonEmpty<C>` itself, and the
+/// call site states which path it is on:
 ///
 /// ```rust
-/// use vitaminc_protected::{nonempty, EmptyError, NonEmpty, TryIntoNonEmpty};
+/// use vitaminc_protected::{nonempty, EmptyError, NonEmpty};
 ///
-/// fn bind<C: TryIntoNonEmpty>(context: C) -> Result<NonEmpty<C::Inner>, EmptyError> {
-///     context.try_into_non_empty()
+/// fn bind<C>(context: NonEmpty<C>) -> NonEmpty<C> {
+///     context
 /// }
 ///
 /// // A literal: proven non-empty at compile time, no runtime check.
-/// assert!(bind(nonempty!("users/email")).is_ok());
+/// assert_eq!(bind(nonempty!("users/email")).get(), &"users/email");
 ///
-/// // A plain string: checked structurally, once, here.
-/// assert!(bind("users/email").is_ok());
-/// assert_eq!(bind("").unwrap_err(), EmptyError);
+/// // A dynamic value: checked structurally, once, at construction.
+/// let field = String::from("users/email");
+/// assert_eq!(bind(NonEmpty::new(field)?).get(), "users/email");
 ///
 /// // Nesting carries the invariant through.
-/// assert!(bind(("users", Some("email"))).is_ok());
-/// assert_eq!(bind(("", None::<&str>)).unwrap_err(), EmptyError);
+/// assert!(NonEmpty::new(("users", Some("email"))).is_ok());
+/// assert_eq!(NonEmpty::new(("", None::<&str>)).unwrap_err(), EmptyError);
+/// # Ok::<(), EmptyError>(())
 /// ```
 ///
 /// # Examples
@@ -275,57 +276,6 @@ impl NonEmpty<&'static [u8]> {
     pub const fn from_static_bytes(value: &'static [u8]) -> Self {
         assert!(!value.is_empty(), "a non-empty context cannot be empty");
         Self(value)
-    }
-}
-
-/// Conversion into a [`NonEmpty`] that accepts either an already-proven
-/// `NonEmpty<T>` (infallible, no check) or a raw value (checked structurally).
-///
-/// Bound on this to keep a plain-string call site while still rejecting an
-/// empty context: `"users/email"` and [`nonempty!`](crate::nonempty)`("users/email")` both
-/// satisfy it, and the literal form costs nothing at runtime.
-///
-/// # Examples
-///
-/// ```rust
-/// use vitaminc_protected::{nonempty, EmptyError, TryIntoNonEmpty};
-///
-/// let checked = "users/email".try_into_non_empty()?;
-/// let proven = nonempty!("users/email").try_into_non_empty()?;
-/// assert_eq!(checked, proven);
-///
-/// assert_eq!("".try_into_non_empty().unwrap_err(), EmptyError);
-/// # Ok::<(), EmptyError>(())
-/// ```
-pub trait TryIntoNonEmpty: Sized {
-    /// The value carried by the resulting [`NonEmpty`].
-    type Inner;
-
-    /// Converts `self` into a [`NonEmpty`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`EmptyError`] if `self` is a raw value that is
-    /// [empty](IsEmpty). A `NonEmpty` input never fails.
-    fn try_into_non_empty(self) -> Result<NonEmpty<Self::Inner>, EmptyError>;
-}
-
-impl<T> TryIntoNonEmpty for T
-where
-    T: IsEmpty,
-{
-    type Inner = T;
-
-    fn try_into_non_empty(self) -> Result<NonEmpty<T>, EmptyError> {
-        NonEmpty::new(self)
-    }
-}
-
-impl<T> TryIntoNonEmpty for NonEmpty<T> {
-    type Inner = T;
-
-    fn try_into_non_empty(self) -> Result<NonEmpty<T>, EmptyError> {
-        Ok(self)
     }
 }
 
@@ -471,21 +421,6 @@ mod tests {
 
         let nested = NonEmpty::new(("users", Some("email"))).unwrap();
         assert_eq!(nested.into_inner(), ("users", Some("email")));
-    }
-
-    #[test]
-    fn try_into_non_empty_accepts_both_forms() {
-        let proven = nonempty!("users/email").try_into_non_empty().unwrap();
-        let checked = "users/email".try_into_non_empty().unwrap();
-        assert_eq!(proven, checked);
-
-        assert_eq!("".try_into_non_empty().unwrap_err(), EmptyError);
-        assert_eq!(String::new().try_into_non_empty().unwrap_err(), EmptyError);
-        assert_eq!(
-            (None::<&str>, "").try_into_non_empty().unwrap_err(),
-            EmptyError
-        );
-        assert!(("", "email").try_into_non_empty().is_ok());
     }
 
     #[test]

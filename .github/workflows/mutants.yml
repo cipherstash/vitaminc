@@ -203,19 +203,10 @@ jobs:
             [ -s "$out/timeout.txt" ] && cat "$out/timeout.txt"
             exit 1
           fi
-          # Only three exits mean the sweep actually completed: 0 (all mutants
-          # caught), 2 (missed mutants) and 3 (timeouts) — and 2/3 are already
-          # enforced via missed.txt/timeout.txt above. Everything else means it
-          # did not complete: 4 (the unmutated baseline failed to build or
-          # test), 70 (internal tool error), an OOM kill, … . The presence of
-          # outcomes.json cannot stand in for this check — it is written
-          # incrementally after the baseline, so a mid-run death leaves it on
-          # disk with most mutants untested.
-          case "${{ steps.mutants.outputs.exit_code }}" in
-            0|2|3) ;;
-            *)
-              echo "::error::cargo-mutants did not complete (exit ${{ steps.mutants.outputs.exit_code }}) — check the run logs."
-              exit 1
-              ;;
-          esac
+          # cargo-mutants failed before producing results (e.g. baseline tests
+          # failed) — surface that as a gate failure rather than a false pass.
+          if [ "${{ steps.mutants.outputs.exit_code }}" != "0" ] && [ ! -f "$out/outcomes.json" ]; then
+            echo "::error::cargo-mutants did not complete (exit ${{ steps.mutants.outputs.exit_code }}) — check the run logs."
+            exit 1
+          fi
           echo "No surviving mutants in the PR diff."
