@@ -11,21 +11,28 @@ use std::borrow::Cow;
 /// | value | empty when |
 /// |---|---|
 /// | `()` | always |
-/// | `str`, `String`, `[u8]`, `[u8; N]`, `Vec<u8>`, `Cow<[u8]>` | `len() == 0` |
+/// | `str`, `String`, `[u8]`, `[u8; N]`, `Vec<u8>` | `len() == 0` |
+/// | `Cow<T>` | its referent is empty |
 /// | integers | never — a number is caller information |
 /// | `Option<T>` | `None`, or `Some(t)` with `t` empty |
 /// | `(A, B)` | **both** components empty |
-/// | [`NonEmpty<T>`] | never, by construction |
 ///
 /// A composite is empty only when it contributes nothing: `("", "email")`
 /// still separates from `("", "id")`, so it is not empty, whereas `("", "")`,
 /// `Some("")` and `Some(None)` are. This is the definition a downstream crate
 /// would otherwise have to reconstruct by parsing the encoded bytes.
 ///
-/// Because the check runs before encoding, an *already-encoded* context (a
-/// `PrfContext` or `Aad` built from an empty value) is judged on its encoded
-/// bytes, which are usually non-empty because of framing. The check is for
-/// values handed to vitaminc, not for values vitaminc has already framed.
+/// [`NonEmpty<T>`] deliberately does **not** implement `IsEmpty`, so it
+/// composes only at the outermost position: wrap the whole composite
+/// (`NonEmpty::new(("tenant", "email"))`), not the parts — a proven part
+/// nested inside a larger value would force the outer check to be re-derived
+/// anyway.
+///
+/// Because the check runs before encoding, *already-encoded* contexts (a
+/// `PrfContext` or an `Aad`) do not implement `IsEmpty` either: framing makes
+/// their bytes non-empty even when built from an empty value, so an encoded
+/// byte check would certify exactly the degenerate case `NonEmpty` exists to
+/// exclude. Check the value on its way *into* vitaminc, before it is framed.
 ///
 /// Implement this for your own context types so they can be wrapped in
 /// [`NonEmpty`].
@@ -70,9 +77,13 @@ impl IsEmpty for Vec<u8> {
     }
 }
 
-impl IsEmpty for Cow<'_, [u8]> {
+/// A `Cow` is as empty as its referent, whichever side it holds.
+impl<T> IsEmpty for Cow<'_, T>
+where
+    T: IsEmpty + ToOwned + ?Sized,
+{
     fn is_empty(&self) -> bool {
-        self.as_ref().is_empty()
+        T::is_empty(self.as_ref())
     }
 }
 
@@ -147,6 +158,12 @@ pub struct EmptyError;
 ///
 /// `NonEmpty<T>` is transparent to the vitaminc context traits: wrapping a
 /// value changes nothing about how it is encoded, only what the type promises.
+///
+/// It is transparent to `Debug` too: unlike [`Protected`](crate::Protected),
+/// it does not redact, so `{:?}` prints the inner value verbatim. Context
+/// values are normally public identifiers (`"users/email"`), which is why this
+/// is the default — but if a context is derived from sensitive data, wrap it
+/// in a redacting type before proving it non-empty, not after.
 ///
 /// # Two ways to build one
 ///
@@ -244,6 +261,23 @@ impl NonEmpty<&'static str> {
     }
 }
 
+impl NonEmpty<&'static [u8]> {
+    /// Wraps a static byte string, checking at compile time when evaluated in
+    /// a `const` context. Prefer [`nonempty_bytes!`](crate::nonempty_bytes),
+    /// which does that for you.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value` is empty. In the initialiser of a `const` item that
+    /// panic is a compile error, which is the point.
+    /// At runtime it is a real panic, so use [`NonEmpty::new`] for values that
+    /// are not literals.
+    pub const fn from_static_bytes(value: &'static [u8]) -> Self {
+        assert!(!value.is_empty(), "a non-empty context cannot be empty");
+        Self(value)
+    }
+}
+
 /// Conversion into a [`NonEmpty`] that accepts either an already-proven
 /// `NonEmpty<T>` (infallible, no check) or a raw value (checked structurally).
 ///
@@ -297,16 +331,27 @@ impl<T> TryIntoNonEmpty for NonEmpty<T> {
 
 /// A [`NonEmpty<&'static str>`](NonEmpty) checked at compile time.
 ///
-/// Expands to a `const` item, so an empty literal fails to compile rather
+/// Expands to a `const` item, so an empty value fails to compile rather
 /// than panicking at runtime. (A `const { … }` block would not do: its
 /// evaluation is deferred to codegen, so `cargo check` — and any tool built
 /// on it — would not report the error.)
+///
+/// Any `&'static str` constant expression works, not just a literal: a
+/// `const`, or a `concat!`/`env!` composition, stays compile-checked because
+/// the check runs in the `const` item the macro expands to. For byte-string
+/// contexts use [`nonempty_bytes!`](crate::nonempty_bytes).
 ///
 /// ```rust
 /// use vitaminc_protected::{nonempty, NonEmpty};
 ///
 /// let context: NonEmpty<&'static str> = nonempty!("users/email");
 /// assert_eq!(context.get(), &"users/email");
+///
+/// const TABLE: &str = "users";
+/// let composed = nonempty!(concat!("users", "/", "email"));
+/// let from_const = nonempty!(TABLE);
+/// assert_eq!(composed.get(), &"users/email");
+/// assert_eq!(from_const.get(), &"users");
 /// ```
 ///
 /// ```rust,compile_fail
@@ -314,8 +359,34 @@ impl<T> TryIntoNonEmpty for NonEmpty<T> {
 /// ```
 #[macro_export]
 macro_rules! nonempty {
-    ($value:literal) => {{
+    ($value:expr) => {{
         const CONTEXT: $crate::NonEmpty<&'static str> = $crate::NonEmpty::from_static($value);
+        CONTEXT
+    }};
+}
+
+/// A [`NonEmpty<&'static [u8]>`](NonEmpty) checked at compile time.
+///
+/// The byte-string twin of [`nonempty!`](crate::nonempty) — the `Aad` and
+/// `PrfContext` APIs are byte-oriented, so a domain tag that is naturally a
+/// byte string deserves the same compile-time path as a `&str` one, instead
+/// of a runtime `NonEmpty::new(b"tag".as_slice()).unwrap()`.
+///
+/// ```rust
+/// use vitaminc_protected::{nonempty_bytes, NonEmpty};
+///
+/// let context: NonEmpty<&'static [u8]> = nonempty_bytes!(b"users/email");
+/// assert_eq!(context.get(), &b"users/email".as_slice());
+/// ```
+///
+/// ```rust,compile_fail
+/// let context = vitaminc_protected::nonempty_bytes!(b"");
+/// ```
+#[macro_export]
+macro_rules! nonempty_bytes {
+    ($value:expr) => {{
+        const CONTEXT: $crate::NonEmpty<&'static [u8]> =
+            $crate::NonEmpty::from_static_bytes($value);
         CONTEXT
     }};
 }
@@ -432,6 +503,39 @@ mod tests {
         // constant; the `const fn` runs at runtime here.
         let leaked: &'static str = Box::leak(empty.into_boxed_str());
         let _ = NonEmpty::from_static(leaked);
+    }
+
+    #[test]
+    fn from_static_bytes_accepts_a_non_empty_byte_string() {
+        const CONTEXT: NonEmpty<&'static [u8]> = NonEmpty::from_static_bytes(b"users/email");
+        assert_eq!(CONTEXT.get(), &b"users/email".as_slice());
+        assert_eq!(nonempty_bytes!(b"users/email"), CONTEXT);
+    }
+
+    #[test]
+    #[should_panic(expected = "a non-empty context cannot be empty")]
+    fn from_static_bytes_panics_on_empty_bytes_at_runtime() {
+        let leaked: &'static [u8] = Box::leak(Vec::new().into_boxed_slice());
+        let _ = NonEmpty::from_static_bytes(leaked);
+    }
+
+    #[test]
+    fn nonempty_macro_accepts_any_static_constant_expression() {
+        const TABLE: &str = "users";
+        assert_eq!(nonempty!(TABLE).get(), &"users");
+        assert_eq!(
+            nonempty!(concat!("users", "/", "email")).get(),
+            &"users/email"
+        );
+    }
+
+    #[test]
+    fn cow_is_as_empty_as_its_referent() {
+        assert!(IsEmpty::is_empty(&Cow::<str>::Borrowed("")));
+        assert!(IsEmpty::is_empty(&Cow::<str>::Owned(String::new())));
+        assert!(!IsEmpty::is_empty(&Cow::<str>::Borrowed("x")));
+        assert!(IsEmpty::is_empty(&Cow::<[u8]>::Owned(Vec::new())));
+        assert!(!IsEmpty::is_empty(&Cow::<[u8]>::Owned(vec![1])));
     }
 
     #[test]
