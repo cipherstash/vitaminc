@@ -1,8 +1,9 @@
-
+## [0.2.0] - 2026-09-02
 
 ### Documentation
 
-- fix fabricated APIs, wrong metadata, and stale claims; add SECURITY.md
+- Corrected fabricated APIs, wrong metadata and stale claims in the published documentation; added SECURITY.md.
+
 
 
 

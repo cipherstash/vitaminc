@@ -1,13 +1,13 @@
+## [0.2.0] - 2026-09-02
 
+### Breaking
 
-### Fixes
+- **Breaking:** Permutation keys wipe on drop and are no longer `Copy` (#181); the `T: Zeroize` bound propagates to code generic over them.
 
-- thread T: Zeroize bound and drop Copy for #181
+### Performance
 
-### Refactoring
+- `invert()` borrows the key instead of cloning it.
 
-- borrow in invert() instead of cloning the key
-- single-source into_inner_unchecked; document drop-glue guarantees
 
 
 

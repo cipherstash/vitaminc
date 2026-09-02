@@ -1,3 +1,9 @@
+## [0.2.0] - 2026-09-02
+
+### Breaking
+
+- **Breaking:** Generated values wipe on drop and are no longer `Copy` (#181); the `T: Zeroize` bound propagates to code generic over them.
+
 # Changelog
 
 All notable changes to the `vitaminc-random` crate will be documented in this file.
@@ -5,11 +11,6 @@ All notable changes to the `vitaminc-random` crate will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
-
-
-### Fixes
-
-- thread T: Zeroize bound and drop Copy for #181
 
 
 

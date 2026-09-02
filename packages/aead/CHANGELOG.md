@@ -1,3 +1,30 @@
+## [0.2.0] - 2026-09-02
+
+### Breaking
+
+- **Breaking:** Ciphertexts sealed by earlier versions no longer decrypt. Structural authentication changed on every path — map values are now sealed against their key, sequence elements against a labelled per-position derivation, and empty/absent markers under their own domain. Re-encrypt before upgrading; there is no migration path and none is planned before 1.0.
+- **Breaking:** Every leaf now carries an authenticated wire-version byte (`version ‖ nonce ‖ ciphertext ‖ tag`). Unknown versions are rejected at parse time, and because the byte is bound under the tag, relabelling a stored leaf fails verification rather than selecting different parsing rules. `LocalCipherText::wire_version` is a keyless peek, so operators and migration tooling can tell an old-format record from a current one on a decrypt failure.
+- **Breaking:** Map keys are authenticated. They travel in the clear but are now cryptographically inseparable from their value, so a stored ciphertext's keys can no longer be swapped or renamed to reassign encrypted values to different fields.
+- **Breaking:** `decrypt_map` rejects duplicate keys before the visitor sees any entry. Both copies of a duplicated key verify under the same AAD, so a last-wins visitor let an attacker splice one stale field into an otherwise-current ciphertext.
+- **Breaking:** Composites containing only passthrough items are refused on both the encrypt and decrypt sides. They previously carried no AEAD tag at all, decrypted under any AAD, and as a map value re-opened the key-renaming attack.
+- **Breaking:** `Decrypt` takes AAD symmetrically with `Encrypt`, and `Cipher::encrypt_seq`/`encrypt_map` take the AAD once when the sub-cipher is built — `encrypt_next`, `encrypt_value`, `encrypt_entry` and `end` no longer take their own. A hand-written impl can no longer thread one AAD to the elements and a different one to the empty marker, which used to produce a ciphertext that encrypted fine and was unreadable on the first empty collection in production.
+- **Breaking:** `CipherText<Leaf, P>` replaces the per-cipher ciphertext containers, and a `Passthrough` associated type replaces the `T: Any` generics on the passthrough methods, so a cipher declares its passthrough currency once and FFI ciphers can carry an owned host value with no type erasure. `AesCipherText` is now an alias for it — pattern matches and variant construction are unaffected.
+- **Breaking:** `StaticMapBuilder::nested_entry` builds its inner map through a closure instead of attaching a pre-built one. A renamed outer key or a nested map spliced from another record now fails at every inner open.
+
+Sequence element order and membership are still deliberately unauthenticated — retrieval order differs from insertion order for the database-record use case. The residual caller obligations are documented on `decrypt_seq` and `decrypt_map`.
+
+### Features
+
+- Derive `Encrypt` and `Decrypt` on your own structs instead of hand-writing impls, which is also what keeps two same-typed fields from being swappable in stored ciphertext. Fields that should stay readable are marked `#[aead(passthrough)]`.
+- `ContextTag` returns on the revised `Cipher`/`Decipher` traits, with `context` plus `decrypt`/`decrypt_with_aad` helpers, and `NonEmpty` makes an AAD context's non-emptiness a type-level guarantee checked once at construction.
+- `Encrypt`/`Decrypt` for the `Equatable` controlled type.
+- Map keys can now be derived at runtime: the entry methods accept any `Into<Cow<'static, str>>`, and `HashMap<String, T>` gained an `Encrypt` impl to match the existing `Decrypt`.
+- `Element` wraps row-at-a-time sequence access, and `Aad::for_leaf_type` binds a leaf's declared type on the expectation side.
+
+### Fixes
+
+- Hostile input can no longer drive quadratic scans or eager allocations during decode.
+
 # Changelog
 
 All notable changes to `vitaminc-aead` will be documented in this file.
@@ -5,64 +32,6 @@ All notable changes to `vitaminc-aead` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
-
-
-### Documentation
-
-- docs(aead),refactor(encrypt): address decrypt-path review findings
-- docs(aead),test(encrypt): document ContextTag limits; add negative-AAD tests
-- write the `#[aead(...)]` reference once and inline it everywhere
-- fix every broken intra-doc link and gate them in CI
-
-### Features
-
-- re-introduce ContextTag on the revised Cipher/Decipher traits
-- add ContextTag::context + decrypt/decrypt_with_aad helper
-- implement Encrypt/Decrypt for the Equatable controlled type
-- authenticate map keys and accept runtime-derived keys
-- shared generic CipherText container and typed passthrough currency
-- self-describing decryption and passthrough re-homing
-- NAPI value bridge crate for Node.js FFI encryption
-- authenticated wire-version byte on every ciphertext leaf
-- add Aad::for_leaf_type expectation-side type binding
-- add type-erased passthrough channel for self-describing values
-- carry unencrypted subtrees via FfiValue::Passthrough
-- add Element wrapper for row-at-a-time sequence access
-- derive Encrypt and Decrypt so structs need no hand-written impls
-- store chosen fields in the clear with #[aead(passthrough)]
-- add NonEmpty context wrapper checked once at construction
-
-### Fixes
-
-- authenticate empty composite values
-- close marker and passthrough authentication bypasses
-- authenticate container shape and reject duplicate map keys on decrypt
-- bind the outer key of static nested map entries
-- keep hostile input from leveraging quadratic scans and eager reservations
-- close the derive's three review findings and pin the guards with trybuild
-- let a decipher without passthrough inherit a refusal
-- judge context emptiness before encoding, and align conversion coverage
-
-### Refactoring
-
-- thread AAD through the decrypt path to mirror encrypt
-- align ContextTag::aad_with arg order with encrypt_with_aad
-- address ContextTag decrypt-helper review
-- merge duplicate HashMap Encrypt impls into one generic impl
-- capture composite AAD once at sub-cipher construction
-- route fixed-array sealing through CipherTextBuilder
-- move leaf-type AAD binding into aead-value as an IntoAad type
-- move Decrypt into its own module to mirror Encrypt
-
-### Testing
-
-- close Tier-1 cargo-mutants gaps (ConstantTimeEq, PAE invariant)
-- close remaining Tier-1 cargo-mutants gaps (ts_ne, zeroize, read_nonce, hlist CI)
-- address code-review findings on the Tier-1 mutation fixes
-- test(aead),test(encrypt): close ContextTag coverage gaps from review
-- cover passthrough re-homing and exempt the untestable NAPI boundary
-- close the CRAP and mutants gate gaps in the NAPI bridge PR
-- pin the defaulted MapAccess::next_entry and its contract
 
 
 ### Documentation

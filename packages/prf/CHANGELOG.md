@@ -1,26 +1,16 @@
-
+## [0.2.0] - 2026-09-02
 
 ### Features
 
-- add structured PRF foundation
-- reject duplicate map keys at build time
-- add NonEmpty context wrapper checked once at construction
+- Structured PRF foundation: derive deterministic index terms from structured values under a keyed PRF, with duplicate map keys rejected at build time.
+- `NonEmpty` contexts are checked once at construction rather than at each call site.
 
 ### Fixes
 
-- prevent ambiguous value encodings
-- preserve protected secret lifecycles
-- tag Option contexts with the option-some domain
-- derive HashMap terms in a deterministic order
-- wipe HMAC key-normalization temporaries
-- give refine its own domain tag
-- judge context emptiness before encoding, and align conversion coverage
+- Distinct values can no longer produce the same encoding: `Option` contexts carry an option-some domain tag, `refine` derives under its own domain tag, and `HashMap` terms derive in a deterministic order.
+- Secret lifecycles are preserved through the digest path, and HMAC key-normalization temporaries are wiped.
 
 ### Performance
 
-- stream fixed-size leaves without heap copies
+- Fixed-size leaves stream without heap copies.
 
-### Refactoring
-
-- use protected digest for HMAC
-- keep the PRF crate backend-agnostic

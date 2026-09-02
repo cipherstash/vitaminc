@@ -1,22 +1,14 @@
-
-
-### Documentation
-
-- fix fabricated APIs, wrong metadata, and stale claims; add SECURITY.md
+## [0.2.0] - 2026-09-02
 
 ### Features
 
-- add structured PRF foundation
-- add the vitaminc-hmac PRF backend crate
+- The structured PRF foundation and its HMAC backend are reachable from the facade crate.
 
 ### Fixes
 
-- make the prf feature usable on its own
-- require a full-strength PRF key
+- The `prf` feature builds on its own, without pulling in unrelated features.
+- Weak PRF keys are rejected.
 
-### Testing
-
-- compare masked debug output to plain literals
 
 
 

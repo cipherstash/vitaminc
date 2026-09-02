@@ -1,14 +1,10 @@
-
+## [0.2.0] - 2026-09-02
 
 ### Features
 
-- add the vitaminc-hmac PRF backend crate
+- New crate: an HMAC backend for the structured PRF, keeping `vitaminc-prf` itself backend-agnostic.
 
 ### Fixes
 
-- require a full-strength PRF key
+- Weak PRF keys are rejected, with an error that says why.
 
-### Testing
-
-- assert the weak-key rejection explains itself
-- pair hex digits without chunks_exact

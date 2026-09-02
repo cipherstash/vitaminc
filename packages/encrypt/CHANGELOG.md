@@ -1,68 +1,26 @@
+## [0.2.0] - 2026-09-02
 
+### Breaking
 
-### Documentation
-
-- correct stale #181 zeroize note on Aes256Cipher::open
-- docs(aead),refactor(encrypt): address decrypt-path review findings
-- docs(aead),test(encrypt): document ContextTag limits; add negative-AAD tests
-- fix fabricated APIs, wrong metadata, and stale claims; add SECURITY.md
-- write the `#[aead(...)]` reference once and inline it everywhere
-- correct two comments the custody work outdated
-- correct doc claims flagged by review
+- **Breaking:** Ciphertexts sealed by earlier versions no longer decrypt — the leaf format gained an authenticated wire-version byte and structural authentication changed on every path. Re-encrypt before upgrading; there is no migration path and none is planned before 1.0.
+- **Breaking:** `Decrypt` takes AAD symmetrically with `Encrypt`, and sequence and map ciphers capture the AAD once at construction rather than per element and again at `end`. Hand-written impls need updating; see `vitaminc-aead` for the full trait changes.
+- **Breaking:** `AesCipherText` is now an alias for the shared `CipherText<LocalCipherText, BoxedPassthrough>`. Pattern matches and variant construction are unaffected; boxed passthrough payloads come back out through `AesDecipher::decrypt_passthrough_as`.
 
 ### Features
 
-- expose Aes256Cipher::decipher to construct a Decipher
-- re-introduce ContextTag on the revised Cipher/Decipher traits
-- add ContextTag::context + decrypt/decrypt_with_aad helper
-- authenticate map keys and accept runtime-derived keys
-- shared generic CipherText container and typed passthrough currency
-- self-describing decryption and passthrough re-homing
-- authenticated wire-version byte on every ciphertext leaf
-- add type-erased passthrough channel for self-describing values
-- carry unencrypted subtrees via FfiValue::Passthrough
-- add Element wrapper for row-at-a-time sequence access
-- derive Encrypt and Decrypt so structs need no hand-written impls
-- store chosen fields in the clear with #[aead(passthrough)]
+- Derive `Encrypt` and `Decrypt` on your own structs, and keep chosen fields readable with `#[aead(passthrough)]`.
+- `Aes256Cipher::decipher` constructs a `Decipher` directly, and `ContextTag` gains `context` plus `decrypt`/`decrypt_with_aad` helpers.
+- Self-describing decryption re-homes passthrough values, and `Element` wraps row-at-a-time sequence access.
 
 ### Fixes
 
-- authenticate empty composite values
-- close marker and passthrough authentication bypasses
-- authenticate container shape and reject duplicate map keys on decrypt
-- address review findings across the FFI value stack
-- bind the outer key of static nested map entries
-- keep hostile input from leveraging quadratic scans and eager reservations
-- require an empty payload when verifying absence markers
-- close the derive's three review findings and pin the guards with trybuild
-
-### Miscellaneous
-
-- rustfmt context_tag test to satisfy CI
+- Closed three authentication bypasses reachable by an attacker holding a stored ciphertext: all-passthrough composites carried no tag at all, a `Some` leaf could be laundered into a `None`, and absence markers were verified without checking their payload was empty.
+- Map keys, container shape and empty composites are all authenticated now; `decrypt_map` rejects duplicate keys before the visitor sees an entry.
 
 ### Performance
 
-- borrow AAD per seq/map element instead of cloning
-- seal fixed-width arrays without a reallocating copy
+- Fixed-width arrays seal without a reallocating copy, and sequence and map elements borrow their AAD instead of cloning it per element.
 
-### Refactoring
-
-- thread AAD through the decrypt path to mirror encrypt
-- tidy decrypt AAD path per code review
-- align ContextTag::aad_with arg order with encrypt_with_aad
-- address ContextTag decrypt-helper review
-- capture composite AAD once at sub-cipher construction
-- route fixed-array sealing through CipherTextBuilder
-- derive Encrypt for Key and the tagged leaves
-
-### Testing
-
-- split test-module cfg so cargo-mutants skips it
-- add positive AAD roundtrip for the sequence path
-- test(aead),test(encrypt): close ContextTag coverage gaps from review
-- cover Equatable AEAD round-trip and tamper axes
-- cover empty map decryption
-- share the integration-test cipher fixture
 
 
 ### Documentation

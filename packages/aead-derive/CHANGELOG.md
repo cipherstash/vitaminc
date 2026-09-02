@@ -1,18 +1,11 @@
-
-
-### Documentation
-
-- write the `#[aead(...)]` reference once and inline it everywhere
+## [0.2.0] - 2026-09-02
 
 ### Features
 
-- derive Encrypt and Decrypt so structs need no hand-written impls
-- store chosen fields in the clear with #[aead(passthrough)]
+- `#[derive(Encrypt, Decrypt)]` generates the impls a struct previously needed by hand — which is also what stops two same-typed fields being swappable in stored ciphertext.
+- `#[aead(passthrough)]` keeps chosen fields in the clear inside an otherwise encrypted value.
 
 ### Fixes
 
-- close the derive's three review findings and pin the guards with trybuild
+- Closed three review findings in the generated code, with the guards pinned by compile-fail tests.
 
-### Testing
-
-- cover the expansion logic rather than exempt it from the gates

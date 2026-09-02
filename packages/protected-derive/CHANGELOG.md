@@ -1,8 +1,9 @@
+## [0.2.0] - 2026-09-02
 
+### Fixes
 
-### Miscellaneous
+- Updated to `syn` 3.
 
-- bump syn from 2.0.119 to 3.0.3
 
 
 
