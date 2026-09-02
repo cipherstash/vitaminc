@@ -1,0 +1,26 @@
+
+
+### Features
+
+- add structured PRF foundation
+- reject duplicate map keys at build time
+- add NonEmpty context wrapper checked once at construction
+
+### Fixes
+
+- prevent ambiguous value encodings
+- preserve protected secret lifecycles
+- tag Option contexts with the option-some domain
+- derive HashMap terms in a deterministic order
+- wipe HMAC key-normalization temporaries
+- give refine its own domain tag
+- judge context emptiness before encoding, and align conversion coverage
+
+### Performance
+
+- stream fixed-size leaves without heap copies
+
+### Refactoring
+
+- use protected digest for HMAC
+- keep the PRF crate backend-agnostic

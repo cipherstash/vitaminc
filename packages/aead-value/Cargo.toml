@@ -12,10 +12,10 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-vitaminc-aead = { version = "0.2.0-pre.1", path = "../aead" }
-vitaminc-protected = { version = "0.2.0-pre.1", path = "../protected" }
+vitaminc-aead = { version = "0.2.0-pre.2", path = "../aead" }
+vitaminc-protected = { version = "0.2.0-pre.2", path = "../protected" }
 
 zeroize = { workspace = true }
 
 [dev-dependencies]
-vitaminc-encrypt = { version = "0.2.0-pre.1", path = "../encrypt" }
+vitaminc-encrypt = { version = "0.2.0-pre.2", path = "../encrypt" }

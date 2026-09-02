@@ -1,5 +1,24 @@
 
 
+### Documentation
+
+- fix fabricated APIs, wrong metadata, and stale claims; add SECURITY.md
+
+### Features
+
+- add structured PRF foundation
+- add the vitaminc-hmac PRF backend crate
+
+### Fixes
+
+- make the prf feature usable on its own
+- require a full-strength PRF key
+
+### Testing
+
+- compare masked debug output to plain literals
+
+
 
 
 ### Refactoring

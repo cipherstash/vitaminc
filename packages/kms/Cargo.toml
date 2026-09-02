@@ -12,9 +12,9 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-vitaminc-async-traits = { version = "0.2.0-pre.1", path = "../async-traits" }
-vitaminc-traits = { version = "0.2.0-pre.1", path = "../traits" }
-vitaminc-protected = { version = "0.2.0-pre.1", path = "../protected" }
+vitaminc-async-traits = { version = "0.2.0-pre.2", path = "../async-traits" }
+vitaminc-traits = { version = "0.2.0-pre.2", path = "../traits" }
+vitaminc-protected = { version = "0.2.0-pre.2", path = "../protected" }
 aws-sdk-kms = "1.109.0"
 aws-config = "1.8.18"
 

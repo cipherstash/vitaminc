@@ -1,5 +1,19 @@
 
 
+### Documentation
+
+- fix fabricated APIs, wrong metadata, and stale claims; add SECURITY.md
+
+### Fixes
+
+- keep clippy quiet about the AWS SDK's large error
+
+### Miscellaneous
+
+- bump aws-sdk-kms from 1.107.0 to 1.109.0
+- bump aws-config from 1.8.17 to 1.8.18
+
+
 ### Miscellaneous
 
 - bump aws-sdk-kms from 1.106.0 to 1.107.0

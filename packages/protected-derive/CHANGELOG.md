@@ -1,5 +1,10 @@
 
 
+### Miscellaneous
+
+- bump syn from 2.0.119 to 3.0.3
+
+
 
 
 ### Fixes

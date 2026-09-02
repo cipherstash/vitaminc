@@ -1,5 +1,15 @@
 
 
+### Fixes
+
+- thread T: Zeroize bound and drop Copy for #181
+
+### Refactoring
+
+- borrow in invert() instead of cloning the key
+- single-source into_inner_unchecked; document drop-glue guarantees
+
+
 
 ### Fixes
 

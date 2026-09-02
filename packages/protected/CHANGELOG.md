@@ -1,4 +1,38 @@
 
+
+### Documentation
+
+- fix fabricated APIs, wrong metadata, and stale claims; add SECURITY.md
+
+### Features
+
+- add NonEmpty context wrapper checked once at construction
+- compile-time byte-string contexts, wider nonempty!, generic Cow emptiness
+
+### Fixes
+
+- zeroize controlled types on drop ([#181](https://github.com/cipherstash/vitaminc/pull/181))
+- harden digest secret lifecycle
+- skip trybuild harness under Miri
+- give refine its own domain tag
+
+### Miscellaneous
+
+- remove manually added changelog entry
+
+### Refactoring
+
+- move instead of copy in flatten_array
+- single-source into_inner_unchecked; document drop-glue guarantees
+- make move_inner_out a safe fn via an unsafe trait
+- use protected digest for HMAC
+- drop TryIntoNonEmpty — a bare literal cannot be compile-checked
+
+### Testing
+
+- lock down negative-space guarantees
+- drop the const-eval trybuild snapshot and the rust-src CI dependency
+
 ### Security
 
 - require `ProtectedDigest` state to implement `ZeroizeOnDrop`
