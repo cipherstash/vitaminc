@@ -922,7 +922,7 @@ checksum = "9fb9654ba8355388abeb8dcb4fc62f511300867002afc858860463bdd9fe0c44"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.4",
 ]
 
 [[package]]
@@ -2586,12 +2586,14 @@ dependencies = [
  "bitvec",
  "digest 0.11.2",
  "quickcheck",
+ "quickcheck_macros",
  "rmp-serde",
  "serde",
  "serde_bytes",
  "serde_json",
  "sha2",
  "subtle",
+ "thiserror",
  "trybuild",
  "vitaminc-protected-derive",
  "zeroize",

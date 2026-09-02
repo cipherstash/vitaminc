@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use vitaminc_protected::NonEmpty;
+
 use crate::PrfEncoding;
 
 const MAP_ENTRY_DOMAIN: &[u8] = b"vitaminc/prf/map-entry/v1";
@@ -79,8 +81,26 @@ impl<'a> PrfContext<'a> {
     }
 }
 
+// `PrfContext` deliberately does NOT implement `IsEmpty`: an already-encoded
+// context can only be judged on its bytes, and framing makes most encoded
+// contexts non-empty even when built from an empty value — so
+// `NonEmpty<PrfContext>` would certify exactly the degenerate value it exists
+// to exclude. Prove non-emptiness on the raw value, before it is encoded, then
+// convert: `NonEmpty<T>` where `T: IntoPrfContext`.
+
 pub trait IntoPrfContext<'a> {
     fn into_prf_context(self) -> PrfContext<'a>;
+}
+
+/// `NonEmpty<T>` is transparent: it encodes exactly as `T` does. The wrapper
+/// changes what the type promises, never the bytes derived from it.
+impl<'a, T> IntoPrfContext<'a> for NonEmpty<T>
+where
+    T: IntoPrfContext<'a>,
+{
+    fn into_prf_context(self) -> PrfContext<'a> {
+        self.into_inner().into_prf_context()
+    }
 }
 
 impl<'a> IntoPrfContext<'a> for PrfContext<'a> {
@@ -117,6 +137,12 @@ impl<'a, const N: usize> IntoPrfContext<'a> for [u8; N] {
 }
 
 impl<'a> IntoPrfContext<'a> for Vec<u8> {
+    fn into_prf_context(self) -> PrfContext<'a> {
+        PrfContext::typed(PrfEncoding::BYTES, &self)
+    }
+}
+
+impl<'a> IntoPrfContext<'a> for Cow<'a, [u8]> {
     fn into_prf_context(self) -> PrfContext<'a> {
         PrfContext::typed(PrfEncoding::BYTES, &self)
     }
@@ -285,6 +311,38 @@ mod tests {
     }
 
     #[test]
+    fn non_empty_is_transparent_to_the_encoding() {
+        assert_eq!(
+            NonEmpty::new("users/email").unwrap().into_prf_context(),
+            "users/email".into_prf_context()
+        );
+        assert_eq!(
+            Some(NonEmpty::new("users/email").unwrap()).into_prf_context(),
+            Some("users/email").into_prf_context()
+        );
+        assert_eq!(
+            NonEmpty::new(("users", "email"))
+                .unwrap()
+                .into_prf_context(),
+            ("users", "email").into_prf_context()
+        );
+        assert_eq!(
+            vitaminc_protected::nonempty!("users/email").into_prf_context(),
+            "users/email".into_prf_context()
+        );
+    }
+
+    #[test]
+    fn encoded_contexts_report_emptiness_of_their_bytes_only() {
+        assert!(PrfContext::empty().is_empty());
+        assert!(!PrfContext::from_slice(b"raw").is_empty());
+        // Framing makes an encoded empty value non-empty as bytes — which is
+        // exactly why `PrfContext` has no `IsEmpty` impl: the structural check
+        // belongs before encoding (`NonEmpty<T>` where `T: IntoPrfContext`).
+        assert!(!"".into_prf_context().is_empty());
+    }
+
+    #[test]
     fn context_value_types_are_separated() {
         assert_ne!("a".into_prf_context(), b"a".into_prf_context());
         assert_ne!(1_u8.into_prf_context(), 1_i8.into_prf_context());
@@ -295,6 +353,14 @@ mod tests {
     fn equivalent_context_containers_share_an_encoding() {
         assert_eq!("a".into_prf_context(), String::from("a").into_prf_context());
         assert_eq!(b"a".into_prf_context(), b"a".to_vec().into_prf_context());
+        assert_eq!(
+            Cow::<[u8]>::Borrowed(b"a").into_prf_context(),
+            b"a".to_vec().into_prf_context()
+        );
+        assert_eq!(
+            Cow::<[u8]>::Owned(b"a".to_vec()).into_prf_context(),
+            b"a".to_vec().into_prf_context()
+        );
     }
 
     #[test]
