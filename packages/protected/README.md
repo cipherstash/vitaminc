@@ -34,6 +34,10 @@ let x = Protected::new([0u8; 32]);
 ```
 
 `Protected` will call `zeroize` on the inner value when it goes out of scope.
+Because that wipe is a real `Drop`, `Protected` is never `Copy`, even when the
+inner type is: a bitwise copy would leave an un-wiped duplicate of the secret
+behind. Duplicating a protected value is always an explicit `clone()`, and each
+clone is wiped when it drops.
 It also provides an "opaque" implementation of the `Debug` trait so you can debug protected values
 without accidentally leaking their innards.
 

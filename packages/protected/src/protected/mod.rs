@@ -195,6 +195,70 @@ mod tests {
         );
     }
 
+    /// Regression test for #263: a `Copy` payload must still be wiped when
+    /// the wrapper drops. `Protected<T>` used to be `Copy` whenever `T` was,
+    /// which made a zeroizing `Drop` structurally impossible for exactly the
+    /// payloads that carry key material (`[u8; 32]` and friends). The payload
+    /// here is `Copy`, and the wipe must run anyway.
+    #[test]
+    fn drop_zeroizes_copy_payload() {
+        #[derive(Clone, Copy)]
+        struct CopyTracked<'a>(&'a AtomicBool);
+        impl Zeroize for CopyTracked<'_> {
+            fn zeroize(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let zeroized = AtomicBool::new(false);
+        {
+            let _p = Protected::new(CopyTracked(&zeroized));
+            assert!(!zeroized.load(Ordering::SeqCst));
+        }
+        assert!(
+            zeroized.load(Ordering::SeqCst),
+            "Protected::drop must zeroize a Copy payload"
+        );
+    }
+
+    /// Regression test for #263: `ZeroizeOnDrop` on `Protected<T>` must be
+    /// backed by real drop glue, not a bare marker impl. Byte arrays and byte
+    /// vectors are the payloads downstream key material actually uses.
+    #[test]
+    fn zeroize_on_drop_is_backed_by_drop_glue() {
+        fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+        assert_zeroize_on_drop::<Protected<[u8; 32]>>();
+        assert_zeroize_on_drop::<Protected<Vec<u8>>>();
+
+        // A marker-only `ZeroizeOnDrop` leaves `[u8; 32]` with no destructor
+        // at all; `needs_drop` is the compiler's word on whether one exists.
+        assert!(std::mem::needs_drop::<Protected<[u8; 32]>>());
+        assert!(std::mem::needs_drop::<Protected<Vec<u8>>>());
+    }
+
+    /// Regression test for #263: the bytes of a `Protected<[u8; 32]>` are
+    /// zero after its destructor runs. The wrapper lives in a `ManuallyDrop`
+    /// so its storage stays addressable once the destructor has been run by
+    /// hand.
+    #[test]
+    fn drop_zeroizes_array_bytes_in_place() {
+        use std::mem::ManuallyDrop;
+
+        let mut slot = ManuallyDrop::new(Protected::new([0xAB_u8; 32]));
+        assert_eq!(slot.0, [0xAB_u8; 32]);
+
+        // SAFETY: `slot` is dropped exactly once, here. The storage is a
+        // plain byte array on this stack frame, so reading it back after the
+        // destructor is a read of initialised `u8`s, and `slot` is never
+        // used as a live `Protected` again.
+        unsafe { ManuallyDrop::drop(&mut slot) };
+        let after: [u8; 32] = slot.0;
+        assert_eq!(
+            after, [0_u8; 32],
+            "Protected::drop must wipe the array bytes"
+        );
+    }
+
     /// `risky_unwrap` must move the secret out *without* the wrapper's `Drop`
     /// zeroizing it on the way (the caller now owns the live value).
     #[test]
