@@ -922,3 +922,21 @@ func TestCipherTextMakeMustMaterializeDecodedKind(t *testing.T) {
 		t.Fatalf("an unknown LeafKind must not materialize, got %#v", got)
 	}
 }
+
+func TestMarshalCipherTextRejectsOutOfRangeLeafKind(t *testing.T) {
+	// The encode-side half of the pair above: a Classify that claims a leaf
+	// under a kind outside the wire table is refused before any tag is
+	// emitted, so a future fifth kind can never reach the wire unnamed.
+	badLeaves := LeafSet{
+		Classify: func(v any) (LeafKind, []byte, bool) {
+			if s, ok := v.(otherSealed); ok {
+				return LeafKind(9), s, true
+			}
+			return 0, nil, false
+		},
+		Make: otherLeaves.Make,
+	}
+	if _, err := MarshalCipherText(badLeaves, otherSealed{1, 2, 3}); err == nil {
+		t.Fatal("a Classify returning an out-of-range LeafKind must be rejected")
+	}
+}
