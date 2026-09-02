@@ -38,6 +38,8 @@ func FuzzUnmarshalCipherText(f *testing.F) {
 	f.Add([]byte{0x02, 1, 0, 0, 0, 0xAB})                                    // ctNone
 	f.Add([]byte{0x03, 1, 0, 0, 0, 0x01, 1, 0, 0, 0, 0xAB})                  // ctSeq[leaf]
 	f.Add([]byte{0x04, 1, 0, 0, 0, 1, 0, 0, 0, 'a', 0x01, 1, 0, 0, 0, 0xAB}) // ctMap{a: leaf}
+	f.Add([]byte{0x06, 1, 0, 0, 0, 0xAB})                                    // ctEmptySeq
+	f.Add([]byte{0x07, 1, 0, 0, 0, 0xAB})                                    // ctEmptyMap
 	f.Add([]byte{0x05, 0x00})                                                // ctPassthrough(Null)
 	f.Add([]byte{0x03, 0xFF, 0xFF, 0xFF, 0xFF})                              // hostile count
 

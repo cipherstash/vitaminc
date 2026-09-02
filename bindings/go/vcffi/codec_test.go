@@ -940,3 +940,48 @@ func TestMarshalCipherTextRejectsOutOfRangeLeafKind(t *testing.T) {
 		t.Fatal("a Classify returning an out-of-range LeafKind must be rejected")
 	}
 }
+
+func TestCipherTextRoundTripsAllLeafKinds(t *testing.T) {
+	// Every kind in the wire table, so no Classify or Make arm goes
+	// unexercised: a swapped arm (an empty-map marker materialized where an
+	// empty-seq belongs) fails here rather than at some later decrypt.
+	ct := map[string]any{
+		"single":   vcvalue.Sealed{9, 9, 9},
+		"none":     vcvalue.SealedNone{2},
+		"emptySeq": vcvalue.SealedEmptySeq{7},
+		"emptyMap": vcvalue.SealedEmptyMap{8},
+	}
+	buf, err := MarshalCipherText(VCValueLeaves(), ct)
+	if err != nil {
+		t.Fatalf("MarshalCipherText: %v", err)
+	}
+	got, err := UnmarshalCipherText(VCValueLeaves(), buf)
+	if err != nil {
+		t.Fatalf("UnmarshalCipherText: %v", err)
+	}
+	if !reflect.DeepEqual(got, ct) {
+		t.Fatalf("got %#v, want %#v", got, ct)
+	}
+}
+
+func TestLeafTagsHasNoUnwiredKinds(t *testing.T) {
+	// A LeafKind constant that skips a value would leave a zero hole in
+	// leafTags. Without the zero guard, leafTag would emit tag 0x00 with no
+	// error and leafKind would map it straight back — a clean round trip
+	// inside Go under a tag the Rust codec does not define. Both directions
+	// refuse zero, and the table itself must have no holes to refuse.
+	for kind, tag := range leafTags {
+		if tag == 0 {
+			t.Fatalf("LeafKind %d has no wire tag — a hole in leafTags", kind)
+		}
+	}
+	if _, err := leafTag(LeafKind(len(leafTags))); err == nil {
+		t.Fatal("a LeafKind past the end of the table must be refused")
+	}
+	if _, ok := leafKind(0); ok {
+		t.Fatal("tag 0x00 is not a ciphertext tag and must not map to a kind")
+	}
+	if _, err := UnmarshalCipherText(VCValueLeaves(), []byte{0x00, 0, 0, 0, 0}); err == nil {
+		t.Fatal("a 0x00 tag must be rejected on the wire")
+	}
+}

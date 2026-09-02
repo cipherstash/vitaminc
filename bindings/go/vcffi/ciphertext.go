@@ -140,6 +140,11 @@ func (l LeafSet) check() error {
 // leafTags is the single source of truth for the LeafKind ↔ wire-tag
 // correspondence; leafTag and leafKind are its two directions, so a new leaf
 // kind cannot be wired into one direction and missed in the other.
+//
+// No ciphertext tag is 0x00, so a zero entry means "this kind is not wired to
+// the wire format" — a hole left by a LeafKind constant that skips a value,
+// or an index past the end. Both directions refuse it, so a kind can never
+// round-trip inside Go under a tag the Rust codec has never heard of.
 var leafTags = [...]byte{
 	LeafSingle:   ctSingle,
 	LeafNone:     ctNone,
@@ -149,7 +154,7 @@ var leafTags = [...]byte{
 
 // leafTag maps a classified kind to its wire tag.
 func leafTag(kind LeafKind) (byte, error) {
-	if int(kind) >= len(leafTags) {
+	if int(kind) >= len(leafTags) || leafTags[kind] == 0 {
 		return 0, fmt.Errorf("vcffi: LeafSet classified an unknown LeafKind %d", kind)
 	}
 	return leafTags[kind], nil
@@ -157,6 +162,9 @@ func leafTag(kind LeafKind) (byte, error) {
 
 // leafKind maps a wire tag back to its leaf kind — the decode direction.
 func leafKind(tag byte) (LeafKind, bool) {
+	if tag == 0 {
+		return 0, false
+	}
 	for kind, t := range leafTags {
 		if t == tag {
 			return LeafKind(kind), true
