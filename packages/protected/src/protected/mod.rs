@@ -163,6 +163,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
@@ -237,24 +238,33 @@ mod tests {
     }
 
     /// Regression test for #263: the bytes of a `Protected<[u8; 32]>` are
-    /// zero after its destructor runs. The wrapper lives in a `ManuallyDrop`
-    /// so its storage stays addressable once the destructor has been run by
-    /// hand.
+    /// zero once its destructor has wiped them. The payload records its own
+    /// bytes from inside `Zeroize`, while the value is still live, so the
+    /// observation never touches a dropped value.
     #[test]
-    fn drop_zeroizes_array_bytes_in_place() {
-        use std::mem::ManuallyDrop;
+    fn drop_zeroizes_array_bytes() {
+        struct Recorded<'a> {
+            bytes: [u8; 32],
+            wiped: &'a Cell<Option<[u8; 32]>>,
+        }
+        impl Zeroize for Recorded<'_> {
+            fn zeroize(&mut self) {
+                self.bytes.zeroize();
+                self.wiped.set(Some(self.bytes));
+            }
+        }
 
-        let mut slot = ManuallyDrop::new(Protected::new([0xAB_u8; 32]));
-        assert_eq!(slot.0, [0xAB_u8; 32]);
-
-        // SAFETY: `slot` is dropped exactly once, here. The storage is a
-        // plain byte array on this stack frame, so reading it back after the
-        // destructor is a read of initialised `u8`s, and `slot` is never
-        // used as a live `Protected` again.
-        unsafe { ManuallyDrop::drop(&mut slot) };
-        let after: [u8; 32] = slot.0;
+        let wiped = Cell::new(None);
+        {
+            let _p = Protected::new(Recorded {
+                bytes: [0xAB_u8; 32],
+                wiped: &wiped,
+            });
+            assert!(wiped.get().is_none());
+        }
         assert_eq!(
-            after, [0_u8; 32],
+            wiped.get(),
+            Some([0_u8; 32]),
             "Protected::drop must wipe the array bytes"
         );
     }
