@@ -30,7 +30,12 @@ impl<T> PrfValue for Passthrough<T>
 where
     T: Send + 'static,
 {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, _context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(
+        self,
+        prf: &P,
+        _context: C,
+        visitor: V,
+    ) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -41,7 +46,7 @@ where
 }
 
 impl<const N: usize> PrfValue for [u8; N] {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -57,7 +62,7 @@ impl<const N: usize> PrfValue for [u8; N] {
 }
 
 impl PrfValue for Box<[u8]> {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -73,7 +78,7 @@ impl PrfValue for Box<[u8]> {
 }
 
 impl PrfValue for &[u8] {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -93,7 +98,7 @@ macro_rules! integer_value {
         impl PrfValue for $ty {
             fn prf_visit_with_context<'a, P, V, C>(
                 self,
-                prf: P,
+                prf: &P,
                 context: C,
                 visitor: V,
             ) -> P::Ok<V::Value>
@@ -127,7 +132,7 @@ integer_value!(
 );
 
 impl<const N: usize> PrfValue for Protected<[u8; N]> {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -143,7 +148,7 @@ impl<const N: usize> PrfValue for Protected<[u8; N]> {
 }
 
 impl PrfValue for Protected<Vec<u8>> {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -163,7 +168,7 @@ macro_rules! protected_integer_value {
         impl PrfValue for Protected<$ty> {
             fn prf_visit_with_context<'a, P, V, C>(
                 self,
-                prf: P,
+                prf: &P,
                 context: C,
                 visitor: V,
             ) -> P::Ok<V::Value>
@@ -197,7 +202,7 @@ protected_integer_value!(
 );
 
 impl PrfValue for String {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -213,7 +218,7 @@ impl PrfValue for String {
 }
 
 impl PrfValue for Protected<String> {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -230,7 +235,7 @@ impl PrfValue for Protected<String> {
 }
 
 impl PrfValue for &str {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -249,7 +254,7 @@ impl<T> PrfValue for Vec<T>
 where
     T: PrfValue + Send + 'static,
 {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -290,7 +295,7 @@ impl<T> PrfValue for Option<T>
 where
     T: PrfValue,
 {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -312,7 +317,7 @@ where
     K: Into<Cow<'static, str>> + Eq + Hash,
     T: PrfValue,
 {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -341,7 +346,7 @@ where
     K: Into<Cow<'static, str>> + Ord,
     T: PrfValue,
 {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -379,7 +384,7 @@ mod tests {
     }
 
     fn term<T: PrfValue>(value: T) -> [u8; 32] {
-        value.prf(backend()).into_result().unwrap()
+        value.prf(&backend()).into_result().unwrap()
     }
 
     struct BlocksVisitor;
@@ -432,7 +437,7 @@ mod tests {
     #[test]
     fn passthrough_impl_preserves_the_owned_value() {
         let value = Passthrough::new(42_u32)
-            .prf_visit(backend(), U32PassthroughVisitor)
+            .prf_visit(&backend(), U32PassthroughVisitor)
             .into_result()
             .unwrap();
         assert_eq!(value, 42);
@@ -498,7 +503,7 @@ mod tests {
         let values = vec![String::from("first"), String::from("second")];
         let expected = values.iter().cloned().map(term).collect::<Vec<_>>();
         let actual = values
-            .prf_visit(backend(), BlocksVisitor)
+            .prf_visit(&backend(), BlocksVisitor)
             .into_result()
             .unwrap();
         assert_eq!(actual, expected);
@@ -512,7 +517,7 @@ mod tests {
     #[test]
     fn option_none_impl_visits_absence() {
         None::<String>
-            .prf_visit(backend(), AbsentVisitor)
+            .prf_visit(&backend(), AbsentVisitor)
             .into_result()
             .unwrap();
     }
@@ -561,7 +566,7 @@ mod tests {
             (String::from("right"), String::from("same")),
         ]);
         let terms = values
-            .prf_visit(backend(), MapBlocksVisitor)
+            .prf_visit(&backend(), MapBlocksVisitor)
             .into_result()
             .unwrap();
         assert_eq!(terms.len(), 2);
@@ -587,11 +592,11 @@ mod tests {
             (String::from("mid"), String::from("3")),
         ];
         let ordered = HashMap::from(entries.clone())
-            .prf_visit(backend(), OrderedMapVisitor)
+            .prf_visit(&backend(), OrderedMapVisitor)
             .into_result()
             .unwrap();
         let from_btree = BTreeMap::from(entries)
-            .prf_visit(backend(), OrderedMapVisitor)
+            .prf_visit(&backend(), OrderedMapVisitor)
             .into_result()
             .unwrap();
         assert_eq!(
@@ -611,7 +616,7 @@ mod tests {
             ("right", String::from("same")),
         ]);
         let terms = values
-            .prf_visit(backend(), MapBlocksVisitor)
+            .prf_visit(&backend(), MapBlocksVisitor)
             .into_result()
             .unwrap();
         assert_eq!(

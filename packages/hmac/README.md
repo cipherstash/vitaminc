@@ -10,7 +10,7 @@ buffer in a wiped allocation, so no unwiped copy of the key material is left
 behind by construction. Each leaf derives
 `HMAC-SHA256(key, PAE(encoding, context, input))`.
 
-## Keying
+## Keying and ownership
 
 `HmacSha256Prf::new` takes a `Protected<[u8; 32]>`, so the key length is
 guaranteed by the type and construction cannot fail. Key material whose length
@@ -18,6 +18,15 @@ is only known at runtime — a KMS response, an environment variable — goes
 through `try_from_bytes`, which rejects anything shorter than `MIN_KEY_LEN`
 with a `WeakKeyError`. HMAC itself accepts a key of any length, including an
 empty one, which would silently produce derivations anybody can recompute.
+
+Both constructors take the key **by value**, and that is the whole ownership
+story: the key moves into the PRF, lives there in one `Protected` allocation,
+and is wiped when the PRF drops. `HmacSha256Prf` is deliberately not `Clone`,
+so there is never a second handle whose lifetime could postpone that wipe.
+Derivation borrows the PRF (`&prf`), so one instance serves as many
+derivations as you like. Code that is generic over "any PRF I can build from a
+key" bounds on `vitaminc_prf::PrfKeyInit`, which `HmacSha256Prf` implements
+with the same two constructors.
 
 ```rust
 use vitaminc_hmac::{HmacSha256Prf, WeakKeyError};
@@ -46,9 +55,15 @@ use vitaminc_protected::Protected;
 # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 let prf = HmacSha256Prf::new(Protected::new([7; 32]));
 let term = "alice@example.com"
-    .prf_with_context(prf, "users/email/exact/v1")
+    .prf_with_context(&prf, "users/email/exact/v1")
     .await?;
 assert_eq!(term.len(), 32);
+
+// The same instance keeps serving; nothing was consumed.
+let again = "bob@example.com"
+    .prf_with_context(&prf, "users/email/exact/v1")
+    .await?;
+assert_ne!(term, again);
 # Ok(())
 # }
 ```
@@ -86,7 +101,7 @@ impl<P> PrfVisitor<[u8; 32], P> for BloomPositions {
 let prf = HmacSha256Prf::new(Protected::new([7; 32]));
 let positions = "alice@example.com"
     .prf_visit(
-        prf,
+        &prf,
         BloomPositions {
             count: 4,
             modulus: 2048,
@@ -122,7 +137,7 @@ struct User {
 impl PrfValue for User {
     fn prf_visit_with_context<'a, P, V, C>(
         self,
-        prf: P,
+        prf: &P,
         context: C,
         visitor: V,
     ) -> P::Ok<V::Value>
@@ -185,7 +200,7 @@ let user = User {
 };
 let prf = HmacSha256Prf::new(Protected::new([7; 32]));
 let terms = user
-    .prf_visit_with_context(prf, "tenant/acme/users/v1", UserTermsVisitor)
+    .prf_visit_with_context(&prf, "tenant/acme/users/v1", UserTermsVisitor)
     .await?;
 
 assert_eq!(terms.aliases.len(), 2);

@@ -6,12 +6,20 @@ domain-separated pseudorandom values. Inputs cross backend boundaries in
 backend output is always awaitable so local and remote batched implementations
 share one interface.
 
-This crate defines only the abstraction: the [`PrfValue`](https://docs.rs/vitaminc-prf/latest/vitaminc_prf/trait.PrfValue.html)
-and [`Prf`](https://docs.rs/vitaminc-prf/latest/vitaminc_prf/trait.Prf.html)
+This crate defines only the abstraction: the [`PrfValue`](https://docs.rs/vitaminc-prf/latest/vitaminc_prf/trait.PrfValue.html),
+[`Prf`](https://docs.rs/vitaminc-prf/latest/vitaminc_prf/trait.Prf.html), and
+[`PrfKeyInit`](https://docs.rs/vitaminc-prf/latest/vitaminc_prf/trait.PrfKeyInit.html)
 traits, context and encoding domains, and the visitor machinery. It contains
 no cryptography. Concrete backends live in their own crates; the local
 HMAC-SHA256 backend is [`vitaminc-hmac`](https://docs.rs/vitaminc-hmac),
 and its documentation carries runnable end-to-end examples.
+
+Key ownership lives in exactly one place. `PrfKeyInit` constructs a backend
+from key material taken **by value**, so the key moves into the backend and is
+wiped when the backend drops. Every `Prf` derivation method then borrows the
+backend (`&self`): a derivation is a pure function of the key and the input,
+so nothing is consumed and one instance serves any number of derivations
+without being cloned.
 
 Every protected leaf carries an explicit [`PrfEncoding`](https://docs.rs/vitaminc-prf/latest/vitaminc_prf/struct.PrfEncoding.html)
 domain. Built-in text, bytes, and fixed-width integers are separated even when
@@ -40,7 +48,7 @@ struct User {
 impl PrfValue for User {
     fn prf_visit_with_context<'a, P, V, C>(
         self,
-        prf: P,
+        prf: &P,
         context: C,
         visitor: V,
     ) -> P::Ok<V::Value>
@@ -99,4 +107,4 @@ impl<P> PrfVisitor<[u8; 32], P> for UserTermsVisitor {
 
 Executing the derivation requires a backend; with `vitaminc-hmac` in
 scope the value above resolves through
-`user.prf_visit_with_context(prf, "tenant/acme/users/v1", UserTermsVisitor).await`.
+`user.prf_visit_with_context(&prf, "tenant/acme/users/v1", UserTermsVisitor).await`.

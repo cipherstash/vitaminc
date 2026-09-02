@@ -17,5 +17,5 @@ pub use encoding::PrfEncoding;
 pub use error::{PrfBuildError, PrfError, PrfVisitorError};
 pub use impls::Passthrough;
 pub use ready::ReadyPrf;
-pub use traits::{MapPrf, Prf, PrfValue, SeqPrf};
+pub use traits::{MapPrf, Prf, PrfKeyInit, PrfValue, SeqPrf};
 pub use visitor::{BlockVisitor, MapAccess, PrfVisitor, ResolvedPrf, ResolvedVisitor, SeqAccess};
