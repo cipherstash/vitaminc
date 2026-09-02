@@ -9,11 +9,10 @@
 use std::collections::HashMap;
 
 use vitaminc_aead::{Decipher, DecipherVisitor, Encrypt, MapAccess, Unspecified};
-use vitaminc_encrypt::{Aes256Cipher, Key};
+use vitaminc_encrypt::Aes256Cipher;
 
-fn cipher() -> Aes256Cipher {
-    Aes256Cipher::new(&Key::from([42u8; 32])).expect("failed to create cipher")
-}
+mod common;
+use common::cipher;
 
 fn two_entry_ciphertext(cipher: &Aes256Cipher) -> vitaminc_encrypt::AesCipherText {
     let mut map: HashMap<String, String> = HashMap::new();

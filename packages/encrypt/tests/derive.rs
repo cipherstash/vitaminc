@@ -10,11 +10,9 @@
 use std::collections::HashMap;
 
 use vitaminc_aead::{Decrypt, Encrypt};
-use vitaminc_encrypt::{Aes256Cipher, Key};
 
-fn cipher() -> Aes256Cipher {
-    Aes256Cipher::new(&Key::from([42u8; 32])).expect("failed to create cipher")
-}
+mod common;
+use common::cipher;
 
 #[derive(Encrypt, Decrypt, Debug, PartialEq)]
 struct User {

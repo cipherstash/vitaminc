@@ -18,12 +18,19 @@
 //!
 //! - [`TaggedFixed`] for the fixed-width leaves (the numeric family and the
 //!   payloadless Null/Undefined/Bool tags). The header byte is written into a
-//!   stack array — **no heap allocation** — and sealed directly through the
+//!   stack array — **no heap allocation** here — and sealed through the
 //!   cipher's [`encrypt_bytes_array`](vitaminc_aead::Cipher::encrypt_bytes_array)
-//!   entry point.
+//!   entry point. Whether that stays allocation-free is the cipher's call:
+//!   `Aes256Cipher` overrides the method to seal the array in place, while a
+//!   cipher on the trait default copies it into a heap buffer that stays
+//!   inside `Protected`.
 //! - [`TaggedVariable`] for the variable-length leaves (String, Bytes). It
 //!   allocates the `1 + len` buffer once and seals through
 //!   [`encrypt_bytes_vec`](vitaminc_aead::Cipher::encrypt_bytes_vec).
+//!
+//! Both derive [`Encrypt`]: a newtype is transparent, and `Protected<[u8; N]>`
+//! / `Protected<Vec<u8>>` already reach those entry points still wrapped
+//! (via `Encrypt::encrypt_protected`), so the derive is the hand-written impl.
 //!
 //! # Why `N` includes the header byte
 //!
@@ -43,7 +50,7 @@
 //! inner authenticated tag, which is known only *after* decryption.
 
 use crate::tags;
-use vitaminc_aead::{Cipher, Encrypt, IntoAad};
+use vitaminc_aead::Encrypt;
 use vitaminc_protected::{Controlled, Protected};
 
 /// A fixed-width tagged leaf plaintext: `HDR` in byte 0, payload in the
@@ -51,6 +58,14 @@ use vitaminc_protected::{Controlled, Protected};
 ///
 /// `N` is the **total** width including the header byte — see the module
 /// docs for why the payload arithmetic is hidden behind the type aliases.
+///
+/// [`Encrypt`] is derived: the newtype is transparent, so it seals exactly as
+/// `Protected<[u8; N]>` does — through the cipher's
+/// [`encrypt_bytes_array`](vitaminc_aead::Cipher::encrypt_bytes_array) entry
+/// point, still wrapped, with no bare stack copy. (`Aes256Cipher` overrides
+/// that entry point to seal without an intermediate copy; a cipher on the
+/// trait default copies into a heap buffer that stays inside `Protected`.)
+#[derive(Encrypt)]
 pub struct TaggedFixed<const HDR: u8, const N: usize>(Protected<[u8; N]>);
 
 impl<const HDR: u8, const N: usize> TaggedFixed<HDR, N> {
@@ -77,21 +92,6 @@ impl<const HDR: u8> TaggedFixed<HDR, 1> {
         // No heap allocation: the one-byte plaintext lives on the stack until
         // it is sealed, then is wiped when the `Protected` drops.
         Self(Protected::new([HDR; 1]))
-    }
-}
-
-/// One generic [`Encrypt`] impl covers every fixed-width tagged leaf: seal
-/// the stack array directly through the array entry point (no `to_vec`
-/// detour). No new [`Cipher`] method is introduced — `encrypt_bytes_array`
-/// is the existing entry point, and `Aes256Cipher` overrides it to seal
-/// without an intermediate copy.
-impl<const HDR: u8, const N: usize> Encrypt for TaggedFixed<HDR, N> {
-    fn encrypt_with_aad<'a, C, A>(self, cipher: C, aad: A) -> Result<C::Ok, C::Error>
-    where
-        C: Cipher,
-        A: IntoAad<'a>,
-    {
-        cipher.encrypt_bytes_array(self.0, aad)
     }
 }
 
@@ -152,6 +152,11 @@ impl From<f64> for TaggedFloat64 {
 /// A variable-width tagged leaf plaintext: `HDR` in byte 0 followed by an
 /// arbitrary-length payload, held inside [`Protected`]. Used for String and
 /// Bytes.
+///
+/// [`Encrypt`] is derived and transparent, as for [`TaggedFixed`]: the buffer
+/// reaches [`encrypt_bytes_vec`](vitaminc_aead::Cipher::encrypt_bytes_vec)
+/// still wrapped.
+#[derive(Encrypt)]
 pub struct TaggedVariable<const HDR: u8>(Protected<Vec<u8>>);
 
 impl<const HDR: u8> TaggedVariable<HDR> {
@@ -172,16 +177,6 @@ impl<const HDR: u8> TaggedVariable<HDR> {
         buf.extend_from_slice(bytes);
         // `payload` drops (and wipes) here; `buf` is owned by the new `Protected`.
         Self(Protected::new(buf))
-    }
-}
-
-impl<const HDR: u8> Encrypt for TaggedVariable<HDR> {
-    fn encrypt_with_aad<'a, C, A>(self, cipher: C, aad: A) -> Result<C::Ok, C::Error>
-    where
-        C: Cipher,
-        A: IntoAad<'a>,
-    {
-        cipher.encrypt_bytes_vec(self.0, aad)
     }
 }
 

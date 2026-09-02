@@ -9,9 +9,8 @@
 use vitaminc_aead::{ContextTag, Encrypt};
 use vitaminc_encrypt::{Aes256Cipher, Key};
 
-fn cipher() -> Aes256Cipher {
-    Aes256Cipher::new(&Key::from([42u8; 32])).expect("failed to create cipher")
-}
+mod common;
+use common::cipher;
 
 #[test]
 fn roundtrip_with_context_tag() {
