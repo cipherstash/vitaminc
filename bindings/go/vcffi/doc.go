@@ -38,7 +38,12 @@
 //
 // The decoders treat their input as untrusted: recursion depth, length
 // prefixes and item counts are bounded, strings are UTF-8 validated,
-// duplicate map keys are rejected, and every malformed shape fails with
+// duplicate map keys are rejected, and every malformed input fails with
 // [ErrMalformed] rather than panicking or over-allocating. The fuzz targets
 // in this package pin that contract.
+//
+// [ErrMalformed] covers hostile bytes, not caller mistakes: a [LeafSet] that
+// is partially wired, or that does not materialize a kind the buffer carries,
+// fails with its own attributable error, so errors.Is(err, [ErrMalformed]) is
+// a test for bad input rather than a total branch over decode failures.
 package vcffi

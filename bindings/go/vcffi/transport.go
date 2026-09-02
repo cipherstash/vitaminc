@@ -66,11 +66,15 @@ func eagerCap(n int) int {
 	return min(n, maxEagerCapacity)
 }
 
-// ErrMalformed is returned (sometimes wrapped) by the decoders for any
-// transport buffer that does not parse: truncated, over-deep, hostile
-// counts, duplicate keys, unknown tags. Deliberately unspecific — the
-// decoders treat their input as hostile and do not distinguish *how* it is
-// malformed.
+// ErrMalformed is returned by the decoders for any transport buffer that
+// does not parse: truncated, over-deep, hostile counts, duplicate keys,
+// unknown tags. Deliberately unspecific — the decoders treat their input as
+// hostile and do not distinguish *how* it is malformed. It is returned bare,
+// never wrapped, so errors.Is and == are equivalent today; prefer errors.Is.
+//
+// A misconfigured [LeafSet] is a different class of failure — the binding's
+// own wiring, not hostile bytes — and [UnmarshalCipherText] reports it with a
+// distinct, attributable error rather than folding it into ErrMalformed.
 var ErrMalformed = errors.New("vcffi: malformed transport bytes")
 
 // ErrTooDeep is returned by the encoders when a value or ciphertext tree
