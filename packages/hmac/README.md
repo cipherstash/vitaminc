@@ -12,24 +12,26 @@ behind by construction. Each leaf derives
 
 ## Keying and ownership
 
-`HmacSha256Prf::new` takes a `Protected<[u8; 32]>`, so the key length is
-guaranteed by the type and construction cannot fail. Key material whose length
-is only known at runtime — a KMS response, an environment variable — goes
-through `try_from_bytes`, which rejects anything shorter than `MIN_KEY_LEN`
-with a `WeakKeyError`. HMAC itself accepts a key of any length, including an
-empty one, which would silently produce derivations anybody can recompute.
+Construction goes through `vitaminc_prf::PrfKeyInit`. `new` takes a
+`Protected<[u8; 32]>`, so the key length is guaranteed by the type and
+construction cannot fail. Key material whose length is only known at runtime —
+a KMS response, an environment variable — goes through `try_from_bytes`, which
+rejects anything shorter than `MIN_KEY_LEN` with a `WeakKeyError`. HMAC itself
+accepts a key of any length, including an empty one, which would silently
+produce derivations anybody can recompute.
 
 Both constructors take the key **by value**, and that is the whole ownership
 story: the key moves into the PRF, lives there in one `Protected` allocation,
 and is wiped when the PRF drops. `HmacSha256Prf` is deliberately not `Clone`,
-so there is never a second handle whose lifetime could postpone that wipe.
-Derivation borrows the PRF (`&prf`), so one instance serves as many
-derivations as you like. Code that is generic over "any PRF I can build from a
-key" bounds on `vitaminc_prf::PrfKeyInit`, which `HmacSha256Prf` implements
-with the same two constructors.
+so there is never a hidden second handle whose lifetime could postpone that
+wipe. Derivation borrows the PRF (`&prf`), so one instance serves as many
+derivations as you like; where a PRF genuinely has to be shared, wrap it in
+an `Arc` so the sharing is visible at every call site (see the
+`HmacSha256Prf` docs).
 
 ```rust
 use vitaminc_hmac::{HmacSha256Prf, WeakKeyError};
+use vitaminc_prf::PrfKeyInit;
 use vitaminc_protected::Protected;
 
 # fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -48,7 +50,7 @@ Built-in values return the backend's raw block through `prf`. Use
 `prf_with_context` to separate the same value across indexes or applications.
 
 ```rust
-use vitaminc_prf::PrfValue;
+use vitaminc_prf::{PrfKeyInit, PrfValue};
 use vitaminc_hmac::HmacSha256Prf;
 use vitaminc_protected::Protected;
 
@@ -74,7 +76,7 @@ assert_ne!(term, again);
 or other policy in the PRF crates.
 
 ```rust
-use vitaminc_prf::{PrfValue, PrfVisitor, PrfVisitorError};
+use vitaminc_prf::{PrfKeyInit, PrfValue, PrfVisitor, PrfVisitorError};
 use vitaminc_hmac::HmacSha256Prf;
 use vitaminc_protected::Protected;
 
@@ -123,7 +125,7 @@ batch.
 
 ```rust
 use vitaminc_prf::{
-    BlockVisitor, IntoPrfContext, MapAccess, MapPrf, Prf,
+    BlockVisitor, IntoPrfContext, MapAccess, MapPrf, Prf, PrfKeyInit,
     PrfValue, PrfVisitor, PrfVisitorError, SeqAccess,
 };
 use vitaminc_hmac::HmacSha256Prf;

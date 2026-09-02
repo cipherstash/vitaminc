@@ -619,11 +619,12 @@ fn derivation_is_deterministic(key_suffix: Vec<u8>, context: Vec<u8>, input: Vec
     first == second
 }
 
-/// The key is wiped when the PRF drops, full stop. `HmacSha256Prf` used to
-/// hold its key behind an `Arc` with a derived `Clone`, so the wipe only ran
-/// when the last outstanding clone dropped, which no call site could see.
+/// `HmacSha256Prf` declares `ZeroizeOnDrop`. The marker is hand-written,
+/// so this only checks the declaration exists; the single-owner property it
+/// rests on (no `Clone`) is pinned by the compile-fail case in
+/// `tests/ui/negative_space`.
 #[test]
-fn prf_owns_its_key_and_wipes_it_on_drop() {
+fn prf_declares_zeroize_on_drop() {
     fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
     assert_zeroize_on_drop::<HmacSha256Prf>();
 }

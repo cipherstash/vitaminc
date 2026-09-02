@@ -26,13 +26,13 @@ const SHA256_OUTPUT_SIZE: usize = 32;
 const IPAD: u8 = 0x36;
 const OPAD: u8 = 0x5C;
 
-/// Length of the key accepted by [`HmacSha256Prf::new`].
+/// Length of the key accepted by [`PrfKeyInit::new`] on [`HmacSha256Prf`].
 pub const KEY_LEN: usize = 32;
 
-/// Shortest key accepted by [`HmacSha256Prf::try_from_bytes`].
+/// Shortest key accepted by [`PrfKeyInit::try_from_bytes`] on [`HmacSha256Prf`].
 pub const MIN_KEY_LEN: usize = KEY_LEN;
 
-/// Key material offered to [`HmacSha256Prf::try_from_bytes`] was too short to
+/// Key material offered to [`PrfKeyInit::try_from_bytes`] was too short to
 /// key the PRF safely.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WeakKeyError {
@@ -144,14 +144,53 @@ impl ZeroizeOnDrop for ZeroizingHmacSha256 {}
 
 /// Local HMAC-SHA256 structured PRF.
 ///
-/// The PRF owns its key outright. Construction takes the key by value, the
-/// key lives in a single [`Protected`] allocation for the life of the PRF,
-/// and it is wiped when the PRF drops, unconditionally. There is no `Clone`:
-/// a shared handle would make that wipe depend on whichever clone happens to
-/// drop last, which no call site can see. Derivation borrows the PRF
-/// (`&self`), so one instance serves any number of derivations.
+/// The PRF owns its key outright. Construction goes through [`PrfKeyInit`]
+/// and takes the key by value; the key lives in a single [`Protected`]
+/// allocation for the life of the PRF and is wiped when the PRF drops,
+/// unconditionally. Derivation borrows the PRF (`&self`), so one instance
+/// serves any number of derivations.
 ///
 /// Each leaf derives `HMAC-SHA256(key, PAE(encoding, context, input))`.
+///
+/// # Sharing
+///
+/// `HmacSha256Prf` is deliberately not `Clone`. A clone would either copy the
+/// key or, worse, share it behind a hidden `Arc`, which turns "wiped when
+/// this PRF drops" into "wiped when the last clone drops" with nothing at
+/// the call site to say so. Sharing is still supported; it is just spelled
+/// out by the caller. Wrap the PRF in an [`Arc`](std::sync::Arc) where it
+/// needs to be shared, and the type at every call site then says exactly
+/// when the key is wiped: when the last `Arc` goes away.
+///
+/// ```
+/// use std::sync::Arc;
+/// use vitaminc_hmac::HmacSha256Prf;
+/// use vitaminc_prf::{PrfKeyInit, PrfValue};
+/// use vitaminc_protected::Protected;
+///
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let prf = Arc::new(HmacSha256Prf::new(Protected::new([7; 32])));
+///
+/// // Hand a handle to each place that derives; `Arc<T>` clones without
+/// // `T: Clone`, and `&*handle` is the `&HmacSha256Prf` that derivation
+/// // borrows.
+/// let for_worker = Arc::clone(&prf);
+/// let handle = std::thread::spawn(move || {
+///     "alice@example.com".prf_with_context(&*for_worker, "users/email/v1")
+/// });
+///
+/// let here = "alice@example.com"
+///     .prf_with_context(&*prf, "users/email/v1")
+///     .into_result()?;
+/// let there = handle.join().expect("worker panicked").into_result()?;
+/// assert_eq!(here, there);
+///
+/// // Dropping the last handle wipes the key.
+/// drop(prf);
+/// # Ok(())
+/// # }
+/// # example().unwrap();
+/// ```
 pub struct HmacSha256Prf {
     key: Protected<Vec<u8>>,
 }
@@ -161,11 +200,14 @@ pub struct HmacSha256Prf {
 // ipad/opad state each derivation builds from it.
 impl ZeroizeOnDrop for HmacSha256Prf {}
 
-impl HmacSha256Prf {
+impl PrfKeyInit for HmacSha256Prf {
+    type Key = Protected<[u8; KEY_LEN]>;
+    type KeyError = WeakKeyError;
+
     /// Key the PRF with a full-strength key.
     ///
     /// The array type carries the length guarantee, so this cannot fail.
-    pub fn new(key: Protected<[u8; KEY_LEN]>) -> Self {
+    fn new(key: Self::Key) -> Self {
         // `risky_ref` + drop, not `map`: `map` moves the array out through
         // `risky_unwrap`, and a bare `[u8; 32]` has no destructor to wipe it.
         // Borrowing leaves the array inside its `Protected`, which wipes it
@@ -181,14 +223,16 @@ impl HmacSha256Prf {
     /// Returns [`WeakKeyError`] if the key is shorter than [`MIN_KEY_LEN`].
     /// HMAC itself accepts any key length, including an empty one, which
     /// would silently produce derivations that anybody can recompute.
-    pub fn try_from_bytes(key: Protected<Vec<u8>>) -> Result<Self, WeakKeyError> {
+    fn try_from_bytes(key: Protected<Vec<u8>>) -> Result<Self, Self::KeyError> {
         let len = key.risky_ref().len();
         if len < MIN_KEY_LEN {
             return Err(WeakKeyError { len });
         }
         Ok(Self::from_vec(key))
     }
+}
 
+impl HmacSha256Prf {
     fn from_vec(key: Protected<Vec<u8>>) -> Self {
         Self { key }
     }
@@ -221,19 +265,6 @@ impl HmacSha256Prf {
         result: Result<T, PrfError<Infallible>>,
     ) -> ReadyPrf<T, Infallible> {
         ReadyPrf::new(result)
-    }
-}
-
-impl PrfKeyInit for HmacSha256Prf {
-    type Key = Protected<[u8; KEY_LEN]>;
-    type KeyError = WeakKeyError;
-
-    fn new(key: Self::Key) -> Self {
-        HmacSha256Prf::new(key)
-    }
-
-    fn try_from_bytes(key: Protected<Vec<u8>>) -> Result<Self, Self::KeyError> {
-        HmacSha256Prf::try_from_bytes(key)
     }
 }
 
