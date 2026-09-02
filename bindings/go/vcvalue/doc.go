@@ -12,7 +12,10 @@
 //   - Sealed is one encrypted leaf (version || nonce || ciphertext || tag),
 //     the only frozen byte format in the model. SealedNone, SealedEmptySeq
 //     and SealedEmptyMap are its authenticated marker siblings for absent
-//     values and empty composites.
+//     values and empty composites. This sealed family is vitaminc-encrypt's
+//     materialization of the model: another binding (a stack-encrypt SDK,
+//     say) defines its own distinct sealed-leaf types and wires them to the
+//     codec via vcffi's LeafSet — a stack-encrypt leaf is never a Sealed.
 //   - Object is the ordered map-decode shape (entry order preserved, so
 //     results compare deterministically); Field is one entry of it.
 //
@@ -23,12 +26,12 @@
 // # What is deliberately NOT here
 //
 // The transport codec — the wire encoding that carries a value tree across
-// an FFI boundary — is an unexported detail of the consumer that owns the
-// boundary (module vcencrypt, for the wasm harness). It is not a storage
-// format, so this module does not export it: the only bytes an application
-// should ever persist are the sealed leaves above. The Encryptable/Encoder
-// extension point for custom encodings lives with the codec in vcencrypt
-// for the same reason.
+// an FFI boundary — lives in the sibling module vcffi, shared by the
+// bindings that own such a boundary (vcencrypt, the stack-encrypt Go SDK).
+// It is not a storage format, so this module does not carry it: the only
+// bytes an application should ever persist are the sealed leaves above. The
+// Encryptable/Encoder extension point for custom encodings lives with the
+// codec in vcffi for the same reason.
 //
 // The cross-language contract is the frozen tag table plus the sealed leaf
 // encodings defined in the Rust crate vitaminc-aead-value — the model, not

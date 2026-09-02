@@ -1,4 +1,4 @@
-package vcencrypt
+package vcffi
 
 import (
 	"encoding/binary"
@@ -16,7 +16,7 @@ import (
 // Encryptable is the extension point for user types: a type implements it to
 // control how it is sealed, the way a Rust type implements `Encrypt`. Because
 // Go has no orphan impls, this interface (rather than reflection) is how a
-// type opts into a bespoke encoding. Encode and marshal consult it before
+// type opts into a bespoke encoding. Encode and Marshal consult it before
 // falling back to reflection.
 type Encryptable interface {
 	// EncryptValue records this value into enc. Implementations write
@@ -29,7 +29,7 @@ type Encryptable interface {
 // sub-encoder it hands out. Errors accumulate: once one is recorded, further
 // channel calls are no-ops, so consumer code can chain writes without
 // checking after every call and still surface the first failure from
-// End/marshal.
+// End/Marshal.
 type encState struct {
 	buf []byte
 	err error
@@ -49,7 +49,10 @@ func (s *encState) fail(err error) {
 //
 // Encoder is passed and stored by value; all instances handed out for one
 // encode share the same underlying buffer and first-error via a pointer, so
-// copying an Encoder is cheap and safe.
+// copying an Encoder is cheap and safe. The zero Encoder is not usable and
+// its methods panic: usable Encoders are only the one handed to
+// [Encryptable.EncryptValue] and those returned by Passthrough, Elem and
+// Field.
 type Encoder struct {
 	st    *encState
 	depth int
@@ -59,7 +62,7 @@ type Encoder struct {
 	// completion. This is per-slot on purpose: a global counter would let a
 	// completed *descendant* (e.g. a terminal inside an un-Ended nested
 	// container) stand in for the slot's own value, shifting the wire and
-	// surfacing only as an opaque errMalformed at decode.
+	// surfacing only as an opaque ErrMalformed at decode.
 	done *int
 }
 
@@ -178,7 +181,7 @@ func (e Encoder) String(s string) {
 		return
 	}
 	if !utf8.ValidString(s) {
-		e.st.fail(errors.New("vcencrypt: string is not valid UTF-8"))
+		e.st.fail(errors.New("vcffi: string is not valid UTF-8"))
 		return
 	}
 	e.push(tagString)
@@ -217,7 +220,7 @@ func (e Encoder) Bytes(b []byte) {
 func (e Encoder) Passthrough() Encoder {
 	if e.st.err == nil {
 		if e.depth+1 > maxDepth {
-			e.st.fail(errors.New("vcencrypt: value is nested too deeply"))
+			e.st.fail(ErrTooDeep)
 		} else {
 			e.push(tagPassthrough)
 		}
@@ -234,7 +237,7 @@ func (e Encoder) Seq() *SeqEncoder {
 		return s
 	}
 	if e.depth+1 > maxDepth {
-		e.st.fail(errors.New("vcencrypt: value is nested too deeply"))
+		e.st.fail(ErrTooDeep)
 		return s
 	}
 	e.push(tagArray)
@@ -251,7 +254,7 @@ func (e Encoder) Map() *MapEncoder {
 		return m
 	}
 	if e.depth+1 > maxDepth {
-		e.st.fail(errors.New("vcencrypt: value is nested too deeply"))
+		e.st.fail(ErrTooDeep)
 		return m
 	}
 	e.push(tagObject)
@@ -273,16 +276,16 @@ type SeqEncoder struct {
 	// childDone counts completions of this sequence's own element slots.
 	// Elem and End verify childDone == count, so a skipped element, an
 	// un-Ended nested container, or a doubly-written element fails here at
-	// encode time instead of as errMalformed at decode.
+	// encode time instead of as ErrMalformed at decode.
 	childDone int
 }
 
 // checkPrev verifies the previous element slot completed exactly once.
 func (s *SeqEncoder) checkPrev() {
 	if s.childDone > s.count {
-		s.st.fail(fmt.Errorf("vcencrypt: more than one value was written for sequence element %d", s.count-1))
+		s.st.fail(fmt.Errorf("vcffi: more than one value was written for sequence element %d", s.count-1))
 	} else if s.count > 0 && s.childDone < s.count {
-		s.st.fail(fmt.Errorf("vcencrypt: sequence element %d was never completed", s.count-1))
+		s.st.fail(fmt.Errorf("vcffi: sequence element %d was never completed", s.count-1))
 	}
 }
 
@@ -335,7 +338,7 @@ type MapEncoder struct {
 	// entry slots. Field and End verify childDone == count, so a key whose
 	// value was skipped, left as an un-Ended container, or written twice
 	// fails at encode time — otherwise the wire shifts and the next key
-	// parses as the missing value, surfacing only as errMalformed at decode.
+	// parses as the missing value, surfacing only as ErrMalformed at decode.
 	childDone int
 	// lastKey is the most recent Field key, kept so contract violations name
 	// the key whose value slot misbehaved.
@@ -345,16 +348,16 @@ type MapEncoder struct {
 	// with another field's effective name) and a hand-written Encryptable
 	// can; without this check the collision only surfaces after the
 	// plaintext has crossed the FFI boundary, as the ciphertext decoder's
-	// opaque errMalformed naming neither the struct nor the key.
+	// opaque ErrMalformed naming neither the struct nor the key.
 	seen map[string]struct{}
 }
 
 // checkPrev verifies the previous entry's value slot completed exactly once.
 func (m *MapEncoder) checkPrev() {
 	if m.childDone > m.count {
-		m.st.fail(fmt.Errorf("vcencrypt: more than one value was written for key %q", m.lastKey))
+		m.st.fail(fmt.Errorf("vcffi: more than one value was written for key %q", m.lastKey))
 	} else if m.count > 0 && m.childDone < m.count {
-		m.st.fail(fmt.Errorf("vcencrypt: value for key %q was never completed", m.lastKey))
+		m.st.fail(fmt.Errorf("vcffi: value for key %q was never completed", m.lastKey))
 	}
 }
 
@@ -367,9 +370,9 @@ func (m *MapEncoder) Field(key string) Encoder {
 	}
 	if m.st.err == nil {
 		if !utf8.ValidString(key) {
-			m.st.fail(errors.New("vcencrypt: object key is not valid UTF-8"))
+			m.st.fail(errors.New("vcffi: object key is not valid UTF-8"))
 		} else if _, dup := m.seen[key]; dup {
-			m.st.fail(fmt.Errorf("vcencrypt: duplicate key %q in map encoding", key))
+			m.st.fail(fmt.Errorf("vcffi: duplicate key %q in map encoding", key))
 		} else if buf, err := appendChunk(m.st.buf, []byte(key)); err != nil {
 			m.st.fail(err)
 		} else {
@@ -407,16 +410,16 @@ func patchLen(st *encState, off, count int) error {
 		return st.err
 	}
 	if count < 0 || uint64(count) > maxUint32 {
-		st.fail(fmt.Errorf("vcencrypt: item count %d out of range", count))
+		st.fail(fmt.Errorf("vcffi: item count %d out of range", count))
 		return st.err
 	}
 	binary.LittleEndian.PutUint32(st.buf[off:off+4], uint32(count))
 	return nil
 }
 
-// marshal encodes v into the value transport form the guest expects. It is
-// the encode counterpart of unmarshal and the path Client.Encrypt uses.
-func marshal(v any) ([]byte, error) {
+// Marshal encodes v into the value transport form a wasm guest expects: the
+// encode counterpart of [Unmarshal], and the path a binding's Encrypt takes.
+func Marshal(v any) ([]byte, error) {
 	st := &encState{}
 	var root int
 	if err := Encode(Encoder{st: st, done: &root}, v); err != nil {
@@ -426,7 +429,7 @@ func marshal(v any) ([]byte, error) {
 	// Encryptable can leave the root empty (or an un-Ended container) or
 	// write more than once.
 	if root != 1 {
-		return nil, fmt.Errorf("vcencrypt: encode must complete exactly one root value, completed %d", root)
+		return nil, fmt.Errorf("vcffi: encode must complete exactly one root value, completed %d", root)
 	}
 	return st.buf, nil
 }
@@ -456,7 +459,7 @@ func marshal(v any) ([]byte, error) {
 // declaration order.
 //
 // Encode returns the first error recorded while writing enc, so it composes:
-// an Encryptable can delegate a sub-value with vcvalue.Encode(m.Field(k), x).
+// an Encryptable can delegate a sub-value with vcffi.Encode(m.Field(k), x).
 func Encode(enc Encoder, v any) error {
 	encodeAny(enc, v)
 	return enc.st.err
@@ -593,13 +596,13 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 		// no container framing, so without this a pointer cycle (x = &x)
 		// would recurse to stack overflow instead of failing cleanly.
 		if enc.depth+1 > maxDepth {
-			enc.st.fail(errors.New("vcencrypt: value is nested too deeply"))
+			enc.st.fail(ErrTooDeep)
 			return
 		}
 		// Same slot: the dereferenced value completes the pointer's counter.
 		encodeReflect(Encoder{st: enc.st, depth: enc.depth + 1, done: enc.done}, rv.Elem())
 	default:
-		enc.st.fail(fmt.Errorf("vcencrypt: cannot encode value of kind %s", rv.Kind()))
+		enc.st.fail(fmt.Errorf("vcffi: cannot encode value of kind %s", rv.Kind()))
 	}
 }
 
@@ -613,7 +616,7 @@ func encodeSeq(enc Encoder, rv reflect.Value) {
 
 func encodeMap(enc Encoder, rv reflect.Value) {
 	if rv.Type().Key().Kind() != reflect.String {
-		enc.st.fail(fmt.Errorf("vcencrypt: map keys must be strings, got %s", rv.Type().Key()))
+		enc.st.fail(fmt.Errorf("vcffi: map keys must be strings, got %s", rv.Type().Key()))
 		return
 	}
 	keys := rv.MapKeys()
@@ -656,7 +659,7 @@ func encodeStruct(enc Encoder, rv reflect.Value) {
 	// caller asked for the empty encoding explicitly.
 	if encoded == 0 && unexported > 0 {
 		enc.st.fail(fmt.Errorf(
-			"vcencrypt: struct %s has no exported fields to encode — implement Encryptable to control its sealing", t))
+			"vcffi: struct %s has no exported fields to encode — implement Encryptable to control its sealing", t))
 		return
 	}
 	_ = m.End()

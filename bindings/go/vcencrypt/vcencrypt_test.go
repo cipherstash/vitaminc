@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/cipherstash/vitaminc/bindings/go/vcencrypt"
+	"github.com/cipherstash/vitaminc/bindings/go/vcffi"
 	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 )
 
@@ -496,11 +497,11 @@ func TestCrossLanguageFixture(t *testing.T) {
 	}
 	aad, ctBytes, valBytes := chunk(), chunk(), chunk()
 
-	ct, err := vcencrypt.UnmarshalCipherTextForTest(ctBytes)
+	ct, err := vcffi.UnmarshalCipherText(vcffi.VCValueLeaves(), ctBytes)
 	if err != nil {
 		t.Fatalf("decoding fixture ciphertext: %v", err)
 	}
-	want, err := vcencrypt.UnmarshalForTest(valBytes)
+	want, err := vcffi.Unmarshal(valBytes)
 	if err != nil {
 		t.Fatalf("decoding fixture expected value: %v", err)
 	}

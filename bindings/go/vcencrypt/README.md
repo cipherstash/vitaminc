@@ -227,7 +227,7 @@ cd .. && CGO_ENABLED=0 go test ./...
   multiple `Client`s for parallelism.
 - Guest-side buffers are zeroized before free, but copies on the Go heap (keys,
   plaintext values) cannot be reliably wiped from Go.
-- The transport encoding is transport-only. The only frozen byte format is the
-  sealed leaf (`[tag] ++ payload`, see `vitaminc-aead-value`); durable database
-  interop belongs to a schema-aware layer, which this module knows nothing
-  about.
+- The transport encoding is transport-only, and lives in the shared sibling
+  module [`vcffi`](../vcffi). The only frozen byte format is the sealed leaf
+  (`[tag] ++ payload`, see `vitaminc-aead-value`); durable database interop
+  belongs to a schema-aware layer, which this module knows nothing about.

@@ -1,4 +1,4 @@
-package vcencrypt
+package vcffi
 
 import (
 	"encoding/binary"
@@ -38,7 +38,7 @@ const (
 // an int fails to compile on 32-bit GOARCH (constant overflows int), and the
 // guard is load-bearing there — an oversized count coerced to a negative int
 // would slip past the remaining-bytes check and panic in make instead of
-// returning errMalformed. Comparisons convert the int operand to uint64
+// returning ErrMalformed. Comparisons convert the int operand to uint64
 // (always lossless for non-negative values, which the n < 0 guards ensure).
 const maxUint32 = uint64(1<<32 - 1)
 
@@ -66,11 +66,26 @@ func eagerCap(n int) int {
 	return min(n, maxEagerCapacity)
 }
 
-var errMalformed = errors.New("vcencrypt: malformed transport bytes")
+// ErrMalformed is returned by the decoders for any transport buffer that
+// does not parse: truncated, over-deep, hostile counts, duplicate keys,
+// unknown tags. Deliberately unspecific — the decoders treat their input as
+// hostile and do not distinguish *how* it is malformed. It is returned bare,
+// never wrapped, so errors.Is and == are equivalent today; prefer errors.Is.
+//
+// A misconfigured [LeafSet] is a different class of failure — the binding's
+// own wiring, not hostile bytes — and [UnmarshalCipherText] reports it with a
+// distinct, attributable error rather than folding it into ErrMalformed.
+var ErrMalformed = errors.New("vcffi: malformed transport bytes")
+
+// ErrTooDeep is returned by the encoders when a value or ciphertext tree
+// exceeds the recursion bound (the decoders fold over-deep input into
+// [ErrMalformed] — hostile bytes stay unspecific by design, but a too-deep
+// value handed in by the caller's own code is worth matching on).
+var ErrTooDeep = errors.New("vcffi: value is nested too deeply")
 
 func appendLen(out []byte, n int) ([]byte, error) {
 	if n < 0 || uint64(n) > maxUint32 {
-		return nil, fmt.Errorf("vcencrypt: length %d out of range", n)
+		return nil, fmt.Errorf("vcffi: length %d out of range", n)
 	}
 	return binary.LittleEndian.AppendUint32(out, uint32(n)), nil
 }
@@ -92,7 +107,7 @@ type reader struct {
 
 func (r *reader) byteTag() (byte, error) {
 	if r.pos >= len(r.buf) {
-		return 0, errMalformed
+		return 0, ErrMalformed
 	}
 	b := r.buf[r.pos]
 	r.pos++
@@ -101,7 +116,7 @@ func (r *reader) byteTag() (byte, error) {
 
 func (r *reader) take(n int) ([]byte, error) {
 	if n < 0 || n > len(r.buf)-r.pos {
-		return nil, errMalformed
+		return nil, ErrMalformed
 	}
 	s := r.buf[r.pos : r.pos+n]
 	r.pos += n
@@ -127,7 +142,7 @@ func (r *reader) count() (int, error) {
 		return 0, err
 	}
 	if n < 0 || n > len(r.buf)-r.pos {
-		return 0, errMalformed
+		return 0, ErrMalformed
 	}
 	return n, nil
 }
@@ -147,7 +162,7 @@ func (r *reader) str() (string, error) {
 		return "", err
 	}
 	if !utf8.Valid(s) {
-		return "", errMalformed
+		return "", ErrMalformed
 	}
 	return string(s), nil
 }

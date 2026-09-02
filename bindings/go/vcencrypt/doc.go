@@ -44,11 +44,13 @@
 // # Transport, not storage
 //
 // The wire bytes this package shuttles across the wasm boundary are an FFI
-// detail and are deliberately unexported: the codec is NOT a storage format
-// and carries no compatibility commitment. The only frozen bytes are the
-// sealed leaves inside the AEAD envelope (see vcvalue.Sealed). Durable
-// cross-language database interop is a schema-aware layer's job, which this
-// package knows nothing about.
+// detail: the codec is NOT a storage format and carries no compatibility
+// commitment. It lives in the sibling module vcffi — one implementation
+// shared by every binding that owns such a boundary — and this package
+// re-exports its Encryptable/Encoder extension point as aliases. The only
+// frozen bytes are the sealed leaves inside the AEAD envelope (see
+// vcvalue.Sealed). Durable cross-language database interop is a schema-aware
+// layer's job, which this package knows nothing about.
 //
 // Security notes:
 //   - Buffers inside guest memory are zeroized before being freed, and the

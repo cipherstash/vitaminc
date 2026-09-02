@@ -25,12 +25,13 @@ when a value class cannot be represented in the existing model, and needs a
 defined decode mapping in every supported language before it ships.
 
 The transport codec — the wire encoding that hands a tree across an FFI
-boundary in one copy — is **not part of this module**. It is an unexported
-detail of whichever consumer owns the boundary (`vcencrypt` for the wasm
-harness), because it is transport-only and carries no storage commitment:
-the only bytes an application should ever persist are the sealed leaves.
-The `Encryptable`/`Encoder` encoding extension point lives with the codec in
-`vcencrypt` for the same reason.
+boundary in one copy — is **not part of this module**. It lives in the
+sibling module `vcffi`, shared by the bindings that own such a boundary
+(`vcencrypt` for the wasm harness, the stack-encrypt Go SDK), because it is
+transport-only and carries no storage commitment: the only bytes an
+application should ever persist are the sealed leaves. The
+`Encryptable`/`Encoder` encoding extension point lives with the codec in
+`vcffi` for the same reason.
 
 ## Passthrough — fields in the clear
 
@@ -73,6 +74,12 @@ not just the parse. All four leaf types share that byte layout: the *kind* of
 a leaf is authenticated through domain-separated AAD, not written into the
 bytes, so a stored leaf's kind must be tracked by the schema (see the note on
 the marker types' `Scan`).
+
+The `Sealed` family here is **vitaminc-encrypt's** materialization of the
+model. Another binding — a stack-encrypt SDK, say — defines its own distinct
+sealed-leaf types and wires them to the codec via `vcffi.LeafSet`, so its
+leaves can never scan or marshal where these belong: a stack-encrypt leaf is
+never a `vcvalue.Sealed`.
 
 The sealed leaf types and `Plain` implement `driver.Valuer`, and the sealed
 types `sql.Scanner`, so a record-shaped ciphertext binds straight into a

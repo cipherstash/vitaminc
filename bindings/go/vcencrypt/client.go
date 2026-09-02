@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/cipherstash/vitaminc/bindings/go/vcffi"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -199,7 +200,7 @@ func (c *Client) NewCipher(ctx context.Context, key []byte) (*Cipher, error) {
 // where they passed through, map[string]any for records (directly bindable as
 // database named parameters), []any for sequences.
 func (cph *Cipher) Encrypt(ctx context.Context, v any, aad []byte) (any, error) {
-	encoded, err := marshal(v)
+	encoded, err := vcffi.Marshal(v)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +226,7 @@ func (cph *Cipher) Decrypt(ctx context.Context, ct any, aad []byte) (any, error)
 	if err != nil {
 		return nil, err
 	}
-	return unmarshal(out)
+	return vcffi.Unmarshal(out)
 }
 
 // EncryptElement seals v as a *sequence element* of the logical collection
@@ -234,7 +235,7 @@ func (cph *Cipher) Decrypt(ctx context.Context, ct any, aad []byte) (any, error)
 // rows were (or will be) written by batch-encrypting a slice under the same
 // aad: rows from both paths interchange freely.
 func (cph *Cipher) EncryptElement(ctx context.Context, v any, aad []byte) (any, error) {
-	encoded, err := marshal(v)
+	encoded, err := vcffi.Marshal(v)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +262,7 @@ func (cph *Cipher) DecryptElement(ctx context.Context, ct any, aad []byte) (any,
 	if err != nil {
 		return nil, err
 	}
-	return unmarshal(out)
+	return vcffi.Unmarshal(out)
 }
 
 // Close frees the cipher's key schedule inside the guest. Using the Cipher
