@@ -72,7 +72,11 @@ pub trait PrfValue {
 ///
 /// The shape mirrors RustCrypto's `KeyInit`, with the deliberate difference
 /// that the key is owned rather than borrowed and copied in.
-pub trait PrfKeyInit: Sized {
+///
+/// [`Prf`] is a supertrait, so `P: PrfKeyInit` alone says "a PRF I can
+/// build from a key"; generic code does not need to spell out `P: Prf` as
+/// well.
+pub trait PrfKeyInit: Prf {
     /// Fixed-size key type whose length is guaranteed by construction, so
     /// [`new`](PrfKeyInit::new) cannot fail. Always a controlled type; a
     /// bare array cannot key a backend.

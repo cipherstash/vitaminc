@@ -651,7 +651,9 @@ fn one_prf_instance_serves_repeated_derivations_by_reference() {
 }
 
 /// Callers generic over "any PRF constructible from a key" bound on
-/// `PrfKeyInit`; both constructors agree with the inherent ones.
+/// `PrfKeyInit` alone (`Prf` is its supertrait). Its two constructor paths,
+/// the fixed-length `new` and the runtime-length `try_from_bytes`, key the
+/// backend identically, and `try_from_bytes` still rejects short keys.
 #[test]
 fn prf_key_init_builds_the_backend_generically() {
     fn keyed<P: PrfKeyInit>(key: P::Key) -> P {
@@ -660,16 +662,16 @@ fn prf_key_init_builds_the_backend_generically() {
     fn keyed_from_bytes<P: PrfKeyInit>(key: Protected<Vec<u8>>) -> Result<P, P::KeyError> {
         P::try_from_bytes(key)
     }
+    // `PrfKeyInit` alone is enough to derive with: `Prf` is its supertrait.
+    fn needle<P: PrfKeyInit>(prf: &P) -> P::Ok<P::Block> {
+        b"needle".as_slice().prf(prf)
+    }
 
     let via_trait: HmacSha256Prf = keyed(Protected::new(key_bytes()));
     let via_trait_bytes: HmacSha256Prf = keyed_from_bytes(key()).unwrap();
-    let expected: [u8; 32] = b"needle".as_slice().prf(&local()).into_result().unwrap();
-    let a: [u8; 32] = b"needle".as_slice().prf(&via_trait).into_result().unwrap();
-    let b: [u8; 32] = b"needle"
-        .as_slice()
-        .prf(&via_trait_bytes)
-        .into_result()
-        .unwrap();
+    let expected: [u8; 32] = needle(&local()).into_result().unwrap();
+    let a: [u8; 32] = needle(&via_trait).into_result().unwrap();
+    let b: [u8; 32] = needle(&via_trait_bytes).into_result().unwrap();
     assert_eq!(a, expected);
     assert_eq!(b, expected);
 
