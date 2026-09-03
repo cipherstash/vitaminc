@@ -22,12 +22,16 @@ impl<T, S> Usage<T, S> {
 // (`PhantomData` is a ZST with nothing to wipe).
 //
 // `Usage` intentionally has no `Drop` (and so no `ZeroizeOnDrop` *derive*) of
-// its own. Its secret is still wiped on drop: `Usage::new` requires
-// `Self: Controlled`, so the inner `T` is always a controlled type
-// (`Protected`/`Equatable`/`Exportable`), each of which is `ZeroizeOnDrop` —
-// dropping `Usage` runs the field's drop glue and wipes the bytes. Giving
-// `Usage` its own `Drop` would require a viral `T: Zeroize` bound on the struct
-// (E0367: a conditional `Drop` must match the struct bounds), which would
+// its own: the wipe is whatever drop glue the field `T` brings. Every path that
+// can put a secret into a `Usage` goes through `Controlled` (`Usage::new`,
+// `init_from_inner`, `inner_mut`), and `Controlled for Usage` requires
+// `T: Controlled`, so a `Usage` holding a secret always has a
+// `Protected`/`Equatable`/`Exportable` field whose `ZeroizeOnDrop` wipes the
+// bytes when `Usage` drops. The one constructor without that bound,
+// `Zeroed for Usage`, can build e.g. `Usage<[u8; 32], S>`, but such a value is
+// inert: it holds only zeros and exposes no way to write a secret into it.
+// Giving `Usage` its own `Drop` would require a viral `T: Zeroize` bound on the
+// struct (E0367: a conditional `Drop` must match the struct bounds), which would
 // cascade through every `Usage<T, S>` use for no behavioural gain.
 impl<T: Zeroize, Scope> Zeroize for Usage<T, Scope> {
     fn zeroize(&mut self) {
