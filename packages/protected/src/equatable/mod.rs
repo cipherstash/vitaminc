@@ -349,6 +349,31 @@ mod tests {
     use super::ConstantTimeEq;
     use crate::{Equatable, Protected};
     use core::num::NonZeroU16;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use zeroize::Zeroize;
+
+    /// `Equatable`'s `ZeroizeOnDrop` comes from the derive; this pins the
+    /// generated drop glue so removing the derive fails a test, not just a
+    /// promise. The `!Copy` half lives in `tests/ui/negative_space`.
+    #[test]
+    fn drop_zeroizes_inner() {
+        struct Tracked<'a>(&'a AtomicBool);
+        impl Zeroize for Tracked<'_> {
+            fn zeroize(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let zeroized = AtomicBool::new(false);
+        {
+            let _e = Equatable(Tracked(&zeroized));
+            assert!(!zeroized.load(Ordering::SeqCst));
+        }
+        assert!(
+            zeroized.load(Ordering::SeqCst),
+            "Equatable::drop must zeroize the inner value"
+        );
+    }
 
     #[test]
     fn test_opaque_debug() {

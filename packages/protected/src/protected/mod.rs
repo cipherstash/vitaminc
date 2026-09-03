@@ -233,16 +233,71 @@ mod tests {
 
         // A marker-only `ZeroizeOnDrop` leaves `[u8; 32]` with no destructor
         // at all; `needs_drop` is the compiler's word on whether one exists.
+        // Each pair shows the payload alone contributes no glue, so the
+        // wrapper's `true` can only come from `Protected`'s zeroizing `Drop`.
+        // (`Protected<Vec<u8>>` proves nothing here: `Vec` brings its own
+        // destructor, so `needs_drop` stays true even with no wipe at all.)
+        assert!(!std::mem::needs_drop::<[u8; 32]>());
         assert!(std::mem::needs_drop::<Protected<[u8; 32]>>());
-        assert!(std::mem::needs_drop::<Protected<Vec<u8>>>());
+        assert!(!std::mem::needs_drop::<u64>());
+        assert!(std::mem::needs_drop::<Protected<u64>>());
     }
 
-    /// Regression test for #263: the bytes of a `Protected<[u8; 32]>` are
-    /// zero once its destructor has wiped them. The payload records its own
-    /// bytes from inside `Zeroize`, while the value is still live, so the
-    /// observation never touches a dropped value.
+    /// The canonical downstream nesting from the `Exportable` docs: the drop
+    /// glue must propagate through all three wrapper layers, and the payload
+    /// alone contributes none of it.
     #[test]
-    fn drop_zeroizes_array_bytes() {
+    fn nested_wrappers_keep_zeroizing_drop_glue() {
+        use crate::{Equatable, Exportable};
+        fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+        assert_zeroize_on_drop::<Exportable<Equatable<Protected<[u8; 32]>>>>();
+        assert_zeroize_on_drop::<Equatable<Exportable<Protected<[u8; 32]>>>>();
+        assert!(!std::mem::needs_drop::<[u8; 32]>());
+        assert!(std::mem::needs_drop::<
+            Exportable<Equatable<Protected<[u8; 32]>>>,
+        >());
+        assert!(std::mem::needs_drop::<
+            Equatable<Exportable<Protected<[u8; 32]>>>,
+        >());
+    }
+
+    /// The README's clone contract: a clone is a distinct value with its own
+    /// zeroizing `Drop`, so each duplicate is wiped exactly once, when it
+    /// itself drops. Fails if `Clone` ever starts aliasing the payload or the
+    /// clone loses its drop glue.
+    #[test]
+    fn each_clone_is_wiped_independently() {
+        use std::sync::atomic::AtomicUsize;
+
+        #[derive(Clone)]
+        struct Counted<'a>(&'a AtomicUsize);
+        impl Zeroize for Counted<'_> {
+            fn zeroize(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let wipes = AtomicUsize::new(0);
+        let original = Protected::new(Counted(&wipes));
+        let dup = original.clone();
+        drop(original);
+        assert_eq!(
+            wipes.load(Ordering::SeqCst),
+            1,
+            "original wiped on its own drop"
+        );
+        drop(dup);
+        assert_eq!(wipes.load(Ordering::SeqCst), 2, "clone wiped independently");
+    }
+
+    /// Regression test for #263: `Protected`'s drop glue runs the payload's
+    /// `Zeroize` to completion — the payload observes its own wiped bytes
+    /// from inside `zeroize`, while the value is still live, so the
+    /// observation never touches a dropped value. (That the array wipe
+    /// itself writes zeros is the `zeroize` crate's property; what this
+    /// pins for `Protected` is that the wipe runs and finishes.)
+    #[test]
+    fn drop_runs_payload_zeroize_to_completion() {
         struct Recorded<'a> {
             bytes: [u8; 32],
             wiped: &'a Cell<Option<[u8; 32]>>,
@@ -287,6 +342,44 @@ mod tests {
         assert!(
             !zeroized.load(Ordering::SeqCst),
             "risky_unwrap must not zeroize the value it hands back"
+        );
+    }
+
+    /// `flatten` and `transpose` route through `into_inner_unchecked`, so the
+    /// consumed outer wrapper must NOT wipe the value it hands on — the
+    /// result still owns the live secret. The wipe belongs to whoever drops
+    /// the result, and it must still happen there.
+    #[test]
+    fn flatten_and_transpose_move_without_zeroizing() {
+        struct Tracked<'a>(&'a AtomicBool);
+        impl Zeroize for Tracked<'_> {
+            fn zeroize(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let zeroized = AtomicBool::new(false);
+        let flattened = Protected::new(Protected::new(Tracked(&zeroized))).flatten();
+        assert!(
+            !zeroized.load(Ordering::SeqCst),
+            "flatten must not zeroize the value it hands on"
+        );
+        drop(flattened);
+        assert!(
+            zeroized.load(Ordering::SeqCst),
+            "the flattened wrapper still wipes on drop"
+        );
+
+        let zeroized = AtomicBool::new(false);
+        let transposed = Protected::new(Some(Tracked(&zeroized))).transpose();
+        assert!(
+            !zeroized.load(Ordering::SeqCst),
+            "transpose must not zeroize the value it hands on"
+        );
+        drop(transposed);
+        assert!(
+            zeroized.load(Ordering::SeqCst),
+            "the transposed wrapper still wipes on drop"
         );
     }
 

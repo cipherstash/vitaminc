@@ -99,6 +99,19 @@ mod tests {
     struct MyScope;
     impl Scope for MyScope {}
 
+    /// `Usage` deliberately has no `ZeroizeOnDrop` of its own (see the note
+    /// on the `Zeroize` impl above): the wipe is the inner wrapper's drop
+    /// glue, reached through `Usage`'s field. This pins that the delegation
+    /// actually holds — a bare `[u8; 32]` has no glue, so the `true` can
+    /// only come from `Protected`'s zeroizing `Drop` propagating through.
+    #[test]
+    fn drop_glue_comes_from_inner_wrapper() {
+        assert!(!std::mem::needs_drop::<[u8; 32]>());
+        assert!(std::mem::needs_drop::<
+            Usage<Protected<[u8; 32]>, DefaultScope>,
+        >());
+    }
+
     // TODO: Create some compilation tests
     fn example1<T: Acceptable<DefaultScope>>(_: T) -> bool {
         true

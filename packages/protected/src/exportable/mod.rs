@@ -171,9 +171,33 @@ where
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use super::*;
     use crate::{Equatable, Protected};
+
+    /// `Exportable`'s `ZeroizeOnDrop` comes from the derive; this pins the
+    /// generated drop glue so removing the derive fails a test, not just a
+    /// promise. The `!Copy` half lives in `tests/ui/negative_space`.
+    #[test]
+    fn drop_zeroizes_inner() {
+        struct Tracked<'a>(&'a AtomicBool);
+        impl Zeroize for Tracked<'_> {
+            fn zeroize(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let zeroized = AtomicBool::new(false);
+        {
+            let _e = Exportable(Tracked(&zeroized));
+            assert!(!zeroized.load(Ordering::SeqCst));
+        }
+        assert!(
+            zeroized.load(Ordering::SeqCst),
+            "Exportable::drop must zeroize the inner value"
+        );
+    }
 
     #[test]
     fn test_opaque_debug() {
