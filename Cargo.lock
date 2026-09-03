@@ -2527,6 +2527,7 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "sha2",
+ "trybuild",
  "vitaminc-prf",
  "vitaminc-protected",
  "zeroize",

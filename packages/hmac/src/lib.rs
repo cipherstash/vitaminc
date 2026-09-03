@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![doc = include_str!("../README.md")]
 
-use std::{any::Any, borrow::Cow, convert::Infallible, sync::Arc};
+use std::{any::Any, borrow::Cow, convert::Infallible};
 
 use hmac::{
     digest::{
@@ -15,8 +15,8 @@ use vitaminc_protected::{Acceptable, Controlled, DefaultScope, Protected, Protec
 use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 use vitaminc_prf::{
-    MapPrf, Prf, PrfBuildError, PrfContext, PrfEncoding, PrfError, PrfValue, PrfVisitor, ReadyPrf,
-    ResolvedPrf, ResolvedVisitor, SeqPrf,
+    MapPrf, Prf, PrfBuildError, PrfContext, PrfEncoding, PrfError, PrfKeyInit, PrfValue,
+    PrfVisitor, ReadyPrf, ResolvedPrf, ResolvedVisitor, SeqPrf,
 };
 
 type PassthroughValue = Box<dyn Any + Send + 'static>;
@@ -26,13 +26,13 @@ const SHA256_OUTPUT_SIZE: usize = 32;
 const IPAD: u8 = 0x36;
 const OPAD: u8 = 0x5C;
 
-/// Length of the key accepted by [`HmacSha256Prf::new`].
+/// Length of the key accepted by [`PrfKeyInit::new`] on [`HmacSha256Prf`].
 pub const KEY_LEN: usize = 32;
 
-/// Shortest key accepted by [`HmacSha256Prf::try_from_bytes`].
+/// Shortest key accepted by [`PrfKeyInit::try_from_bytes`] on [`HmacSha256Prf`].
 pub const MIN_KEY_LEN: usize = KEY_LEN;
 
-/// Key material offered to [`HmacSha256Prf::try_from_bytes`] was too short to
+/// Key material offered to [`PrfKeyInit::try_from_bytes`] was too short to
 /// key the PRF safely.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WeakKeyError {
@@ -144,18 +144,75 @@ impl ZeroizeOnDrop for ZeroizingHmacSha256 {}
 
 /// Local HMAC-SHA256 structured PRF.
 ///
-/// The key remains in a [`Protected`] allocation shared by nested drivers.
+/// The PRF owns its key outright. Construction goes through [`PrfKeyInit`]
+/// and takes the key by value; the key lives in a single [`Protected`]
+/// allocation for the life of the PRF and is wiped when the PRF drops,
+/// unconditionally. Derivation borrows the PRF (`&self`), so one instance
+/// serves any number of derivations.
+///
 /// Each leaf derives `HMAC-SHA256(key, PAE(encoding, context, input))`.
-#[derive(Clone)]
+///
+/// # Sharing
+///
+/// `HmacSha256Prf` is deliberately not `Clone`. A clone would either copy the
+/// key or, worse, share it behind a hidden `Arc`, which turns "wiped when
+/// this PRF drops" into "wiped when the last clone drops" with nothing at
+/// the call site to say so. Sharing is still supported; it is just spelled
+/// out by the caller. Wrap the PRF in an [`Arc`](std::sync::Arc) where it
+/// needs to be shared, and the type at every call site then says exactly
+/// when the key is wiped: when the last `Arc` goes away.
+///
+/// ```
+/// use std::sync::Arc;
+/// use vitaminc_hmac::HmacSha256Prf;
+/// use vitaminc_prf::{PrfKeyInit, PrfValue};
+/// use vitaminc_protected::Protected;
+///
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let prf = Arc::new(HmacSha256Prf::new(Protected::new([7; 32])));
+///
+/// // Hand a handle to each place that derives; `Arc<T>` clones without
+/// // `T: Clone`, and `&*handle` is the `&HmacSha256Prf` that derivation
+/// // borrows.
+/// let for_worker = Arc::clone(&prf);
+/// let handle = std::thread::spawn(move || {
+///     "alice@example.com".prf_with_context(&*for_worker, "users/email/v1")
+/// });
+///
+/// let here = "alice@example.com"
+///     .prf_with_context(&*prf, "users/email/v1")
+///     .into_result()?;
+/// let there = handle.join().expect("worker panicked").into_result()?;
+/// assert_eq!(here, there);
+///
+/// // Dropping the last handle wipes the key.
+/// drop(prf);
+/// # Ok(())
+/// # }
+/// # example().unwrap();
+/// ```
+// Derived, not hand-written: the derive only compiles while every field
+// wipes on drop, so caching key-derived state (say, expanded ipad/opad
+// bytes) in a new field without zeroizing it is a compile error, not a
+// silent leak. `ZeroizingHmacSha256` covers the expanded state each
+// derivation builds from the key.
+#[derive(ZeroizeOnDrop)]
 pub struct HmacSha256Prf {
-    key: Arc<Protected<Vec<u8>>>,
+    key: Protected<Vec<u8>>,
 }
 
-impl HmacSha256Prf {
+impl PrfKeyInit for HmacSha256Prf {
+    type Key = Protected<[u8; KEY_LEN]>;
+    type KeyError = WeakKeyError;
+
     /// Key the PRF with a full-strength key.
     ///
     /// The array type carries the length guarantee, so this cannot fail.
-    pub fn new(key: Protected<[u8; KEY_LEN]>) -> Self {
+    fn new(key: Self::Key) -> Self {
+        // `risky_ref` + drop, not `map`: `map` moves the array out through
+        // `risky_unwrap`, and a bare `[u8; 32]` has no destructor to wipe it.
+        // Borrowing leaves the array inside its `Protected`, which wipes it
+        // when `key` drops at the end of this call.
         Self::from_vec(Protected::new(key.risky_ref().to_vec()))
     }
 
@@ -167,16 +224,18 @@ impl HmacSha256Prf {
     /// Returns [`WeakKeyError`] if the key is shorter than [`MIN_KEY_LEN`].
     /// HMAC itself accepts any key length, including an empty one, which
     /// would silently produce derivations that anybody can recompute.
-    pub fn try_from_bytes(key: Protected<Vec<u8>>) -> Result<Self, WeakKeyError> {
+    fn try_from_bytes(key: Protected<Vec<u8>>) -> Result<Self, Self::KeyError> {
         let len = key.risky_ref().len();
         if len < MIN_KEY_LEN {
             return Err(WeakKeyError { len });
         }
         Ok(Self::from_vec(key))
     }
+}
 
+impl HmacSha256Prf {
     fn from_vec(key: Protected<Vec<u8>>) -> Self {
-        Self { key: Arc::new(key) }
+        Self { key }
     }
 
     fn derive<T>(&self, data: &T, encoding: PrfEncoding, context: &PrfContext<'_>) -> [u8; 32]
@@ -185,7 +244,7 @@ impl HmacSha256Prf {
         T::Inner: AsRef<[u8]>,
     {
         let mut hmac: ProtectedDigest<ZeroizingHmacSha256> =
-            ProtectedDigest::new_with_key(self.key.as_ref())
+            ProtectedDigest::new_with_key(&self.key)
                 .expect("HMAC-SHA256 accepts keys of any length");
 
         // Stream PAE directly into the digest. Building a framed Vec here would
@@ -214,15 +273,15 @@ impl Prf for HmacSha256Prf {
     type Block = [u8; 32];
     type BackendError = Infallible;
     type Passthrough = PassthroughValue;
-    type SeqPrf = HmacSeqPrf;
-    type MapPrf = HmacMapPrf;
+    type SeqPrf<'a> = HmacSeqPrf<'a>;
+    type MapPrf<'a> = HmacMapPrf<'a>;
     type Ok<T>
         = ReadyPrf<T, Infallible>
     where
         T: Send + 'static;
 
     fn prf_bytes_vec<V>(
-        self,
+        &self,
         data: Protected<Vec<u8>>,
         encoding: PrfEncoding,
         context: PrfContext<'static>,
@@ -238,7 +297,7 @@ impl Prf for HmacSha256Prf {
     // Overrides the Vec-copying default: fixed-size leaves stream into the
     // digest without an intermediate heap allocation.
     fn prf_bytes_array<const N: usize, V>(
-        self,
+        &self,
         data: Protected<[u8; N]>,
         encoding: PrfEncoding,
         context: PrfContext<'static>,
@@ -251,7 +310,7 @@ impl Prf for HmacSha256Prf {
         Self::resolved(visitor.visit_block(block).map_err(PrfError::Visitor))
     }
 
-    fn prf_seq(self, size_hint: Option<usize>) -> Self::SeqPrf {
+    fn prf_seq(&self, size_hint: Option<usize>) -> Self::SeqPrf<'_> {
         HmacSeqPrf {
             backend: self,
             values: Vec::with_capacity(size_hint.unwrap_or(0)),
@@ -259,7 +318,7 @@ impl Prf for HmacSha256Prf {
         }
     }
 
-    fn prf_map(self, size_hint: Option<usize>) -> Self::MapPrf {
+    fn prf_map(&self, size_hint: Option<usize>) -> Self::MapPrf<'_> {
         HmacMapPrf {
             backend: self,
             entries: Vec::with_capacity(size_hint.unwrap_or(0)),
@@ -268,14 +327,14 @@ impl Prf for HmacSha256Prf {
         }
     }
 
-    fn prf_none<V>(self, _context: PrfContext<'static>, visitor: V) -> Self::Ok<V::Value>
+    fn prf_none<V>(&self, _context: PrfContext<'static>, visitor: V) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>,
     {
         Self::resolved(visitor.visit_absent().map_err(PrfError::Visitor))
     }
 
-    fn passthrough<V>(self, value: Self::Passthrough, visitor: V) -> Self::Ok<V::Value>
+    fn passthrough<V>(&self, value: Self::Passthrough, visitor: V) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>,
     {
@@ -283,7 +342,7 @@ impl Prf for HmacSha256Prf {
     }
 
     fn passthrough_boxed<V>(
-        self,
+        &self,
         value: Box<dyn Any + Send + 'static>,
         visitor: V,
     ) -> Self::Ok<V::Value>
@@ -293,7 +352,7 @@ impl Prf for HmacSha256Prf {
         self.passthrough(value, visitor)
     }
 
-    fn failure<T>(self, error: PrfError<Self::BackendError>) -> Self::Ok<T>
+    fn failure<T>(&self, error: PrfError<Self::BackendError>) -> Self::Ok<T>
     where
         T: Send + 'static,
     {
@@ -301,13 +360,14 @@ impl Prf for HmacSha256Prf {
     }
 }
 
-pub struct HmacSeqPrf {
-    backend: HmacSha256Prf,
+/// Sequence driver borrowing its [`HmacSha256Prf`] for one derivation.
+pub struct HmacSeqPrf<'a> {
+    backend: &'a HmacSha256Prf,
     values: Vec<ResolvedPrf<[u8; 32], PassthroughValue>>,
     error: Option<PrfError<Infallible>>,
 }
 
-impl SeqPrf for HmacSeqPrf {
+impl SeqPrf for HmacSeqPrf<'_> {
     type Prf = HmacSha256Prf;
     type Block = [u8; 32];
     type BackendError = Infallible;
@@ -319,7 +379,7 @@ impl SeqPrf for HmacSeqPrf {
     {
         if self.error.is_none() {
             match value
-                .prf_visit_with_context(self.backend.clone(), context, ResolvedVisitor)
+                .prf_visit_with_context(self.backend, context, ResolvedVisitor)
                 .into_result()
             {
                 Ok(value) => self.values.push(value),
@@ -355,14 +415,15 @@ impl SeqPrf for HmacSeqPrf {
     }
 }
 
-pub struct HmacMapPrf {
-    backend: HmacSha256Prf,
+/// Map driver borrowing its [`HmacSha256Prf`] for one derivation.
+pub struct HmacMapPrf<'a> {
+    backend: &'a HmacSha256Prf,
     entries: Vec<(String, ResolvedPrf<[u8; 32], PassthroughValue>)>,
     pending_key: Option<String>,
     error: Option<PrfError<Infallible>>,
 }
 
-impl HmacMapPrf {
+impl HmacMapPrf<'_> {
     fn set_build_error(&mut self, error: PrfBuildError) {
         if self.error.is_none() {
             self.error = Some(PrfError::Build(error));
@@ -374,7 +435,7 @@ impl HmacMapPrf {
     }
 }
 
-impl MapPrf for HmacMapPrf {
+impl MapPrf for HmacMapPrf<'_> {
     type Prf = HmacSha256Prf;
     type Block = [u8; 32];
     type BackendError = Infallible;
@@ -409,7 +470,7 @@ impl MapPrf for HmacMapPrf {
         }
         let entry_context = context.for_map_entry(&key);
         match value
-            .prf_visit_with_context(self.backend.clone(), entry_context, ResolvedVisitor)
+            .prf_visit_with_context(self.backend, entry_context, ResolvedVisitor)
             .into_result()
         {
             Ok(value) => self.entries.push((key, value)),

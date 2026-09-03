@@ -48,15 +48,15 @@ impl Prf for MockPrf {
     type Block = [u8; 32];
     type BackendError = Infallible;
     type Passthrough = PassthroughValue;
-    type SeqPrf = MockSeqPrf;
-    type MapPrf = MockMapPrf;
+    type SeqPrf<'a> = MockSeqPrf<'a>;
+    type MapPrf<'a> = MockMapPrf<'a>;
     type Ok<T>
         = ReadyPrf<T, Infallible>
     where
         T: Send + 'static;
 
     fn prf_bytes_vec<V>(
-        self,
+        &self,
         data: Protected<Vec<u8>>,
         encoding: PrfEncoding,
         context: PrfContext<'static>,
@@ -70,7 +70,7 @@ impl Prf for MockPrf {
     }
 
     fn prf_bytes_array<const N: usize, V>(
-        self,
+        &self,
         data: Protected<[u8; N]>,
         encoding: PrfEncoding,
         context: PrfContext<'static>,
@@ -83,7 +83,7 @@ impl Prf for MockPrf {
         Self::resolved(visitor.visit_block(block).map_err(PrfError::Visitor))
     }
 
-    fn prf_seq(self, size_hint: Option<usize>) -> Self::SeqPrf {
+    fn prf_seq(&self, size_hint: Option<usize>) -> Self::SeqPrf<'_> {
         MockSeqPrf {
             backend: self,
             values: Vec::with_capacity(size_hint.unwrap_or(0)),
@@ -91,7 +91,7 @@ impl Prf for MockPrf {
         }
     }
 
-    fn prf_map(self, size_hint: Option<usize>) -> Self::MapPrf {
+    fn prf_map(&self, size_hint: Option<usize>) -> Self::MapPrf<'_> {
         MockMapPrf {
             backend: self,
             entries: Vec::with_capacity(size_hint.unwrap_or(0)),
@@ -100,14 +100,14 @@ impl Prf for MockPrf {
         }
     }
 
-    fn prf_none<V>(self, _context: PrfContext<'static>, visitor: V) -> Self::Ok<V::Value>
+    fn prf_none<V>(&self, _context: PrfContext<'static>, visitor: V) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>,
     {
         Self::resolved(visitor.visit_absent().map_err(PrfError::Visitor))
     }
 
-    fn passthrough<V>(self, value: Self::Passthrough, visitor: V) -> Self::Ok<V::Value>
+    fn passthrough<V>(&self, value: Self::Passthrough, visitor: V) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>,
     {
@@ -115,7 +115,7 @@ impl Prf for MockPrf {
     }
 
     fn passthrough_boxed<V>(
-        self,
+        &self,
         value: Box<dyn Any + Send + 'static>,
         visitor: V,
     ) -> Self::Ok<V::Value>
@@ -125,7 +125,7 @@ impl Prf for MockPrf {
         self.passthrough(value, visitor)
     }
 
-    fn failure<T>(self, error: PrfError<Self::BackendError>) -> Self::Ok<T>
+    fn failure<T>(&self, error: PrfError<Self::BackendError>) -> Self::Ok<T>
     where
         T: Send + 'static,
     {
@@ -133,13 +133,13 @@ impl Prf for MockPrf {
     }
 }
 
-pub(crate) struct MockSeqPrf {
-    backend: MockPrf,
+pub(crate) struct MockSeqPrf<'a> {
+    backend: &'a MockPrf,
     values: Vec<ResolvedPrf<[u8; 32], PassthroughValue>>,
     error: Option<PrfError<Infallible>>,
 }
 
-impl SeqPrf for MockSeqPrf {
+impl SeqPrf for MockSeqPrf<'_> {
     type Prf = MockPrf;
     type Block = [u8; 32];
     type BackendError = Infallible;
@@ -151,7 +151,7 @@ impl SeqPrf for MockSeqPrf {
     {
         if self.error.is_none() {
             match value
-                .prf_visit_with_context(self.backend.clone(), context, ResolvedVisitor)
+                .prf_visit_with_context(self.backend, context, ResolvedVisitor)
                 .into_result()
             {
                 Ok(value) => self.values.push(value),
@@ -187,14 +187,14 @@ impl SeqPrf for MockSeqPrf {
     }
 }
 
-pub(crate) struct MockMapPrf {
-    backend: MockPrf,
+pub(crate) struct MockMapPrf<'a> {
+    backend: &'a MockPrf,
     entries: Vec<(String, ResolvedPrf<[u8; 32], PassthroughValue>)>,
     pending_key: Option<String>,
     error: Option<PrfError<Infallible>>,
 }
 
-impl MockMapPrf {
+impl MockMapPrf<'_> {
     fn set_build_error(&mut self, error: PrfBuildError) {
         if self.error.is_none() {
             self.error = Some(PrfError::Build(error));
@@ -206,7 +206,7 @@ impl MockMapPrf {
     }
 }
 
-impl MapPrf for MockMapPrf {
+impl MapPrf for MockMapPrf<'_> {
     type Prf = MockPrf;
     type Block = [u8; 32];
     type BackendError = Infallible;
@@ -241,7 +241,7 @@ impl MapPrf for MockMapPrf {
         }
         let entry_context = context.for_map_entry(&key);
         match value
-            .prf_visit_with_context(self.backend.clone(), entry_context, ResolvedVisitor)
+            .prf_visit_with_context(self.backend, entry_context, ResolvedVisitor)
             .into_result()
         {
             Ok(value) => self.entries.push((key, value)),

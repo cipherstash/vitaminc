@@ -19,9 +19,10 @@ use vitaminc_protected::{Controlled, Protected};
 use vitaminc_hmac::HmacSha256Prf;
 use vitaminc_prf::{
     BlockVisitor, IntoPrfContext, MapAccess, MapPrf, Prf, PrfBuildError, PrfContext, PrfEncoding,
-    PrfError, PrfValue, PrfVisitor, PrfVisitorError, ReadyPrf, ResolvedPrf, ResolvedVisitor,
-    SeqAccess, SeqPrf,
+    PrfError, PrfKeyInit, PrfValue, PrfVisitor, PrfVisitorError, ReadyPrf, ResolvedPrf,
+    ResolvedVisitor, SeqAccess, SeqPrf,
 };
+use zeroize::ZeroizeOnDrop;
 
 type Boxed = Box<dyn Any + Send + 'static>;
 type Node = ResolvedPrf<[u8; 32], Boxed>;
@@ -60,12 +61,12 @@ fn hmac_sha256_known_answer_and_byte_container_equivalence() {
     let array = *b"Hi There";
 
     let from_array = array
-        .prf(HmacSha256Prf::new(Protected::new(key)))
+        .prf(&HmacSha256Prf::new(Protected::new(key)))
         .into_result()
         .unwrap();
     let from_vec = array
         .to_vec()
-        .prf(HmacSha256Prf::new(Protected::new(key)))
+        .prf(&HmacSha256Prf::new(Protected::new(key)))
         .into_result()
         .unwrap();
 
@@ -79,12 +80,12 @@ fn hmac_sha256_normalizes_keys_larger_than_one_hash_block() {
     let input = b"long HMAC key".to_vec();
     let local = input
         .clone()
-        .prf(HmacSha256Prf::try_from_bytes(Protected::new(key_bytes.clone())).unwrap())
+        .prf(&HmacSha256Prf::try_from_bytes(Protected::new(key_bytes.clone())).unwrap())
         .into_result()
         .unwrap();
     let reference = block_on(
         input
-            .prf(DeferredPrf::new(Protected::new(key_bytes)))
+            .prf(&DeferredPrf::new(Protected::new(key_bytes)))
             .into_future(),
     )
     .unwrap();
@@ -112,11 +113,11 @@ impl<P> PrfVisitor<[u8; 32], P> for BloomVisitor {
 
 #[test]
 fn visitors_can_produce_equality_and_bloom_terms() {
-    let equality: [u8; 32] = b"needle".as_slice().prf(local()).into_result().unwrap();
+    let equality: [u8; 32] = b"needle".as_slice().prf(&local()).into_result().unwrap();
     let positions: Vec<i16> = b"needle"
         .as_slice()
         .prf_visit(
-            local(),
+            &local(),
             BloomVisitor {
                 positions: 6,
                 modulus: 2048,
@@ -224,7 +225,7 @@ struct MixedRecord {
 }
 
 impl PrfValue for MixedRecord {
-    fn prf_visit_with_context<'a, P, V, C>(self, prf: P, context: C, visitor: V) -> P::Ok<V::Value>
+    fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
@@ -252,7 +253,7 @@ fn mixed_record() -> MixedRecord {
 #[test]
 fn handwritten_mixed_record_resolves_heterogeneous_children() {
     let output = mixed_record()
-        .prf_visit_with_context(local(), "tenant-42", RecordVisitor)
+        .prf_visit_with_context(&local(), "tenant-42", RecordVisitor)
         .into_result()
         .unwrap();
     assert_eq!(output.tags.len(), 2);
@@ -360,15 +361,15 @@ impl Prf for DeferredPrf {
     type Block = [u8; 32];
     type BackendError = Infallible;
     type Passthrough = Boxed;
-    type SeqPrf = DeferredSeq;
-    type MapPrf = DeferredMap;
+    type SeqPrf<'a> = DeferredSeq<'a>;
+    type MapPrf<'a> = DeferredMap<'a>;
     type Ok<T>
         = DeferredOutput<T>
     where
         T: Send + 'static;
 
     fn prf_bytes_vec<V>(
-        self,
+        &self,
         data: Protected<Vec<u8>>,
         encoding: PrfEncoding,
         context: PrfContext<'static>,
@@ -382,7 +383,7 @@ impl Prf for DeferredPrf {
         self.output(PendingNode::Leaf(data, encoding, context), visitor)
     }
 
-    fn prf_seq(self, size_hint: Option<usize>) -> Self::SeqPrf {
+    fn prf_seq(&self, size_hint: Option<usize>) -> Self::SeqPrf<'_> {
         DeferredSeq {
             backend: self,
             values: Vec::with_capacity(size_hint.unwrap_or(0)),
@@ -390,7 +391,7 @@ impl Prf for DeferredPrf {
         }
     }
 
-    fn prf_map(self, size_hint: Option<usize>) -> Self::MapPrf {
+    fn prf_map(&self, size_hint: Option<usize>) -> Self::MapPrf<'_> {
         DeferredMap {
             backend: self,
             entries: Vec::with_capacity(size_hint.unwrap_or(0)),
@@ -399,46 +400,46 @@ impl Prf for DeferredPrf {
         }
     }
 
-    fn prf_none<V>(self, _context: PrfContext<'static>, visitor: V) -> Self::Ok<V::Value>
+    fn prf_none<V>(&self, _context: PrfContext<'static>, visitor: V) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>,
     {
         self.output(PendingNode::Absent, visitor)
     }
 
-    fn passthrough<V>(self, value: Self::Passthrough, visitor: V) -> Self::Ok<V::Value>
+    fn passthrough<V>(&self, value: Self::Passthrough, visitor: V) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>,
     {
         self.output(PendingNode::Passthrough(value), visitor)
     }
 
-    fn passthrough_boxed<V>(self, value: Boxed, visitor: V) -> Self::Ok<V::Value>
+    fn passthrough_boxed<V>(&self, value: Boxed, visitor: V) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>,
     {
         self.passthrough(value, visitor)
     }
 
-    fn failure<T>(self, error: PrfError<Self::BackendError>) -> Self::Ok<T>
+    fn failure<T>(&self, error: PrfError<Self::BackendError>) -> Self::Ok<T>
     where
         T: Send + 'static,
     {
         DeferredOutput {
             node: Err(error),
             finish: None,
-            backend: self,
+            backend: self.clone(),
         }
     }
 }
 
-struct DeferredSeq {
-    backend: DeferredPrf,
+struct DeferredSeq<'a> {
+    backend: &'a DeferredPrf,
     values: Vec<PendingNode>,
     error: Option<PrfError<Infallible>>,
 }
 
-impl SeqPrf for DeferredSeq {
+impl SeqPrf for DeferredSeq<'_> {
     type Prf = DeferredPrf;
     type Block = [u8; 32];
     type BackendError = Infallible;
@@ -447,7 +448,7 @@ impl SeqPrf for DeferredSeq {
     fn prf_next<T: PrfValue>(mut self, value: T, context: PrfContext<'static>) -> Self {
         if self.error.is_none() {
             match value
-                .prf_visit_with_context(self.backend.clone(), context, ResolvedVisitor)
+                .prf_visit_with_context(self.backend, context, ResolvedVisitor)
                 .into_node()
             {
                 Ok(node) => self.values.push(node),
@@ -479,14 +480,14 @@ impl SeqPrf for DeferredSeq {
     }
 }
 
-struct DeferredMap {
-    backend: DeferredPrf,
+struct DeferredMap<'a> {
+    backend: &'a DeferredPrf,
     entries: Vec<(String, PendingNode)>,
     pending: Option<String>,
     error: Option<PrfError<Infallible>>,
 }
 
-impl DeferredMap {
+impl DeferredMap<'_> {
     fn build_error(&mut self, error: PrfBuildError) {
         if self.error.is_none() {
             self.error = Some(PrfError::Build(error));
@@ -494,7 +495,7 @@ impl DeferredMap {
     }
 }
 
-impl MapPrf for DeferredMap {
+impl MapPrf for DeferredMap<'_> {
     type Prf = DeferredPrf;
     type Block = [u8; 32];
     type BackendError = Infallible;
@@ -515,11 +516,7 @@ impl MapPrf for DeferredMap {
             return self;
         };
         match value
-            .prf_visit_with_context(
-                self.backend.clone(),
-                context.for_map_entry(&key),
-                ResolvedVisitor,
-            )
+            .prf_visit_with_context(self.backend, context.for_map_entry(&key), ResolvedVisitor)
             .into_node()
         {
             Ok(node) => self.entries.push((key, node)),
@@ -562,7 +559,7 @@ fn deferred_nested_record_executes_one_batch() {
     let calls = backend.batch_calls.clone();
     let output = block_on(
         mixed_record()
-            .prf_visit_with_context(backend, "tenant-42", RecordVisitor)
+            .prf_visit_with_context(&backend, "tenant-42", RecordVisitor)
             .into_future(),
     )
     .unwrap();
@@ -574,12 +571,12 @@ fn deferred_nested_record_executes_one_batch() {
 fn local_and_deferred_backends_match(values: Vec<Vec<u8>>, context: Vec<u8>) -> bool {
     let expected = values
         .clone()
-        .prf_visit_with_context(local(), context.clone(), BlocksVisitor)
+        .prf_visit_with_context(&local(), context.clone(), BlocksVisitor)
         .into_result()
         .unwrap();
     let actual = block_on(
         values
-            .prf_visit_with_context(DeferredPrf::new(key()), context, BlocksVisitor)
+            .prf_visit_with_context(&DeferredPrf::new(key()), context, BlocksVisitor)
             .into_future(),
     )
     .unwrap();
@@ -590,10 +587,10 @@ fn local_and_deferred_backends_match(values: Vec<Vec<u8>>, context: Vec<u8>) -> 
 fn sequence_order_and_shape_are_preserved(values: Vec<Vec<u8>>) -> bool {
     let expected: Vec<_> = values
         .iter()
-        .map(|value| value.clone().prf(local()).into_result().unwrap())
+        .map(|value| value.clone().prf(&local()).into_result().unwrap())
         .collect();
     let structured = values
-        .prf_visit(local(), BlocksVisitor)
+        .prf_visit(&local(), BlocksVisitor)
         .into_result()
         .unwrap();
     expected == structured
@@ -607,19 +604,81 @@ fn derivation_is_deterministic(key_suffix: Vec<u8>, context: Vec<u8>, input: Vec
     let first = input
         .clone()
         .prf_with_context(
-            HmacSha256Prf::try_from_bytes(Protected::new(key_bytes.clone())).unwrap(),
+            &HmacSha256Prf::try_from_bytes(Protected::new(key_bytes.clone())).unwrap(),
             context.clone(),
         )
         .into_result()
         .unwrap();
     let second = input
         .prf_with_context(
-            HmacSha256Prf::try_from_bytes(Protected::new(key_bytes)).unwrap(),
+            &HmacSha256Prf::try_from_bytes(Protected::new(key_bytes)).unwrap(),
             context,
         )
         .into_result()
         .unwrap();
     first == second
+}
+
+/// `HmacSha256Prf` declares `ZeroizeOnDrop`. The impl is derived, so it
+/// only compiles while every field wipes on drop; this test pins the
+/// declaration itself. The single-owner property it rests on (no `Clone`)
+/// is pinned by the compile-fail case in `tests/ui/negative_space`.
+#[test]
+fn prf_declares_zeroize_on_drop() {
+    fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+    assert_zeroize_on_drop::<HmacSha256Prf>();
+}
+
+/// Derivation borrows the PRF, so one instance serves repeated derivations
+/// without a `Clone` handle and without consuming the key.
+#[test]
+fn one_prf_instance_serves_repeated_derivations_by_reference() {
+    let prf = local();
+    let first: [u8; 32] = b"needle".as_slice().prf(&prf).into_result().unwrap();
+    let second: [u8; 32] = b"needle".as_slice().prf(&prf).into_result().unwrap();
+    let other: [u8; 32] = b"haystack".as_slice().prf(&prf).into_result().unwrap();
+    assert_eq!(first, second);
+    assert_ne!(first, other);
+
+    // Structural drivers borrow the same instance, then hand it back.
+    let terms = vec![vec![1_u8], vec![2_u8]]
+        .prf_visit(&prf, BlocksVisitor)
+        .into_result()
+        .unwrap();
+    assert_eq!(terms.len(), 2);
+    let after: [u8; 32] = b"needle".as_slice().prf(&prf).into_result().unwrap();
+    assert_eq!(first, after);
+}
+
+/// Callers generic over "any PRF constructible from a key" bound on
+/// `PrfKeyInit` alone (`Prf` is its supertrait). Its two constructor paths,
+/// the fixed-length `new` and the runtime-length `try_from_bytes`, key the
+/// backend identically, and `try_from_bytes` still rejects short keys.
+#[test]
+fn prf_key_init_builds_the_backend_generically() {
+    fn keyed<P: PrfKeyInit>(key: P::Key) -> P {
+        P::new(key)
+    }
+    fn keyed_from_bytes<P: PrfKeyInit>(key: Protected<Vec<u8>>) -> Result<P, P::KeyError> {
+        P::try_from_bytes(key)
+    }
+    // `PrfKeyInit` alone is enough to derive with: `Prf` is its supertrait.
+    fn needle<P: PrfKeyInit>(prf: &P) -> P::Ok<P::Block> {
+        b"needle".as_slice().prf(prf)
+    }
+
+    let via_trait: HmacSha256Prf = keyed(Protected::new(key_bytes()));
+    let via_trait_bytes: HmacSha256Prf = keyed_from_bytes(key()).unwrap();
+    let expected: [u8; 32] = needle(&local()).into_result().unwrap();
+    let a: [u8; 32] = needle(&via_trait).into_result().unwrap();
+    let b: [u8; 32] = needle(&via_trait_bytes).into_result().unwrap();
+    assert_eq!(a, expected);
+    assert_eq!(b, expected);
+
+    match keyed_from_bytes::<HmacSha256Prf>(Protected::new(vec![0x0b; 16])) {
+        Err(error) => assert_eq!(error.len(), 16),
+        Ok(_) => panic!("a 16-byte key must be rejected through the trait too"),
+    }
 }
 
 #[test]
@@ -652,11 +711,11 @@ fn both_constructors_agree_on_the_same_key() {
     let input = b"same key, same derivation".to_vec();
     let from_array = input
         .clone()
-        .prf(HmacSha256Prf::new(Protected::new(key_bytes())))
+        .prf(&HmacSha256Prf::new(Protected::new(key_bytes())))
         .into_result()
         .unwrap();
     let from_bytes = input
-        .prf(HmacSha256Prf::try_from_bytes(key()).unwrap())
+        .prf(&HmacSha256Prf::try_from_bytes(key()).unwrap())
         .into_result()
         .unwrap();
 
@@ -666,7 +725,7 @@ fn both_constructors_agree_on_the_same_key() {
 #[quickcheck]
 fn equal_sequence_values_share_terms(value: Vec<u8>, context: Vec<u8>) -> bool {
     let terms = vec![value.clone(), value]
-        .prf_visit_with_context(local(), context, BlocksVisitor)
+        .prf_visit_with_context(&local(), context, BlocksVisitor)
         .into_result()
         .unwrap();
     terms[0] == terms[1]
@@ -685,7 +744,7 @@ fn map_key_context_separates_equal_values() {
             map.map(|(_, node)| node.visit(BlockVisitor)).collect()
         }
     }
-    let terms = values.prf_visit(local(), MapBlocks).into_result().unwrap();
+    let terms = values.prf_visit(&local(), MapBlocks).into_result().unwrap();
     assert_ne!(terms[0], terms[1]);
 }
 
@@ -714,7 +773,7 @@ fn structural_and_visitor_errors_remain_distinct() {
 
     let wrong_visitor = b"leaf"
         .as_slice()
-        .prf_visit(local(), BlocksVisitor)
+        .prf_visit(&local(), BlocksVisitor)
         .into_result();
     assert!(matches!(
         wrong_visitor,

@@ -30,9 +30,15 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust stable
+      - name: setup rust
+        # Pinned, not `@stable`: the trybuild cases under
+        # packages/hmac/tests/ui compare rustc diagnostics verbatim, and a
+        # stable release that rewords a diagnostic would fail unrelated PRs.
+        # When bumping, regenerate the pinned output with
+        # `TRYBUILD=overwrite cargo test -p vitaminc-hmac`.
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.96.0
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
 
