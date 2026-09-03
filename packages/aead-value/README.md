@@ -40,13 +40,14 @@ home); the 32-bit widths exist for **schema fidelity with the EQL layer**
 round-trips as a 32-bit value rather than silently widening. Every tag has
 a defined Go/Python/JavaScript decode mapping (below).
 
-> **Governance note — this table is v2.** It was renumbered and renamed
-> once, on 2026-07-25, *before any ciphertext shipped*, to add the
-> fixed-width 32-bit numeric variants and to rename the floating-point tag
-> from the JS-centric `NUMBER` to the language-neutral `FLOAT64`. Nothing
-> was in the wild, so the renumber cost nothing — and it was the **last**
-> one. From v2 onward the freeze is absolute: the only permitted change is
-> *appending* a new tag for a genuinely unrepresentable value class.
+> **Governance note — this table is v1; no other version was ever
+> published.** It was reshaped once, on 2026-07-25, during pre-release
+> development and *before anything was published*, to add the fixed-width
+> 32-bit numeric variants and to rename the floating-point tag from the
+> JS-centric `NUMBER` to the language-neutral `FLOAT64`. Nothing was in the
+> wild, so that cost nothing — and it cannot happen again. The freeze is
+> absolute: the only permitted change is *appending* a new tag for a
+> genuinely unrepresentable value class.
 
 ## Leaf encoding (cross-language wire commitment)
 
