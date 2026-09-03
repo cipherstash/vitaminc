@@ -3,16 +3,20 @@
 // the scope wrapper would leave an un-wiped duplicate behind, so `Usage`
 // itself must never be `Copy`.
 //
-// The payload here is a bare `[u8; 32]` on purpose: it *is* `Copy`, so the
-// only thing that can reject this call is `Usage` itself. (With a `Protected`
-// payload the error would already come from `Protected: !Copy`, and a `Copy`
-// impl added to `Usage` would go unnoticed.) `Zeroed` is the one constructor
-// that admits a non-controlled payload.
-use vitaminc_protected::{DefaultScope, Usage, Zeroed};
+// Both type arguments are `Copy` on purpose, so the only thing that can
+// reject this is `Usage`. The payload is a bare `[u8; 32]` rather than a
+// `Protected` (whose `!Copy` would mask a `Copy` added to `Usage`), and the
+// scope is a local `Copy` marker rather than `DefaultScope` (a derived
+// `Copy` on `Usage` would also require `Scope: Copy`, so with `DefaultScope`
+// the case would keep failing for the wrong reason).
+use vitaminc_protected::{Scope, Usage};
 
-fn require_copy<T: Copy>(_: &T) {}
+#[derive(Clone, Copy)]
+struct CopyScope;
+impl Scope for CopyScope {}
+
+fn require_copy<T: Copy>() {}
 
 fn main() {
-    let secret: Usage<[u8; 32], DefaultScope> = Usage::zeroed();
-    require_copy(&secret);
+    require_copy::<Usage<[u8; 32], CopyScope>>();
 }
