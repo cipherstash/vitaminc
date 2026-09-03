@@ -191,14 +191,15 @@ impl ZeroizeOnDrop for ZeroizingHmacSha256 {}
 /// # }
 /// # example().unwrap();
 /// ```
+// Derived, not hand-written: the derive only compiles while every field
+// wipes on drop, so caching key-derived state (say, expanded ipad/opad
+// bytes) in a new field without zeroizing it is a compile error, not a
+// silent leak. `ZeroizingHmacSha256` covers the expanded state each
+// derivation builds from the key.
+#[derive(ZeroizeOnDrop)]
 pub struct HmacSha256Prf {
     key: Protected<Vec<u8>>,
 }
-
-// The only field is `Protected`, which wipes on drop; there is no other copy
-// of the key to leave behind. `ZeroizingHmacSha256` covers the expanded
-// ipad/opad state each derivation builds from it.
-impl ZeroizeOnDrop for HmacSha256Prf {}
 
 impl PrfKeyInit for HmacSha256Prf {
     type Key = Protected<[u8; KEY_LEN]>;

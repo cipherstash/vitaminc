@@ -619,10 +619,10 @@ fn derivation_is_deterministic(key_suffix: Vec<u8>, context: Vec<u8>, input: Vec
     first == second
 }
 
-/// `HmacSha256Prf` declares `ZeroizeOnDrop`. The marker is hand-written,
-/// so this only checks the declaration exists; the single-owner property it
-/// rests on (no `Clone`) is pinned by the compile-fail case in
-/// `tests/ui/negative_space`.
+/// `HmacSha256Prf` declares `ZeroizeOnDrop`. The impl is derived, so it
+/// only compiles while every field wipes on drop; this test pins the
+/// declaration itself. The single-owner property it rests on (no `Clone`)
+/// is pinned by the compile-fail case in `tests/ui/negative_space`.
 #[test]
 fn prf_declares_zeroize_on_drop() {
     fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
