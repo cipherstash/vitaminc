@@ -1,4 +1,14 @@
 
+## [0.2.0] - 2026-09-03
+
+### Dependencies
+
+- aws-sdk-kms 1.109.0, aws-config 1.8.18.
+
+### Documentation
+
+- README and rustdoc corrected; SECURITY.md added.
+
 
 ### Miscellaneous
 

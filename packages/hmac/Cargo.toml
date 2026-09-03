@@ -14,8 +14,8 @@ categories.workspace = true
 [dependencies]
 hmac = { version = "0.13.0", features = ["zeroize"] }
 sha2 = { version = "0.11.0", features = ["zeroize"] }
-vitaminc-prf = { version = "0.2.0-pre.1", path = "../prf" }
-vitaminc-protected = { version = "0.2.0-pre.1", path = "../protected" }
+vitaminc-prf = { version = "0.2.0", path = "../prf" }
+vitaminc-protected = { version = "0.2.0", path = "../protected" }
 zeroize = { workspace = true }
 
 [dev-dependencies]

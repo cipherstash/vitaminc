@@ -1,4 +1,10 @@
 
+## [0.2.0] - 2026-09-03
+
+### Breaking
+
+- **Breaking:** `PermutationKey` is no longer `Copy` — it wraps a secret that now zeroizes on drop, and a bitwise copy would leave un-wiped duplicates. Use `Clone` where a copy is needed.
+
 
 
 ### Fixes

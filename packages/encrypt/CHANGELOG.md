@@ -1,4 +1,30 @@
 
+## [0.2.0] - 2026-09-03
+
+### Breaking
+
+- **Breaking:** Ciphertexts written by 0.2.0-pre.1 do not decrypt with this release: every leaf carries an authenticated wire-version byte, container shape and map keys are authenticated, and AAD encodings changed. Re-encrypt prerelease data; there is no migration path.
+- **Breaking:** Decryption requires the AAD used at encrypt time; duplicate map keys are rejected on decrypt; absence markers must carry an empty payload.
+- **Breaking:** Ciphertexts use the shared generic `CipherText<Leaf, P>` container with a typed `Passthrough` currency; code built against the old concrete container needs updating.
+
+### Features
+
+- `Aes256Cipher::decipher` constructs a `Decipher` directly.
+- `ContextTag` on the revised traits with `context`, `decrypt` and `decrypt_with_aad` helpers.
+- Self-describing decryption and passthrough re-homing, `Element` for row-at-a-time sequence access, and struct `#[derive(Encrypt, Decrypt)]` including `#[aead(passthrough)]` clear fields.
+
+### Fixes
+
+- Empty composites are authenticated; hostile input can no longer force quadratic scans or eager allocations during decode.
+
+### Performance
+
+- AAD is borrowed per sequence/map element instead of cloned; fixed-width arrays seal without a reallocating copy.
+
+### Documentation
+
+- READMEs and rustdoc corrected (fabricated APIs, stale zeroize claims); SECURITY.md added.
+
 
 ### Documentation
 

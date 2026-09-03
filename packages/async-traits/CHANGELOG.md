@@ -1,4 +1,10 @@
 
+## [0.2.0] - 2026-09-03
+
+### Documentation
+
+- README and rustdoc corrected; SECURITY.md added.
+
 
 
 

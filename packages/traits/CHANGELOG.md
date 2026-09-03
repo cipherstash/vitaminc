@@ -1,4 +1,8 @@
 
+## [0.2.0] - 2026-09-03
+
+- No user-facing changes; version aligned with the workspace release.
+
 
 
 

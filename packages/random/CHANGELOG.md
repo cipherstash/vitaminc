@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-03
+
+### Breaking
+
+- **Breaking:** `Generatable` impls for `Protected`/`Equatable`/`Exportable` now require `T: Zeroize`, matching the wrappers' zeroize-on-drop guarantee; generic callers may need the added bound.
+
 
 
 ### Features
