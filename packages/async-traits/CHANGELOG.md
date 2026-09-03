@@ -3,7 +3,7 @@
 
 ### Documentation
 
-- fix fabricated APIs, wrong metadata, and stale claims; add SECURITY.md
+- README and rustdoc corrected; SECURITY.md added.
 
 
 

@@ -3,13 +3,9 @@
 
 ### Breaking
 
-- **Breaking:** make the PRF own its key and derive by reference ([#307](https://github.com/cipherstash/vitaminc/pull/307))
-- **Breaking:** construct only through PrfKeyInit; pin non-Clone with a compile-fail case
+- **Breaking:** Construct `HmacSha256Prf` through the `PrfKeyInit` trait (`new` / `try_from_bytes`) — the inherent constructors are gone, so import the trait. The PRF owns its key, wipes it when dropped, and is deliberately not `Clone`; wrap it in `Arc` to share.
+- **Breaking:** Keys shorter than 32 bytes are rejected with `WeakKeyError` instead of silently accepted.
 
 ### Features
 
-- add the vitaminc-hmac PRF backend crate
-
-### Fixes
-
-- require a full-strength PRF key
+- The HMAC-SHA256 structured-PRF backend now lives in its own crate.

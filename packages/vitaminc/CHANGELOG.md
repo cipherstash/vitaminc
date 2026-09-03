@@ -1,19 +1,17 @@
 
 ## [0.2.0] - 2026-09-03
 
-### Documentation
-
-- fix fabricated APIs, wrong metadata, and stale claims; add SECURITY.md
-
 ### Features
 
-- add structured PRF foundation
-- add the vitaminc-hmac PRF backend crate
+- Structured PRF support: the `prf` feature exposes `vitaminc-prf` and the `vitaminc-hmac` HMAC-SHA256 backend, and works standalone without other features.
 
 ### Fixes
 
-- make the prf feature usable on its own
-- require a full-strength PRF key
+- PRF keys must be full strength — keys shorter than 32 bytes are rejected.
+
+### Documentation
+
+- READMEs and rustdoc corrected (fabricated APIs, stale claims); SECURITY.md added.
 
 
 

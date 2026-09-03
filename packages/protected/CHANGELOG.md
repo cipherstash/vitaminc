@@ -1,21 +1,21 @@
 
 ## [0.2.0] - 2026-09-03
 
-### Documentation
+### Breaking
 
-- fix fabricated APIs, wrong metadata, and stale claims; add SECURITY.md
+- **Breaking:** Controlled types (`Protected`, `Equatable`, `Exportable`) now zeroize their contents on drop, and `Controlled` requires `Zeroize` ([#181](https://github.com/cipherstash/vitaminc/pull/181)). Payload types and custom `Controlled` impls must implement `Zeroize`.
 
 ### Features
 
-- add NonEmpty context wrapper checked once at construction
-- compile-time byte-string contexts, wider nonempty!, generic Cow emptiness
+- `NonEmpty` wrapper proves a context non-empty once, at construction; the `nonempty!` macro accepts byte strings and wider inputs, and `Cow` emptiness is judged generically.
 
 ### Fixes
 
-- zeroize controlled types on drop ([#181](https://github.com/cipherstash/vitaminc/pull/181))
-- harden digest secret lifecycle
-- skip trybuild harness under Miri
-- give refine its own domain tag
+- `ProtectedDigest` secret lifecycle hardened: digest state must implement `ZeroizeOnDrop`, and outputs write directly into protected or explicitly public destinations.
+
+### Documentation
+
+- READMEs and rustdoc corrected (fabricated APIs, stale claims); SECURITY.md added.
 
 ### Security
 

@@ -3,24 +3,17 @@
 
 ### Breaking
 
-- **Breaking:** make the PRF own its key and derive by reference ([#307](https://github.com/cipherstash/vitaminc/pull/307))
+- **Breaking:** Derived values changed since 0.2.0-pre.1: `Option` contexts, `refine` chains and value encodings are now domain-separated, and `HashMap` terms derive in deterministic order. Terms derived with the prerelease will not match — re-derive anything persisted.
+- **Breaking:** A PRF owns its key and is passed by reference to derivation; construct backends through `PrfKeyInit` (`new` / `try_from_bytes`) instead of handing keys to each call.
 
 ### Features
 
-- add structured PRF foundation
-- reject duplicate map keys at build time
-- add NonEmpty context wrapper checked once at construction
+- Structured PRF foundation: derive terms over values, sequences and maps with typed, non-empty contexts (checked once at construction) and visitor-shaped drivers; duplicate map keys are rejected at build time.
 
 ### Fixes
 
-- prevent ambiguous value encodings
-- preserve protected secret lifecycles
-- tag Option contexts with the option-some domain
-- derive HashMap terms in a deterministic order
-- wipe HMAC key-normalization temporaries
-- give refine its own domain tag
-- judge context emptiness before encoding, and align conversion coverage
+- Key-normalization temporaries are wiped and protected secret lifecycles are preserved end to end.
 
 ### Performance
 
-- stream fixed-size leaves without heap copies
+- Fixed-size leaves stream without heap copies.

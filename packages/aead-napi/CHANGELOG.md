@@ -3,16 +3,12 @@
 
 ### Breaking
 
-- **Breaking:** extract language-neutral FfiValue crate with INT64 tag
-- **Breaking:** renumber tag table to v2 and widen the numeric family
+- **Breaking:** The value types moved to the new `vitaminc-aead-value` crate and the tag table is v2 (`INT64`/`UINT64` added); values encoded with 0.2.0-pre.1 do not decode. Update imports and re-encode prerelease data.
 
 ### Features
 
-- NAPI value bridge crate for Node.js FFI encryption
-- add UINT64 tag to close the unsigned-range hole
-- carry unencrypted subtrees via FfiValue::Passthrough
+- Node.js FFI bridge: encrypt and decrypt JS values (null, undefined, booleans, numbers, strings, bytes, arrays, objects), with unencrypted subtrees carried via passthrough.
 
 ### Fixes
 
-- close prototype-chain, exotic-object, and allocation holes at the JS boundary
-- address review findings across the FFI value stack
+- The JS boundary is hardened: prototype-chain keys (`__proto__`, `constructor`, `prototype`) are rejected in both directions, exotic objects are refused, and allocation limits apply.

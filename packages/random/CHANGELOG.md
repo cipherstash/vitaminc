@@ -8,9 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.2.0] - 2026-09-03
 
-### Fixes
+### Breaking
 
-- thread T: Zeroize bound and drop Copy for #181
+- **Breaking:** `Generatable` impls for `Protected`/`Equatable`/`Exportable` now require `T: Zeroize`, matching the wrappers' zeroize-on-drop guarantee; generic callers may need the added bound.
 
 
 

@@ -3,26 +3,19 @@
 
 ### Breaking
 
-- **Breaking:** extract language-neutral FfiValue crate with INT64 tag
-- **Breaking:** renumber tag table to v2 and widen the numeric family
-
-### Documentation
-
-- fix every broken intra-doc link and gate them in CI
-- correct two comments the custody work outdated
+- **Breaking:** The tag table is renumbered to v2 with a widened numeric family (`INT64`, `UINT64`); values encoded with the 0.2.0-pre.1 table do not decode. Re-encode prerelease data.
+- **Breaking:** `FfiValue` now lives in this language-neutral crate, extracted from the NAPI bridge; update imports that pointed at `vitaminc-aead-napi`.
 
 ### Features
 
-- add UINT64 tag to close the unsigned-range hole
-- carry unencrypted subtrees via FfiValue::Passthrough
-- propagate tag table v2 numeric family to Go and the guest
-- frame passthrough values in the transport codec
-- store chosen fields in the clear with #[aead(passthrough)]
+- Strings ride a dedicated `Utf8String` type and ciphertext leaves carry the authenticated wire-version byte.
+- Unencrypted subtrees travel via `FfiValue::Passthrough`, framed in the transport codec, with the v2 numeric family propagated to the Go bindings and the wasm guest.
+- Empty-composite markers survive the FFI transport round-trip.
 
 ### Fixes
 
-- address review findings across the FFI value stack
-- carry empty-composite markers across the FFI transport
-- adopt Utf8String and the authenticated wire-version byte
-- keep hostile input from leveraging quadratic scans and eager reservations
-- reject duplicate keys in the transport decoders
+- Transport decoders reject duplicate keys, and hostile input can no longer force quadratic scans or eager allocations.
+
+### Documentation
+
+- Intra-doc links fixed and gated in CI.
