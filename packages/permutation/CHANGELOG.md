@@ -1,4 +1,10 @@
 
+## [0.2.0-pre.2] - 2026-09-03
+
+### Fixes
+
+- thread T: Zeroize bound and drop Copy for #181
+
 
 
 ### Fixes

@@ -12,9 +12,9 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-vitaminc-aead = { version = "0.2.0-pre.1", path = "../aead" }
-vitaminc-protected = { version = "0.2.0-pre.1", path = "../protected" }
-vitaminc-random = { version = "0.2.0-pre.1", path = "../random" }
+vitaminc-aead = { version = "0.2.0-pre.2", path = "../aead" }
+vitaminc-protected = { version = "0.2.0-pre.2", path = "../protected" }
+vitaminc-random = { version = "0.2.0-pre.2", path = "../random" }
 
 zeroize = { workspace = true }
 
@@ -46,7 +46,7 @@ _test-rust-crypto-backend = ["dep:aes-gcm"]
 hlist = ["vitaminc-aead/hlist"]
 
 [dev-dependencies]
-vitaminc-protected = { path = "../protected", version = "0.2.0-pre.1", features = ["arbitrary"] }
+vitaminc-protected = { path = "../protected", version = "0.2.0-pre.2", features = ["arbitrary"] }
 quickcheck = "1.1.0"
 quickcheck_macros = "1.2.0"
 

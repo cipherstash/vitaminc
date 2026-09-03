@@ -1,4 +1,10 @@
 
+## [0.2.0-pre.2] - 2026-09-03
+
+### Documentation
+
+- fix fabricated APIs, wrong metadata, and stale claims; add SECURITY.md
+
 
 
 
