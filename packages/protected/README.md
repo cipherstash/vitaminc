@@ -35,9 +35,11 @@ let x = Protected::new([0u8; 32]);
 
 `Protected` will call `zeroize` on the inner value when it goes out of scope.
 Because that wipe is a real `Drop`, `Protected` is never `Copy`, even when the
-inner type is: a bitwise copy would leave an un-wiped duplicate of the secret
-behind. Duplicating a protected value is always an explicit `clone()`, and each
-clone is wiped when it drops.
+inner type is: unlike a move, a `Copy` value has no single owner whose drop can
+wipe it. Duplicating the wrapper is an explicit `clone()`, and each clone is
+wiped when it drops. See the [Protected] docs for the full rationale, and note
+that escape hatches such as `risky_unwrap` and `map` hand back the plain inner
+value along with the obligation to wipe it.
 It also provides an "opaque" implementation of the `Debug` trait so you can debug protected values
 without accidentally leaking their innards.
 

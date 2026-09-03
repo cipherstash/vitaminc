@@ -2,7 +2,7 @@ use serde::{Serialize, Serializer};
 
 use crate::{exportable::SafeSerialize, private::ControlledPrivate, Controlled, Protected};
 use std::marker::PhantomData;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 // TODO: Docs, explain compile time
 pub struct Usage<T, Scope = DefaultScope>(pub(crate) T, pub(crate) PhantomData<Scope>);
@@ -21,18 +21,27 @@ impl<T, S> Usage<T, S> {
 // satisfy the `Controlled: Zeroize` supertrait and delegates to the inner type
 // (`PhantomData` is a ZST with nothing to wipe).
 //
-// `Usage` intentionally does NOT derive `ZeroizeOnDrop`. Its secret is still
-// wiped on drop: `Usage::new` requires `Self: Controlled`, so the inner `T` is
-// always a controlled type (`Protected`/`Equatable`/`Exportable`), each of which
-// is `ZeroizeOnDrop` — dropping `Usage` runs the field's drop glue and wipes the
-// bytes. Giving `Usage` its own `Drop` would require a viral `T: Zeroize` bound
-// on the struct (E0367: a conditional `Drop` must match the struct bounds),
-// which would cascade through every `Usage<T, S>` use for no behavioural gain.
+// `Usage` intentionally has no `Drop` (and so no `ZeroizeOnDrop` *derive*) of
+// its own. Its secret is still wiped on drop: `Usage::new` requires
+// `Self: Controlled`, so the inner `T` is always a controlled type
+// (`Protected`/`Equatable`/`Exportable`), each of which is `ZeroizeOnDrop` —
+// dropping `Usage` runs the field's drop glue and wipes the bytes. Giving
+// `Usage` its own `Drop` would require a viral `T: Zeroize` bound on the struct
+// (E0367: a conditional `Drop` must match the struct bounds), which would
+// cascade through every `Usage<T, S>` use for no behavioural gain.
 impl<T: Zeroize, Scope> Zeroize for Usage<T, Scope> {
     fn zeroize(&mut self) {
         self.0.zeroize();
     }
 }
+
+// `ZeroizeOnDrop` is a method-less marker, so unlike a `Drop` impl it needs no
+// struct-level bound (the same pattern as `ProtectedDigest`). It is correct
+// exactly when the field is `ZeroizeOnDrop`: `PhantomData` holds nothing, so
+// the field's drop glue is the whole of `Usage`'s drop. Without this impl every
+// `T: ZeroizeOnDrop` bound downstream would reject `Usage<..>` and force
+// callers to strip the scope wrapper first.
+impl<T: ZeroizeOnDrop, Scope> ZeroizeOnDrop for Usage<T, Scope> {}
 
 impl<T: ControlledPrivate, Scope> ControlledPrivate for Usage<T, Scope> {}
 
@@ -95,21 +104,38 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_util::{assert_zeroize_on_drop, Tracked};
+    use std::sync::atomic::AtomicBool;
 
     struct MyScope;
     impl Scope for MyScope {}
 
-    /// `Usage` deliberately has no `ZeroizeOnDrop` of its own (see the note
-    /// on the `Zeroize` impl above): the wipe is the inner wrapper's drop
-    /// glue, reached through `Usage`'s field. This pins that the delegation
-    /// actually holds — a bare `[u8; 32]` has no glue, so the `true` can
-    /// only come from `Protected`'s zeroizing `Drop` propagating through.
+    /// `Usage` has no `Drop` of its own (see the note on the `Zeroize` impl
+    /// above): the wipe is the inner wrapper's drop glue, reached through
+    /// `Usage`'s field. This observes the wipe directly, so it fails if
+    /// `Usage` ever stops letting the field's `Drop` run (e.g. by wrapping it
+    /// in `ManuallyDrop`), regardless of what other destructors exist.
     #[test]
-    fn drop_glue_comes_from_inner_wrapper() {
-        assert!(!std::mem::needs_drop::<[u8; 32]>());
-        assert!(std::mem::needs_drop::<
-            Usage<Protected<[u8; 32]>, DefaultScope>,
-        >());
+    fn drop_wipes_through_inner_wrapper() {
+        let zeroized = AtomicBool::new(false);
+        let tracked = Tracked(&zeroized);
+        {
+            let _u = Usage::<Protected<Tracked<'_>>, DefaultScope>::new(tracked);
+            assert!(!tracked.was_zeroized());
+        }
+        assert!(
+            tracked.was_zeroized(),
+            "dropping Usage must run the inner wrapper's zeroizing Drop"
+        );
+    }
+
+    /// The `ZeroizeOnDrop` marker on `Usage` follows the inner wrapper, so
+    /// `Usage<..>` satisfies the same `T: ZeroizeOnDrop` bounds its payload
+    /// does. Nested inside `Option` too, as callers commonly hold it.
+    #[test]
+    fn usage_is_zeroize_on_drop_when_inner_is() {
+        assert_zeroize_on_drop::<Usage<Protected<[u8; 32]>, DefaultScope>>();
+        assert_zeroize_on_drop::<Option<Usage<Protected<[u8; 32]>, MyScope>>>();
     }
 
     // TODO: Create some compilation tests

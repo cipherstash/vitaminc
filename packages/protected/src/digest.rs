@@ -264,7 +264,6 @@ mod tests {
 
     #[test]
     fn protected_digest_state_is_zeroize_on_drop() {
-        fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
-        assert_zeroize_on_drop::<ProtectedDigest<Sha256>>();
+        crate::test_util::assert_zeroize_on_drop::<ProtectedDigest<Sha256>>();
     }
 }
