@@ -29,7 +29,10 @@ trim = true
 
 [git]
 conventional_commits = true
-filter_unconventional = false
+# Unconventional commits (merge commits, mostly) never render: the template's
+# `breaking`/`group` filters only pass commits the conventional parser
+# understood. Filter them here too, so the config says what the output does.
+filter_unconventional = true
 # A commit marked `!` or carrying a BREAKING CHANGE footer is never dropped by
 # the skip rules below — it always surfaces in the Breaking section.
 protect_breaking_commits = true
