@@ -1,12 +1,26 @@
 # git-cliff configuration for baseline changelog generation.
-# These entries are a starting point — rewrite them with AI before merging.
+# These entries are a starting point — rewrite them before merging the release
+# PR. See RELEASING.md step 4 for what that rewrite has to cover.
 
 [changelog]
 header = ""
 body = """
-{% for group, commits in commits | group_by(attribute="group") %}
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% set breaking = commits | filter(attribute="breaking", value=true) %}\
+{% set normal = commits | filter(attribute="breaking", value=false) %}\
+{% if breaking | length > 0 %}
+### Breaking
+{% for commit in breaking %}
+- **Breaking:** {{ commit.message | split(pat="\n") | first | trim }}\
+{% endfor %}
+{% endif %}\
+{% for group, group_commits in normal | group_by(attribute="group") %}
 ### {{ group | upper_first }}
-{% for commit in commits %}
+{% for commit in group_commits %}
 - {{ commit.message | split(pat="\n") | first | trim }}\
 {% endfor %}
 {% endfor %}
@@ -15,14 +29,25 @@ trim = true
 
 [git]
 conventional_commits = true
-filter_unconventional = false
+# Unconventional commits (merge commits, mostly) never render: the template's
+# `breaking`/`group` filters only pass commits the conventional parser
+# understood. Filter them here too, so the config says what the output does.
+filter_unconventional = true
+# A commit marked `!` or carrying a BREAKING CHANGE footer is never dropped by
+# the skip rules below — it always surfaces in the Breaking section.
+protect_breaking_commits = true
 commit_parsers = [
     { message = "^feat", group = "Features" },
     { message = "^fix", group = "Fixes" },
-    { message = "^docs", group = "Documentation" },
     { message = "^perf", group = "Performance" },
-    { message = "^refactor", group = "Refactoring" },
-    { message = "^test", group = "Testing" },
-    { message = "^chore", group = "Miscellaneous" },
-    { message = "^ci", group = "CI" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^chore\\(deps", group = "Dependencies" },
+    # Internal churn: real work, but not news for someone upgrading the crate.
+    # A user-visible refactor still needs a hand-written entry in the rewrite.
+    { message = "^refactor", skip = true },
+    { message = "^test", skip = true },
+    { message = "^ci", skip = true },
+    { message = "^build", skip = true },
+    { message = "^style", skip = true },
+    { message = "^chore", skip = true },
 ]
