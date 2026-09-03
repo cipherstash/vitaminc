@@ -12,18 +12,6 @@
 //! binding and are pinned byte-for-byte by known-answer tests. Changing one
 //! breaks decryption of existing ciphertexts everywhere. New types must be
 //! assigned **new** tags; tags are never reused or renumbered.
-//!
-//! ## Governance note: this table is v1 — no other version was ever published
-//!
-//! The table was reshaped **once**, on 2026-07-25, during pre-release
-//! development and before anything was published, to widen the numeric
-//! family (adding fixed-width 32-bit variants for schema fidelity with the
-//! EQL layer) and to give the floating-point tag a language-neutral name
-//! (`FLOAT64`, formerly the JS-centric `NUMBER`). Nothing was in the wild,
-//! so that cost nothing — and it cannot happen again. The published table
-//! is v1 and the freeze is absolute: the only permitted change is
-//! *appending* a new tag for a value class that genuinely cannot be
-//! represented in the existing model.
 
 /// Null (JS `null`, Python `None`, Go `nil`). No payload.
 pub const NULL: u8 = 0x00;
@@ -59,7 +47,7 @@ pub const FLOAT32: u8 = 0x08;
 /// 64-bit floating-point number: 8 bytes, IEEE-754 binary64 bit pattern,
 /// little-endian. Raw bits (not a numeric encoding) so `NaN` payloads and
 /// `-0.0` survive round trips. This is the tag a JavaScript `number` maps
-/// to (it was named `NUMBER` before the pre-release reshape).
+/// to.
 pub const FLOAT64: u8 = 0x09;
 /// String: UTF-8 bytes. Validated on decrypt.
 pub const STRING: u8 = 0x0A;

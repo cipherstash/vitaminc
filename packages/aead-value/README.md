@@ -40,15 +40,6 @@ home); the 32-bit widths exist for **schema fidelity with the EQL layer**
 round-trips as a 32-bit value rather than silently widening. Every tag has
 a defined Go/Python/JavaScript decode mapping (below).
 
-> **Governance note — this table is v1; no other version was ever
-> published.** It was reshaped once, on 2026-07-25, during pre-release
-> development and *before anything was published*, to add the fixed-width
-> 32-bit numeric variants and to rename the floating-point tag from the
-> JS-centric `NUMBER` to the language-neutral `FLOAT64`. Nothing was in the
-> wild, so that cost nothing — and it cannot happen again. The freeze is
-> absolute: the only permitted change is *appending* a new tag for a
-> genuinely unrepresentable value class.
-
 ## Leaf encoding (cross-language wire commitment)
 
 Scalar values seal as a one-byte type tag followed by the payload,
@@ -78,8 +69,7 @@ encoding), so `NaN` payloads and `-0.0` survive a round trip.
 This table is a **frozen wire format**: changing a tag or payload encoding
 breaks decryption of existing ciphertexts in every language. New types must
 take new tags. The known-answer tests in this crate pin each encoding
-byte-for-byte. (See the governance note above: the table was renumbered
-once pre-release, on 2026-07-25, and is now frozen for good.)
+byte-for-byte.
 
 ## Cross-language type mapping
 
