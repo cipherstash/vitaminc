@@ -18,9 +18,11 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// the wrapper is genuinely needed, call `clone()`: each clone is its own owner
 /// and is wiped when it drops.
 ///
-/// Escape hatches such as [`Controlled::risky_unwrap`] and
-/// [`Controlled::map`] hand back the plain inner value, and with it the wiping
-/// obligation.
+/// [`Controlled::risky_unwrap`] is the escape hatch: it hands back the plain
+/// inner value, and with it the wiping obligation. Combinators such as
+/// [`Controlled::map`] expose the plain value only to their closure and
+/// return the result re-wrapped in a controlled type; the closure owns the
+/// plain value for its own duration and anything it copies out of it.
 #[derive(Zeroize, ZeroizeOnDrop, OpaqueDebug)]
 pub struct Protected<T: Zeroize>(pub(crate) T);
 
