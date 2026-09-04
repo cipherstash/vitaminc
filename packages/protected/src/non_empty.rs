@@ -104,6 +104,15 @@ macro_rules! never_empty {
                 false
             }
         }
+
+        /// An integer is never empty, so it converts without a check: an
+        /// API taking `impl Into<NonEmpty<T>>` accepts a bare integer where
+        /// a string would need [`NonEmpty::new`] or [`nonempty!`](crate::nonempty).
+        impl From<$ty> for NonEmpty<$ty> {
+            fn from(value: $ty) -> Self {
+                NonEmpty(value)
+            }
+        }
     )+};
 }
 
@@ -243,6 +252,28 @@ impl<T> NonEmpty<T> {
     pub fn get(&self) -> &T {
         &self.0
     }
+
+    /// Pairs this proven value with `tail`, keeping the proof and checking
+    /// nothing: a pair is [empty](IsEmpty) only when **both** halves are, so
+    /// a head that carries caller bytes makes the pair carry them whatever
+    /// the tail is — `()` or `""` included. This is how a fixed context is
+    /// extended with a value known only at the call site, a record id say,
+    /// without giving up the invariant the head already proved:
+    ///
+    /// ```rust
+    /// use vitaminc_protected::{nonempty, NonEmpty};
+    ///
+    /// let column = nonempty!("users/email");
+    /// let row: NonEmpty<(&str, u64)> = column.with(42u64);
+    /// assert_eq!(row.get(), &("users/email", 42u64));
+    /// ```
+    ///
+    /// The pair encodes exactly as the bare `(T, U)` would (`NonEmpty` is
+    /// transparent to the context traits), so `nonempty!("users/email")
+    /// .with(42u64)` authenticates the same bytes as `("users/email", 42u64)`.
+    pub fn with<U>(self, tail: U) -> NonEmpty<(T, U)> {
+        NonEmpty((self.0, tail))
+    }
 }
 
 impl NonEmpty<&'static str> {
@@ -361,6 +392,28 @@ mod tests {
         assert!(Some(None::<&str>).is_empty_ctx());
         assert!((None::<&str>, Some("")).is_empty_ctx());
         assert!(((), ()).is_empty_ctx());
+    }
+
+    #[test]
+    fn with_keeps_the_proof_whatever_the_tail() {
+        // The head is proven; the tail is not checked, and need not carry
+        // anything — a pair is empty only when both halves are.
+        let head = nonempty!("users/email");
+        assert_eq!(head.with(()).get(), &("users/email", ()));
+        assert_eq!(head.with("").get(), &("users/email", ""));
+        assert_eq!(head.with(42u64).get(), &("users/email", 42u64));
+        assert_eq!(
+            head.with(String::from("acme")).with(7u32).into_inner(),
+            (("users/email", String::from("acme")), 7u32)
+        );
+    }
+
+    #[test]
+    fn integers_convert_without_a_check() {
+        assert_eq!(NonEmpty::from(0u8).into_inner(), 0u8);
+        assert_eq!(NonEmpty::from(-1i64).into_inner(), -1i64);
+        let id: NonEmpty<u128> = 7u128.into();
+        assert_eq!(id.get(), &7u128);
     }
 
     #[test]

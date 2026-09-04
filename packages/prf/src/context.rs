@@ -320,6 +320,14 @@ mod tests {
             Some(NonEmpty::new("users/email").unwrap()).into_prf_context(),
             Some("users/email").into_prf_context()
         );
+        // A pair extended from a proven head encodes as the bare pair.
+        assert_eq!(
+            NonEmpty::new("users/email")
+                .unwrap()
+                .with(42u64)
+                .into_prf_context(),
+            ("users/email", 42u64).into_prf_context(),
+        );
         assert_eq!(
             NonEmpty::new(("users", "email"))
                 .unwrap()
