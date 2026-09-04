@@ -11,6 +11,8 @@ mod exportable;
 mod non_empty;
 mod ops;
 mod protected;
+#[cfg(test)]
+mod test_util;
 mod timing_safe;
 mod usage;
 mod zeroed;

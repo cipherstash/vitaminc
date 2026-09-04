@@ -171,9 +171,44 @@ where
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
+    use std::sync::atomic::AtomicBool;
 
     use super::*;
+    use crate::test_util::Tracked;
     use crate::{Equatable, Protected};
+
+    /// `Exportable`'s `ZeroizeOnDrop` comes from the derive; this pins the
+    /// generated drop glue so removing the derive fails a test, not just a
+    /// promise. The `!Copy` half lives in `tests/ui/negative_space`.
+    #[test]
+    fn drop_zeroizes_inner() {
+        let zeroized = AtomicBool::new(false);
+        let tracked = Tracked(&zeroized);
+        {
+            let _e = Exportable(tracked);
+            assert!(!tracked.was_zeroized());
+        }
+        assert!(
+            tracked.was_zeroized(),
+            "Exportable::drop must zeroize the inner value"
+        );
+    }
+
+    /// `risky_unwrap` routes through `into_inner_unchecked` and then the inner
+    /// wrapper's `risky_unwrap`: neither layer may wipe the value it hands on,
+    /// since the caller now owns the live secret.
+    #[test]
+    fn risky_unwrap_does_not_zeroize() {
+        let zeroized = AtomicBool::new(false);
+        let tracked = Tracked(&zeroized);
+        // `Tracked` has no `Drop`, so the recovered value falling out of
+        // scope is a no-op and the flag can only be raised by a wrapper.
+        let _recovered = Exportable(Protected::new(tracked)).risky_unwrap();
+        assert!(
+            !tracked.was_zeroized(),
+            "Exportable::risky_unwrap must not zeroize the value it hands back"
+        );
+    }
 
     #[test]
     fn test_opaque_debug() {

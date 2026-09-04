@@ -11,9 +11,9 @@ use crate::{
 
 pub(crate) type KeyInner<const N: usize> = Exportable<Protected<[u8; N]>>;
 
-// NOTE: no `Copy` — `PermutationKey` wraps a `Protected` secret that zeroizes
-// on drop, and `Copy`/`Drop` are mutually exclusive. A bitwise copy would also
-// leave un-zeroized duplicates of the key. Use `Clone` where a copy is needed.
+// NOTE: no `Copy` — `KeyInner` is a `Protected` secret, and the reasons it can
+// never be `Copy` (see the `vitaminc_protected::Protected` docs) apply to any
+// wrapper around it. Use `Clone` where a copy is needed.
 //
 // The key IS wiped on drop: `KeyInner` is `Exportable<Protected<[u8; N]>>`, both
 // of which are `ZeroizeOnDrop`, so the field's drop glue zeroizes the bytes. We
