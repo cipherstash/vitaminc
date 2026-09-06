@@ -1,6 +1,6 @@
 //! Non-empty context values. This module is private; its documentation lives
-//! on [`MaybeEmpty`] (what "empty" means) and [`NonEmpty`] (why, and the two
-//! ways to build one).
+//! on [`MaybeEmpty`] (what "empty" means) and [`NonEmpty`] (why, and how to
+//! build one).
 
 use std::borrow::Cow;
 
@@ -109,9 +109,9 @@ macro_rules! never_empty {
             }
         }
 
-        /// An integer is never empty, so it converts without a check: an
-        /// API taking `impl Into<NonEmpty<T>>` accepts a bare integer where
-        /// a string would need [`NonEmpty::new`] or [`nonempty!`](crate::nonempty).
+        /// An integer is never empty, so it converts without a check —
+        /// `NonEmpty::from(7u64)` or `7u64.into()` — where a string would
+        /// need [`NonEmpty::new`] or [`nonempty!`](crate::nonempty).
         impl From<$ty> for NonEmpty<$ty> {
             fn from(value: $ty) -> Self {
                 NonEmpty(value)
@@ -177,16 +177,24 @@ pub struct EmptyError;
 /// is the default — but if a context is derived from sensitive data, wrap it
 /// in a redacting type before proving it non-empty, not after.
 ///
-/// # Two ways to build one
+/// # Building one
 ///
-/// Literals are checked at compile time with [`nonempty!`](crate::nonempty) —
-/// an empty one fails to compile — and dynamic values are checked at runtime,
-/// once, with [`NonEmpty::new`]. There is no third path: a bare `&'static str`
-/// argument cannot be value-checked at compile time, because `""` and
-/// `"users/email"` are the same type, so an API accepting one directly could
-/// only downgrade to a runtime check while appearing to promise more. An API
-/// that requires the invariant therefore takes `NonEmpty<C>` itself, and the
-/// call site states which path it is on:
+/// The rule is: checked once where the type cannot prove non-emptiness,
+/// converted freely where it can.
+///
+/// - **Literals** are checked at compile time with
+///   [`nonempty!`](crate::nonempty); an empty one fails to compile.
+/// - **Dynamic values** are checked at runtime, once, with [`NonEmpty::new`].
+/// - **Integers** are never empty, so `From` converts them with no check:
+///   `NonEmpty::from(7u64)`, `7u64.into()`.
+/// - **A proven value** is extended with [`NonEmpty::with`], which pairs it
+///   with a tail and checks nothing, because the head already carries bytes.
+///
+/// There is no implicit conversion from a string or byte slice: `""` and
+/// `"users/email"` are the same type, so an API accepting a bare `&str`
+/// could only downgrade to a runtime check while appearing to promise more.
+/// An API that requires the invariant therefore takes `NonEmpty<C>` itself,
+/// and the call site states which path it is on:
 ///
 /// ```rust
 /// use vitaminc_protected::{nonempty, EmptyError, NonEmpty};
@@ -201,6 +209,12 @@ pub struct EmptyError;
 /// // A dynamic value: checked structurally, once, at construction.
 /// let field = String::from("users/email");
 /// assert_eq!(bind(NonEmpty::new(field)?).get(), "users/email");
+///
+/// // An integer: never empty, so no check at all.
+/// assert_eq!(bind(NonEmpty::from(7u64)).get(), &7u64);
+///
+/// // A proven head extended with a call-site value: no second check.
+/// assert_eq!(bind(nonempty!("users/email").with(42u64)).get(), &("users/email", 42u64));
 ///
 /// // Nesting carries the invariant through.
 /// assert!(NonEmpty::new(("users", Some("email"))).is_ok());
@@ -272,10 +286,26 @@ impl<T> NonEmpty<T> {
     /// assert_eq!(row.get(), &("users/email", 42u64));
     /// ```
     ///
+    /// The tail must be [`MaybeEmpty`] for the same reason [`NonEmpty::new`]
+    /// requires it: every `NonEmpty<T>` wraps a `T` that *could* have been
+    /// checked, so an already-encoded `Aad` or `PrfContext`, or another
+    /// `NonEmpty`, is rejected here as it is there. The bound is never
+    /// evaluated; the head's proof makes that unnecessary.
+    ///
+    /// ```compile_fail
+    /// use vitaminc_protected::nonempty;
+    ///
+    /// // `NonEmpty` is not `MaybeEmpty`: wrap the whole composite, not the parts.
+    /// let _ = nonempty!("users/email").with(nonempty!("acme"));
+    /// ```
+    ///
     /// The pair encodes exactly as the bare `(T, U)` would (`NonEmpty` is
     /// transparent to the context traits), so `nonempty!("users/email")
-    /// .with(42u64)` authenticates the same bytes as `("users/email", 42u64)`.
-    pub fn with<U>(self, tail: U) -> NonEmpty<(T, U)> {
+    /// .with(42u64)` encodes to the same bytes as `("users/email", 42u64)`.
+    /// Chaining nests to the **left**: `a.with(b).with(c)` is `((a, b), c)`,
+    /// which encodes differently from `(a, (b, c))`. To match an existing
+    /// tuple layout, pass the whole tail at once: `a.with((b, c))`.
+    pub fn with<U: MaybeEmpty>(self, tail: U) -> NonEmpty<(T, U)> {
         NonEmpty((self.0, tail))
     }
 }
