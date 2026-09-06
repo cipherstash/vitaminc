@@ -458,6 +458,20 @@ mod tests {
     }
 
     #[test]
+    fn with_needs_no_bound_on_the_head() {
+        // The point of `with` for a generic consumer: a `NonEmpty<C>` can be
+        // extended without `C: MaybeEmpty` leaking into the caller's bounds.
+        // Adding `T: MaybeEmpty` to `with` would stop this compiling.
+        fn bind_row<C>(column: NonEmpty<C>, row: u64) -> NonEmpty<(C, u64)> {
+            column.with(row)
+        }
+        assert_eq!(
+            bind_row(nonempty!("users/email"), 42).into_inner(),
+            ("users/email", 42u64)
+        );
+    }
+
+    #[test]
     fn integers_convert_without_a_check() {
         assert_eq!(NonEmpty::from(0u8).into_inner(), 0u8);
         assert_eq!(NonEmpty::from(-1i64).into_inner(), -1i64);
