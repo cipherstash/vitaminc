@@ -81,7 +81,7 @@ impl<'a> PrfContext<'a> {
     }
 }
 
-// `PrfContext` deliberately does NOT implement `IsEmpty`: an already-encoded
+// `PrfContext` deliberately does NOT implement `MaybeEmpty`: an already-encoded
 // context can only be judged on its bytes, and framing makes most encoded
 // contexts non-empty even when built from an empty value — so
 // `NonEmpty<PrfContext>` would certify exactly the degenerate value it exists
@@ -345,7 +345,7 @@ mod tests {
         assert!(PrfContext::empty().is_empty());
         assert!(!PrfContext::from_slice(b"raw").is_empty());
         // Framing makes an encoded empty value non-empty as bytes — which is
-        // exactly why `PrfContext` has no `IsEmpty` impl: the structural check
+        // exactly why `PrfContext` has no `MaybeEmpty` impl: the structural check
         // belongs before encoding (`NonEmpty<T>` where `T: IntoPrfContext`).
         assert!(!"".into_prf_context().is_empty());
     }

@@ -1,10 +1,14 @@
 //! Non-empty context values. This module is private; its documentation lives
-//! on [`IsEmpty`] (what "empty" means) and [`NonEmpty`] (why, and the two
+//! on [`MaybeEmpty`] (what "empty" means) and [`NonEmpty`] (why, and the two
 //! ways to build one).
 
 use std::borrow::Cow;
 
 /// Structural emptiness of a value, decided **before** any encoding is applied.
+///
+/// A type implementing `MaybeEmpty` is one that can be *asked* whether a given
+/// value is empty, not one whose values are empty: integers implement it and
+/// are never empty. It is the bound [`NonEmpty::new`] checks against.
 ///
 /// A value is empty when it carries no caller-supplied bytes:
 ///
@@ -22,74 +26,74 @@ use std::borrow::Cow;
 /// `Some("")` and `Some(None)` are. This is the definition a downstream crate
 /// would otherwise have to reconstruct by parsing the encoded bytes.
 ///
-/// [`NonEmpty<T>`] deliberately does **not** implement `IsEmpty`, so it
+/// [`NonEmpty<T>`] deliberately does **not** implement `MaybeEmpty`, so it
 /// composes only at the outermost position: wrap the whole composite
 /// (`NonEmpty::new(("tenant", "email"))`), not the parts — a proven part
 /// nested inside a larger value would force the outer check to be re-derived
 /// anyway.
 ///
 /// Because the check runs before encoding, *already-encoded* contexts (a
-/// `PrfContext` or an `Aad`) do not implement `IsEmpty` either: framing makes
+/// `PrfContext` or an `Aad`) do not implement `MaybeEmpty` either: framing makes
 /// their bytes non-empty even when built from an empty value, so an encoded
 /// byte check would certify exactly the degenerate case `NonEmpty` exists to
 /// exclude. Check the value on its way *into* vitaminc, before it is framed.
 ///
 /// Implement this for your own context types so they can be wrapped in
 /// [`NonEmpty`].
-pub trait IsEmpty {
+pub trait MaybeEmpty {
     /// Returns `true` if this value carries no caller-supplied bytes.
     fn is_empty(&self) -> bool;
 }
 
-impl IsEmpty for () {
+impl MaybeEmpty for () {
     fn is_empty(&self) -> bool {
         true
     }
 }
 
-impl IsEmpty for str {
+impl MaybeEmpty for str {
     fn is_empty(&self) -> bool {
         str::is_empty(self)
     }
 }
 
-impl IsEmpty for String {
+impl MaybeEmpty for String {
     fn is_empty(&self) -> bool {
         String::is_empty(self)
     }
 }
 
-impl IsEmpty for [u8] {
+impl MaybeEmpty for [u8] {
     fn is_empty(&self) -> bool {
         <[u8]>::is_empty(self)
     }
 }
 
-impl<const N: usize> IsEmpty for [u8; N] {
+impl<const N: usize> MaybeEmpty for [u8; N] {
     fn is_empty(&self) -> bool {
         N == 0
     }
 }
 
-impl IsEmpty for Vec<u8> {
+impl MaybeEmpty for Vec<u8> {
     fn is_empty(&self) -> bool {
         Vec::is_empty(self)
     }
 }
 
 /// A `Cow` is as empty as its referent, whichever side it holds.
-impl<T> IsEmpty for Cow<'_, T>
+impl<T> MaybeEmpty for Cow<'_, T>
 where
-    T: IsEmpty + ToOwned + ?Sized,
+    T: MaybeEmpty + ToOwned + ?Sized,
 {
     fn is_empty(&self) -> bool {
         T::is_empty(self.as_ref())
     }
 }
 
-impl<T> IsEmpty for &T
+impl<T> MaybeEmpty for &T
 where
-    T: IsEmpty + ?Sized,
+    T: MaybeEmpty + ?Sized,
 {
     fn is_empty(&self) -> bool {
         T::is_empty(self)
@@ -99,7 +103,7 @@ where
 macro_rules! never_empty {
     ($($ty:ty),+ $(,)?) => {$(
         /// An integer is caller information, so it is never empty.
-        impl IsEmpty for $ty {
+        impl MaybeEmpty for $ty {
             fn is_empty(&self) -> bool {
                 false
             }
@@ -119,9 +123,9 @@ macro_rules! never_empty {
 never_empty!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 
 /// `None` is empty; `Some(value)` is as empty as `value`.
-impl<T> IsEmpty for Option<T>
+impl<T> MaybeEmpty for Option<T>
 where
-    T: IsEmpty,
+    T: MaybeEmpty,
 {
     fn is_empty(&self) -> bool {
         match self {
@@ -133,10 +137,10 @@ where
 
 /// A pair is empty only when **both** components are: a composite that still
 /// contributes caller bytes on either side is not the degenerate case.
-impl<A, B> IsEmpty for (A, B)
+impl<A, B> MaybeEmpty for (A, B)
 where
-    A: IsEmpty,
-    B: IsEmpty,
+    A: MaybeEmpty,
+    B: MaybeEmpty,
 {
     fn is_empty(&self) -> bool {
         self.0.is_empty() && self.1.is_empty()
@@ -144,7 +148,7 @@ where
 }
 
 /// The error returned when a value that must carry caller-supplied data
-/// turned out to be [empty](IsEmpty).
+/// turned out to be [empty](MaybeEmpty).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("context value carries no caller-supplied data")]
 pub struct EmptyError;
@@ -160,7 +164,7 @@ pub struct EmptyError;
 ///
 /// `NonEmpty` lets such a caller *demand* non-emptiness in a bound, without
 /// forcing the invariant on anyone who wants an empty context. It follows the
-/// `NonZero` pattern: the check ([`IsEmpty`]) happens exactly once, at
+/// `NonZero` pattern: the check ([`MaybeEmpty`]) happens exactly once, at
 /// construction, and after that the type carries the invariant, so an API can
 /// take a `NonEmpty<C>` instead of re-checking on every use.
 ///
@@ -226,9 +230,9 @@ pub struct NonEmpty<T>(T);
 
 impl<T> NonEmpty<T>
 where
-    T: IsEmpty,
+    T: MaybeEmpty,
 {
-    /// Wraps `value`, checking once that it is not [empty](IsEmpty).
+    /// Wraps `value`, checking once that it is not [empty](MaybeEmpty).
     ///
     /// # Errors
     ///
@@ -254,7 +258,7 @@ impl<T> NonEmpty<T> {
     }
 
     /// Pairs this proven value with `tail`, keeping the proof and checking
-    /// nothing: a pair is [empty](IsEmpty) only when **both** halves are, so
+    /// nothing: a pair is [empty](MaybeEmpty) only when **both** halves are, so
     /// a head that carries caller bytes makes the pair carry them whatever
     /// the tail is — `()` or `""` included. This is how a fixed context is
     /// extended with a value known only at the call site, a record id say,
@@ -454,12 +458,12 @@ mod tests {
     #[test]
     fn references_defer_to_the_referent() {
         let owned = String::from("x");
-        assert!(!<&String as IsEmpty>::is_empty(&&owned));
-        assert!(!<&&String as IsEmpty>::is_empty(&&&owned));
+        assert!(!<&String as MaybeEmpty>::is_empty(&&owned));
+        assert!(!<&&String as MaybeEmpty>::is_empty(&&&owned));
         let empty = String::new();
-        assert!(<&String as IsEmpty>::is_empty(&&empty));
-        assert!(!<&[u8; 3] as IsEmpty>::is_empty(&b"abc"));
-        assert!(!<&str as IsEmpty>::is_empty(&"abc"));
+        assert!(<&String as MaybeEmpty>::is_empty(&&empty));
+        assert!(!<&[u8; 3] as MaybeEmpty>::is_empty(&b"abc"));
+        assert!(!<&str as MaybeEmpty>::is_empty(&"abc"));
     }
 
     #[test]
@@ -519,11 +523,11 @@ mod tests {
 
     #[test]
     fn cow_is_as_empty_as_its_referent() {
-        assert!(IsEmpty::is_empty(&Cow::<str>::Borrowed("")));
-        assert!(IsEmpty::is_empty(&Cow::<str>::Owned(String::new())));
-        assert!(!IsEmpty::is_empty(&Cow::<str>::Borrowed("x")));
-        assert!(IsEmpty::is_empty(&Cow::<[u8]>::Owned(Vec::new())));
-        assert!(!IsEmpty::is_empty(&Cow::<[u8]>::Owned(vec![1])));
+        assert!(MaybeEmpty::is_empty(&Cow::<str>::Borrowed("")));
+        assert!(MaybeEmpty::is_empty(&Cow::<str>::Owned(String::new())));
+        assert!(!MaybeEmpty::is_empty(&Cow::<str>::Borrowed("x")));
+        assert!(MaybeEmpty::is_empty(&Cow::<[u8]>::Owned(Vec::new())));
+        assert!(!MaybeEmpty::is_empty(&Cow::<[u8]>::Owned(vec![1])));
     }
 
     #[test]
@@ -547,24 +551,24 @@ mod tests {
     #[quickcheck]
     fn option_is_as_empty_as_its_payload(value: Option<String>) -> bool {
         let expected = value.as_ref().is_none_or(|inner| inner.is_empty());
-        IsEmpty::is_empty(&value) == expected
+        MaybeEmpty::is_empty(&value) == expected
     }
 
     #[quickcheck]
     fn pair_is_empty_only_when_both_sides_are(left: String, right: Vec<u8>) -> bool {
         let expected = left.is_empty() && right.is_empty();
-        IsEmpty::is_empty(&(left, right)) == expected
+        MaybeEmpty::is_empty(&(left, right)) == expected
     }
 
     /// Disambiguates from the inherent `is_empty` on `str`, `String`, `Vec`
     /// and slices so every assertion above exercises the trait.
-    trait IsEmptyCtx {
+    trait MaybeEmptyCtx {
         fn is_empty_ctx(&self) -> bool;
     }
 
-    impl<T: IsEmpty + ?Sized> IsEmptyCtx for T {
+    impl<T: MaybeEmpty + ?Sized> MaybeEmptyCtx for T {
         fn is_empty_ctx(&self) -> bool {
-            IsEmpty::is_empty(self)
+            MaybeEmpty::is_empty(self)
         }
     }
 }
