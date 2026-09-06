@@ -304,7 +304,22 @@ impl<T> NonEmpty<T> {
     /// .with(42u64)` encodes to the same bytes as `("users/email", 42u64)`.
     /// Chaining nests to the **left**: `a.with(b).with(c)` is `((a, b), c)`,
     /// which encodes differently from `(a, (b, c))`. To match an existing
-    /// tuple layout, pass the whole tail at once: `a.with((b, c))`.
+    /// tuple layout, pass the whole tail at once: `a.with((b, c))`. For a
+    /// layout with the fixed part on the *right*, build the tuple and prove it
+    /// with [`NonEmpty::new`]; `with` only extends rightwards.
+    ///
+    /// Three things the tail does **not** get from the head:
+    ///
+    /// - It is not checked. If an empty tail would be a bug in your domain, an
+    ///   id that must be present say, validate it before pairing; integer ids
+    ///   need no validation because they are never empty.
+    /// - An empty tail does not vanish: `head.with(())` is still a pair and is
+    ///   framed as one, so it does not encode to the same bytes as `head`
+    ///   alone. Do not use an empty tail to mean "absent" — in AEAD `()`, `""`
+    ///   and an empty `Vec<u8>` all frame to the same zero bytes.
+    /// - Its type is not authenticated in AEAD: integers encode as raw
+    ///   little-endian bytes with no tag, so `with(42u64)` and `with(42i64)`
+    ///   produce the same AAD. See the integer note on `IntoAad`.
     pub fn with<U: MaybeEmpty>(self, tail: U) -> NonEmpty<(T, U)> {
         NonEmpty((self.0, tail))
     }
@@ -429,13 +444,13 @@ mod tests {
     }
 
     #[test]
-    fn with_keeps_the_proof_whatever_the_tail() {
+    fn with_pairs_unchecked_and_nests_left() {
         // The head is proven; the tail is not checked, and need not carry
-        // anything — a pair is empty only when both halves are.
+        // anything — a pair is empty only when both halves are. Chaining
+        // nests to the left, as the rustdoc promises.
         let head = nonempty!("users/email");
         assert_eq!(head.with(()).get(), &("users/email", ()));
         assert_eq!(head.with("").get(), &("users/email", ""));
-        assert_eq!(head.with(42u64).get(), &("users/email", 42u64));
         assert_eq!(
             head.with(String::from("acme")).with(7u32).into_inner(),
             (("users/email", String::from("acme")), 7u32)
