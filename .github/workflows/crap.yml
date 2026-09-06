@@ -12,9 +12,10 @@ name: "CRAP"
 # branch-protection settings. To soften it back to report-only, drop the
 # "Enforce CRAP threshold" step — the sticky comment keeps working either way.
 on:
+  # No branch filter: a stacked PR (a feature branch as base) must run this
+  # gate too. With `branches: [main]` here, retargeting a PR onto its
+  # parent branch silently switched every Rust gate off; see go.yml.
   pull_request:
-    branches:
-      - main
     paths:
       - "packages/**"
       - "Cargo.toml"

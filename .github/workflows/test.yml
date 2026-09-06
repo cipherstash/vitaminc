@@ -3,9 +3,10 @@ on:
   push:
     branches:
       - main
+  # No branch filter: a stacked PR (a feature branch as base) must run this
+  # gate too. With `branches: [main]` here, retargeting a PR onto its
+  # parent branch silently switched every Rust gate off; see go.yml.
   pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 defaults:
