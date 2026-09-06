@@ -17,9 +17,10 @@ name: "Mutants"
 # step; the sticky comment keeps working either way. To block merges, mark this
 # check ("🧬 Mutants gate") as required in the repo's branch-protection settings.
 on:
+  # No branch filter: a stacked PR (a feature branch as base) must run this
+  # gate too. With `branches: [main]` here, retargeting a PR onto its
+  # parent branch silently switched every Rust gate off; see go.yml.
   pull_request:
-    branches:
-      - main
     paths:
       - "packages/**"
       - "Cargo.toml"

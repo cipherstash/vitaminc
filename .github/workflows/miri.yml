@@ -15,9 +15,10 @@ name: "Miri"
 # and `protected` is where the only unsafe lives. Expand the matrix if other
 # crates grow pure-Rust `unsafe`.
 on:
+  # No branch filter: a stacked PR (a feature branch as base) must run this
+  # gate too. With `branches: [main]` here, retargeting a PR onto its
+  # parent branch silently switched every Rust gate off; see go.yml.
   pull_request:
-    branches:
-      - main
     paths:
       - "packages/protected/**"
       - ".github/workflows/miri.yml"
