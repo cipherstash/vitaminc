@@ -94,8 +94,12 @@ where
 {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let key = KeyInner::<N>::generate(identity).map(|key| {
+            // Fisher-Yates: for i from N-1 down to 0, swap i with a uniform
+            // j in 0..=i. `i + 1` candidates, so the bound is `next_below(i + 1)`.
+            // j == i (no swap) must be as likely as any other choice or the
+            // permutation is not uniform.
             (0..N).rev().fold(key, |mut key, i| {
-                let mut j = rng.next_bounded_u32(i as u32) as usize;
+                let mut j = rng.next_below(i as u32 + 1) as usize;
                 key.swap(i, j);
                 j.zeroize();
                 key
@@ -112,6 +116,60 @@ where
 {
     fn permute(&self, Self(inner): Self) -> Self {
         Self(inner.map(|arr| permute_array(self, arr)))
+    }
+}
+
+#[cfg(test)]
+mod generation_tests {
+    use super::*;
+
+    const SEED: [u8; 32] = [7u8; 32];
+
+    /// The generator is Fisher-Yates over the identity, drawing
+    /// `next_below(i + 1)` for `i` from `N - 1` down to `0`. Replaying that
+    /// with a second generator on the same seed must reproduce the key
+    /// exactly, which pins both the draw order and the bound.
+    #[test]
+    fn key_is_fisher_yates_over_next_below() {
+        let key = PermutationKey::<16>::from_seed(SEED).expect("random");
+        let mut rng = SafeRand::from_seed(SEED);
+        let mut expected: [u8; 16] = core::array::from_fn(|i| i as u8);
+        for i in (0..16).rev() {
+            let j = rng.next_below(i as u32 + 1) as usize;
+            expected.swap(i, j);
+        }
+        let got: Vec<u8> = key.iter().map(|b| b.risky_unwrap()).collect();
+        assert_eq!(got, expected);
+    }
+
+    /// Every element lands in every position about equally often. The old
+    /// bound was exclusive at powers of two, so at `i = 1` the swap was
+    /// forced and at `i = 2, 4` element `i` could never stay put; that
+    /// skews these counts far outside the tolerance below (7σ at this
+    /// sample size), while a uniform generator sits well inside it.
+    #[test]
+    fn keys_are_uniform_over_positions() {
+        const N: usize = 8;
+        const SAMPLES: usize = 40_000;
+        let expected = (SAMPLES / N) as f64;
+        let tolerance = expected * 0.10;
+
+        let mut rng = SafeRand::from_seed(SEED);
+        let mut counts = [[0usize; N]; N];
+        for _ in 0..SAMPLES {
+            let key = PermutationKey::<N>::random(&mut rng).expect("random");
+            for (position, value) in key.iter().enumerate() {
+                counts[position][value.risky_unwrap() as usize] += 1;
+            }
+        }
+        for (position, row) in counts.iter().enumerate() {
+            for (value, &count) in row.iter().enumerate() {
+                assert!(
+                    (count as f64 - expected).abs() <= tolerance,
+                    "value {value} at position {position}: {count} (expected ~{expected})"
+                );
+            }
+        }
     }
 }
 

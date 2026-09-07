@@ -41,7 +41,7 @@ use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 let mut rng = SafeRand::from_seed([0; 32]);
 let key = PermutationKey::random(&mut rng).expect("Random error");
 let input: u32 = 1000;
-assert_eq!(key.bitwise_permute(input), 1082155265);
+assert_eq!(key.bitwise_permute(input), 83910913);
 ```
 
 ## Permutations and Security
