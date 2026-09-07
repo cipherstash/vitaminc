@@ -1,4 +1,10 @@
 
+## [0.3.0] - 2026-09-07
+
+### Features
+
+- `LeafTypeAad` names its parts
+
 ## [0.2.0] - 2026-09-03
 
 First release.

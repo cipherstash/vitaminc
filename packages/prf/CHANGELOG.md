@@ -1,4 +1,14 @@
 
+## [0.3.0] - 2026-09-07
+
+### Breaking
+
+- **Breaking:** rename `IsEmpty` to `MaybeEmpty`
+
+### Features
+
+- `NonEmpty::with` and `From<integer>` for `NonEmpty`
+
 ## [0.2.0] - 2026-09-03
 
 First release.
