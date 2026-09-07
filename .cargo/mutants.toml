@@ -45,6 +45,12 @@ exclude_globs = [
 # NOTE: a deferral, not a dismissal. This layer needs JS-level tests driving a
 # built addon; see the tracking note in packages/aead-napi/README.md.
 exclude_re = [
+    # `batcher_fill`'s outer merge loop, `while n > j + k`: the `>=` mutant
+    # runs one extra iteration whose every inner step is rejected by the
+    # guard `i + j + k < n`, so it emits no gate and is unobservable by any
+    # test. Equivalent mutant, not a coverage gap; the inner guard's own
+    # mutants are caught by the odd-length zero-one test.
+    "replace > with >= in batcher_fill",
     "js_to_value",
     "value_to_js",
     "node_to_js",

@@ -45,7 +45,12 @@ const fn batcher_fill(n: usize, out: &mut [(u8, u8)]) -> usize {
         let mut k = p;
         loop {
             let mut j = k % p;
-            while j + k < n {
+            // `n > j + k` (rather than `j + k < n`) so this loop bound has a
+            // mutant name distinct from the inner guard's. Its `>=` mutant is
+            // equivalent: the extra iteration starts at `i + j + k == n`, which
+            // the inner guard rejects, so it emits nothing. That mutant is
+            // excluded by name in .cargo/mutants.toml; the inner `<` is not.
+            while n > j + k {
                 let mut i = 0;
                 while i < k && i + j + k < n {
                     if (i + j) / (2 * p) == (i + j + k) / (2 * p) {
@@ -178,7 +183,10 @@ where
     const { assert!(N <= 256, "permutation length must fit in u8") };
     let mut w: Zeroizing<[u64; N]> = Zeroizing::new([0; N]);
     for (i, slot) in w.iter_mut().enumerate() {
-        *slot = (rng.next_u64() << 8) | i as u64;
+        // The shift clears the low byte, so adding the index is the same as
+        // or-ing it in. `+` is used because `|` and `^` are indistinguishable
+        // here, which left the packing untestable by mutation.
+        *slot = (rng.next_u64() << 8) + i as u64;
     }
     permutation_from_words(&mut w).ok_or(RandomError::SeedRejected)
 }
@@ -219,8 +227,13 @@ mod tests {
 
     #[test]
     fn schedule_gates_are_in_bounds_and_ordered() {
+        // Called at runtime, not in a `const` block, so the match in
+        // `schedule` is actually executed under coverage; production only
+        // ever evaluates it at compile time.
         fn check<const N: usize>() {
-            for &(a, b) in const { schedule::<N>() } {
+            let gates = schedule::<N>();
+            assert_eq!(gates.len(), batcher_gate_count(N));
+            for &(a, b) in gates {
                 assert!(a < b, "gate ({a}, {b}) not ordered");
                 assert!((b as usize) < N, "gate ({a}, {b}) out of bounds for {N}");
             }
@@ -230,6 +243,37 @@ mod tests {
         check::<32>();
         check::<64>();
         check::<128>();
+    }
+
+    #[test]
+    #[should_panic(expected = "no sorting network for this length")]
+    fn schedule_rejects_an_unsupported_length_at_runtime() {
+        let _ = schedule::<7>();
+    }
+
+    #[test]
+    fn network_sorts_all_binary_inputs_for_every_length_to_16() {
+        // The shipped sizes are all powers of two, where a partial final
+        // merge block never occurs, so the inner `i + j + k < n` guard in
+        // `batcher_fill` is only exercised by odd sizes. Build the schedule
+        // at runtime for every n and check the zero-one principle and the
+        // gate bounds.
+        for n in 2..=16usize {
+            let count = batcher_gate_count(n);
+            let mut gates = vec![(0u8, 0u8); count];
+            assert_eq!(batcher_fill(n, &mut gates), count);
+            for &(a, b) in &gates {
+                assert!(a < b, "n = {n}: gate ({a}, {b}) not ordered");
+                assert!((b as usize) < n, "n = {n}: gate ({a}, {b}) out of bounds");
+            }
+            for bits in 0u32..(1 << n) {
+                let mut w: Vec<u64> = (0..n).map(|i| u64::from(bits >> i) & 1).collect();
+                for &(a, b) in &gates {
+                    compare_exchange(&mut w, a as usize, b as usize);
+                }
+                assert!(is_sorted(&w), "n = {n}: failed on binary input {bits:#b}");
+            }
+        }
     }
 
     #[test]
