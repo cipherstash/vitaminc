@@ -26,11 +26,12 @@ use std::borrow::Cow;
 /// `Some("")` and `Some(None)` are. This is the definition a downstream crate
 /// would otherwise have to reconstruct by parsing the encoded bytes.
 ///
-/// [`NonEmpty<T>`] deliberately does **not** implement `MaybeEmpty`, so it
-/// composes only at the outermost position: wrap the whole composite
-/// (`NonEmpty::new(("tenant", "email"))`), not the parts — a proven part
-/// nested inside a larger value would force the outer check to be re-derived
-/// anyway.
+/// [`NonEmpty<T>`] deliberately does **not** implement `MaybeEmpty`, so
+/// [`NonEmpty::new`] checks a composite as a whole
+/// (`NonEmpty::new(("tenant", "email"))`), never a proven part nested inside
+/// a larger value — that would force the outer check to be re-derived anyway.
+/// Extending a proven value is [`NonEmpty::with`]'s job, and it checks
+/// nothing, so its tail needs no `MaybeEmpty` impl at all.
 ///
 /// Because the check runs before encoding, *already-encoded* contexts (a
 /// `PrfContext` or an `Aad`) do not implement `MaybeEmpty` either: framing makes
@@ -251,6 +252,7 @@ where
     /// # Errors
     ///
     /// Returns [`EmptyError`] if `value.is_empty()`.
+    #[must_use = "the proof lives in the returned value"]
     pub fn new(value: T) -> Result<Self, EmptyError> {
         if value.is_empty() {
             Err(EmptyError)
@@ -286,17 +288,21 @@ impl<T> NonEmpty<T> {
     /// assert_eq!(row.get(), &("users/email", 42u64));
     /// ```
     ///
-    /// The tail must be [`MaybeEmpty`] for the same reason [`NonEmpty::new`]
-    /// requires it: every `NonEmpty<T>` wraps a `T` that *could* have been
-    /// checked, so an already-encoded `Aad` or `PrfContext`, or another
-    /// `NonEmpty`, is rejected here as it is there. The bound is never
-    /// evaluated; the head's proof makes that unnecessary.
+    /// Neither side is bounded. The head needs no `MaybeEmpty` because it is
+    /// already proven, so a generic `NonEmpty<C>` extends without `C:
+    /// MaybeEmpty` leaking into the caller's bounds; the tail needs none
+    /// because nothing is evaluated on it. Any type is a valid tail: a
+    /// downstream context type with no `MaybeEmpty` impl, an already-encoded
+    /// `Aad` or `PrfContext`, even another `NonEmpty`. The pair frames it
+    /// once, as the tuple would.
     ///
-    /// ```compile_fail
-    /// use vitaminc_protected::nonempty;
+    /// ```rust
+    /// use vitaminc_protected::{nonempty, NonEmpty};
     ///
-    /// // `NonEmpty` is not `MaybeEmpty`: wrap the whole composite, not the parts.
-    /// let _ = nonempty!("users/email").with(nonempty!("acme"));
+    /// struct RecordId(u64); // implements nothing from this crate
+    ///
+    /// let row: NonEmpty<(&str, RecordId)> = nonempty!("users/email").with(RecordId(7));
+    /// assert_eq!(row.get().1 .0, 7);
     /// ```
     ///
     /// The pair encodes exactly as the bare `(T, U)` would (`NonEmpty` is
@@ -320,7 +326,8 @@ impl<T> NonEmpty<T> {
     /// - Its type is not authenticated in AEAD: integers encode as raw
     ///   little-endian bytes with no tag, so `with(42u64)` and `with(42i64)`
     ///   produce the same AAD. See the integer note on `IntoAad`.
-    pub fn with<U: MaybeEmpty>(self, tail: U) -> NonEmpty<(T, U)> {
+    #[must_use = "`with` returns the extended context and leaves the receiver unchanged"]
+    pub fn with<U>(self, tail: U) -> NonEmpty<(T, U)> {
         NonEmpty((self.0, tail))
     }
 }
@@ -336,6 +343,7 @@ impl NonEmpty<&'static str> {
     /// panic is a compile error, which is the point.
     /// At runtime it is a real panic, so use [`NonEmpty::new`] for values that
     /// are not literals.
+    #[must_use = "the proof lives in the returned value"]
     pub const fn from_static(value: &'static str) -> Self {
         assert!(!value.is_empty(), "a non-empty context cannot be empty");
         Self(value)
@@ -353,6 +361,7 @@ impl NonEmpty<&'static [u8]> {
     /// panic is a compile error, which is the point.
     /// At runtime it is a real panic, so use [`NonEmpty::new`] for values that
     /// are not literals.
+    #[must_use = "the proof lives in the returned value"]
     pub const fn from_static_bytes(value: &'static [u8]) -> Self {
         assert!(!value.is_empty(), "a non-empty context cannot be empty");
         Self(value)
@@ -455,6 +464,36 @@ mod tests {
             head.with(String::from("acme")).with(7u32).into_inner(),
             (("users/email", String::from("acme")), 7u32)
         );
+    }
+
+    #[test]
+    fn with_needs_no_bound_on_the_tail() {
+        // #313: any tail, no check. A type with no `MaybeEmpty` impl, an
+        // already-encoded context stand-in, and another `NonEmpty` all pass.
+        // Adding `U: MaybeEmpty` to `with` would stop this compiling.
+        struct Opaque;
+        let head = nonempty!("users/email");
+        let _: NonEmpty<(&str, Opaque)> = head.with(Opaque);
+        let _: NonEmpty<(&str, NonEmpty<&str>)> = head.with(nonempty!("acme"));
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn the_old_trait_name_still_resolves() {
+        // `IsEmpty` is a deprecated alias for `MaybeEmpty`: 0.2.0 bounds and
+        // impls keep compiling, with a warning that names the replacement.
+        fn check<T: crate::IsEmpty>(value: &T) -> bool {
+            crate::IsEmpty::is_empty(value)
+        }
+        struct Never;
+        impl crate::IsEmpty for Never {
+            fn is_empty(&self) -> bool {
+                false
+            }
+        }
+        assert!(check(&""));
+        assert!(!check(&Never));
+        assert!(NonEmpty::new(Never).is_ok());
     }
 
     #[test]
