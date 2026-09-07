@@ -1,4 +1,26 @@
 
+## [0.3.0] - 2026-09-07
+
+### Breaking
+
+- **Breaking:** rename `IsEmpty` to `MaybeEmpty`
+
+### Documentation
+
+- scope the Usage wipe claim to fields that carry drop glue
+- stop describing map as an escape hatch
+- spell out what `NonEmpty::with` does not do for the tail
+
+### Features
+
+- `NonEmpty::with` and `From<integer>` for `NonEmpty`
+- keep `IsEmpty` as a deprecated alias for `MaybeEmpty`
+
+### Fixes
+
+- bound `NonEmpty::with` on `MaybeEmpty` and document its shape
+- lift the `MaybeEmpty` bound from `with`'s tail; mark constructors `#[must_use]`
+
 ## [0.2.0] - 2026-09-03
 
 ### Breaking
