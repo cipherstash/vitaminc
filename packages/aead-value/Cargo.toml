@@ -18,4 +18,4 @@ vitaminc-protected = { version = "0.3.0", path = "../protected" }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-vitaminc-encrypt = { version = "0.3.0", path = "../encrypt" }
+vitaminc-encrypt = { path = "../encrypt" }
