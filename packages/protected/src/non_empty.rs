@@ -1,10 +1,14 @@
 //! Non-empty context values. This module is private; its documentation lives
-//! on [`IsEmpty`] (what "empty" means) and [`NonEmpty`] (why, and the two
-//! ways to build one).
+//! on [`MaybeEmpty`] (what "empty" means) and [`NonEmpty`] (why, and how to
+//! build one).
 
 use std::borrow::Cow;
 
 /// Structural emptiness of a value, decided **before** any encoding is applied.
+///
+/// A type implementing `MaybeEmpty` is one that can be *asked* whether a given
+/// value is empty, not one whose values are empty: integers implement it and
+/// are never empty. It is the bound [`NonEmpty::new`] checks against.
 ///
 /// A value is empty when it carries no caller-supplied bytes:
 ///
@@ -22,74 +26,75 @@ use std::borrow::Cow;
 /// `Some("")` and `Some(None)` are. This is the definition a downstream crate
 /// would otherwise have to reconstruct by parsing the encoded bytes.
 ///
-/// [`NonEmpty<T>`] deliberately does **not** implement `IsEmpty`, so it
-/// composes only at the outermost position: wrap the whole composite
-/// (`NonEmpty::new(("tenant", "email"))`), not the parts — a proven part
-/// nested inside a larger value would force the outer check to be re-derived
-/// anyway.
+/// [`NonEmpty<T>`] deliberately does **not** implement `MaybeEmpty`, so
+/// [`NonEmpty::new`] checks a composite as a whole
+/// (`NonEmpty::new(("tenant", "email"))`), never a proven part nested inside
+/// a larger value — that would force the outer check to be re-derived anyway.
+/// Extending a proven value is [`NonEmpty::with`]'s job, and it checks
+/// nothing, so its tail needs no `MaybeEmpty` impl at all.
 ///
 /// Because the check runs before encoding, *already-encoded* contexts (a
-/// `PrfContext` or an `Aad`) do not implement `IsEmpty` either: framing makes
+/// `PrfContext` or an `Aad`) do not implement `MaybeEmpty` either: framing makes
 /// their bytes non-empty even when built from an empty value, so an encoded
 /// byte check would certify exactly the degenerate case `NonEmpty` exists to
 /// exclude. Check the value on its way *into* vitaminc, before it is framed.
 ///
 /// Implement this for your own context types so they can be wrapped in
 /// [`NonEmpty`].
-pub trait IsEmpty {
+pub trait MaybeEmpty {
     /// Returns `true` if this value carries no caller-supplied bytes.
     fn is_empty(&self) -> bool;
 }
 
-impl IsEmpty for () {
+impl MaybeEmpty for () {
     fn is_empty(&self) -> bool {
         true
     }
 }
 
-impl IsEmpty for str {
+impl MaybeEmpty for str {
     fn is_empty(&self) -> bool {
         str::is_empty(self)
     }
 }
 
-impl IsEmpty for String {
+impl MaybeEmpty for String {
     fn is_empty(&self) -> bool {
         String::is_empty(self)
     }
 }
 
-impl IsEmpty for [u8] {
+impl MaybeEmpty for [u8] {
     fn is_empty(&self) -> bool {
         <[u8]>::is_empty(self)
     }
 }
 
-impl<const N: usize> IsEmpty for [u8; N] {
+impl<const N: usize> MaybeEmpty for [u8; N] {
     fn is_empty(&self) -> bool {
         N == 0
     }
 }
 
-impl IsEmpty for Vec<u8> {
+impl MaybeEmpty for Vec<u8> {
     fn is_empty(&self) -> bool {
         Vec::is_empty(self)
     }
 }
 
 /// A `Cow` is as empty as its referent, whichever side it holds.
-impl<T> IsEmpty for Cow<'_, T>
+impl<T> MaybeEmpty for Cow<'_, T>
 where
-    T: IsEmpty + ToOwned + ?Sized,
+    T: MaybeEmpty + ToOwned + ?Sized,
 {
     fn is_empty(&self) -> bool {
         T::is_empty(self.as_ref())
     }
 }
 
-impl<T> IsEmpty for &T
+impl<T> MaybeEmpty for &T
 where
-    T: IsEmpty + ?Sized,
+    T: MaybeEmpty + ?Sized,
 {
     fn is_empty(&self) -> bool {
         T::is_empty(self)
@@ -99,9 +104,18 @@ where
 macro_rules! never_empty {
     ($($ty:ty),+ $(,)?) => {$(
         /// An integer is caller information, so it is never empty.
-        impl IsEmpty for $ty {
+        impl MaybeEmpty for $ty {
             fn is_empty(&self) -> bool {
                 false
+            }
+        }
+
+        /// An integer is never empty, so it converts without a check —
+        /// `NonEmpty::from(7u64)` or `7u64.into()` — where a string would
+        /// need [`NonEmpty::new`] or [`nonempty!`](crate::nonempty).
+        impl From<$ty> for NonEmpty<$ty> {
+            fn from(value: $ty) -> Self {
+                NonEmpty(value)
             }
         }
     )+};
@@ -110,9 +124,9 @@ macro_rules! never_empty {
 never_empty!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
 
 /// `None` is empty; `Some(value)` is as empty as `value`.
-impl<T> IsEmpty for Option<T>
+impl<T> MaybeEmpty for Option<T>
 where
-    T: IsEmpty,
+    T: MaybeEmpty,
 {
     fn is_empty(&self) -> bool {
         match self {
@@ -124,10 +138,10 @@ where
 
 /// A pair is empty only when **both** components are: a composite that still
 /// contributes caller bytes on either side is not the degenerate case.
-impl<A, B> IsEmpty for (A, B)
+impl<A, B> MaybeEmpty for (A, B)
 where
-    A: IsEmpty,
-    B: IsEmpty,
+    A: MaybeEmpty,
+    B: MaybeEmpty,
 {
     fn is_empty(&self) -> bool {
         self.0.is_empty() && self.1.is_empty()
@@ -135,7 +149,7 @@ where
 }
 
 /// The error returned when a value that must carry caller-supplied data
-/// turned out to be [empty](IsEmpty).
+/// turned out to be [empty](MaybeEmpty).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("context value carries no caller-supplied data")]
 pub struct EmptyError;
@@ -151,7 +165,7 @@ pub struct EmptyError;
 ///
 /// `NonEmpty` lets such a caller *demand* non-emptiness in a bound, without
 /// forcing the invariant on anyone who wants an empty context. It follows the
-/// `NonZero` pattern: the check ([`IsEmpty`]) happens exactly once, at
+/// `NonZero` pattern: the check ([`MaybeEmpty`]) happens exactly once, at
 /// construction, and after that the type carries the invariant, so an API can
 /// take a `NonEmpty<C>` instead of re-checking on every use.
 ///
@@ -164,16 +178,24 @@ pub struct EmptyError;
 /// is the default — but if a context is derived from sensitive data, wrap it
 /// in a redacting type before proving it non-empty, not after.
 ///
-/// # Two ways to build one
+/// # Building one
 ///
-/// Literals are checked at compile time with [`nonempty!`](crate::nonempty) —
-/// an empty one fails to compile — and dynamic values are checked at runtime,
-/// once, with [`NonEmpty::new`]. There is no third path: a bare `&'static str`
-/// argument cannot be value-checked at compile time, because `""` and
-/// `"users/email"` are the same type, so an API accepting one directly could
-/// only downgrade to a runtime check while appearing to promise more. An API
-/// that requires the invariant therefore takes `NonEmpty<C>` itself, and the
-/// call site states which path it is on:
+/// The rule is: checked once where the type cannot prove non-emptiness,
+/// converted freely where it can.
+///
+/// - **Literals** are checked at compile time with
+///   [`nonempty!`](crate::nonempty); an empty one fails to compile.
+/// - **Dynamic values** are checked at runtime, once, with [`NonEmpty::new`].
+/// - **Integers** are never empty, so `From` converts them with no check:
+///   `NonEmpty::from(7u64)`, `7u64.into()`.
+/// - **A proven value** is extended with [`NonEmpty::with`], which pairs it
+///   with a tail and checks nothing, because the head already carries bytes.
+///
+/// There is no implicit conversion from a string or byte slice: `""` and
+/// `"users/email"` are the same type, so an API accepting a bare `&str`
+/// could only downgrade to a runtime check while appearing to promise more.
+/// An API that requires the invariant therefore takes `NonEmpty<C>` itself,
+/// and the call site states which path it is on:
 ///
 /// ```rust
 /// use vitaminc_protected::{nonempty, EmptyError, NonEmpty};
@@ -188,6 +210,12 @@ pub struct EmptyError;
 /// // A dynamic value: checked structurally, once, at construction.
 /// let field = String::from("users/email");
 /// assert_eq!(bind(NonEmpty::new(field)?).get(), "users/email");
+///
+/// // An integer: never empty, so no check at all.
+/// assert_eq!(bind(NonEmpty::from(7u64)).get(), &7u64);
+///
+/// // A proven head extended with a call-site value: no second check.
+/// assert_eq!(bind(nonempty!("users/email").with(42u64)).get(), &("users/email", 42u64));
 ///
 /// // Nesting carries the invariant through.
 /// assert!(NonEmpty::new(("users", Some("email"))).is_ok());
@@ -217,13 +245,14 @@ pub struct NonEmpty<T>(T);
 
 impl<T> NonEmpty<T>
 where
-    T: IsEmpty,
+    T: MaybeEmpty,
 {
-    /// Wraps `value`, checking once that it is not [empty](IsEmpty).
+    /// Wraps `value`, checking once that it is not [empty](MaybeEmpty).
     ///
     /// # Errors
     ///
     /// Returns [`EmptyError`] if `value.is_empty()`.
+    #[must_use = "the proof lives in the returned value"]
     pub fn new(value: T) -> Result<Self, EmptyError> {
         if value.is_empty() {
             Err(EmptyError)
@@ -243,6 +272,64 @@ impl<T> NonEmpty<T> {
     pub fn get(&self) -> &T {
         &self.0
     }
+
+    /// Pairs this proven value with `tail`, keeping the proof and checking
+    /// nothing: a pair is [empty](MaybeEmpty) only when **both** halves are, so
+    /// a head that carries caller bytes makes the pair carry them whatever
+    /// the tail is — `()` or `""` included. This is how a fixed context is
+    /// extended with a value known only at the call site, a record id say,
+    /// without giving up the invariant the head already proved:
+    ///
+    /// ```rust
+    /// use vitaminc_protected::{nonempty, NonEmpty};
+    ///
+    /// let column = nonempty!("users/email");
+    /// let row: NonEmpty<(&str, u64)> = column.with(42u64);
+    /// assert_eq!(row.get(), &("users/email", 42u64));
+    /// ```
+    ///
+    /// Neither side is bounded. The head needs no `MaybeEmpty` because it is
+    /// already proven, so a generic `NonEmpty<C>` extends without `C:
+    /// MaybeEmpty` leaking into the caller's bounds; the tail needs none
+    /// because nothing is evaluated on it. Any type is a valid tail: a
+    /// downstream context type with no `MaybeEmpty` impl, an already-encoded
+    /// `Aad` or `PrfContext`, even another `NonEmpty`. The pair frames it
+    /// once, as the tuple would.
+    ///
+    /// ```rust
+    /// use vitaminc_protected::{nonempty, NonEmpty};
+    ///
+    /// struct RecordId(u64); // implements nothing from this crate
+    ///
+    /// let row: NonEmpty<(&str, RecordId)> = nonempty!("users/email").with(RecordId(7));
+    /// assert_eq!(row.get().1 .0, 7);
+    /// ```
+    ///
+    /// The pair encodes exactly as the bare `(T, U)` would (`NonEmpty` is
+    /// transparent to the context traits), so `nonempty!("users/email")
+    /// .with(42u64)` encodes to the same bytes as `("users/email", 42u64)`.
+    /// Chaining nests to the **left**: `a.with(b).with(c)` is `((a, b), c)`,
+    /// which encodes differently from `(a, (b, c))`. To match an existing
+    /// tuple layout, pass the whole tail at once: `a.with((b, c))`. For a
+    /// layout with the fixed part on the *right*, build the tuple and prove it
+    /// with [`NonEmpty::new`]; `with` only extends rightwards.
+    ///
+    /// Three things the tail does **not** get from the head:
+    ///
+    /// - It is not checked. If an empty tail would be a bug in your domain, an
+    ///   id that must be present say, validate it before pairing; integer ids
+    ///   need no validation because they are never empty.
+    /// - An empty tail does not vanish: `head.with(())` is still a pair and is
+    ///   framed as one, so it does not encode to the same bytes as `head`
+    ///   alone. Do not use an empty tail to mean "absent" — in AEAD `()`, `""`
+    ///   and an empty `Vec<u8>` all frame to the same zero bytes.
+    /// - Its type is not authenticated in AEAD: integers encode as raw
+    ///   little-endian bytes with no tag, so `with(42u64)` and `with(42i64)`
+    ///   produce the same AAD. See the integer note on `IntoAad`.
+    #[must_use = "`with` returns the extended context and leaves the receiver unchanged"]
+    pub fn with<U>(self, tail: U) -> NonEmpty<(T, U)> {
+        NonEmpty((self.0, tail))
+    }
 }
 
 impl NonEmpty<&'static str> {
@@ -256,6 +343,7 @@ impl NonEmpty<&'static str> {
     /// panic is a compile error, which is the point.
     /// At runtime it is a real panic, so use [`NonEmpty::new`] for values that
     /// are not literals.
+    #[must_use = "the proof lives in the returned value"]
     pub const fn from_static(value: &'static str) -> Self {
         assert!(!value.is_empty(), "a non-empty context cannot be empty");
         Self(value)
@@ -273,6 +361,7 @@ impl NonEmpty<&'static [u8]> {
     /// panic is a compile error, which is the point.
     /// At runtime it is a real panic, so use [`NonEmpty::new`] for values that
     /// are not literals.
+    #[must_use = "the proof lives in the returned value"]
     pub const fn from_static_bytes(value: &'static [u8]) -> Self {
         assert!(!value.is_empty(), "a non-empty context cannot be empty");
         Self(value)
@@ -364,6 +453,72 @@ mod tests {
     }
 
     #[test]
+    fn with_pairs_unchecked_and_nests_left() {
+        // The head is proven; the tail is not checked, and need not carry
+        // anything — a pair is empty only when both halves are. Chaining
+        // nests to the left, as the rustdoc promises.
+        let head = nonempty!("users/email");
+        assert_eq!(head.with(()).get(), &("users/email", ()));
+        assert_eq!(head.with("").get(), &("users/email", ""));
+        assert_eq!(
+            head.with(String::from("acme")).with(7u32).into_inner(),
+            (("users/email", String::from("acme")), 7u32)
+        );
+    }
+
+    #[test]
+    fn with_needs_no_bound_on_the_tail() {
+        // #313: any tail, no check. A type with no `MaybeEmpty` impl, an
+        // already-encoded context stand-in, and another `NonEmpty` all pass.
+        // Adding `U: MaybeEmpty` to `with` would stop this compiling.
+        struct Opaque;
+        let head = nonempty!("users/email");
+        let _: NonEmpty<(&str, Opaque)> = head.with(Opaque);
+        let _: NonEmpty<(&str, NonEmpty<&str>)> = head.with(nonempty!("acme"));
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn the_old_trait_name_still_resolves() {
+        // `IsEmpty` is a deprecated alias for `MaybeEmpty`: 0.2.0 bounds and
+        // impls keep compiling, with a warning that names the replacement.
+        fn check<T: crate::IsEmpty>(value: &T) -> bool {
+            crate::IsEmpty::is_empty(value)
+        }
+        struct Never;
+        impl crate::IsEmpty for Never {
+            fn is_empty(&self) -> bool {
+                false
+            }
+        }
+        assert!(check(&""));
+        assert!(!check(&Never));
+        assert!(NonEmpty::new(Never).is_ok());
+    }
+
+    #[test]
+    fn with_needs_no_bound_on_the_head() {
+        // The point of `with` for a generic consumer: a `NonEmpty<C>` can be
+        // extended without `C: MaybeEmpty` leaking into the caller's bounds.
+        // Adding `T: MaybeEmpty` to `with` would stop this compiling.
+        fn bind_row<C>(column: NonEmpty<C>, row: u64) -> NonEmpty<(C, u64)> {
+            column.with(row)
+        }
+        assert_eq!(
+            bind_row(nonempty!("users/email"), 42).into_inner(),
+            ("users/email", 42u64)
+        );
+    }
+
+    #[test]
+    fn integers_convert_without_a_check() {
+        assert_eq!(NonEmpty::from(0u8).into_inner(), 0u8);
+        assert_eq!(NonEmpty::from(-1i64).into_inner(), -1i64);
+        let id: NonEmpty<u128> = 7u128.into();
+        assert_eq!(id.get(), &7u128);
+    }
+
+    #[test]
     fn shapes_carrying_information_are_not_empty() {
         assert!(!"users/email".is_empty_ctx());
         assert!(!"x".is_empty_ctx());
@@ -401,12 +556,12 @@ mod tests {
     #[test]
     fn references_defer_to_the_referent() {
         let owned = String::from("x");
-        assert!(!<&String as IsEmpty>::is_empty(&&owned));
-        assert!(!<&&String as IsEmpty>::is_empty(&&&owned));
+        assert!(!<&String as MaybeEmpty>::is_empty(&&owned));
+        assert!(!<&&String as MaybeEmpty>::is_empty(&&&owned));
         let empty = String::new();
-        assert!(<&String as IsEmpty>::is_empty(&&empty));
-        assert!(!<&[u8; 3] as IsEmpty>::is_empty(&b"abc"));
-        assert!(!<&str as IsEmpty>::is_empty(&"abc"));
+        assert!(<&String as MaybeEmpty>::is_empty(&&empty));
+        assert!(!<&[u8; 3] as MaybeEmpty>::is_empty(&b"abc"));
+        assert!(!<&str as MaybeEmpty>::is_empty(&"abc"));
     }
 
     #[test]
@@ -466,11 +621,11 @@ mod tests {
 
     #[test]
     fn cow_is_as_empty_as_its_referent() {
-        assert!(IsEmpty::is_empty(&Cow::<str>::Borrowed("")));
-        assert!(IsEmpty::is_empty(&Cow::<str>::Owned(String::new())));
-        assert!(!IsEmpty::is_empty(&Cow::<str>::Borrowed("x")));
-        assert!(IsEmpty::is_empty(&Cow::<[u8]>::Owned(Vec::new())));
-        assert!(!IsEmpty::is_empty(&Cow::<[u8]>::Owned(vec![1])));
+        assert!(MaybeEmpty::is_empty(&Cow::<str>::Borrowed("")));
+        assert!(MaybeEmpty::is_empty(&Cow::<str>::Owned(String::new())));
+        assert!(!MaybeEmpty::is_empty(&Cow::<str>::Borrowed("x")));
+        assert!(MaybeEmpty::is_empty(&Cow::<[u8]>::Owned(Vec::new())));
+        assert!(!MaybeEmpty::is_empty(&Cow::<[u8]>::Owned(vec![1])));
     }
 
     #[test]
@@ -494,24 +649,24 @@ mod tests {
     #[quickcheck]
     fn option_is_as_empty_as_its_payload(value: Option<String>) -> bool {
         let expected = value.as_ref().is_none_or(|inner| inner.is_empty());
-        IsEmpty::is_empty(&value) == expected
+        MaybeEmpty::is_empty(&value) == expected
     }
 
     #[quickcheck]
     fn pair_is_empty_only_when_both_sides_are(left: String, right: Vec<u8>) -> bool {
         let expected = left.is_empty() && right.is_empty();
-        IsEmpty::is_empty(&(left, right)) == expected
+        MaybeEmpty::is_empty(&(left, right)) == expected
     }
 
     /// Disambiguates from the inherent `is_empty` on `str`, `String`, `Vec`
     /// and slices so every assertion above exercises the trait.
-    trait IsEmptyCtx {
+    trait MaybeEmptyCtx {
         fn is_empty_ctx(&self) -> bool;
     }
 
-    impl<T: IsEmpty + ?Sized> IsEmptyCtx for T {
+    impl<T: MaybeEmpty + ?Sized> MaybeEmptyCtx for T {
         fn is_empty_ctx(&self) -> bool {
-            IsEmpty::is_empty(self)
+            MaybeEmpty::is_empty(self)
         }
     }
 }

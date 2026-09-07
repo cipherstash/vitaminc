@@ -172,7 +172,7 @@ Beyond the adapters above, the crate exports `TimingSafeEq` and `Choice` (timing
 
 ### Non-empty contexts
 
-An AEAD associated-data value or PRF context can legitimately be empty, but a caller that uses one value to domain-separate fields needs it *not* to be. `NonEmpty<T>` carries that invariant in the type, checked once at construction: `nonempty!("users/email")` is checked at compile time (an empty literal does not compile), and `NonEmpty::new(value)` checks a dynamic value structurally — `""`, `None`, `Some("")` and `("", "")` are all rejected, without parsing any encoding. An API that requires the invariant takes `NonEmpty<T>` directly; a bare `&str` argument cannot be value-checked at compile time, so there is deliberately no implicit conversion from one.
+An AEAD associated-data value or PRF context can legitimately be empty, but a caller that uses one value to domain-separate fields needs it *not* to be. `NonEmpty<T>` carries that invariant in the type, checked once at construction: `nonempty!("users/email")` is checked at compile time (an empty literal does not compile), and `NonEmpty::new(value)` checks a dynamic value structurally — `""`, `None`, `Some("")` and `("", "")` are all rejected, without parsing any encoding. An API that requires the invariant takes `NonEmpty<T>` directly; a bare `&str` argument cannot be value-checked at compile time, so there is deliberately no implicit conversion from a string or byte slice. Integers are never empty and convert with `From`, and a proven value extends with `.with(tail)` without a second check.
 
 ```rust
 use vitaminc_protected::{nonempty, EmptyError, NonEmpty};
