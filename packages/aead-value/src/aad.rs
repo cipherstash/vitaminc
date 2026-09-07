@@ -16,7 +16,9 @@
 //! makes a value self-describing; this AAD binding lets a schema enforce a
 //! type up front.
 
-use vitaminc_aead::{Aad, IntoAad};
+use std::borrow::Cow;
+
+use vitaminc_aead::{Aad, AadPiece, IntoAad};
 
 /// Domain-separation label for the leaf-type AAD binding. The leading label
 /// keeps the encoding disjoint from `Aad::for_map_entry` and from
@@ -58,6 +60,17 @@ impl<'a> IntoAad<'a> for LeafTypeAad<'a> {
         // semantics live here, in the value crate that owns the tag table.
         Aad::pae(&[LEAF_TYPE_DOMAIN, self.base.as_bytes(), &[self.tag]])
     }
+
+    /// The same three PAE parts as `into_aad`: domain label, base, tag. The
+    /// base was encoded by [`LeafTypeAad::new`], so it appears as opaque
+    /// bytes here rather than as its own parts.
+    fn into_aad_piece(self) -> AadPiece<'a> {
+        AadPiece::List(vec![
+            AadPiece::Bytes(Cow::Borrowed(LEAF_TYPE_DOMAIN)),
+            self.base.into_aad_piece(),
+            AadPiece::Bytes(Cow::Owned(vec![self.tag])),
+        ])
+    }
 }
 
 #[cfg(test)]
@@ -72,6 +85,25 @@ mod tests {
         let bound = LeafTypeAad::new(Aad::from_slice(b"ctx"), 0x05).into_aad();
         let expected = Aad::pae(&[b"vitaminc/aead-value/leaf-type/v1", b"ctx", &[0x05]]);
         assert_eq!(bound.as_bytes(), expected.as_bytes());
+    }
+
+    #[test]
+    fn leaf_type_parts_encode_to_the_pinned_bytes() {
+        // The parts view must agree with the bytes view byte for byte, as
+        // every override in the workspace does.
+        let bound = LeafTypeAad::new(Aad::from_slice(b"ctx"), 0x05);
+        let expected = Aad::pae(&[b"vitaminc/aead-value/leaf-type/v1", b"ctx", &[0x05]]);
+        assert_eq!(
+            bound.into_aad_piece().into_aad().as_bytes(),
+            expected.as_bytes()
+        );
+        assert_eq!(
+            LeafTypeAad::new("ctx", 0x05)
+                .into_aad_piece()
+                .leaves()
+                .count(),
+            3
+        );
     }
 
     #[test]
