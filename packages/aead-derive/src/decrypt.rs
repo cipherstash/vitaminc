@@ -12,8 +12,17 @@ use crate::{
 pub(crate) fn derive(input: DeriveInput) -> Result<TokenStream> {
     let attrs = ContainerAttrs::parse(&input.attrs)?;
     let krate = &attrs.krate;
-    let shape = Shape::parse(&input)?;
     let name = &input.ident;
+
+    // `try_from` / `from` replace the whole expansion: a value of the named
+    // type is decrypted and converted into `Self`, so the struct's own shape
+    // is never classified. A failed `TryFrom` is reported as `Unspecified`,
+    // indistinguishable from a value that did not authenticate.
+    if attrs.try_from.is_some() || attrs.from.is_some() {
+        return Ok(conversion_impl(&attrs, &input));
+    }
+
+    let shape = Shape::parse(&input)?;
 
     // `'__c` is the decipher lifetime the trait is generic over. Every type
     // parameter must decrypt for it and outlive it; every lifetime parameter
@@ -103,6 +112,65 @@ pub(crate) fn derive(input: DeriveInput) -> Result<TokenStream> {
             }
         }
     })
+}
+
+/// `impl Decrypt for Self` through a conversion: decrypt the `try_from` /
+/// `from` target with its own `Decrypt`, then convert. Only the `Ok`
+/// container is transformed — the AAD goes to the target's decrypt untouched,
+/// so the conversion cannot weaken what the ciphertext is bound to.
+fn conversion_impl(attrs: &ContainerAttrs, input: &DeriveInput) -> TokenStream {
+    let krate = &attrs.krate;
+    let name = &input.ident;
+
+    // `Ok<Self>` requires `Self: Send + '__c`; a generic `Self` needs its
+    // parameters to carry that.
+    let mut bounded = input.generics.clone();
+    for param in bounded.type_params_mut() {
+        param.bounds.push(parse_quote!(::core::marker::Send));
+        param.bounds.push(parse_quote!('__c));
+    }
+    for lifetime in bounded.lifetimes_mut() {
+        lifetime.bounds.push(parse_quote!('__c));
+    }
+    let mut with_c = bounded.clone();
+    with_c.params.insert(0, parse_quote!('__c));
+    let (_, ty_generics, _) = input.generics.split_for_impl();
+    let (impl_generics, _, where_clause) = with_c.split_for_impl();
+
+    let body = match (&attrs.try_from, &attrs.from) {
+        (Some(target), _) => quote! {
+            <__D as #krate::Decipher<'__c>>::and_then_ok(
+                <#target as #krate::Decrypt<'__c>>::decrypt_with_aad(__decipher, __aad),
+                |__value| {
+                    <Self as ::core::convert::TryFrom<#target>>::try_from(__value)
+                        .map_err(|_| #krate::Unspecified)
+                },
+            )
+        },
+        (None, Some(target)) => quote! {
+            <__D as #krate::Decipher<'__c>>::map_ok(
+                <#target as #krate::Decrypt<'__c>>::decrypt_with_aad(__decipher, __aad),
+                <Self as ::core::convert::From<#target>>::from,
+            )
+        },
+        (None, None) => unreachable!("conversion_impl is only called with try_from or from"),
+    };
+
+    quote! {
+        #[automatically_derived]
+        impl #impl_generics #krate::Decrypt<'__c> for #name #ty_generics #where_clause {
+            fn decrypt_with_aad<'__aead_a, __D, __A>(
+                __decipher: __D,
+                __aad: __A,
+            ) -> __D::Ok<Self>
+            where
+                __D: #krate::Decipher<'__c>,
+                __A: #krate::IntoAad<'__aead_a>,
+            {
+                #body
+            }
+        }
+    }
 }
 
 /// Read keys first, then choose the type to decrypt each value into. Entry
@@ -423,6 +491,77 @@ mod tests {
 
         assert_contains(&out, quote!(::core::marker::PhantomData<fn() -> User<N>));
         assert_lacks(&out, quote!([u8; N]));
+    }
+
+    /// `try_from` decrypts the target type and converts through the fallible
+    /// bind, with the AAD handed to the target's decrypt untouched.
+    #[test]
+    fn try_from_decrypts_the_target_and_converts_fallibly() {
+        let out = expand(parse_quote! {
+            #[aead(try_from = "String")]
+            struct Code([u8; 4]);
+        });
+
+        assert_contains(
+            &out,
+            quote!(<__D as ::vitaminc_aead::Decipher<'__c>>::and_then_ok),
+        );
+        assert_contains(
+            &out,
+            quote!(<String as ::vitaminc_aead::Decrypt<'__c>>::decrypt_with_aad(__decipher, __aad)),
+        );
+        assert_contains(
+            &out,
+            quote!(<Self as ::core::convert::TryFrom<String>>::try_from(
+                __value
+            )),
+        );
+        assert_contains(&out, quote!(.map_err(|_| ::vitaminc_aead::Unspecified)));
+        assert_lacks(&out, quote!(::vitaminc_aead::Decipher::decrypt_map));
+    }
+
+    /// `from` is the infallible form and goes through `map_ok`.
+    #[test]
+    fn from_decrypts_the_target_and_converts_infallibly() {
+        let out = expand(parse_quote! {
+            #[aead(from = "u32")]
+            enum Level {
+                Low,
+                High,
+            }
+        });
+
+        assert_contains(
+            &out,
+            quote!(<__D as ::vitaminc_aead::Decipher<'__c>>::map_ok),
+        );
+        assert_contains(&out, quote!(<Self as ::core::convert::From<u32>>::from));
+        assert_contains(&out, quote!(::vitaminc_aead::Decrypt<'__c> for Level));
+    }
+
+    /// A generic `Self` still has to satisfy `Ok<Self>`'s `Send + '__c`.
+    #[test]
+    fn conversion_bounds_type_parameters_for_the_ok_container() {
+        let out = expand(parse_quote! {
+            #[aead(try_from = "String")]
+            struct Tagged<T> {
+                value: T,
+            }
+        });
+        assert_contains(
+            &out,
+            quote!(impl<'__c, T: ::core::marker::Send + '__c> ::vitaminc_aead::Decrypt<'__c> for Tagged<T>),
+        );
+    }
+
+    #[test]
+    fn try_from_with_from_is_rejected() {
+        let err = derive(parse_quote! {
+            #[aead(try_from = "String", from = "String")]
+            struct Code([u8; 4]);
+        })
+        .expect_err("try_from with from should be rejected");
+        assert!(err.to_string().contains("cannot be combined"));
     }
 
     #[test]

@@ -7,6 +7,10 @@ option is one the author believes is in effect.
 | Attribute | Applies to | Effect |
 |---|---|---|
 | `crate = "path"` | container | Name the path to `vitaminc_aead` in the generated code |
+| `take` | container | Read each field with `mem::take` instead of moving it — for types that implement `Drop`, such as `ZeroizeOnDrop` |
+| `into = "T"` | container | Encrypt by converting `Self` into `T` and encrypting that |
+| `try_from = "T"` | container | Decrypt a `T` and convert it into `Self` with `TryFrom`; a failed conversion is `Unspecified` |
+| `from = "T"` | container | Decrypt a `T` and convert it into `Self` with `From` |
 | `rename = "name"` | field | Store the field under `name` instead of its own name |
 | `passthrough` | field | Store the field **in the clear**, unencrypted and unauthenticated |
 
@@ -25,6 +29,64 @@ struct User {
 
 Every path the expansion emits is redirected, so the deriving crate needs no
 direct dependency on `vitaminc_aead` at all.
+
+## `#[aead(take)]`
+
+A type that implements `Drop` cannot be moved out of, and the derived
+`Encrypt` moves each field out of `self`. That rules out exactly the types the
+derive is most for — a token, a password, a key — because they implement
+`ZeroizeOnDrop`, which is a `Drop` impl:
+
+```ignore
+#[derive(Encrypt, Decrypt, ZeroizeOnDrop)]
+struct SecretToken(String); // error[E0509]: cannot move out of type `SecretToken`, which implements the `Drop` trait
+```
+
+`take` reads each field with `core::mem::take(&mut self.field)` instead, which
+needs only `&mut self`. The field's `Default` is left behind and zeroized when
+`self` drops, so nothing of the secret outlives the call:
+
+```ignore
+#[derive(Encrypt, Decrypt, ZeroizeOnDrop)]
+#[aead(take)]
+struct SecretToken(String);
+```
+
+Every field's type has to implement `Default`. The wire shape is unchanged —
+`take` only changes how the value leaves the struct.
+
+## `#[aead(into = "...")]`, `#[aead(try_from = "...")]`, `#[aead(from = "...")]`
+
+Encrypt and decrypt through another type, mirroring serde's attributes of the
+same names. `into = "T"` derives `Encrypt` as `<T as Encrypt>` applied to
+`<Self as Into<T>>::into(self)`; `try_from = "T"` derives `Decrypt` as
+`<T as Decrypt>` followed by `<Self as TryFrom<T>>::try_from`; `from = "T"` is
+the infallible form. The struct's own fields are never read, so `T` alone
+decides the wire shape, and the struct can wrap a type that does not implement
+the traits itself:
+
+```ignore
+/// Exactly four ASCII uppercase letters, held in an array.
+#[derive(Encrypt, Decrypt)]
+#[aead(into = "String", try_from = "String")]
+struct Code([u8; 4]);
+
+impl From<Code> for String { /* ... */ }
+impl TryFrom<String> for Code { /* validate length and charset */ }
+```
+
+A `TryFrom` that fails is reported as `Unspecified`, the same as a value that
+did not authenticate: a caller cannot tell a tampered ciphertext from one that
+decrypted to something the type refuses, which is the right amount of
+information to give.
+
+The AAD is handed to `T`'s decrypt untouched — the conversion runs on the
+already-authenticated value and cannot weaken what the ciphertext is bound to.
+
+Because the shape comes from `T`, these attributes are also the one way to
+derive on an enum: model the variant as whatever `T` carries it as, and the
+conversions decide the mapping. `into` cannot be combined with `take` (there
+is no field to take), and `try_from` cannot be combined with `from`.
 
 ## `#[aead(rename = "...")]`
 

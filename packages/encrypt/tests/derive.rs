@@ -9,7 +9,8 @@
 
 use std::collections::HashMap;
 
-use vitaminc_aead::{Decrypt, Encrypt};
+use vitaminc_aead::{Decrypt, Encrypt, Unspecified};
+use zeroize::ZeroizeOnDrop;
 
 mod common;
 use common::cipher;
@@ -536,4 +537,161 @@ fn roundtrip_non_usize_const_generic() {
     let decrypted: ConstGeneric<7> = cipher.decrypt(ciphertext).expect("decryption failed");
 
     assert_eq!(decrypted.value, "x");
+}
+
+// ---------------------------------------------------------------------------
+// Container conversions: `take`, `into`, `try_from`, `from`
+// ---------------------------------------------------------------------------
+
+/// A secret-holding newtype: `ZeroizeOnDrop` gives it a `Drop` impl, so its
+/// field cannot be moved out and the plain derive would not compile.
+#[derive(Encrypt, Decrypt, ZeroizeOnDrop, Debug, PartialEq)]
+#[aead(take)]
+struct Secret(String);
+
+#[derive(Encrypt, Decrypt, ZeroizeOnDrop, Debug, PartialEq)]
+#[aead(take)]
+struct Credentials {
+    user: String,
+    password: String,
+}
+
+/// A code of exactly four ASCII uppercase letters, backed by an array the
+/// derive cannot encrypt directly. It travels as the `String` it converts to.
+#[derive(Encrypt, Decrypt, Debug, PartialEq, Clone, Copy)]
+#[aead(into = "String", try_from = "String")]
+struct Code([u8; 4]);
+
+impl From<Code> for String {
+    fn from(code: Code) -> Self {
+        String::from_utf8(code.0.to_vec()).expect("a code is ASCII")
+    }
+}
+
+impl TryFrom<String> for Code {
+    type Error = ();
+
+    fn try_from(s: String) -> Result<Self, ()> {
+        let bytes: [u8; 4] = s.as_bytes().try_into().map_err(|_| ())?;
+        if bytes.iter().all(u8::is_ascii_uppercase) {
+            Ok(Self(bytes))
+        } else {
+            Err(())
+        }
+    }
+}
+
+/// An enum through `into` / `from`: the variant is modelled as the `u32` it
+/// converts to, which is the explicit encoding the enum guard asks for.
+#[derive(Encrypt, Decrypt, Debug, PartialEq)]
+#[aead(into = "u32", from = "u32")]
+enum Level {
+    Low,
+    High,
+}
+
+impl From<Level> for u32 {
+    fn from(level: Level) -> Self {
+        match level {
+            Level::Low => 0,
+            Level::High => 1,
+        }
+    }
+}
+
+impl From<u32> for Level {
+    fn from(n: u32) -> Self {
+        if n == 0 {
+            Level::Low
+        } else {
+            Level::High
+        }
+    }
+}
+
+#[test]
+fn take_roundtrips_a_zeroize_on_drop_newtype() {
+    let cipher = cipher();
+
+    // Still transparent: the ciphertext is the inner string's.
+    let ciphertext = Secret("hunter2".to_string())
+        .encrypt(&cipher)
+        .expect("encryption failed");
+    let as_inner: String = cipher.decrypt(ciphertext).expect("decryption failed");
+    assert_eq!(as_inner, "hunter2");
+
+    let ciphertext = "hunter2".encrypt(&cipher).expect("encryption failed");
+    let secret: Secret = cipher.decrypt(ciphertext).expect("decryption failed");
+    assert_eq!(secret, Secret("hunter2".to_string()));
+}
+
+#[test]
+fn take_roundtrips_a_zeroize_on_drop_struct() {
+    let cipher = cipher();
+    let ciphertext = Credentials {
+        user: "alice".to_string(),
+        password: "hunter2".to_string(),
+    }
+    .encrypt(&cipher)
+    .expect("encryption failed");
+
+    let decrypted: Credentials = cipher.decrypt(ciphertext).expect("decryption failed");
+    assert_eq!(
+        decrypted,
+        Credentials {
+            user: "alice".to_string(),
+            password: "hunter2".to_string(),
+        }
+    );
+}
+
+#[test]
+fn into_and_try_from_travel_as_the_target_type() {
+    let cipher = cipher();
+
+    let ciphertext = Code(*b"ABCD").encrypt(&cipher).expect("encryption failed");
+    let as_target: String = cipher.decrypt(ciphertext).expect("decryption failed");
+    assert_eq!(as_target, "ABCD");
+
+    let ciphertext = "WXYZ".encrypt(&cipher).expect("encryption failed");
+    let code: Code = cipher.decrypt(ciphertext).expect("decryption failed");
+    assert_eq!(code, Code(*b"WXYZ"));
+}
+
+#[test]
+fn a_failed_try_from_is_reported_as_unspecified() {
+    let cipher = cipher();
+
+    // Authenticates fine as a string; only the conversion refuses it.
+    let too_long = "ABCDE".encrypt(&cipher).expect("encryption failed");
+    let result: Result<Code, Unspecified> = cipher.decrypt(too_long);
+    assert_eq!(result, Err(Unspecified));
+
+    let lowercase = "abcd".encrypt(&cipher).expect("encryption failed");
+    let result: Result<Code, Unspecified> = cipher.decrypt(lowercase);
+    assert_eq!(result, Err(Unspecified));
+}
+
+#[test]
+fn try_from_keeps_the_aad_binding() {
+    let cipher = cipher();
+
+    let ciphertext = Code(*b"ABCD")
+        .encrypt_with_aad(&cipher, "tenant:1")
+        .expect("encryption failed");
+    let result: Result<Code, Unspecified> = cipher.decrypt_with_aad(ciphertext, "tenant:2");
+    assert_eq!(result, Err(Unspecified));
+}
+
+#[test]
+fn from_converts_infallibly_and_admits_an_enum() {
+    let cipher = cipher();
+
+    let ciphertext = Level::High.encrypt(&cipher).expect("encryption failed");
+    let as_target: u32 = cipher.decrypt(ciphertext).expect("decryption failed");
+    assert_eq!(as_target, 1);
+
+    let ciphertext = 0u32.encrypt(&cipher).expect("encryption failed");
+    let level: Level = cipher.decrypt(ciphertext).expect("decryption failed");
+    assert_eq!(level, Level::Low);
 }

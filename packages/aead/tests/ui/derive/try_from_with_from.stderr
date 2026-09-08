@@ -1,0 +1,5 @@
+error: `#[aead(try_from = "...")]` and `#[aead(from = "...")]` cannot be combined: both name the type to decrypt as, and only one conversion can run. Use `try_from` if the conversion can fail, `from` if it cannot.
+ --> tests/ui/derive/try_from_with_from.rs:5:1
+  |
+5 | #[aead(try_from = "String", from = "String")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

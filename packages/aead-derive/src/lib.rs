@@ -35,7 +35,8 @@
 //! - A **newtype** struct (exactly one unnamed field) is *transparent*: it
 //!   encrypts and decrypts exactly as its inner type, adding nothing to the
 //!   ciphertext. This mirrors serde, and matches how `Protected<T>` and
-//!   `Equatable<T>` behave.
+//!   `Equatable<T>` behave. A newtype that implements `Drop` (`ZeroizeOnDrop`)
+//!   needs `#[aead(take)]` so its field can leave without a move.
 //! - A unit struct — or a struct with no fields — encrypts to the
 //!   authenticated empty-map marker.
 //!
@@ -45,10 +46,11 @@
 //!
 //! # Enums
 //!
-//! Enums are not supported. The ciphertext carries no authenticated variant
+//! Enums have no derived shape. The ciphertext carries no authenticated variant
 //! discriminator, so any encoding this macro could pick would either leak the
-//! variant in the clear or leave it forgeable. Model the choice explicitly
-//! (e.g. as a struct with `Option` fields) instead.
+//! variant in the clear or leave it forgeable. Model the choice explicitly —
+//! as a struct with `Option` fields, or through `#[aead(into = "T")]` /
+//! `#[aead(from = "T")]` with a `T` that carries the variant.
 //!
 //! [`Encrypt`]: https://docs.rs/vitaminc-aead/latest/vitaminc_aead/trait.Encrypt.html
 //! [`Decrypt`]: https://docs.rs/vitaminc-aead/latest/vitaminc_aead/trait.Decrypt.html

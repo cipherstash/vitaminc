@@ -12,8 +12,38 @@ use crate::{
 pub(crate) fn derive(input: DeriveInput) -> Result<TokenStream> {
     let attrs = ContainerAttrs::parse(&input.attrs)?;
     let krate = &attrs.krate;
-    let shape = Shape::parse(&input)?;
     let name = &input.ident;
+
+    // `into` replaces the whole expansion: the value is converted and the
+    // target type's own `Encrypt` decides the wire shape. The struct's fields
+    // are never read, so its shape is not even classified — which is also
+    // what lets an enum go through, provided the author has modelled the
+    // variant in the target type.
+    if let Some(target) = &attrs.into {
+        let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+        return Ok(quote! {
+            #[automatically_derived]
+            impl #impl_generics #krate::Encrypt for #name #ty_generics #where_clause {
+                fn encrypt_with_aad<'__aead_a, __C, __A>(
+                    self,
+                    __cipher: __C,
+                    __aad: __A,
+                ) -> ::core::result::Result<__C::Ok, __C::Error>
+                where
+                    __C: #krate::Cipher,
+                    __A: #krate::IntoAad<'__aead_a>,
+                {
+                    <#target as #krate::Encrypt>::encrypt_with_aad(
+                        <Self as ::core::convert::Into<#target>>::into(self),
+                        __cipher,
+                        __aad,
+                    )
+                }
+            }
+        });
+    }
+
+    let shape = Shape::parse(&input)?;
 
     // Bound every type parameter, serde-style: a field of type `Vec<T>` then
     // picks up `Vec<T>: Encrypt` from the blanket impl in `vitaminc_aead`.
@@ -24,16 +54,23 @@ pub(crate) fn derive(input: DeriveInput) -> Result<TokenStream> {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let body = match &shape {
-        Shape::Newtype(field) => newtype_body(krate, field),
-        Shape::Map(fields) => map_body(krate, fields),
+        Shape::Newtype(field) => newtype_body(krate, field, attrs.take),
+        Shape::Map(fields) => map_body(krate, fields, attrs.take),
         Shape::Empty => empty_body(krate),
+    };
+
+    // `take` reads through `&mut self`, so the receiver has to be mutable.
+    let receiver = if attrs.take {
+        quote!(mut self)
+    } else {
+        quote!(self)
     };
 
     Ok(quote! {
         #[automatically_derived]
         impl #impl_generics #krate::Encrypt for #name #ty_generics #where_clause {
             fn encrypt_with_aad<'__aead_a, __C, __A>(
-                self,
+                #receiver,
                 __cipher: __C,
                 __aad: __A,
             ) -> ::core::result::Result<__C::Ok, __C::Error>
@@ -47,19 +84,34 @@ pub(crate) fn derive(input: DeriveInput) -> Result<TokenStream> {
     })
 }
 
-/// A newtype adds nothing to the ciphertext — it encrypts exactly as its
-/// inner value, so wrapping a type is not a wire-breaking change.
-fn newtype_body(krate: &syn::Path, field: &FieldInfo) -> TokenStream {
-    let member = &field.member;
-    quote! {
-        #krate::Encrypt::encrypt_with_aad(self.#member, __cipher, __aad)
+/// How a field's value leaves `self`.
+///
+/// A plain move is the default. With `#[aead(take)]` the field is swapped
+/// for its `Default` and the value taken through `&mut self`, which is the
+/// only way out of a type that implements `Drop` — a `ZeroizeOnDrop` newtype
+/// cannot be destructured, and a bare `self.0` on one is E0509. The empty
+/// value left behind is zeroized harmlessly when `self` drops.
+fn field_value(member: &syn::Member, take: bool) -> TokenStream {
+    if take {
+        quote!(::core::mem::take(&mut self.#member))
+    } else {
+        quote!(self.#member)
     }
 }
 
-fn map_body(krate: &syn::Path, fields: &[FieldInfo]) -> TokenStream {
+/// A newtype adds nothing to the ciphertext — it encrypts exactly as its
+/// inner value, so wrapping a type is not a wire-breaking change.
+fn newtype_body(krate: &syn::Path, field: &FieldInfo, take: bool) -> TokenStream {
+    let value = field_value(&field.member, take);
+    quote! {
+        #krate::Encrypt::encrypt_with_aad(#value, __cipher, __aad)
+    }
+}
+
+fn map_body(krate: &syn::Path, fields: &[FieldInfo], take: bool) -> TokenStream {
     let entries = fields.iter().map(|field| {
         let key = &field.key;
-        let member = &field.member;
+        let value = field_value(&field.member, take);
         if field.passthrough {
             // Stored in the clear and bound to nothing — not the value, not
             // even its key. That is what lets the entry be an ordinary
@@ -69,12 +121,12 @@ fn map_body(krate: &syn::Path, fields: &[FieldInfo]) -> TokenStream {
                 let __map = #krate::MapCipher::passthrough_entry_boxed(
                     __map,
                     #key,
-                    ::std::boxed::Box::new(self.#member),
+                    ::std::boxed::Box::new(#value),
                 )?;
             }
         } else {
             quote! {
-                let __map = #krate::MapCipher::encrypt_entry(__map, #key, self.#member)?;
+                let __map = #krate::MapCipher::encrypt_entry(__map, #key, #value)?;
             }
         }
     });
@@ -281,6 +333,91 @@ mod tests {
             !out.contains("vitaminc_aead"),
             "expansion still references the default crate path:\n{out}"
         );
+    }
+
+    /// `take` swaps each field for its default through `&mut self` instead of
+    /// moving it: the only way out of a type with a `Drop` impl.
+    #[test]
+    fn take_reads_every_field_through_mem_take() {
+        let out = expand(parse_quote! {
+            #[aead(take)]
+            struct Secret(String);
+        });
+        assert_contains(&out, quote!(mut self));
+        assert_contains(
+            &out,
+            quote!(::vitaminc_aead::Encrypt::encrypt_with_aad(
+                ::core::mem::take(&mut self.0),
+                __cipher,
+                __aad
+            )),
+        );
+
+        let out = expand(parse_quote! {
+            #[aead(take)]
+            struct Credentials {
+                #[aead(passthrough)]
+                user: String,
+                password: String,
+            }
+        });
+        assert_contains(
+            &out,
+            quote!(::std::boxed::Box::new(::core::mem::take(&mut self.user))),
+        );
+        assert_contains(
+            &out,
+            quote!(::vitaminc_aead::MapCipher::encrypt_entry(
+                __map,
+                "password",
+                ::core::mem::take(&mut self.password)
+            )),
+        );
+    }
+
+    /// `into` hands the whole value to the target type's `Encrypt`; no field
+    /// is read and no map is opened, so the target alone decides the wire.
+    #[test]
+    fn into_converts_the_value_and_reads_no_field() {
+        let out = expand(parse_quote! {
+            #[aead(into = "String")]
+            struct Code([u8; 4]);
+        });
+
+        assert_contains(
+            &out,
+            quote!(<String as ::vitaminc_aead::Encrypt>::encrypt_with_aad(
+                <Self as ::core::convert::Into<String>>::into(self),
+                __cipher,
+                __aad,
+            )),
+        );
+        assert_lacks(&out, quote!(self.0));
+        assert_lacks(&out, quote!(::vitaminc_aead::Cipher::encrypt_map));
+    }
+
+    /// With `into` the variant lives in the target type, which is the explicit
+    /// modelling the enum guard asks for — so an enum is allowed through.
+    #[test]
+    fn into_allows_an_enum() {
+        let out = expand(parse_quote! {
+            #[aead(into = "u32")]
+            enum Level {
+                Low,
+                High,
+            }
+        });
+        assert_contains(&out, quote!(::vitaminc_aead::Encrypt for Level));
+    }
+
+    #[test]
+    fn take_with_into_is_rejected() {
+        let err = derive(parse_quote! {
+            #[aead(take, into = "String")]
+            struct Secret(String);
+        })
+        .expect_err("take with into should be rejected");
+        assert!(err.to_string().contains("cannot be combined"));
     }
 
     /// Attribute typos are rejected rather than ignored: a silently dropped

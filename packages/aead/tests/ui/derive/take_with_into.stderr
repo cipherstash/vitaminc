@@ -1,0 +1,5 @@
+error: `#[aead(take)]` and `#[aead(into = "...")]` cannot be combined: `into` converts the whole value and never reads the fields, so there is nothing for `take` to take. Use one or the other.
+ --> tests/ui/derive/take_with_into.rs:7:1
+  |
+7 | #[aead(take, into = "String")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
