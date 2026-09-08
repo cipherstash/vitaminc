@@ -353,7 +353,7 @@ where
 mod tests {
     use super::*;
     use crate::test_util::MockCipher;
-    use crate::DecipherVisitor;
+    use crate::{DecipherVisitor, Unspecified};
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -584,6 +584,15 @@ mod tests {
             F: FnOnce(T) -> U,
         {
             ok.map(f)
+        }
+
+        fn and_then_ok<T, U, F>(ok: Self::Ok<T>, f: F) -> Self::Ok<U>
+        where
+            T: Send + 'c,
+            U: Send + 'c,
+            F: FnOnce(T) -> Result<U, Unspecified>,
+        {
+            ok.and_then(|value| f(value).ok())
         }
 
         fn decrypt_bytes<'a, V, A>(self, _visitor: V, aad: A) -> Self::Ok<V::Value>

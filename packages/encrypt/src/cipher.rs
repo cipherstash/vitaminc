@@ -527,6 +527,15 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
         ok.map(f)
     }
 
+    fn and_then_ok<T, U, F>(ok: Self::Ok<T>, f: F) -> Self::Ok<U>
+    where
+        T: Send + 'c,
+        U: Send + 'c,
+        F: FnOnce(T) -> Result<U, Unspecified>,
+    {
+        ok.and_then(f)
+    }
+
     fn decrypt_bytes<'a, V, A>(self, visitor: V, aad: A) -> Self::Ok<V::Value>
     where
         V: DecipherVisitor<'c> + Send + 'c,

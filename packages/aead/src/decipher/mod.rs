@@ -64,6 +64,35 @@ pub trait Decipher<'c>: Sized {
         U: Send + 'c,
         F: FnOnce(T) -> U;
 
+    /// Transform the inner value of an [`Ok`](Decipher::Ok) container with a
+    /// conversion that can fail.
+    ///
+    /// The fallible counterpart of [`map_ok`](Decipher::map_ok) — a monadic
+    /// bind over the `Ok` container. It lets a `Decrypt` implementation decode
+    /// as one type and validate its way into another without writing a
+    /// [`DecipherVisitor`]: a newtype that checks length or charset, a type
+    /// whose only constructor is `TryFrom`, an enum recovered from a tag. A
+    /// failed conversion is reported exactly like a failed decryption,
+    /// as [`Unspecified`], so a caller cannot tell a value that did not
+    /// authenticate from one that authenticated but did not validate.
+    ///
+    /// ```ignore
+    /// fn decrypt_with_aad<'a, D, A>(decipher: D, aad: A) -> D::Ok<Self>
+    /// where
+    ///     D: Decipher<'c>,
+    ///     A: IntoAad<'a>,
+    /// {
+    ///     D::and_then_ok(String::decrypt_with_aad(decipher, aad), |s| {
+    ///         Self::try_from(s).map_err(|_| Unspecified)
+    ///     })
+    /// }
+    /// ```
+    fn and_then_ok<T, U, F>(ok: Self::Ok<T>, f: F) -> Self::Ok<U>
+    where
+        T: Send + 'c,
+        U: Send + 'c,
+        F: FnOnce(T) -> Result<U, Unspecified>;
+
     /// Decrypt a single byte-oriented ciphertext authenticated against `aad`,
     /// driving the visitor's [`visit_bytes_vec`](DecipherVisitor::visit_bytes_vec).
     ///
