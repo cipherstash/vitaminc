@@ -95,7 +95,10 @@ where
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let key = KeyInner::<N>::generate(identity).map(|key| {
             (0..N).rev().fold(key, |mut key, i| {
-                let mut j = rng.next_bounded_u32(i as u32) as usize;
+                // Fisher–Yates step `i` needs `j` uniform in `0..=i`, so the
+                // half-open bound is `i + 1`. `j == i` (no swap) must be as
+                // likely as any other choice or the permutation is not uniform.
+                let mut j = rng.next_below(i as u32 + 1) as usize;
                 key.swap(i, j);
                 j.zeroize();
                 key
@@ -124,7 +127,7 @@ mod tests {
         PermutationKey,
     };
     use vitaminc_protected::{Controlled, Zeroed};
-    use vitaminc_random::{Generatable, SafeRand};
+    use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 
     use crate::tests;
 
@@ -170,6 +173,57 @@ mod tests {
         test_key_invert::<16>()?;
         test_key_invert::<32>()?;
         test_key_invert::<64>()?;
+        Ok(())
+    }
+
+    /// The generator is Fisher-Yates over the identity, drawing
+    /// `next_below(i + 1)` for `i` from `N - 1` down to `0`. Replaying that
+    /// with a second generator on the same seed must reproduce the key
+    /// exactly, which pins both the draw order and the bound.
+    #[test]
+    fn key_is_fisher_yates_over_next_below() {
+        let key = PermutationKey::<16>::from_seed([7u8; 32]).expect("random");
+        let mut rng = SafeRand::from_seed([7u8; 32]);
+        let mut expected: [u8; 16] = core::array::from_fn(|i| i as u8);
+        for i in (0..16).rev() {
+            let j = rng.next_below(i as u32 + 1) as usize;
+            expected.swap(i, j);
+        }
+        let got: Vec<u8> = key.iter().map(|b| b.risky_unwrap()).collect();
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn key_position_uniformity() -> Result<(), Box<dyn std::error::Error>> {
+        // Chi-squared test over the position matrix: counts[v][i] tallies how
+        // often value `v` ends up at position `i`. Under a uniform permutation
+        // every cell has the same expectation. This catches the power-of-two
+        // bias in the old inclusive bounded draw (issue #198), where the swap
+        // target at power-of-two Fisher–Yates steps could never equal the step
+        // index itself.
+        const N: usize = 8;
+        const SAMPLES: usize = 20_000;
+        let mut rng = SafeRand::from_seed([7u8; 32]);
+        let mut counts = [[0u32; N]; N];
+        for _ in 0..SAMPLES {
+            let key: PermutationKey<N> = Generatable::random(&mut rng)?;
+            for (i, v) in key.iter().enumerate() {
+                counts[v.risky_unwrap() as usize][i] += 1;
+            }
+        }
+        let expected = (SAMPLES / N) as f64;
+        let chi2: f64 = counts
+            .iter()
+            .flatten()
+            .map(|&c| {
+                let d = f64::from(c) - expected;
+                d * d / expected
+            })
+            .sum();
+        // The position matrix is doubly stochastic, so (N - 1)² = 49 degrees
+        // of freedom; p = 0.001 critical value is 85.35. The seed is fixed, so
+        // this is deterministic — no flakiness.
+        assert!(chi2 < 85.35, "chi-squared too high: {chi2}");
         Ok(())
     }
 
