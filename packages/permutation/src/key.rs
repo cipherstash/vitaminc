@@ -93,16 +93,18 @@ where
     [u8; N]: IsPermutable,
 {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        let key = KeyInner::<N>::generate(identity).map(|key| {
-            (0..N).rev().fold(key, |mut key, i| {
-                // Fisher–Yates step `i` needs `j` uniform in `0..=i`, so the
-                // half-open bound is `i + 1`. `j == i` (no swap) must be as
-                // likely as any other choice or the permutation is not uniform.
-                let mut j = rng.next_below(i as u32 + 1) as usize;
+        let key = KeyInner::<N>::generate(identity).map(|mut key| {
+            // Fisher–Yates: step `i` needs `j` uniform in `0..=i`, so the
+            // half-open bound is `i + 1`. `j == i` (no swap) must be as likely
+            // as any other choice or the permutation is not uniform. The loop
+            // stops at `i == 1`: the `i == 0` step could only draw `j == 0`
+            // and swap an element with itself, so it would spend a draw for
+            // no entropy.
+            for i in (1..N).rev() {
+                let j = rng.next_below(i as u32 + 1) as usize;
                 key.swap(i, j);
-                j.zeroize();
-                key
-            })
+            }
+            key
         });
 
         Ok(Self(key))
@@ -177,15 +179,16 @@ mod tests {
     }
 
     /// The generator is Fisher-Yates over the identity, drawing
-    /// `next_below(i + 1)` for `i` from `N - 1` down to `0`. Replaying that
-    /// with a second generator on the same seed must reproduce the key
-    /// exactly, which pins both the draw order and the bound.
+    /// `next_below(i + 1)` for `i` from `N - 1` down to `1` (the `i == 0`
+    /// step is a no-op and draws nothing). Replaying that with a second
+    /// generator on the same seed must reproduce the key exactly, which pins
+    /// the draw order, the bound, and that no extra draw is spent.
     #[test]
     fn key_is_fisher_yates_over_next_below() {
         let key = PermutationKey::<16>::from_seed([7u8; 32]).expect("random");
         let mut rng = SafeRand::from_seed([7u8; 32]);
         let mut expected: [u8; 16] = core::array::from_fn(|i| i as u8);
-        for i in (0..16).rev() {
+        for i in (1..16).rev() {
             let j = rng.next_below(i as u32 + 1) as usize;
             expected.swap(i, j);
         }
