@@ -30,7 +30,10 @@ impl SafeRand {
     /// `n = u32::MAX`. A protocol that needs exact uniformity must account
     /// for that term.
     ///
-    /// The bound may be a plain `u32` or a [`Protected<u32>`]; this is the
+    /// The bound may be a plain `u32`, a [`Protected<u32>`], or a
+    /// [`Protected<NonZeroU32>`]; the last is the form for a secret bound
+    /// that might be zero, since it moves the zero check to construction and
+    /// makes the draw itself total. All three are the
     /// [`BoundedRng::next_below`] trait method, reachable here without
     /// importing the trait.
     ///
@@ -39,11 +42,13 @@ impl SafeRand {
     /// Panics if `n == 0`: the range `0..0` is empty and has no value to
     /// return. Callers that compute `n` should check it first. When `n` is
     /// a [`Protected<u32>`] the panic is observable on a secret, so a caller
-    /// whose secret bound may be zero must rule that out before calling.
+    /// whose secret bound may be zero should pass a
+    /// [`Protected<NonZeroU32>`] instead, which never panics.
     ///
     /// [`Protected<u32>`]: vitaminc_protected::Protected
+    /// [`Protected<NonZeroU32>`]: vitaminc_protected::Protected
     /// [`BoundedRng::next_below`]: crate::BoundedRng::next_below
-    pub fn next_below<T>(&mut self, n: T) -> T
+    pub fn next_below<T>(&mut self, n: T) -> <Self as crate::BoundedRng<T>>::Output
     where
         Self: crate::BoundedRng<T>,
     {
@@ -62,6 +67,13 @@ impl SafeRand {
     /// `next_below(max + 1)` (for `max == u32::MAX` that is the whole word:
     /// use [`Rng::next_u32`](rand::Rng::next_u32)), or `next_below(n)` when
     /// the caller has a length `n` rather than a maximum.
+    ///
+    /// Besides the power-of-two case, two things changed for existing
+    /// callers: every call now consumes exactly one 64-bit word of the
+    /// stream, where it previously consumed one or more 32-bit words, so a
+    /// fixed-seed sequence that interleaves bounded and raw draws yields
+    /// different values than before; and the value drawn for a given seed
+    /// is different, because the reduction is different.
     ///
     /// [`BoundedRngInclusive::next_bounded`]: crate::BoundedRngInclusive::next_bounded
     #[deprecated(
