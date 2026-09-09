@@ -11,37 +11,24 @@ pub use elementwise::{Depermute, Permute};
 pub use key::PermutationKey;
 
 mod private {
-    use crate::shuffle::{batcher_gate_count, batcher_schedule};
     use vitaminc_protected::Zeroed;
 
-    pub trait IsPermutable: Zeroed {
-        /// The Batcher odd-even mergesort network for arrays of this length,
-        /// used for oblivious key generation. Depends only on the length, so
-        /// all element types of a given length share one schedule.
-        const SCHEDULE: &'static [(u8, u8)];
-    }
-
-    macro_rules! impl_permutable {
-        ($($n:literal),* $(,)?) => {
-            paste::paste! {
-                $(
-                    const [<SCHEDULE_ $n>]: [(u8, u8); batcher_gate_count($n)] =
-                        batcher_schedule($n);
-                    impl IsPermutable for [u8; $n] {
-                        const SCHEDULE: &'static [(u8, u8)] = &[<SCHEDULE_ $n>];
-                    }
-                    impl IsPermutable for [u16; $n] {
-                        const SCHEDULE: &'static [(u8, u8)] = &[<SCHEDULE_ $n>];
-                    }
-                    impl IsPermutable for [u32; $n] {
-                        const SCHEDULE: &'static [(u8, u8)] = &[<SCHEDULE_ $n>];
-                    }
-                )*
-            }
-        };
-    }
-
-    impl_permutable!(8, 16, 32, 64, 128);
+    pub trait IsPermutable: Zeroed {}
+    impl IsPermutable for [u8; 8] {}
+    impl IsPermutable for [u8; 16] {}
+    impl IsPermutable for [u8; 32] {}
+    impl IsPermutable for [u8; 64] {}
+    impl IsPermutable for [u8; 128] {}
+    impl IsPermutable for [u16; 8] {}
+    impl IsPermutable for [u16; 16] {}
+    impl IsPermutable for [u16; 32] {}
+    impl IsPermutable for [u16; 64] {}
+    impl IsPermutable for [u16; 128] {}
+    impl IsPermutable for [u32; 8] {}
+    impl IsPermutable for [u32; 16] {}
+    impl IsPermutable for [u32; 32] {}
+    impl IsPermutable for [u32; 64] {}
+    impl IsPermutable for [u32; 128] {}
 
     pub(crate) const fn identity<const N: usize>() -> [u8; N]
     where

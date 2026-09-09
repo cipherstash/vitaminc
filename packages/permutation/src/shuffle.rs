@@ -28,10 +28,17 @@ use zeroize::Zeroizing;
 
 use crate::private::IsPermutable;
 
-/// Number of compare-exchange gates in the Batcher odd-even mergesort network
-/// for `n` inputs. Counting pass of [`batcher_schedule`]; for `n = 2^k` the
-/// closed form is `(k² − k + 4)·2^(k−2) − 1`.
-pub(crate) const fn batcher_gate_count(n: usize) -> usize {
+/// Emits the Batcher odd-even mergesort network for `n` inputs (Knuth 5.3.4,
+/// iterative form) into `out`, returning the total gate count. The division
+/// guard keeps comparisons within the pair of runs being merged. Correctness
+/// rests on the zero-one principle — a network sorts everything iff it sorts
+/// all binary inputs — so the tests target this transcription, not the
+/// theorem.
+///
+/// This is the single source of truth for the network: the counting pass
+/// calls it with an empty slice (gates beyond `out.len()` are counted but not
+/// stored), and the schedule pass calls it with the full-size array.
+const fn batcher_fill(n: usize, out: &mut [(u8, u8)]) -> usize {
     let mut gates = 0;
     let mut p = 1;
     while p < n {
@@ -42,6 +49,9 @@ pub(crate) const fn batcher_gate_count(n: usize) -> usize {
                 let mut i = 0;
                 while i < k && i + j + k < n {
                     if (i + j) / (2 * p) == (i + j + k) / (2 * p) {
+                        if gates < out.len() {
+                            out[gates] = ((i + j) as u8, (i + j + k) as u8);
+                        }
                         gates += 1;
                     }
                     i += 1;
@@ -58,39 +68,18 @@ pub(crate) const fn batcher_gate_count(n: usize) -> usize {
     gates
 }
 
-/// The Batcher odd-even mergesort network for `n` inputs as a fixed schedule
-/// of compare-exchange gates, generated at compile time (Knuth 5.3.4,
-/// iterative form). The division guard keeps comparisons within the pair of
-/// runs being merged. Correctness rests on the zero-one principle — a network
-/// sorts everything iff it sorts all binary inputs — so the tests target this
-/// transcription, not the theorem.
+/// Number of compare-exchange gates in the Batcher network for `n` inputs;
+/// for `n = 2^k` the closed form is `(k² − k + 4)·2^(k−2) − 1`.
+pub(crate) const fn batcher_gate_count(n: usize) -> usize {
+    batcher_fill(n, &mut [])
+}
+
+/// The Batcher network for `n` inputs as a fixed compile-time schedule of
+/// compare-exchange gates.
 pub(crate) const fn batcher_schedule<const G: usize>(n: usize) -> [(u8, u8); G] {
     assert!(n <= 256, "gate indices must fit in u8");
     let mut out = [(0u8, 0u8); G];
-    let mut gates = 0;
-    let mut p = 1;
-    while p < n {
-        let mut k = p;
-        loop {
-            let mut j = k % p;
-            while j + k < n {
-                let mut i = 0;
-                while i < k && i + j + k < n {
-                    if (i + j) / (2 * p) == (i + j + k) / (2 * p) {
-                        out[gates] = ((i + j) as u8, (i + j + k) as u8);
-                        gates += 1;
-                    }
-                    i += 1;
-                }
-                j += 2 * k;
-            }
-            if k == 1 {
-                break;
-            }
-            k /= 2;
-        }
-        p *= 2;
-    }
+    let gates = batcher_fill(n, &mut out);
     assert!(gates == G, "schedule length must match the gate count");
     out
 }
@@ -106,12 +95,29 @@ fn compare_exchange(w: &mut [u64], a: usize, b: usize) {
     w[b] = u64::conditional_select(&y, &x, swap);
 }
 
+const SCHEDULE_8: [(u8, u8); batcher_gate_count(8)] = batcher_schedule(8);
+const SCHEDULE_16: [(u8, u8); batcher_gate_count(16)] = batcher_schedule(16);
+const SCHEDULE_32: [(u8, u8); batcher_gate_count(32)] = batcher_schedule(32);
+const SCHEDULE_64: [(u8, u8); batcher_gate_count(64)] = batcher_schedule(64);
+const SCHEDULE_128: [(u8, u8); batcher_gate_count(128)] = batcher_schedule(128);
+
+/// The compare-exchange schedule for arrays of length `N`. Only referenced
+/// from inline `const` blocks, so an unsupported length is a compile-time
+/// error at the call site, never a runtime panic.
+pub(crate) const fn schedule<const N: usize>() -> &'static [(u8, u8)] {
+    match N {
+        8 => &SCHEDULE_8,
+        16 => &SCHEDULE_16,
+        32 => &SCHEDULE_32,
+        64 => &SCHEDULE_64,
+        128 => &SCHEDULE_128,
+        _ => panic!("no sorting network for this length"),
+    }
+}
+
 /// Sorts `w` in place through the fixed network for `N`.
-pub(crate) fn sort<const N: usize>(w: &mut [u64; N])
-where
-    [u8; N]: IsPermutable,
-{
-    for &(a, b) in <[u8; N]>::SCHEDULE {
+pub(crate) fn sort<const N: usize>(w: &mut [u64; N]) {
+    for &(a, b) in const { schedule::<N>() } {
         compare_exchange(w, a as usize, b as usize);
     }
 }
@@ -213,11 +219,8 @@ mod tests {
 
     #[test]
     fn schedule_gates_are_in_bounds_and_ordered() {
-        fn check<const N: usize>()
-        where
-            [u8; N]: IsPermutable,
-        {
-            for &(a, b) in <[u8; N]>::SCHEDULE {
+        fn check<const N: usize>() {
+            for &(a, b) in const { schedule::<N>() } {
                 assert!(a < b, "gate ({a}, {b}) not ordered");
                 assert!((b as usize) < N, "gate ({a}, {b}) out of bounds for {N}");
             }
