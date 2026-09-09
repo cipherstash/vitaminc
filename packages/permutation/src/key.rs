@@ -37,9 +37,10 @@ impl<const N: usize> PermutationKey<N> {
     /// Creates a new permutation key from a seed.
     ///
     /// Derivation is deterministic: a given seed always yields the same key.
-    /// If it returns [`RandomError::SeedRejected`] (probability ≈ 2⁻⁴³), the
-    /// seed can *never* derive a key — discard it and provision a fresh seed.
-    /// Only retain seeds whose first derivation succeeds.
+    /// If it returns [`RandomError::SeedRejected`] (probability ≈ N²/2⁵⁷,
+    /// at most ≈ 2⁻⁴³ for N = 128), the seed can *never* derive a key —
+    /// discard it and provision a fresh seed. Only retain seeds whose first
+    /// derivation succeeds.
     ///
     /// TODO: Perhaps seed should be protected?
     pub fn from_seed(seed: [u8; 32]) -> Result<Self, RandomError>
@@ -105,8 +106,13 @@ where
         //
         // Exactly one batch is attempted: `Err(SeedRejected)` means the seed
         // behind `rng` is unusable and must be replaced, not retried.
-        let out = crate::shuffle::random_permutation(rng)?;
-        Ok(Self(KeyInner::<N>::generate(|| *out)))
+        //
+        // The permutation is written straight into the key's own wiped-on-
+        // drop slot, so no plain `[u8; N]` copy of it exists at any point;
+        // on failure the zeroed slot is dropped and wiped like any key.
+        let mut key = KeyInner::<N>::generate(|| [0; N]);
+        crate::shuffle::random_permutation(rng, key.inner_mut())?;
+        Ok(Self(key))
     }
 }
 

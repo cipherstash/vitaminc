@@ -18,9 +18,12 @@
 //! 4. **Strip**: the low bytes of the sorted array *are* the permutation.
 //!
 //! Instruction trace, memory trace, and per-instruction latency are functions
-//! of `N` only: gate indices come from the public compile-time schedule, and
-//! the comparison outcome is absorbed into a `subtle` select mask. No memory
-//! address is ever derived from a secret value.
+//! of `N` only, with one deliberate exception: the final accept/reject of the
+//! whole batch in step 3, which is a single branch on the collision predicate
+//! and is the documented failure mode. Gate indices come from the public
+//! compile-time schedule, and the comparison outcome inside every gate is
+//! absorbed into a `subtle` select mask. No memory address is ever derived
+//! from a secret value.
 
 use subtle::{Choice, ConditionallySelectable, ConstantTimeEq, ConstantTimeGreater};
 use vitaminc_random::{RandomError, Rng, SafeRand};
@@ -86,15 +89,16 @@ pub(crate) const fn batcher_schedule<const G: usize>(n: usize) -> [(u8, u8); G] 
     out
 }
 
-/// Branchless compare-exchange: both locations are read and written
-/// unconditionally on every gate, and the comparison outcome only ever feeds
-/// a select mask (`cmov`/`csel`), never a branch or an address.
+/// Branchless compare-exchange for `a < b`: both locations are read and
+/// written unconditionally on every gate, and the comparison outcome only
+/// ever feeds a select mask (`cmov`/`csel`), never a branch or an address.
+/// The swap is `subtle`'s xor-mask form, so the only transient it creates is
+/// the masked difference of the two words, never a copy of either.
 #[inline(always)]
 fn compare_exchange(w: &mut [u64], a: usize, b: usize) {
-    let (x, y) = (w[a], w[b]);
-    let swap = x.ct_gt(&y);
-    w[a] = u64::conditional_select(&x, &y, swap);
-    w[b] = u64::conditional_select(&y, &x, swap);
+    let swap = w[a].ct_gt(&w[b]);
+    let (lo, hi) = w.split_at_mut(b);
+    u64::conditional_swap(&mut lo[a], &mut hi[0], swap);
 }
 
 /// Sorts `w` in place through the fixed network for `N`.
@@ -107,15 +111,18 @@ where
     }
 }
 
-/// Sorts a batch of packed words and extracts the permutation payload, or
-/// returns `None` if any two random sort keys collide. Only the random bits
-/// matter for collisions: the packed indices make the full words distinct,
-/// and equal keys end up adjacent after sorting. The scan accumulates into a
-/// mask so it is itself branch-free.
+/// Sorts a batch of packed words and writes the permutation payload into
+/// `out`, or returns `false` without touching `out` if any two random sort
+/// keys collide. Only the random bits matter for collisions: the packed
+/// indices make the full words distinct, and equal keys end up adjacent
+/// after sorting. The scan accumulates into a mask so it is itself
+/// branch-free; the single branch is the final accept/reject.
 ///
-/// The extracted permutation is itself secret key material, so it is built
-/// inside `Zeroizing` — the packed words being wiped is not enough.
-fn permutation_from_words<const N: usize>(w: &mut [u64; N]) -> Option<Zeroizing<[u8; N]>>
+/// The extracted permutation is itself secret key material, which is why it
+/// is written straight into the caller's buffer rather than returned by
+/// value: the caller passes the wiped-on-drop slot the key will live in, so
+/// no plain `[u8; N]` copy of the permutation is ever made.
+fn permutation_from_words<const N: usize>(w: &mut [u64; N], out: &mut [u8; N]) -> bool
 where
     [u8; N]: IsPermutable,
 {
@@ -125,18 +132,19 @@ where
         collision |= (pair[0] >> 8).ct_eq(&(pair[1] >> 8));
     }
     if bool::from(collision) {
-        return None;
+        return false;
     }
-    let mut out: Zeroizing<[u8; N]> = Zeroizing::new([0; N]);
     for (o, x) in out.iter_mut().zip(w.iter()) {
         *o = (x & 0xFF) as u8;
     }
-    Some(out)
+    true
 }
 
-/// Returns a uniform random permutation of `0..N` in gather form
-/// (`out[j] = data[p[j]]` applies it), generated obliviously: timing and
-/// memory access patterns are independent of the result.
+/// Writes a uniform random permutation of `0..N` in gather form
+/// (`out[j] = data[p[j]]` applies it) into `out`, generated obliviously:
+/// timing and memory access patterns are independent of the result. `out`
+/// should be the wiped-on-drop slot the key will live in; on failure it is
+/// left untouched.
 ///
 /// Exactly **one** batch is attempted. On a key collision the whole batch is
 /// rejected and generation fails with [`RandomError::SeedRejected`] — the
@@ -151,16 +159,19 @@ where
 ///   moves the retry to the seed-generation layer, where timing reveals only
 ///   how many independent, discarded seeds preceded the accepted one.
 ///
+/// A caller whose generator was seeded from the OS rather than from a
+/// retained seed has nothing to discard: it builds a fresh generator with
+/// [`SafeRand::from_entropy`] and calls again.
+///
 /// With 56 random bits the collision probability is ≈ N²/2⁵⁷ (≈ 2⁻⁴³ at
-/// N = 128), so honest generation essentially never fails.
+/// N = 128, ≈ 2⁻⁵¹ at N = 8), so honest generation essentially never fails.
 pub(crate) fn random_permutation<const N: usize>(
     rng: &mut SafeRand,
-) -> Result<Zeroizing<[u8; N]>, RandomError>
+    out: &mut [u8; N],
+) -> Result<(), RandomError>
 where
     [u8; N]: IsPermutable,
 {
-    // The payload (and the schedule's gate indices) are single bytes.
-    const { assert!(N <= 256, "permutation length must fit in u8") };
     let mut w: Zeroizing<[u64; N]> = Zeroizing::new([0; N]);
     for (i, slot) in w.iter_mut().enumerate() {
         // The shift clears the low byte, so adding the index is the same as
@@ -168,7 +179,11 @@ where
         // here, which left the packing untestable by mutation.
         *slot = (rng.next_u64() << 8) + i as u64;
     }
-    permutation_from_words(&mut w).ok_or(RandomError::SeedRejected)
+    if permutation_from_words(&mut w, out) {
+        Ok(())
+    } else {
+        Err(RandomError::SeedRejected)
+    }
 }
 
 #[cfg(test)]
@@ -289,7 +304,9 @@ mod tests {
             [u8; N]: IsPermutable,
         {
             for _ in 0..50 {
-                assert_is_permutation(&random_permutation::<N>(rng).unwrap());
+                let mut out = [0u8; N];
+                random_permutation::<N>(rng, &mut out).unwrap();
+                assert_is_permutation(&out);
             }
         }
         let mut rng = SafeRand::from_seed([9u8; 32]);
@@ -303,24 +320,27 @@ mod tests {
     #[test]
     fn colliding_keys_reject_the_batch() {
         // Two equal random keys (high 56 bits) with different payloads must
-        // reject the whole batch, even though the packed words are distinct.
+        // reject the whole batch, even though the packed words are distinct,
+        // and must leave the output untouched.
         let mut w: [u64; 8] = core::array::from_fn(|i| ((i as u64) << 8) | i as u64);
         w[3] = (7 << 8) | 3; // same sort key as w[7], different payload
-        assert!(permutation_from_words(&mut w).is_none());
+        let mut out = [0xAAu8; 8];
+        assert!(!permutation_from_words(&mut w, &mut out));
+        assert_eq!(out, [0xAA; 8]);
 
         // Distinct keys must produce the payload permutation in sorted-key
         // order: descending keys reverse the payloads.
         let mut w: [u64; 8] = core::array::from_fn(|i| ((7 - i as u64) << 8) | i as u64);
-        assert_eq!(
-            permutation_from_words(&mut w).map(|z| *z),
-            Some([7, 6, 5, 4, 3, 2, 1, 0])
-        );
+        assert!(permutation_from_words(&mut w, &mut out));
+        assert_eq!(out, [7, 6, 5, 4, 3, 2, 1, 0]);
     }
 
     #[test]
     fn output_is_deterministic_for_a_seed() {
-        let a = random_permutation::<64>(&mut SafeRand::from_seed([1u8; 32])).unwrap();
-        let b = random_permutation::<64>(&mut SafeRand::from_seed([1u8; 32])).unwrap();
-        assert_eq!(*a, *b);
+        let mut a = [0u8; 64];
+        let mut b = [0u8; 64];
+        random_permutation(&mut SafeRand::from_seed([1u8; 32]), &mut a).unwrap();
+        random_permutation(&mut SafeRand::from_seed([1u8; 32]), &mut b).unwrap();
+        assert_eq!(a, b);
     }
 }
