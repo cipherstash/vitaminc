@@ -17,6 +17,7 @@ vitaminc-traits = { version = "0.5.0", path = "../traits" }
 vitaminc-protected = { version = "0.5.0", path = "../protected" }
 aws-sdk-kms = "1.109.0"
 aws-config = "1.8.18"
+futures = "0.3.31"
 
 thiserror = { workspace = true }
 zeroize = { workspace = true }

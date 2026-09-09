@@ -8,6 +8,33 @@ This implementation is asynchronous and uses the [aws_sdk_kms] crate to interact
 
 This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) framework to make cryptography code healthy.
 
+## Key-provider capability traits
+
+Alongside [`AwsKmsHmac`], this crate defines a family of small, capability-based
+traits for using a KMS backend as a key provider: minting and retrieving data
+keys ([`GenerateDataKey`]/[`RetrieveDataKey`], with batch variants
+[`BatchGenerateDataKey`]/[`BatchRetrieveDataKey`] and the
+[`fan_out_generate`]/[`pooled_key_generate`]/[`dedup_retrieve`] shims for
+backends without native batch support), deriving a deterministic per-keyset
+index key ([`load_index_key`]), encrypting/decrypting directly under a
+KMS-held key ([`EncryptWithKey`]/[`DecryptWithKey`]), and MAC/signing
+operations ([`GenerateMac`]/[`VerifyMac`], [`Sign`]/[`Verify`],
+[`GetPublicKey`]).
+
+These traits deliberately cover more than any single consumer (e.g.
+`stack-encrypt`) calls today. `vitaminc-kms` is a general-purpose,
+open-source cryptography crate, not a private integration layer for one
+downstream project — limiting its trait surface to exactly what one consumer
+currently calls would fit an internal abstraction, but not the philosophy of
+a general-purpose crate meant for other users and use cases. The traits
+reflect the real capabilities KMS vendors offer, not just the narrow slice
+one caller happens to exercise today.
+
+[`AwsKmsHmac`] is deliberately unrelated to these traits: it's built on AWS
+KMS's `GenerateMac` operation as a streaming `Update`/`AsyncFixedOutput`
+construction, a different capability shape entirely, and shares no code with
+them.
+
 # Example
 
 ```no_run
