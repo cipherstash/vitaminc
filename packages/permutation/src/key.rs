@@ -236,7 +236,7 @@ mod tests {
             }
         }
         let expected = (SAMPLES / N) as f64;
-        let chi2: f64 = counts
+        let raw: f64 = counts
             .iter()
             .flatten()
             .map(|&c| {
@@ -244,9 +244,15 @@ mod tests {
                 d * d / expected
             })
             .sum();
-        // The position matrix is doubly stochastic, so (N - 1)² = 49 degrees
-        // of freedom; p = 0.001 critical value is 85.35. The seed is fixed, so
-        // this is deterministic — no flakiness.
+        // Each sample is a permutation matrix, not N independent draws, so
+        // the raw Pearson sum over the N² cells is not χ² on (N − 1)² = 49
+        // degrees of freedom: its mean is N/(N − 1) times that. Scaling by
+        // (N − 1)/N recovers a χ²(49) statistic (verified by simulation:
+        // mean 49.0, 0.1% above the threshold). p = 0.001 critical value for
+        // χ²(49) is 85.35. The seed is fixed, so the value is reproducible;
+        // an honest generator would exceed the threshold for about one seed
+        // in a thousand.
+        let chi2 = raw * (N - 1) as f64 / N as f64;
         assert!(chi2 < 85.35, "chi-squared too high: {chi2}");
         Ok(())
     }
