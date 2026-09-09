@@ -26,12 +26,14 @@ pub trait Generatable: Sized {
 }
 
 impl Generatable for NonZeroU16 {
-    /// Uniform over `1..=u16::MAX` in exactly one bounded draw: an offset
-    /// in `0..u16::MAX` is drawn with [`SafeRand::next_below`] and added to
-    /// one. Drawing a raw `u16` and retrying on zero would consume a
-    /// data-dependent number of words from the stream, which is the
-    /// in-stream retry that [`RandomError::SeedRejected`] exists to forbid
-    /// for a secret-seeded generator.
+    /// Exactly one bounded draw: an offset in `0..u16::MAX` is drawn with
+    /// [`SafeRand::next_below`] and added to one, so the result is uniform
+    /// over `1..=u16::MAX` to within the `u16::MAX / 2⁶⁴` bias bound
+    /// documented on [`BoundedRng`](crate::BoundedRng) (exactly 2⁻⁶⁴ here).
+    /// Drawing a raw `u16` and retrying on zero would be just as
+    /// deterministic for a given seed, but would consume a data-dependent
+    /// number of words from the stream, and on a secret-seeded generator
+    /// that draw count leaks through timing.
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let offset = rng.next_below(u32::from(u16::MAX)) as u16;
         Ok(NonZeroU16::MIN.saturating_add(offset))
