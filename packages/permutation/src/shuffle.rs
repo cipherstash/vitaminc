@@ -29,30 +29,28 @@ use zeroize::Zeroizing;
 use crate::private::IsPermutable;
 
 /// Emits the Batcher odd-even mergesort network for `n` inputs (Knuth 5.3.4,
-/// iterative form) into `out`, returning the total gate count. The division
-/// guard keeps comparisons within the pair of runs being merged. Correctness
-/// rests on the zero-one principle — a network sorts everything iff it sorts
-/// all binary inputs — so the tests target this transcription, not the
-/// theorem.
+/// iterative form) into `out`, returning the total gate count. `n` must be a
+/// power of two: the network is only used at those sizes, and for them every
+/// merge block is full, so no partial-block guard is needed on the inner
+/// loop. The division guard keeps comparisons within the pair of runs being
+/// merged. Correctness rests on the zero-one principle — a network sorts
+/// everything iff it sorts all binary inputs — so the tests target this
+/// transcription, not the theorem.
 ///
 /// This is the single source of truth for the network: the counting pass
 /// calls it with an empty slice (gates beyond `out.len()` are counted but not
 /// stored), and the schedule pass calls it with the full-size array.
 const fn batcher_fill(n: usize, out: &mut [(u8, u8)]) -> usize {
+    assert!(n.is_power_of_two(), "network size must be a power of two");
     let mut gates = 0;
     let mut p = 1;
     while p < n {
         let mut k = p;
-        loop {
+        while k != 0 {
             let mut j = k % p;
-            // `n > j + k` (rather than `j + k < n`) so this loop bound has a
-            // mutant name distinct from the inner guard's. Its `>=` mutant is
-            // equivalent: the extra iteration starts at `i + j + k == n`, which
-            // the inner guard rejects, so it emits nothing. That mutant is
-            // excluded by name in .cargo/mutants.toml; the inner `<` is not.
-            while n > j + k {
+            while j + k < n {
                 let mut i = 0;
-                while i < k && i + j + k < n {
+                while i < k {
                     if (i + j) / (2 * p) == (i + j + k) / (2 * p) {
                         if gates < out.len() {
                             out[gates] = ((i + j) as u8, (i + j + k) as u8);
@@ -62,9 +60,6 @@ const fn batcher_fill(n: usize, out: &mut [(u8, u8)]) -> usize {
                     i += 1;
                 }
                 j += 2 * k;
-            }
-            if k == 1 {
-                break;
             }
             k /= 2;
         }
@@ -80,7 +75,9 @@ pub(crate) const fn batcher_gate_count(n: usize) -> usize {
 }
 
 /// The Batcher network for `n` inputs as a fixed compile-time schedule of
-/// compare-exchange gates.
+/// compare-exchange gates. This is what each [`IsPermutable`] impl stores as
+/// its `SCHEDULE`, so a length without a network is a missing associated
+/// const — a compile error in this crate — rather than a runtime lookup.
 pub(crate) const fn batcher_schedule<const G: usize>(n: usize) -> [(u8, u8); G] {
     assert!(n <= 256, "gate indices must fit in u8");
     let mut out = [(0u8, 0u8); G];
@@ -100,29 +97,12 @@ fn compare_exchange(w: &mut [u64], a: usize, b: usize) {
     w[b] = u64::conditional_select(&y, &x, swap);
 }
 
-const SCHEDULE_8: [(u8, u8); batcher_gate_count(8)] = batcher_schedule(8);
-const SCHEDULE_16: [(u8, u8); batcher_gate_count(16)] = batcher_schedule(16);
-const SCHEDULE_32: [(u8, u8); batcher_gate_count(32)] = batcher_schedule(32);
-const SCHEDULE_64: [(u8, u8); batcher_gate_count(64)] = batcher_schedule(64);
-const SCHEDULE_128: [(u8, u8); batcher_gate_count(128)] = batcher_schedule(128);
-
-/// The compare-exchange schedule for arrays of length `N`. Only referenced
-/// from inline `const` blocks, so an unsupported length is a compile-time
-/// error at the call site, never a runtime panic.
-pub(crate) const fn schedule<const N: usize>() -> &'static [(u8, u8)] {
-    match N {
-        8 => &SCHEDULE_8,
-        16 => &SCHEDULE_16,
-        32 => &SCHEDULE_32,
-        64 => &SCHEDULE_64,
-        128 => &SCHEDULE_128,
-        _ => panic!("no sorting network for this length"),
-    }
-}
-
 /// Sorts `w` in place through the fixed network for `N`.
-pub(crate) fn sort<const N: usize>(w: &mut [u64; N]) {
-    for &(a, b) in const { schedule::<N>() } {
+pub(crate) fn sort<const N: usize>(w: &mut [u64; N])
+where
+    [u8; N]: IsPermutable,
+{
+    for &(a, b) in <[u8; N] as IsPermutable>::SCHEDULE {
         compare_exchange(w, a as usize, b as usize);
     }
 }
@@ -196,10 +176,6 @@ mod tests {
     use super::*;
     use vitaminc_random::SeedableRng;
 
-    fn is_sorted(w: &[u64]) -> bool {
-        w.windows(2).all(|p| p[0] <= p[1])
-    }
-
     fn assert_is_permutation<const N: usize>(p: &[u8; N]) {
         let mut seen = [false; N];
         for &v in p {
@@ -226,12 +202,18 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "network size must be a power of two")]
+    fn network_rejects_a_size_that_is_not_a_power_of_two() {
+        batcher_gate_count(6);
+    }
+
+    #[test]
     fn schedule_gates_are_in_bounds_and_ordered() {
-        // Called at runtime, not in a `const` block, so the match in
-        // `schedule` is actually executed under coverage; production only
-        // ever evaluates it at compile time.
-        fn check<const N: usize>() {
-            let gates = schedule::<N>();
+        fn check<const N: usize>()
+        where
+            [u8; N]: IsPermutable,
+        {
+            let gates = <[u8; N] as IsPermutable>::SCHEDULE;
             assert_eq!(gates.len(), batcher_gate_count(N));
             for &(a, b) in gates {
                 assert!(a < b, "gate ({a}, {b}) not ordered");
@@ -246,19 +228,13 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "no sorting network for this length")]
-    fn schedule_rejects_an_unsupported_length_at_runtime() {
-        let _ = schedule::<7>();
-    }
-
-    #[test]
     fn network_sorts_all_binary_inputs_for_every_length_to_16() {
-        // The shipped sizes are all powers of two, where a partial final
-        // merge block never occurs, so the inner `i + j + k < n` guard in
-        // `batcher_fill` is only exercised by odd sizes. Build the schedule
-        // at runtime for every n and check the zero-one principle and the
-        // gate bounds.
-        for n in 2..=16usize {
+        // Zero-one principle: a comparison network sorts every input iff it
+        // sorts all binary inputs. Build the schedule at runtime for every
+        // power of two up to 16 (exhaustive over 2^n inputs), check the gate
+        // bounds, and at the shipped sizes check that the runtime build is
+        // byte-for-byte the compile-time `SCHEDULE`.
+        for n in [2usize, 4, 8, 16] {
             let count = batcher_gate_count(n);
             let mut gates = vec![(0u8, 0u8); count];
             assert_eq!(batcher_fill(n, &mut gates), count);
@@ -266,36 +242,26 @@ mod tests {
                 assert!(a < b, "n = {n}: gate ({a}, {b}) not ordered");
                 assert!((b as usize) < n, "n = {n}: gate ({a}, {b}) out of bounds");
             }
+            match n {
+                8 => assert_eq!(<[u8; 8] as IsPermutable>::SCHEDULE, &gates[..]),
+                16 => assert_eq!(<[u8; 16] as IsPermutable>::SCHEDULE, &gates[..]),
+                _ => {}
+            }
             for bits in 0u32..(1 << n) {
                 let mut w: Vec<u64> = (0..n).map(|i| u64::from(bits >> i) & 1).collect();
                 for &(a, b) in &gates {
                     compare_exchange(&mut w, a as usize, b as usize);
                 }
-                assert!(is_sorted(&w), "n = {n}: failed on binary input {bits:#b}");
+                assert!(w.is_sorted(), "n = {n}: failed on binary input {bits:#b}");
             }
         }
     }
 
     #[test]
-    fn network_sorts_all_binary_inputs() {
-        // Zero-one principle: a comparison network sorts every input iff it
-        // sorts all binary inputs. Exhaustive at N = 8 and N = 16.
-        for bits in 0u32..(1 << 8) {
-            let mut w: [u64; 8] = core::array::from_fn(|i| u64::from(bits >> i) & 1);
-            sort(&mut w);
-            assert!(is_sorted(&w), "failed on binary input {bits:#010b}");
-        }
-        for bits in 0u32..(1 << 16) {
-            let mut w: [u64; 16] = core::array::from_fn(|i| u64::from(bits >> i) & 1);
-            sort(&mut w);
-            assert!(is_sorted(&w), "failed on binary input {bits:#018b}");
-        }
-    }
-
-    #[test]
     fn network_sorts_random_words() {
-        // Every supported length: the zero-one tests only cover 8/16, and a
-        // length-specific transcription bug would otherwise go unnoticed.
+        // Every supported length: the zero-one test only covers up to 16,
+        // and a length-specific transcription bug would otherwise go
+        // unnoticed.
         fn check<const N: usize>(rng: &mut SafeRand)
         where
             [u8; N]: IsPermutable,
