@@ -1,6 +1,15 @@
 use vitaminc_protected::Protected;
 use vitaminc_random::{Generatable, RandomError, SafeRand};
 
+/// Number of letters at the front of [`STANDARD_CHARS`]: `A..=Z` then
+/// `a..=z`. [`AlphaPassword`] draws from `STANDARD_CHARS[..ALPHA_LEN]`.
+const ALPHA_LEN: usize = 52;
+/// Number of letters and digits at the front of [`STANDARD_CHARS`]: the
+/// letters, then `0..=9`. [`AlphaNumericPassword`] draws from
+/// `STANDARD_CHARS[..ALPHANUMERIC_LEN]`. The ordering both constants depend
+/// on is pinned by `standard_chars_are_distinct_and_ordered_by_class`.
+const ALPHANUMERIC_LEN: usize = 62;
+
 const STANDARD_CHARS: [char; 94] = [
     'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S',
     'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
@@ -78,7 +87,7 @@ impl<const N: usize> Generatable for AlphaNumericPassword<N> {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let mut password: [char; N] = [0x00 as char; N];
         (0..N).for_each(|i| {
-            let char = rng.next_below(62);
+            let char = rng.next_below(ALPHANUMERIC_LEN as u32);
             password[i] = STANDARD_CHARS[char as usize];
         });
         Ok(Self(Password::new(password)))
@@ -89,7 +98,7 @@ impl<const N: usize> Generatable for AlphaPassword<N> {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
         let mut password: [char; N] = [0x00 as char; N];
         (0..N).for_each(|i| {
-            let char = rng.next_below(52);
+            let char = rng.next_below(ALPHA_LEN as u32);
             password[i] = STANDARD_CHARS[char as usize];
         });
         Ok(Self(Password::new(password)))
@@ -98,7 +107,7 @@ impl<const N: usize> Generatable for AlphaPassword<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{AlphaNumericPassword, AlphaPassword, STANDARD_CHARS};
+    use crate::{AlphaNumericPassword, AlphaPassword, ALPHANUMERIC_LEN, ALPHA_LEN, STANDARD_CHARS};
 
     use super::Password;
     use vitaminc_protected::Controlled;
@@ -121,9 +130,13 @@ mod tests {
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted.len(), STANDARD_CHARS.len(), "duplicate character");
-        assert!(STANDARD_CHARS[..52].iter().all(|c| c.is_ascii_alphabetic()));
-        assert!(STANDARD_CHARS[52..62].iter().all(|c| c.is_ascii_digit()));
-        assert!(STANDARD_CHARS[62..]
+        assert!(STANDARD_CHARS[..ALPHA_LEN]
+            .iter()
+            .all(|c| c.is_ascii_alphabetic()));
+        assert!(STANDARD_CHARS[ALPHA_LEN..ALPHANUMERIC_LEN]
+            .iter()
+            .all(|c| c.is_ascii_digit()));
+        assert!(STANDARD_CHARS[ALPHANUMERIC_LEN..]
             .iter()
             .all(|c| c.is_ascii_punctuation()));
         assert!(STANDARD_CHARS.contains(&'d'));
@@ -172,6 +185,31 @@ mod tests {
             let s = chars(value.0);
             assert!(s.iter().all(|c| c.is_ascii_alphanumeric()), "{s:?}");
         }
+    }
+
+    /// The membership tests above would still pass if a narrow set's bound
+    /// shrank by one (dropping `'9'` or `'z'`); this checks every character
+    /// of each narrow set is actually drawn.
+    #[test]
+    fn narrow_sets_reach_their_last_character() {
+        let mut rng = SafeRand::from_seed(SEED);
+        let mut alnum = [false; ALPHANUMERIC_LEN];
+        let mut alpha = [false; ALPHA_LEN];
+        for _ in 0..SAMPLES {
+            let value: AlphaNumericPassword<16> = Generatable::random(&mut rng).expect("random");
+            for c in chars(value.0) {
+                alnum[STANDARD_CHARS.iter().position(|&s| s == c).expect("in set")] = true;
+            }
+            let value: AlphaPassword<16> = Generatable::random(&mut rng).expect("random");
+            for c in chars(value.0) {
+                alpha[STANDARD_CHARS.iter().position(|&s| s == c).expect("in set")] = true;
+            }
+        }
+        assert!(
+            alnum.iter().all(|&s| s),
+            "alphanumeric set not fully reachable"
+        );
+        assert!(alpha.iter().all(|&s| s), "alpha set not fully reachable");
     }
 
     #[test]
