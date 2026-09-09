@@ -101,8 +101,11 @@ where
             // and swap an element with itself, so it would spend a draw for
             // no entropy.
             for i in (1..N).rev() {
-                let j = rng.next_below(i as u32 + 1) as usize;
+                let mut j = rng.next_below(i as u32 + 1) as usize;
                 key.swap(i, j);
+                // `j` is derived from the (possibly secret-seeded) key stream;
+                // wipe it as this crate does for every secret intermediate.
+                j.zeroize();
             }
             key
         });
@@ -194,6 +197,39 @@ mod tests {
         }
         let got: Vec<u8> = key.iter().map(|b| b.risky_unwrap()).collect();
         assert_eq!(got, expected);
+    }
+
+    /// A generated key is a valid permutation: every value in `0..N` present
+    /// exactly once. The invert / complement round-trips imply this only
+    /// transitively; checking it directly fails loudly if the Fisher–Yates
+    /// loop bounds regress.
+    fn test_key_is_a_permutation<const N: usize>() -> Result<(), Box<dyn std::error::Error>>
+    where
+        [u8; N]: IsPermutable,
+    {
+        let mut rng = SafeRand::from_seed([7u8; 32]);
+        for _ in 0..64 {
+            let key: PermutationKey<N> = Generatable::random(&mut rng)?;
+            let mut seen = [false; N];
+            for v in key.iter() {
+                let v = v.risky_unwrap() as usize;
+                assert!(v < N, "value {v} out of range for N = {N}");
+                assert!(!seen[v], "value {v} appears twice for N = {N}");
+                seen[v] = true;
+            }
+            assert!(seen.iter().all(|&s| s), "missing value for N = {N}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn key_is_a_permutation_case() -> Result<(), Box<dyn std::error::Error>> {
+        test_key_is_a_permutation::<8>()?;
+        test_key_is_a_permutation::<16>()?;
+        test_key_is_a_permutation::<32>()?;
+        test_key_is_a_permutation::<64>()?;
+        test_key_is_a_permutation::<128>()?;
+        Ok(())
     }
 
     #[test]
