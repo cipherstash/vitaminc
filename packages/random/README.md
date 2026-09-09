@@ -37,10 +37,11 @@ println!("Generated id: {}", instance.id);
 
 ## Bounded Random Numbers
 
-`SafeRand::next_below(n)` returns a value uniformly distributed in `0..n`, the bound every
-index-shaped use wants. It makes exactly one 64-bit draw per call, reduced with Lemire's
-multiply-high method, so the number of draws does not depend on the values drawn. The
-reduction's statistical distance from uniform is at most `n / 2⁶⁴`.
+`SafeRand::next_below(n)` returns a value in `0..n`, the bound every index-shaped use
+wants. It makes exactly one 64-bit draw per call, reduced with Lemire's multiply-high
+method, so the number of draws does not depend on the values drawn. The reduction's
+statistical distance from uniform is at most `n / 2⁶⁴`; a protocol that needs exact
+uniformity must account for that term.
 
 ```rust
 use vitaminc_random::{SafeRand, SeedableRng};
@@ -61,9 +62,10 @@ let index: Protected<u32> = rng.next_below(Protected::new(10));
 assert!(index.risky_unwrap() < 10);
 ```
 
-Both are the `BoundedRng::next_below` trait method; the trait also carries the older
-**inclusive** form, `BoundedRng::next_bounded(max)` for `0..=max`, which is deprecated in
-favour of `next_below(max + 1)`.
+Both are the `BoundedRng::next_below` trait method. The older **inclusive** form,
+`next_bounded(max)` for `0..=max`, lives on the separate, deprecated `BoundedRngInclusive`
+trait and on `SafeRand::next_bounded_u32`; both are deprecated in favour of
+`next_below(max + 1)`.
 
 ## CipherStash
 
