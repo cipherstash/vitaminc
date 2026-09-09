@@ -13,9 +13,10 @@ use zeroize::Zeroize;
 pub struct SafeRand(rand::rngs::ChaCha20Rng);
 
 impl SafeRand {
-    /// A uniformly distributed value in `0..n`: at least `0`, strictly below
-    /// `n`. This is the bound every index-shaped use wants (`n` items, pick
-    /// one) and the one `std` and `rand` ranges use.
+    /// A value in `0..n`: at least `0`, strictly below `n`, uniform to
+    /// within the bias bound stated below. This is the bound every
+    /// index-shaped use wants (`n` items, pick one) and the one `std` and
+    /// `rand` ranges use.
     ///
     /// Exactly one 64-bit draw per call, reduced with Lemire's multiply-high
     /// method: no rejection loop and no branch on the value drawn, so the
@@ -36,7 +37,9 @@ impl SafeRand {
     /// # Panics
     ///
     /// Panics if `n == 0`: the range `0..0` is empty and has no value to
-    /// return. Callers that compute `n` should check it first.
+    /// return. Callers that compute `n` should check it first. When `n` is
+    /// a [`Protected<u32>`] the panic is observable on a secret, so a caller
+    /// whose secret bound may be zero must rule that out before calling.
     ///
     /// [`Protected<u32>`]: vitaminc_protected::Protected
     /// [`BoundedRng::next_below`]: crate::BoundedRng::next_below
@@ -47,9 +50,10 @@ impl SafeRand {
         <Self as crate::BoundedRng<T>>::next_below(self, n)
     }
 
-    /// A uniformly distributed value in `0..=max`, for every `max` up to and
-    /// including `u32::MAX`, with the same fixed-count draw and the same
-    /// `(max + 1) / 2⁶⁴` bias bound as [`next_below`](Self::next_below).
+    /// A value in `0..=max`, for every `max` up to and including `u32::MAX`,
+    /// with the same fixed-count draw and the same `(max + 1) / 2⁶⁴` bias
+    /// bound as [`next_below`](Self::next_below). This is the
+    /// [`BoundedRngInclusive::next_bounded`] trait method at `u32`.
     ///
     /// Deprecated: earlier versions honoured the inclusive bound only when
     /// `max` was not a power of two and were exclusive otherwise, so callers
@@ -58,6 +62,8 @@ impl SafeRand {
     /// `next_below(max + 1)` (for `max == u32::MAX` that is the whole word:
     /// use [`Rng::next_u32`](rand::Rng::next_u32)), or `next_below(n)` when
     /// the caller has a length `n` rather than a maximum.
+    ///
+    /// [`BoundedRngInclusive::next_bounded`]: crate::BoundedRngInclusive::next_bounded
     #[deprecated(
         note = "inclusive `0..=max`; use `next_below(max + 1)`, or `next_below(n)` when you have a length `n`"
     )]
@@ -188,10 +194,13 @@ mod tests {
 
     /// The deprecated inclusive form is `next_below(max + 1)` for every
     /// `max`, including `u32::MAX`, where `max + 1` does not fit a `u32`.
+    /// `BOUNDS` shifted down by one tops out at `u32::MAX - 1`, so
+    /// `u32::MAX` itself is appended: that is the input where the inclusive
+    /// path must widen to `u64` before adding one.
     #[test]
     #[allow(deprecated)]
     fn next_bounded_u32_is_the_inclusive_form_of_next_below() {
-        for max in BOUNDS.map(|n| n - 1) {
+        for max in BOUNDS.map(|n| n - 1).into_iter().chain([u32::MAX]) {
             let mut safe = SafeRand::from_seed(SEED);
             let mut reference = ChaCha20Rng::from_seed(SEED);
             for _ in 0..256 {
