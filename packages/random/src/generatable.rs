@@ -26,16 +26,15 @@ pub trait Generatable: Sized {
 }
 
 impl Generatable for NonZeroU16 {
+    /// Uniform over `1..=u16::MAX` in exactly one bounded draw: an offset
+    /// in `0..u16::MAX` is drawn with [`SafeRand::next_below`] and added to
+    /// one. Drawing a raw `u16` and retrying on zero would consume a
+    /// data-dependent number of words from the stream, which is the
+    /// in-stream retry that [`RandomError::SeedRejected`] exists to forbid
+    /// for a secret-seeded generator.
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        let mut buf: [u8; 2] = [0, 0];
-        use rand::RngExt;
-        rng.fill(&mut buf);
-        if let Some(value) = NonZeroU16::new(u16::from_be_bytes(buf)) {
-            Ok(value)
-        } else {
-            // Because a 0 would be an invalid value we must try again (rejection sampling)
-            Self::random(rng)
-        }
+        let offset = rng.next_below(u32::from(u16::MAX)) as u16;
+        Ok(NonZeroU16::MIN.saturating_add(offset))
     }
 }
 
@@ -148,6 +147,23 @@ mod tests {
         test_generate_controlled::<[u8; 128]>(&mut rng);
         test_generate_controlled::<[u8; 256]>(&mut rng);
         Ok(())
+    }
+
+    /// `NonZeroU16` is `next_below(u16::MAX) + 1` over the same seed: one
+    /// bounded draw per value, never a retry, and the offset covers exactly
+    /// `1..=u16::MAX`.
+    #[test]
+    fn nonzero_u16_is_one_bounded_draw() {
+        use rand::SeedableRng;
+        use std::num::NonZeroU16;
+
+        let mut got = SafeRand::from_seed([11u8; 32]);
+        let mut reference = SafeRand::from_seed([11u8; 32]);
+        for _ in 0..256 {
+            let value: NonZeroU16 = Generatable::random(&mut got).unwrap();
+            let want = reference.next_below(u32::from(u16::MAX)) as u16 + 1;
+            assert_eq!(value.get(), want);
+        }
     }
 
     #[test]
