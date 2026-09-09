@@ -72,9 +72,13 @@ impl<const N: usize> AlphaPassword<N> {
     }
 }
 
-/// `N` characters drawn independently and uniformly from `set`, each with
-/// one fixed-count draw in `0..set.len()`, so the index is always in bounds
-/// and every character of the set is reachable.
+/// `N` characters drawn independently from `set`, each with one fixed-count
+/// draw in `0..set.len()`, so the index is always in bounds and every
+/// character of the set is reachable. Each draw is uniform to within the
+/// `set.len() / 2⁶⁴` bias bound documented on
+/// [`BoundedRng`](vitaminc_random::BoundedRng); for the sets in this crate
+/// the exact statistical distance from uniform is at most 2⁻⁶⁰ per
+/// character.
 fn fill<const N: usize>(rng: &mut SafeRand, set: &[char]) -> [char; N] {
     let mut password: [char; N] = [0x00 as char; N];
     for slot in password.iter_mut() {
