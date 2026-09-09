@@ -7,6 +7,24 @@ use vitaminc_protected::{AsProtectedRef, Controlled, Protected, ProtectedRef};
 use vitaminc_traits::Update;
 use zeroize::Zeroize;
 
+mod crypt;
+mod data_key;
+mod index_key;
+mod key_id;
+mod mac;
+mod sign;
+
+pub use crypt::{DecryptWithKey, EncryptWithKey};
+pub use data_key::{
+    dedup_retrieve, fan_out_generate, pooled_key_generate, BatchGenerateDataKey,
+    BatchRetrieveDataKey, GenerateDataKey, GeneratedDataKey, KeyIsolation, KeyReconstruction,
+    RetrieveDataKey,
+};
+pub use index_key::{load_index_key, IndexKeyMaterial};
+pub use key_id::KeyId;
+pub use mac::{GenerateMac, VerifyMac};
+pub use sign::{GetPublicKey, Sign, Verify};
+
 /// A `Mac` implementation that uses AWS KMS to generate HMACs of `N` bytes.
 /// Valid sizes are 28, 32, 48, and 64 bytes.
 ///
