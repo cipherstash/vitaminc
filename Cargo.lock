@@ -2775,6 +2775,7 @@ version = "0.5.1"
 dependencies = [
  "aws-config",
  "aws-sdk-kms",
+ "futures",
  "thiserror",
  "tokio",
  "vitaminc-async-traits",
