@@ -72,36 +72,35 @@ impl<const N: usize> AlphaPassword<N> {
     }
 }
 
+/// `N` characters drawn independently and uniformly from `set`, each with
+/// one fixed-count draw in `0..set.len()`, so the index is always in bounds
+/// and every character of the set is reachable.
+fn fill<const N: usize>(rng: &mut SafeRand, set: &[char]) -> [char; N] {
+    let mut password: [char; N] = [0x00 as char; N];
+    for slot in password.iter_mut() {
+        *slot = set[rng.next_below(set.len() as u32) as usize];
+    }
+    password
+}
+
 impl<const N: usize> Generatable for Password<N> {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        let mut password: [char; N] = [0x00 as char; N];
-        (0..N).for_each(|i| {
-            let char = rng.next_below(STANDARD_CHARS.len() as u32);
-            password[i] = STANDARD_CHARS[char as usize];
-        });
-        Ok(Password::new(password))
+        Ok(Password::new(fill(rng, &STANDARD_CHARS)))
     }
 }
 
 impl<const N: usize> Generatable for AlphaNumericPassword<N> {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        let mut password: [char; N] = [0x00 as char; N];
-        (0..N).for_each(|i| {
-            let char = rng.next_below(ALPHANUMERIC_LEN as u32);
-            password[i] = STANDARD_CHARS[char as usize];
-        });
-        Ok(Self(Password::new(password)))
+        Ok(Self(Password::new(fill(
+            rng,
+            &STANDARD_CHARS[..ALPHANUMERIC_LEN],
+        ))))
     }
 }
 
 impl<const N: usize> Generatable for AlphaPassword<N> {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        let mut password: [char; N] = [0x00 as char; N];
-        (0..N).for_each(|i| {
-            let char = rng.next_below(ALPHA_LEN as u32);
-            password[i] = STANDARD_CHARS[char as usize];
-        });
-        Ok(Self(Password::new(password)))
+        Ok(Self(Password::new(fill(rng, &STANDARD_CHARS[..ALPHA_LEN]))))
     }
 }
 
@@ -177,19 +176,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn alphanumeric_passwords_contain_only_alphanumerics() {
-        let mut rng = SafeRand::from_seed(SEED);
-        for _ in 0..SAMPLES {
-            let value: AlphaNumericPassword<16> = Generatable::random(&mut rng).expect("random");
-            let s = chars(value.0);
-            assert!(s.iter().all(|c| c.is_ascii_alphanumeric()), "{s:?}");
-        }
-    }
-
-    /// The membership tests above would still pass if a narrow set's bound
-    /// shrank by one (dropping `'9'` or `'z'`); this checks every character
-    /// of each narrow set is actually drawn.
+    /// Every character of each narrow set is drawn, and nothing outside it:
+    /// the position lookup is into the *whole* table, so a character past
+    /// the narrow set's end indexes past the tally array and panics. A
+    /// membership-only check would still pass if a set's bound shrank by
+    /// one (dropping `'9'` or `'z'`); the tally catches that too.
     #[test]
     fn narrow_sets_reach_their_last_character() {
         let mut rng = SafeRand::from_seed(SEED);
@@ -210,15 +201,5 @@ mod tests {
             "alphanumeric set not fully reachable"
         );
         assert!(alpha.iter().all(|&s| s), "alpha set not fully reachable");
-    }
-
-    #[test]
-    fn alpha_passwords_contain_only_letters() {
-        let mut rng = SafeRand::from_seed(SEED);
-        for _ in 0..SAMPLES {
-            let value: AlphaPassword<16> = Generatable::random(&mut rng).expect("random");
-            let s = chars(value.0);
-            assert!(s.iter().all(|c| c.is_ascii_alphabetic()), "{s:?}");
-        }
     }
 }
