@@ -62,7 +62,22 @@ let index: Protected<u32> = rng.next_below(Protected::new(10));
 assert!(index.risky_unwrap() < 10);
 ```
 
-Both are the `BoundedRng::next_below` trait method. The older **inclusive** form,
+A `Protected<u32>` bound of zero panics, and that panic is observable on the secret. When
+a secret bound might be zero, check it once at construction and pass a
+`Protected<NonZeroU32>`; that form never panics:
+
+```rust
+use std::num::NonZeroU32;
+use vitaminc_protected::{Controlled, Protected};
+use vitaminc_random::{SafeRand, SeedableRng};
+
+let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
+let bound = Protected::new(NonZeroU32::new(10).expect("non-zero"));
+let index: Protected<u32> = rng.next_below(bound);
+assert!(index.risky_unwrap() < 10);
+```
+
+All three are the `BoundedRng::next_below` trait method. The older **inclusive** form,
 `next_bounded(max)` for `0..=max`, lives on the separate, deprecated `BoundedRngInclusive`
 trait and on `SafeRand::next_bounded_u32`; both are deprecated in favour of
 `next_below(max + 1)`.
