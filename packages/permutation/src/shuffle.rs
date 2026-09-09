@@ -54,6 +54,12 @@ const fn batcher_fill(n: usize, out: &mut [(u8, u8)]) -> usize {
             while j + k < n {
                 let mut i = 0;
                 while i < k {
+                    // Every candidate pair lies inside the network. This is
+                    // implied by the loop bounds for a power of two, and
+                    // asserting it makes an off-by-one in those bounds fail
+                    // at compile time instead of being absorbed by the
+                    // division guard below.
+                    assert!(i + j + k < n, "gate index out of bounds");
                     if (i + j) / (2 * p) == (i + j + k) / (2 * p) {
                         if gates < out.len() {
                             out[gates] = ((i + j) as u8, (i + j + k) as u8);
