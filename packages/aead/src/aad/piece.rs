@@ -538,7 +538,7 @@ mod tests {
         use super::*;
 
         #[test]
-        fn one_part_spells_some_and_no_parts_spells_none() {
+        fn one_part_spells_some() {
             let some = AadPiece::List(vec![AadPiece::U64(7)]);
             assert_eq!(
                 some.clone().into_aad_piece(),
@@ -550,7 +550,10 @@ mod tests {
                 Some(7u64).into_prf_context(),
                 "a list of one is `Some` as a PRF context"
             );
+        }
 
+        #[test]
+        fn no_parts_spells_none() {
             let none = AadPiece::List(vec![]);
             assert_eq!(
                 none.into_prf_context(),
@@ -560,13 +563,18 @@ mod tests {
         }
 
         #[test]
-        fn two_parts_spell_the_pair_and_the_proven_chain() {
+        fn two_parts_spell_the_pair() {
             let pair = AadPiece::List(vec![text("users/age"), AadPiece::U64(7)]);
             assert_eq!(
-                pair.clone().into_prf_context(),
+                pair.into_prf_context(),
                 ("users/age", 7u64).into_prf_context(),
                 "a list of two is the pair"
             );
+        }
+
+        #[test]
+        fn two_parts_spell_the_proven_chain() {
+            let pair = AadPiece::List(vec![text("users/age"), AadPiece::U64(7)]);
             assert_eq!(
                 pair.into_prf_context(),
                 NonEmpty::new("users/age")
@@ -613,14 +621,22 @@ mod tests {
         use super::*;
 
         #[test]
-        fn the_aad_half_holds_and_the_prf_half_is_the_documented_exception() {
+        fn the_aad_half_of_the_law_holds() {
+            assert!(agrees(()), "`()` is zero AAD bytes on both sides");
+        }
+
+        #[test]
+        fn the_prf_half_is_the_documented_exception() {
             // `()` is the empty PRF context by definition, and its parts view
             // is an empty `Bytes` leaf, which encodes as typed empty bytes.
-            assert!(agrees(()), "`()` is zero AAD bytes on both sides");
             assert!(
                 !prf_agrees(()),
                 "`()` derives no PRF bytes statically and typed empty bytes from its parts"
             );
+        }
+
+        #[test]
+        fn never_reaches_non_empty_on_its_own() {
             assert!(
                 ().into_aad_piece().is_empty(),
                 "bare `()` is empty, so it never reaches `NonEmpty`"
@@ -628,16 +644,20 @@ mod tests {
         }
 
         #[test]
-        fn a_pair_containing_unit_is_non_empty_and_diverges_on_the_prf_side() {
+        fn a_pair_containing_it_is_non_empty() {
+            assert!(
+                NonEmpty::new(("x", ())).is_ok(),
+                "a pair with one non-empty part is non-empty"
+            );
+        }
+
+        #[test]
+        fn a_pair_containing_it_diverges_on_the_prf_side() {
             // The exception reaches `NonEmpty` through a composite: the pair
             // rule makes `("x", ())` non-empty, and the divergence in `()`
             // carries through. Pinned so the exception's reach is visible;
             // removed for good by the shared encoding in #339.
             let pair = ("x", ());
-            assert!(
-                NonEmpty::new(pair).is_ok(),
-                "a pair with one non-empty part is non-empty"
-            );
             assert!(agrees(pair), "the AAD half still holds through a pair");
             assert!(
                 !prf_agrees(pair),

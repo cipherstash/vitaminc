@@ -327,6 +327,16 @@ mod tests {
         }
 
         #[test]
+        fn some_frames_the_typed_inner_context() {
+            let typed_value = PrfContext::typed(PrfEncoding::UTF8, b"value");
+            assert_eq!(
+                Some("value").into_prf_context(),
+                PrfContext::pae(&[typed_value.as_bytes()]),
+                "`Some` frames the typed inner context as one piece"
+            );
+        }
+
+        #[test]
         fn none_is_the_empty_list() {
             assert_eq!(
                 None::<&str>.into_prf_context(),
@@ -389,33 +399,52 @@ mod tests {
         );
     }
 
-    #[test]
-    fn every_context_conversion_preserves_structure() {
-        let expected_bytes = PrfContext::typed(PrfEncoding::BYTES, b"abc");
-        let slice: &[u8] = b"abc";
-        assert_eq!(slice.into_prf_context(), expected_bytes);
-        assert_eq!((*b"abc").into_prf_context(), expected_bytes);
-        assert_eq!(b"abc".to_vec().into_prf_context(), expected_bytes);
-        assert_eq!(().into_prf_context(), PrfContext::default());
+    mod given_a_bytes_context {
+        use super::*;
 
-        let some = Some("value").into_prf_context();
-        let typed_value = PrfContext::typed(PrfEncoding::UTF8, b"value");
-        assert_eq!(
-            some,
-            PrfContext::pae(&[typed_value.as_bytes()]),
-            "`Some` frames the typed inner context as one piece"
-        );
-        assert_eq!(
-            None::<&str>.into_prf_context(),
-            PrfContext::pae(&[]),
-            "`None` is the PAE of zero pieces"
-        );
+        #[test]
+        fn every_byte_shape_encodes_as_typed_bytes() {
+            let expected = PrfContext::typed(PrfEncoding::BYTES, b"abc");
+            let slice: &[u8] = b"abc";
+            assert_eq!(slice.into_prf_context(), expected, "a slice is typed bytes");
+            assert_eq!(
+                (*b"abc").into_prf_context(),
+                expected,
+                "an array is typed bytes"
+            );
+            assert_eq!(
+                b"abc".to_vec().into_prf_context(),
+                expected,
+                "a vector is typed bytes"
+            );
+        }
+    }
 
-        let left = PrfContext::typed(PrfEncoding::UTF8, b"left");
-        let right = PrfContext::typed(PrfEncoding::U16, &7_u16.to_le_bytes());
-        assert_eq!(
-            ("left", 7_u16).into_prf_context(),
-            PrfContext::pae(&[left.as_bytes(), right.as_bytes()])
-        );
+    mod given_the_unit_context {
+        use super::*;
+
+        #[test]
+        fn is_the_empty_context() {
+            assert_eq!(
+                ().into_prf_context(),
+                PrfContext::default(),
+                "`()` is the empty context by definition, with no framing"
+            );
+        }
+    }
+
+    mod given_a_pair_context {
+        use super::*;
+
+        #[test]
+        fn frames_both_typed_parts() {
+            let left = PrfContext::typed(PrfEncoding::UTF8, b"left");
+            let right = PrfContext::typed(PrfEncoding::U16, &7_u16.to_le_bytes());
+            assert_eq!(
+                ("left", 7_u16).into_prf_context(),
+                PrfContext::pae(&[left.as_bytes(), right.as_bytes()]),
+                "a pair is the PAE of its two typed parts"
+            );
+        }
     }
 }
