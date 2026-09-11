@@ -206,8 +206,7 @@ impl<'a> Aad<'a> {
 /// `x.into_aad()`, and if the type is also a PRF context,
 /// `x.into_aad_piece().into_prf_context()` is `x.into_prf_context()` — the
 /// parts view is the identity of the context on both derivations (see
-/// [`AadPiece`]'s module docs). Every built-in upholds both, pinned by
-/// quickcheck.
+/// [`AadPiece`]). Every built-in upholds both, pinned by quickcheck.
 ///
 /// ```rust
 /// use std::borrow::Cow;

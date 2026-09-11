@@ -20,37 +20,6 @@
 //! that logs or binds the parts (a key-management service) reads them
 //! straight from what it is given, while a backend that only wants bytes
 //! pays nothing for the view.
-//!
-//! # The parts view is the identity of a context
-//!
-//! A context feeds two derivations: the AEAD's associated data
-//! ([`IntoAad`]) and a PRF's domain-separation context
-//! ([`IntoPrfContext`]). [`AadPiece`] implements both, and the law every
-//! context type upholds is that each derivation of the value equals the
-//! same derivation of its parts view:
-//!
-//! ```text
-//! x.into_aad()         == x.into_aad_piece().into_aad()
-//! x.into_prf_context() == x.into_aad_piece().into_prf_context()
-//! ```
-//!
-//! So a context assembled at runtime from parts — one that arrived as data
-//! across an FFI boundary, say — is the *same* context as the static Rust
-//! value with those parts, on both sides, and needs no type of its own:
-//! `Some(x)` is the one-element list, `None` the empty list, `(a, b)` the
-//! two-element list, and `nonempty!(a).with(b).with(c)` the left-nested
-//! `((a, b), c)`. A flat list of three or more parts is a context too,
-//! reachable from Rust through [`AadPiece::List`] directly. The one
-//! exception is `()`: its PRF context is the *empty* context by definition
-//! (no encoding at all), while its parts view is an empty `Bytes` leaf,
-//! which the PRF side encodes as typed empty bytes. `()` is never a
-//! context a caller proves non-empty, so nothing built from parts meets
-//! it. The law is pinned by quickcheck over every built-in context type.
-//!
-//! [`MaybeEmpty`] completes the set, so a parts tree can be proven
-//! [`NonEmpty`](vitaminc_protected::NonEmpty) by the same rule the static
-//! types use: text and bytes are empty at zero length, an integer never is,
-//! and a list is empty only when every part is.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -65,8 +34,9 @@ use super::{Aad, IntoAad};
 /// Built by [`IntoAad::into_aad_piece`]; encodes through [`IntoAad`]
 /// to the same bytes the source value does, and through
 /// [`IntoPrfContext`] to the same PRF context, so it can stand in for the
-/// value anywhere a context is taken (see the [module docs](self) for the
-/// law). A list encodes in one allocation however deep the tree. [`Display`](fmt::Display) renders it injectively
+/// value anywhere a context is taken (the law is [below](#the-parts-view-is-the-identity-of-a-context)).
+/// A list encodes in one allocation however deep the tree.
+/// [`Display`](fmt::Display) renders it injectively
 /// — `("users/email", 7u64)` — and [`leaves`](Self::leaves) walks the parts
 /// in encoding order for a consumer building its own rendering or binding.
 ///
@@ -78,6 +48,37 @@ use super::{Aad, IntoAad};
 /// `Bytes(b"ab")` compare unequal, as do `U64(7)` and `I64(7)`, though each
 /// pair encodes to the same bytes. To compare what the AEAD authenticates,
 /// compare `into_aad().as_bytes()`.
+///
+/// # The parts view is the identity of a context
+///
+/// A context feeds two derivations: the AEAD's associated data
+/// ([`IntoAad`]) and a PRF's domain-separation context
+/// ([`IntoPrfContext`]). [`AadPiece`] implements both, and the law every
+/// context type upholds is that each derivation of the value equals the
+/// same derivation of its parts view:
+///
+/// ```text
+/// x.into_aad()         == x.into_aad_piece().into_aad()
+/// x.into_prf_context() == x.into_aad_piece().into_prf_context()
+/// ```
+///
+/// So a context assembled at runtime from parts — one that arrived as data
+/// across an FFI boundary, say — is the *same* context as the static Rust
+/// value with those parts, on both sides, and needs no type of its own:
+/// `Some(x)` is the one-element list, `None` the empty list, `(a, b)` the
+/// two-element list, and `nonempty!(a).with(b).with(c)` the left-nested
+/// `((a, b), c)`. A flat list of three or more parts is a context too,
+/// reachable from Rust through [`AadPiece::List`] directly. The one
+/// exception is `()`: its PRF context is the *empty* context by definition
+/// (no encoding at all), while its parts view is an empty `Bytes` leaf,
+/// which the PRF side encodes as typed empty bytes. `()` is never a
+/// context a caller proves non-empty, so nothing built from parts meets
+/// it. The law is pinned by quickcheck over every built-in context type.
+///
+/// [`MaybeEmpty`] completes the set, so a parts tree can be proven
+/// [`NonEmpty`](vitaminc_protected::NonEmpty) by the same rule the static
+/// types use: text and bytes are empty at zero length, an integer never is,
+/// and a list is empty only when every part is.
 ///
 /// The enum is `#[non_exhaustive]`: the crate's own derived contexts
 /// (`Aad::for_map_entry`, `Aad::for_leaf`, …) have no faithful shape here
