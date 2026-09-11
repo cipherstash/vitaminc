@@ -57,8 +57,8 @@ impl<'a> PrfContext<'a> {
     ///
     /// The leading domain tag keeps caller-refined contexts disjoint from the
     /// contexts this crate assigns automatically. Without it, a context built
-    /// as `PrfContext::from_slice(OPTION_SOME_DOMAIN).refine(x)` would encode
-    /// identically to the one derived for `Some(x)`.
+    /// as `PrfContext::from_slice(MAP_ENTRY_DOMAIN).refine(key)` would encode
+    /// identically to the one `for_map_entry` derives for `key`.
     pub fn refine<'b, C>(&self, component: C) -> PrfContext<'static>
     where
         C: IntoPrfContext<'b>,
@@ -300,26 +300,39 @@ mod tests {
         );
     }
 
-    #[quickcheck]
-    fn option_context_is_the_one_element_list(bytes: Vec<u8>) -> bool {
-        // `Some(x)` is the single-piece PAE of `x`'s encoding — the same
-        // shape `IntoAad` gives it, so a runtime list of one part is the
-        // static `Some`. It is framed, so it is not `x` itself.
-        let inner = bytes.clone().into_prf_context();
-        let some = Some(bytes).into_prf_context();
-        some == PrfContext::pae(&[inner.as_bytes()]) && some != inner
-    }
+    mod given_an_option_context {
+        use super::*;
 
-    #[test]
-    fn option_context_does_not_share_the_value_path_some_domain() {
-        // The `PrfValue` Option path tags `Some` with its own domain; a
-        // context does not. If this fails, the context encoding has grown a
-        // tag again and runtime parts can no longer spell `Some`.
-        assert_ne!(
-            Some("value").into_prf_context(),
-            "value".into_prf_context().for_option_some()
-        );
-        assert_eq!(None::<&str>.into_prf_context(), PrfContext::pae(&[]));
+        #[quickcheck]
+        fn some_is_the_one_element_list(bytes: Vec<u8>) -> bool {
+            // `Some(x)` is the single-piece PAE of `x`'s encoding — the same
+            // shape `IntoAad` gives it, so a runtime list of one part is the
+            // static `Some`. It is framed, so it is not `x` itself.
+            let inner = bytes.clone().into_prf_context();
+            let some = Some(bytes).into_prf_context();
+            some == PrfContext::pae(&[inner.as_bytes()]) && some != inner
+        }
+
+        #[test]
+        fn some_does_not_carry_the_value_path_domain() {
+            // The `PrfValue` Option path tags `Some` with its own domain; a
+            // context does not. If this fails, the context encoding has grown
+            // a tag again and runtime parts can no longer spell `Some`.
+            assert_ne!(
+                Some("value").into_prf_context(),
+                "value".into_prf_context().for_option_some(),
+                "a `Some` context must not share the `PrfValue` option-some domain"
+            );
+        }
+
+        #[test]
+        fn none_is_the_empty_list() {
+            assert_eq!(
+                None::<&str>.into_prf_context(),
+                PrfContext::pae(&[]),
+                "`None` is the PAE of zero pieces"
+            );
+        }
     }
 
     #[test]
@@ -386,8 +399,16 @@ mod tests {
 
         let some = Some("value").into_prf_context();
         let typed_value = PrfContext::typed(PrfEncoding::UTF8, b"value");
-        assert_eq!(some, PrfContext::pae(&[typed_value.as_bytes()]));
-        assert_eq!(None::<&str>.into_prf_context(), PrfContext::pae(&[]));
+        assert_eq!(
+            some,
+            PrfContext::pae(&[typed_value.as_bytes()]),
+            "`Some` frames the typed inner context as one piece"
+        );
+        assert_eq!(
+            None::<&str>.into_prf_context(),
+            PrfContext::pae(&[]),
+            "`None` is the PAE of zero pieces"
+        );
 
         let left = PrfContext::typed(PrfEncoding::UTF8, b"left");
         let right = PrfContext::typed(PrfEncoding::U16, &7_u16.to_le_bytes());
