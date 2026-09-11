@@ -8,7 +8,7 @@ use std::convert::Infallible;
 
 use rand::{rngs::SysRng, Rng, SeedableRng, TryCryptoRng, TryRng};
 use vitaminc_protected::Controlled;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 /// A secure random number generator that is safe to use for cryptographic purposes.
 ///
@@ -88,15 +88,20 @@ impl SafeRand {
         Ok(Self::try_from_rng(&mut SysRng)?)
     }
 
-    /// A safer alternative to `from_seed` that the seed is zeroized after use.
+    /// A safer alternative to `from_seed`: the seed is wiped once the
+    /// generator is built, on every exit from this function.
+    ///
+    /// The unwrapped bytes live in a [`Zeroizing`] wrapper from the moment
+    /// they leave `seed`'s custody, so the wipe is done by drop glue rather
+    /// than by a trailing statement. An unwind between unwrapping and
+    /// returning (e.g. a panic in the generator's constructor) still wipes
+    /// them.
     pub fn from_controlled_seed<C>(seed: C) -> Self
     where
         C: Controlled<Inner = [u8; 32]>,
     {
-        let mut seed = seed.risky_unwrap();
-        let rng = Self(rand::rngs::ChaCha20Rng::from_seed(seed));
-        seed.zeroize();
-        rng
+        let seed = Zeroizing::new(seed.risky_unwrap());
+        Self(rand::rngs::ChaCha20Rng::from_seed(*seed))
     }
 }
 
