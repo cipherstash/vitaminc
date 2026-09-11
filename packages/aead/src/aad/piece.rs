@@ -29,33 +29,35 @@ use vitaminc_protected::MaybeEmpty;
 
 use super::{Aad, IntoAad};
 
-/// One part of a context, or a PAE-framed list of parts.
+/// One part of a context, or a list of parts.
 ///
-/// Built by [`IntoAad::into_aad_piece`]; encodes through [`IntoAad`]
-/// to the same bytes the source value does, and through
-/// [`IntoPrfContext`] to the same PRF context, so it can stand in for the
-/// value anywhere a context is taken (the law is [below](#the-parts-view-is-the-identity-of-a-context)).
-/// A list encodes in one allocation however deep the tree.
-/// [`Display`](fmt::Display) renders it injectively
-/// — `("users/email", 7u64)` — and [`leaves`](Self::leaves) walks the parts
-/// in encoding order for a consumer building its own rendering or binding.
+/// [`IntoAad::into_aad_piece`] builds one from any context. The tree is a
+/// stand-in for the value it was built from: it encodes to the same AAD
+/// bytes through [`IntoAad`] and to the same PRF context through
+/// [`IntoPrfContext`], so it can be passed anywhere a context is expected
+/// (see [the rule below](#a-parts-tree-is-the-same-context-as-the-value-it-came-from)).
+/// On the AAD side a list is written into a single buffer, however deeply
+/// it nests. [`Display`](fmt::Display) renders a tree so that different
+/// trees never print the same, for example `("users/email", 7u64)`, and
+/// [`leaves`](Self::leaves) walks the parts in encoding order for a caller
+/// that wants to render or bind them itself.
 ///
-/// Integers keep their source type as their variant, so every tree
-/// expressible here encodes without truncation or failure: `U8(7)` is one
-/// byte and `U64(7)` is eight, exactly as `7u8` and `7u64` are.
+/// Integers keep their source type as their variant, so every tree that
+/// can be built here encodes without truncation: `U8(7)` is one byte and
+/// `U64(7)` is eight, exactly as `7u8` and `7u64` are.
 ///
-/// `PartialEq` is tree identity, not encoding identity. `Text("ab")` and
-/// `Bytes(b"ab")` compare unequal, as do `U64(7)` and `I64(7)`, though each
-/// pair encodes to the same bytes. To compare what the AEAD authenticates,
-/// compare `into_aad().as_bytes()`.
+/// `PartialEq` compares trees, not encodings. `Text("ab")` and
+/// `Bytes(b"ab")` are unequal, as are `U64(7)` and `I64(7)`, even though
+/// each pair encodes to the same bytes. To compare what the AEAD
+/// authenticates, compare `into_aad().as_bytes()`.
 ///
-/// # The parts view is the identity of a context
+/// # A parts tree is the same context as the value it came from
 ///
-/// A context feeds two derivations: the AEAD's associated data
-/// ([`IntoAad`]) and a PRF's domain-separation context
-/// ([`IntoPrfContext`]). [`AadPiece`] implements both, and the law every
-/// context type upholds is that each derivation of the value equals the
-/// same derivation of its parts view:
+/// A context is used in two places: as the associated data an AEAD
+/// authenticates ([`IntoAad`]) and as the context a PRF mixes into its key
+/// derivation ([`IntoPrfContext`]). [`AadPiece`] implements both, and every
+/// built-in context type follows one rule: converting the value gives the
+/// same result as converting its parts tree, on both sides.
 ///
 /// ```rust
 /// use std::borrow::Cow;
@@ -69,7 +71,8 @@ use super::{Aad, IntoAad};
 /// );
 /// assert_eq!(x.into_aad_piece().into_prf_context(), x.into_prf_context());
 ///
-/// // So a list assembled at runtime *is* the static value with those parts.
+/// // A list built at runtime is therefore the same context as the
+/// // static value with those parts.
 /// let runtime = AadPiece::List(vec![
 ///     AadPiece::Text(Cow::Borrowed("users/email")),
 ///     AadPiece::U64(7),
@@ -78,42 +81,40 @@ use super::{Aad, IntoAad};
 /// assert_eq!(runtime.into_prf_context(), x.into_prf_context());
 /// ```
 ///
-/// So a context assembled at runtime from parts — one that arrived as data
-/// across an FFI boundary, say — is the *same* context as the static Rust
-/// value with those parts, on both sides, and needs no type of its own:
-/// `Some(x)` is the one-element list, `None` the empty list, `(a, b)` the
-/// two-element list, and `nonempty!(a).with(b).with(c)` the left-nested
-/// `((a, b), c)`. A flat list of three or more parts is a context too,
-/// reachable from Rust through [`AadPiece::List`] directly. The law is
-/// pinned by quickcheck over every built-in context type.
+/// This matters for a context that arrives as data rather than as a Rust
+/// type, for example across an FFI boundary. It needs no mirror type of its
+/// own, because a tree with the same parts is the same context:
 ///
-/// The one exception is `()`, and any composite that contains it. `()` is
-/// the *empty* PRF context by definition (no encoding at all), while its
-/// parts view is an empty `Bytes` leaf, which the PRF side encodes as typed
-/// empty bytes. Bare `()` is empty and so never reaches `NonEmpty`, but
-/// `("x", ())` is non-empty by the pair rule and derives different PRF
-/// bytes from its parts view than from the static value. Do not put `()`
-/// inside a context a runtime consumer must reproduce. The divergence is
-/// pinned, and removed for good by the shared context encoding in
-/// [#339](https://github.com/cipherstash/vitaminc/issues/339).
+/// - `Some(x)` is the one-element list and `None` is the empty list;
+/// - `(a, b)` is the two-element list;
+/// - `nonempty!(a).with(b).with(c)` is the nested list `((a, b), c)`;
+/// - `()` is [`AadPiece::Unit`].
 ///
-/// [`MaybeEmpty`] completes the set, so a parts tree can be proven
-/// [`NonEmpty`](vitaminc_protected::NonEmpty) by the same rule the static
-/// types use: text and bytes are empty at zero length, an integer never is,
-/// and a list is empty only when every part is.
+/// A flat list of three or more parts is also a valid context. It has no
+/// tuple spelling in Rust, so build it with [`AadPiece::List`] directly.
+/// The rule is checked by quickcheck for every built-in context type.
 ///
-/// The enum is `#[non_exhaustive]`: the crate's own derived contexts
-/// (`Aad::for_map_entry`, `Aad::for_leaf`, …) have no faithful shape here
-/// yet, and adding one must not break a downstream `match`.
+/// [`MaybeEmpty`] is implemented by the same rule the static types use, so
+/// a tree can be wrapped in [`NonEmpty`](vitaminc_protected::NonEmpty):
+/// text and bytes are empty at zero length, unit is empty, an integer never
+/// is, and a list is empty only when every part is.
+///
+/// The enum is `#[non_exhaustive]`. The crate's own derived contexts
+/// (`Aad::for_map_entry`, `Aad::for_leaf`, and so on) have no faithful
+/// shape here yet, and adding one must not break a downstream `match`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AadPiece<'a> {
     /// Text; encodes as its UTF-8 bytes. `&str`, `String`.
     Text(Cow<'a, str>),
     /// Opaque bytes; encode as themselves. Byte slices and arrays,
-    /// `Vec<u8>`, `Cow<[u8]>`, an already-encoded [`Aad`], and `()` (no
-    /// bytes at all).
+    /// `Vec<u8>`, `Cow<[u8]>`, and an already-encoded [`Aad`].
     Bytes(Cow<'a, [u8]>),
+    /// The unit context, `()`. Encodes as no bytes at all on the AAD side
+    /// and as the empty context on the PRF side. Not the same as empty
+    /// bytes, which the PRF side frames, or the empty list, which both
+    /// sides frame.
+    Unit,
     /// A `u8`; encodes as one little-endian byte, with no type tag — see
     /// the integer [`IntoAad`] impls.
     U8(u8),
@@ -146,6 +147,7 @@ impl<'a> AadPiece<'a> {
         match self {
             AadPiece::Text(text) => AadPiece::Text(Cow::Owned(text.into_owned())),
             AadPiece::Bytes(bytes) => AadPiece::Bytes(Cow::Owned(bytes.into_owned())),
+            AadPiece::Unit => AadPiece::Unit,
             AadPiece::U8(v) => AadPiece::U8(v),
             AadPiece::U16(v) => AadPiece::U16(v),
             AadPiece::U32(v) => AadPiece::U32(v),
@@ -188,6 +190,7 @@ impl<'a> AadPiece<'a> {
         match self {
             AadPiece::Text(text) => text.len(),
             AadPiece::Bytes(bytes) => bytes.len(),
+            AadPiece::Unit => 0,
             AadPiece::U8(_) | AadPiece::I8(_) => 1,
             AadPiece::U16(_) | AadPiece::I16(_) => 2,
             AadPiece::U32(_) | AadPiece::I32(_) => 4,
@@ -235,6 +238,7 @@ impl<'a> AadPiece<'a> {
         match self {
             AadPiece::Text(text) => buf.extend_from_slice(text.as_bytes()),
             AadPiece::Bytes(bytes) => buf.extend_from_slice(bytes),
+            AadPiece::Unit => {}
             AadPiece::U8(v) => buf.extend_from_slice(&v.to_le_bytes()),
             AadPiece::U16(v) => buf.extend_from_slice(&v.to_le_bytes()),
             AadPiece::U32(v) => buf.extend_from_slice(&v.to_le_bytes()),
@@ -260,10 +264,10 @@ impl<'a> AadPiece<'a> {
     }
 }
 
-/// Encodes to the bytes of the value the piece was built from. A leaf hands
-/// its storage to that value's own [`IntoAad`] impl without copying; a list
-/// is written into one buffer sized up front, however deep it nests. The
-/// parts view of a piece is the piece.
+/// Encodes to the same bytes as the value the tree was built from. A leaf
+/// hands its storage to that value's own [`IntoAad`] impl without copying.
+/// A list is written into one buffer sized up front, however deeply it
+/// nests. The parts tree of a tree is itself.
 impl<'a> IntoAad<'a> for AadPiece<'a> {
     fn into_aad_piece(self) -> AadPiece<'a> {
         self
@@ -274,6 +278,7 @@ impl<'a> IntoAad<'a> for AadPiece<'a> {
             AadPiece::Text(Cow::Borrowed(text)) => text.into_aad(),
             AadPiece::Text(Cow::Owned(text)) => text.into_aad(),
             AadPiece::Bytes(bytes) => bytes.into_aad(),
+            AadPiece::Unit => ().into_aad(),
             AadPiece::U8(v) => v.into_aad(),
             AadPiece::U16(v) => v.into_aad(),
             AadPiece::U32(v) => v.into_aad(),
@@ -295,18 +300,19 @@ impl<'a> IntoAad<'a> for AadPiece<'a> {
     }
 }
 
-/// A piece derives the PRF context its source value would: a leaf hands
-/// itself to the standard type's own [`IntoPrfContext`] impl (text as a
-/// `str`, bytes as a `[u8]`, an integer as itself, so each keeps its typed
-/// encoding) and a list is [`PrfContext::pae`] of its parts, which is what
-/// the pair and `Option` impls produce. Nothing is re-derived here; the
-/// framing is the one `pae` every list impl uses.
+/// Derives the same PRF context as the value the tree was built from. A
+/// leaf hands itself to the standard type's own [`IntoPrfContext`] impl
+/// (text as a `str`, bytes as a `[u8]`, an integer as itself), so each
+/// keeps its typed encoding. A list is [`PrfContext::pae`] over its parts,
+/// which is exactly how the pair and `Option` impls frame theirs. Nothing
+/// is encoded differently here.
 impl<'a> IntoPrfContext<'a> for AadPiece<'a> {
     fn into_prf_context(self) -> PrfContext<'a> {
         match self {
             AadPiece::Text(Cow::Borrowed(text)) => text.into_prf_context(),
             AadPiece::Text(Cow::Owned(text)) => text.into_prf_context(),
             AadPiece::Bytes(bytes) => bytes.into_prf_context(),
+            AadPiece::Unit => ().into_prf_context(),
             AadPiece::U8(v) => v.into_prf_context(),
             AadPiece::U16(v) => v.into_prf_context(),
             AadPiece::U32(v) => v.into_prf_context(),
@@ -329,16 +335,17 @@ impl<'a> IntoPrfContext<'a> for AadPiece<'a> {
     }
 }
 
-/// The rule the static types follow, on the tree: text and bytes are empty
-/// at zero length, an integer is never empty (it is caller information),
-/// and a list is empty only when every part is — so `[]` (`None`) and
-/// `[""]` (`Some("")`) are empty and `["", 7u64]` is not, as
-/// `Option<T>` and `(A, B)` decide.
+/// The same emptiness rule the static types use, applied to the tree. Text
+/// and bytes are empty at zero length. Unit is empty. An integer is never
+/// empty, because even zero is information the caller chose. A list is
+/// empty only when every part is, so `None` and `Some("")` are empty and
+/// `("", 7u64)` is not, matching what `Option<T>` and `(A, B)` decide.
 impl MaybeEmpty for AadPiece<'_> {
     fn is_empty(&self) -> bool {
         match self {
             AadPiece::Text(text) => text.is_empty(),
             AadPiece::Bytes(bytes) => bytes.is_empty(),
+            AadPiece::Unit => true,
             AadPiece::U8(_)
             | AadPiece::U16(_)
             | AadPiece::U32(_)
@@ -354,16 +361,19 @@ impl MaybeEmpty for AadPiece<'_> {
     }
 }
 
-/// An injective rendering, in Rust literal syntax: text quoted and escaped
-/// as `Debug` does, integers with their type suffix, bytes as `0x`-prefixed
-/// hex, a list parenthesised and comma-separated — `("users/email", 7u64)`
-/// shows as `("users/email", 7u64)`, and `None` as `()`.
+/// Renders the tree in Rust literal syntax, and different trees never
+/// render the same. Text is quoted and escaped as `Debug` does, integers
+/// carry their type suffix, bytes print as `0x`-prefixed hex, unit prints
+/// as `()`, a list is parenthesised and comma-separated, and the empty list
+/// prints as `None` (the context it is). So `("users/email", 7u64)` prints
+/// as `("users/email", 7u64)`.
 ///
-/// Distinct trees render distinctly: the four leaf kinds start with `"`,
-/// a digit or `-`, `0x` and `(` respectively, integer suffixes keep types
-/// of equal width apart, and quoting keeps separators inside text from
-/// reading as structure. Two contexts that authenticate different bytes
-/// therefore never share a log line.
+/// Each kind starts differently: `"` for text, a digit or `-` for an
+/// integer, `0x` for bytes, `()` for unit, `(` followed by a part for a
+/// list, and `None` for the empty list. Integer suffixes keep types of the
+/// same width apart, and quoting keeps separators inside text from reading
+/// as structure. Two contexts that authenticate different bytes therefore
+/// never share a log line.
 impl fmt::Display for AadPiece<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -372,6 +382,7 @@ impl fmt::Display for AadPiece<'_> {
                 f.write_str("0x")?;
                 bytes.iter().try_for_each(|byte| write!(f, "{byte:02x}"))
             }
+            AadPiece::Unit => f.write_str("()"),
             AadPiece::U8(v) => write!(f, "{v}u8"),
             AadPiece::U16(v) => write!(f, "{v}u16"),
             AadPiece::U32(v) => write!(f, "{v}u32"),
@@ -382,6 +393,7 @@ impl fmt::Display for AadPiece<'_> {
             AadPiece::I32(v) => write!(f, "{v}i32"),
             AadPiece::I64(v) => write!(f, "{v}i64"),
             AadPiece::I128(v) => write!(f, "{v}i128"),
+            AadPiece::List(parts) if parts.is_empty() => f.write_str("None"),
             AadPiece::List(parts) => {
                 f.write_str("(")?;
                 for (i, part) in parts.iter().enumerate() {
@@ -405,7 +417,7 @@ mod tests {
 
     use super::*;
 
-    /// One half of the law: the tree encodes to the value's own AAD bytes.
+    /// The AAD half of the rule: the tree encodes to the value's own AAD bytes.
     fn agrees<'a, T>(value: T) -> bool
     where
         T: IntoAad<'a> + Clone,
@@ -413,7 +425,7 @@ mod tests {
         value.clone().into_aad_piece().into_aad().as_bytes() == value.into_aad().as_bytes()
     }
 
-    /// The other half: the tree derives the value's own PRF context.
+    /// The PRF half of the rule: the tree derives the value's own PRF context.
     fn prf_agrees<'a, T>(value: T) -> bool
     where
         T: IntoAad<'a> + IntoPrfContext<'a> + Clone,
@@ -421,8 +433,8 @@ mod tests {
         value.clone().into_aad_piece().into_prf_context() == value.into_prf_context()
     }
 
-    /// Both halves together: the parts view is the identity of the context
-    /// on both derivations.
+    /// Both halves: converting the value and converting its tree give the
+    /// same result on both sides.
     fn is_identity<'a, T>(value: T) -> bool
     where
         T: IntoAad<'a> + IntoPrfContext<'a> + Clone,
@@ -434,8 +446,7 @@ mod tests {
         AadPiece::Text(Cow::Borrowed(s))
     }
 
-    /// The parts-view law, per built-in context type: each derivation of
-    /// the value equals the same derivation of `into_aad_piece()`.
+    /// The rule from the type docs, checked per built-in context type.
     mod given_a_text_context {
         use super::*;
 
@@ -466,8 +477,9 @@ mod tests {
         }
 
         #[test]
-        fn a_raw_aad_agrees_on_the_aad_derivation() {
-            // `Aad` is not a PRF context, so only the AAD half applies.
+        fn a_raw_aad_agrees_on_the_aad_side() {
+            // `Aad` does not implement `IntoPrfContext`, so only the AAD
+            // half of the rule applies to it.
             assert!(
                 agrees(Aad::from_slice(b"raw")),
                 "a raw `Aad` is one opaque `Bytes` leaf"
@@ -500,8 +512,8 @@ mod tests {
 
         #[quickcheck]
         fn both_derivations_agree(s: String, n: u64, o: Option<String>, b: Vec<u8>) -> bool {
-            // Pairs, options, nesting in both directions, and the proven
-            // wrapper — the shapes a runtime list has to be able to spell.
+            // Pairs, options, nesting in both directions, and `NonEmpty`:
+            // every shape a runtime list has to be able to express.
             is_identity((s.as_str(), n))
                 && is_identity(o.clone())
                 && is_identity(((s.as_str(), n), b.as_slice()))
@@ -621,48 +633,57 @@ mod tests {
         use super::*;
 
         #[test]
-        fn the_aad_half_of_the_law_holds() {
-            assert!(agrees(()), "`()` is zero AAD bytes on both sides");
+        fn is_the_unit_leaf() {
+            assert_eq!(().into_aad_piece(), AadPiece::Unit, "`()` has its own leaf");
+            assert_eq!(AadPiece::Unit.to_string(), "()", "unit prints as `()`");
         }
 
         #[test]
-        fn the_prf_half_is_the_documented_exception() {
-            // `()` is the empty PRF context by definition, and its parts view
-            // is an empty `Bytes` leaf, which encodes as typed empty bytes.
+        fn both_sides_agree_on_its_own() {
             assert!(
-                !prf_agrees(()),
-                "`()` derives no PRF bytes statically and typed empty bytes from its parts"
+                is_identity(()),
+                "`()` is no AAD bytes and the empty PRF context"
             );
         }
 
         #[test]
-        fn never_reaches_non_empty_on_its_own() {
+        fn both_sides_agree_inside_a_composite() {
+            // `()` on its own is empty, so it never reaches `NonEmpty`. Inside
+            // a pair or a `with` chain it does, so the rule has to hold there.
+            assert!(is_identity(("x", ())), "`()` as the second half of a pair");
+            assert!(is_identity(((), "x")), "`()` as the first half of a pair");
+            assert!(is_identity(Some(())), "`()` inside `Some`");
             assert!(
-                ().into_aad_piece().is_empty(),
-                "bare `()` is empty, so it never reaches `NonEmpty`"
+                is_identity(NonEmpty::new("x").unwrap().with(())),
+                "`()` appended with `with`"
+            );
+            assert!(
+                is_identity(NonEmpty::new("x").unwrap().with(Some(()))),
+                "`Some(())` appended with `with`"
             );
         }
 
         #[test]
-        fn a_pair_containing_it_is_non_empty() {
-            assert!(
-                NonEmpty::new(("x", ())).is_ok(),
-                "a pair with one non-empty part is non-empty"
+        fn is_not_empty_bytes_and_not_the_empty_list() {
+            // Three different contexts: `()` encodes as no bytes, empty
+            // bytes are framed on the PRF side, and the empty list is framed
+            // on both. The tree keeps them apart, and so does `Display`.
+            let empty_bytes = AadPiece::Bytes(Cow::Borrowed(&[]));
+            let none = Option::<()>::None.into_aad_piece();
+            assert_ne!(AadPiece::Unit, empty_bytes, "unit is not empty bytes");
+            assert_ne!(AadPiece::Unit, none, "unit is not the empty list");
+            assert_ne!(
+                AadPiece::Unit.into_prf_context(),
+                empty_bytes.clone().into_prf_context(),
+                "unit and empty bytes are different PRF contexts"
             );
-        }
-
-        #[test]
-        fn a_pair_containing_it_diverges_on_the_prf_side() {
-            // The exception reaches `NonEmpty` through a composite: the pair
-            // rule makes `("x", ())` non-empty, and the divergence in `()`
-            // carries through. Pinned so the exception's reach is visible;
-            // removed for good by the shared encoding in #339.
-            let pair = ("x", ());
-            assert!(agrees(pair), "the AAD half still holds through a pair");
-            assert!(
-                !prf_agrees(pair),
-                "the PRF half does not, because `()` inside a pair encodes as typed empty bytes"
+            assert_ne!(
+                AadPiece::Unit.into_aad().as_bytes(),
+                none.clone().into_aad().as_bytes(),
+                "unit and the empty list are different AAD"
             );
+            assert_ne!(AadPiece::Unit.to_string(), empty_bytes.to_string());
+            assert_ne!(AadPiece::Unit.to_string(), none.to_string());
         }
     }
 
@@ -671,10 +692,12 @@ mod tests {
 
         #[quickcheck]
         fn a_list_derives_the_pae_of_its_parts(tree: Tree) -> bool {
-            // The PRF side of `list_encodes_as_pae_of_its_parts`: a list's
-            // context is `LE64(count) || (LE64(len) || part)*` over each
-            // part's context, at every level. The oracle frames by hand so
-            // it does not share `PrfContext::pae` with the impl under test.
+            // The PRF-side twin of `list_encodes_as_pae_of_its_parts`: a
+            // list's PRF context is `LE64(count) || (LE64(len) || part)*`
+            // over its parts' PRF contexts, at every level. The expected
+            // value is framed by hand here rather than with
+            // `PrfContext::pae`, so the test does not share code with the
+            // impl it checks.
             fn expected(piece: &AadPiece<'_>) -> Vec<u8> {
                 match piece {
                     AadPiece::List(parts) => {
@@ -768,17 +791,8 @@ mod tests {
             Some("a").into_aad_piece(),
             AadPiece::List(vec![AadPiece::Text(Cow::Borrowed("a"))])
         );
-        assert_eq!(Option::<&str>::None.into_aad_piece().to_string(), "()");
+        assert_eq!(Option::<&str>::None.into_aad_piece().to_string(), "None");
         assert_eq!(Some("a").into_aad_piece().to_string(), "(\"a\")");
-    }
-
-    #[test]
-    fn the_empty_aad_is_no_bytes_not_an_empty_list() {
-        // `()` encodes as zero bytes; `None` as PAE of zero pieces. The
-        // trees keep them apart the way the encodings do.
-        assert_eq!(().into_aad_piece(), AadPiece::Bytes(Cow::Borrowed(&[])));
-        assert_ne!(().into_aad_piece(), Option::<()>::None.into_aad_piece());
-        assert_eq!(().into_aad_piece().to_string(), "0x");
     }
 
     #[test]
@@ -835,10 +849,10 @@ mod tests {
     #[test]
     fn display_is_injective_where_it_used_to_collide() {
         // Same width, different type; text that looks like an integer; text
-        // that looks like hex; `Some("")` against `None`; text containing
-        // the separators. Each pair encodes differently and must print
-        // differently.
-        let pairs: [(AadPiece<'_>, AadPiece<'_>); 5] = [
+        // that looks like hex; `Some("")` against `None`; `()` against
+        // `None`; text containing the separators. Each pair encodes
+        // differently and must print differently.
+        let pairs: [(AadPiece<'_>, AadPiece<'_>); 6] = [
             (7u64.into_aad_piece(), 7i64.into_aad_piece()),
             (("x", 7u64).into_aad_piece(), ("x", "7").into_aad_piece()),
             ("0xdead".into_aad_piece(), [0xdeu8, 0xad].into_aad_piece()),
@@ -846,6 +860,7 @@ mod tests {
                 Some("").into_aad_piece(),
                 Option::<&str>::None.into_aad_piece(),
             ),
+            (().into_aad_piece(), Option::<&str>::None.into_aad_piece()),
             (
                 ("a, b", "c").into_aad_piece(),
                 ("a", "b, c").into_aad_piece(),
@@ -870,20 +885,21 @@ mod tests {
     impl quickcheck::Arbitrary for Tree {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
             fn gen(g: &mut quickcheck::Gen, depth: u8) -> AadPiece<'static> {
-                let kinds = if depth == 0 { 12 } else { 13 };
+                let kinds = if depth == 0 { 13 } else { 14 };
                 match u8::arbitrary(g) % kinds {
                     0 => AadPiece::Text(Cow::Owned(String::arbitrary(g))),
                     1 => AadPiece::Bytes(Cow::Owned(Vec::arbitrary(g))),
-                    2 => AadPiece::U8(u8::arbitrary(g)),
-                    3 => AadPiece::U16(u16::arbitrary(g)),
-                    4 => AadPiece::U32(u32::arbitrary(g)),
-                    5 => AadPiece::U64(u64::arbitrary(g)),
-                    6 => AadPiece::U128(u128::arbitrary(g)),
-                    7 => AadPiece::I8(i8::arbitrary(g)),
-                    8 => AadPiece::I16(i16::arbitrary(g)),
-                    9 => AadPiece::I32(i32::arbitrary(g)),
-                    10 => AadPiece::I64(i64::arbitrary(g)),
-                    11 => AadPiece::I128(i128::arbitrary(g)),
+                    2 => AadPiece::Unit,
+                    3 => AadPiece::U8(u8::arbitrary(g)),
+                    4 => AadPiece::U16(u16::arbitrary(g)),
+                    5 => AadPiece::U32(u32::arbitrary(g)),
+                    6 => AadPiece::U64(u64::arbitrary(g)),
+                    7 => AadPiece::U128(u128::arbitrary(g)),
+                    8 => AadPiece::I8(i8::arbitrary(g)),
+                    9 => AadPiece::I16(i16::arbitrary(g)),
+                    10 => AadPiece::I32(i32::arbitrary(g)),
+                    11 => AadPiece::I64(i64::arbitrary(g)),
+                    12 => AadPiece::I128(i128::arbitrary(g)),
                     _ => {
                         let n = usize::arbitrary(g) % 4;
                         AadPiece::List((0..n).map(|_| gen(g, depth - 1)).collect())
@@ -899,6 +915,7 @@ mod tests {
         vec![
             AadPiece::Text(Cow::Borrowed("t")),
             AadPiece::Bytes(Cow::Borrowed(b"b")),
+            AadPiece::Unit,
             AadPiece::U8(1),
             AadPiece::U16(2),
             AadPiece::U32(3),
@@ -933,8 +950,8 @@ mod tests {
         assert_eq!(
             rendered,
             [
-                "\"t\"", "0x62", "1u8", "2u16", "3u32", "4u64", "5u128", "-1i8", "-2i16", "-3i32",
-                "-4i64", "-5i128", "(9u8)",
+                "\"t\"", "0x62", "()", "1u8", "2u16", "3u32", "4u64", "5u128", "-1i8", "-2i16",
+                "-3i32", "-4i64", "-5i128", "(9u8)",
             ]
         );
     }
