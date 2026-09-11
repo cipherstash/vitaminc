@@ -14,8 +14,10 @@ pub(crate) type KeyInner<const N: usize> = Exportable<Protected<[u8; N]>>;
 /// One seed in a [`PermutationKey::from_seeds`] batch could not derive a key.
 ///
 /// `index` is the seed's position in the iterator passed to `from_seeds`.
-/// For [`RandomError::SeedRejected`] that seed can never derive a key:
-/// discard it, provision a fresh one, and derive the batch again.
+/// For [`RandomError::SeedRejected`] that seed can never derive a key.
+/// `from_seeds` consumed and wiped the batch, so recovery starts from the
+/// caller's own retained seeds: replace the one at `index` with a fresh
+/// seed and derive the whole batch again.
 #[derive(Debug, thiserror::Error)]
 #[error("seed at index {index} could not derive a key: {source}")]
 pub struct BatchSeedError {
@@ -76,9 +78,18 @@ impl<const N: usize> PermutationKey<N> {
     /// batch of retained secrets is never copied around unwiped.
     ///
     /// A rejected seed fails the whole call and [`BatchSeedError`] names its
-    /// lane, so the caller discards just that seed and retries with the
-    /// rest. No keys are delivered for the lanes before it: a caller can
+    /// lane. No keys are delivered for the lanes before it, so a caller can
     /// never end up holding a key vector that is out of step with its seeds.
+    ///
+    /// The call consumes the seeds, and every one that was unwrapped is
+    /// wiped whether or not the batch succeeds; the error carries only the
+    /// index. Recovery is therefore the caller's, from its own copy of the
+    /// batch: keep the seeds in their [`Controlled`] containers (a
+    /// `Vec<Protected<[u8; 32]>>`, say) and pass `from_seeds` a view of them
+    /// (clones, or a mapping iterator) rather than the originals; on
+    /// [`RandomError::SeedRejected`] replace the seed at the reported index
+    /// with a fresh one and derive the whole batch again. A caller that
+    /// cannot retain or regenerate its seeds has nothing to retry with.
     ///
     /// The batch entry point exists for bulk workloads (e.g. deriving the
     /// per-block permutations for a batch of ORE encryptions): it fixes the
