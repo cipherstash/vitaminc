@@ -207,7 +207,8 @@ impl<'a> Aad<'a> {
 /// `x.into_aad_piece().into_prf_context()` is `x.into_prf_context()` — the
 /// parts view is the identity of the context on both derivations (see
 /// [`AadPiece`]). Every built-in upholds both, pinned by quickcheck, with
-/// `()` the one documented exception on the PRF side.
+/// `()`, and any composite containing it, the one documented exception on
+/// the PRF side.
 ///
 /// ```rust
 /// use std::borrow::Cow;

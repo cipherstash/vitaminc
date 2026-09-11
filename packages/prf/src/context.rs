@@ -57,8 +57,9 @@ impl<'a> PrfContext<'a> {
     ///
     /// The leading domain tag keeps caller-refined contexts disjoint from the
     /// contexts this crate assigns automatically. Without it, a context built
-    /// as `PrfContext::from_slice(MAP_ENTRY_DOMAIN).refine(key)` would encode
-    /// identically to the one `for_map_entry` derives for `key`.
+    /// as `PrfContext::from_slice(OPTION_SOME_DOMAIN).refine(x)` would encode
+    /// identically to the one `for_option_some` assigns to the `Some` arm of
+    /// an optional *value* derived under `x`.
     pub fn refine<'b, C>(&self, component: C) -> PrfContext<'static>
     where
         C: IntoPrfContext<'b>,
