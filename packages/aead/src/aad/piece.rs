@@ -20,18 +20,53 @@
 //! that logs or binds the parts (a key-management service) reads them
 //! straight from what it is given, while a backend that only wants bytes
 //! pays nothing for the view.
+//!
+//! # The parts view is the identity of a context
+//!
+//! A context feeds two derivations: the AEAD's associated data
+//! ([`IntoAad`]) and a PRF's domain-separation context
+//! ([`IntoPrfContext`]). [`AadPiece`] implements both, and the law every
+//! context type upholds is that each derivation of the value equals the
+//! same derivation of its parts view:
+//!
+//! ```text
+//! x.into_aad()         == x.into_aad_piece().into_aad()
+//! x.into_prf_context() == x.into_aad_piece().into_prf_context()
+//! ```
+//!
+//! So a context assembled at runtime from parts — one that arrived as data
+//! across an FFI boundary, say — is the *same* context as the static Rust
+//! value with those parts, on both sides, and needs no type of its own:
+//! `Some(x)` is the one-element list, `None` the empty list, `(a, b)` the
+//! two-element list, and `nonempty!(a).with(b).with(c)` the left-nested
+//! `((a, b), c)`. A flat list of three or more parts is a context too,
+//! reachable from Rust through [`AadPiece::List`] directly. The one
+//! exception is `()`: its PRF context is the *empty* context by definition
+//! (no encoding at all), while its parts view is an empty `Bytes` leaf,
+//! which the PRF side encodes as typed empty bytes. `()` is never a
+//! context a caller proves non-empty, so nothing built from parts meets
+//! it. The law is pinned by quickcheck over every built-in context type.
+//!
+//! [`MaybeEmpty`] completes the set, so a parts tree can be proven
+//! [`NonEmpty`](vitaminc_protected::NonEmpty) by the same rule the static
+//! types use: text and bytes are empty at zero length, an integer never is,
+//! and a list is empty only when every part is.
 
 use std::borrow::Cow;
 use std::fmt;
+
+use vitaminc_prf::{IntoPrfContext, PrfContext};
+use vitaminc_protected::MaybeEmpty;
 
 use super::{Aad, IntoAad};
 
 /// One part of a context, or a PAE-framed list of parts.
 ///
 /// Built by [`IntoAad::into_aad_piece`]; encodes through [`IntoAad`]
-/// to the same bytes the source value does, so it can stand in for the
-/// value anywhere an AAD is taken. A list encodes in one allocation
-/// however deep the tree. [`Display`](fmt::Display) renders it injectively
+/// to the same bytes the source value does, and through
+/// [`IntoPrfContext`] to the same PRF context, so it can stand in for the
+/// value anywhere a context is taken (see the [module docs](self) for the
+/// law). A list encodes in one allocation however deep the tree. [`Display`](fmt::Display) renders it injectively
 /// — `("users/email", 7u64)` — and [`leaves`](Self::leaves) walks the parts
 /// in encoding order for a consumer building its own rendering or binding.
 ///
@@ -237,6 +272,65 @@ impl<'a> IntoAad<'a> for AadPiece<'a> {
     }
 }
 
+/// A piece derives the PRF context its source value would: a leaf hands
+/// itself to the standard type's own [`IntoPrfContext`] impl (text as a
+/// `str`, bytes as a `[u8]`, an integer as itself, so each keeps its typed
+/// encoding) and a list is [`PrfContext::pae`] of its parts, which is what
+/// the pair and `Option` impls produce. Nothing is re-derived here; the
+/// framing is the one `pae` every list impl uses.
+impl<'a> IntoPrfContext<'a> for AadPiece<'a> {
+    fn into_prf_context(self) -> PrfContext<'a> {
+        match self {
+            AadPiece::Text(Cow::Borrowed(text)) => text.into_prf_context(),
+            AadPiece::Text(Cow::Owned(text)) => text.into_prf_context(),
+            AadPiece::Bytes(bytes) => bytes.into_prf_context(),
+            AadPiece::U8(v) => v.into_prf_context(),
+            AadPiece::U16(v) => v.into_prf_context(),
+            AadPiece::U32(v) => v.into_prf_context(),
+            AadPiece::U64(v) => v.into_prf_context(),
+            AadPiece::U128(v) => v.into_prf_context(),
+            AadPiece::I8(v) => v.into_prf_context(),
+            AadPiece::I16(v) => v.into_prf_context(),
+            AadPiece::I32(v) => v.into_prf_context(),
+            AadPiece::I64(v) => v.into_prf_context(),
+            AadPiece::I128(v) => v.into_prf_context(),
+            AadPiece::List(parts) => {
+                let parts: Vec<PrfContext<'a>> = parts
+                    .into_iter()
+                    .map(IntoPrfContext::into_prf_context)
+                    .collect();
+                let pieces: Vec<&[u8]> = parts.iter().map(PrfContext::as_bytes).collect();
+                PrfContext::pae(&pieces)
+            }
+        }
+    }
+}
+
+/// The rule the static types follow, on the tree: text and bytes are empty
+/// at zero length, an integer is never empty (it is caller information),
+/// and a list is empty only when every part is — so `[]` (`None`) and
+/// `[""]` (`Some("")`) are empty and `["", 7u64]` is not, as
+/// `Option<T>` and `(A, B)` decide.
+impl MaybeEmpty for AadPiece<'_> {
+    fn is_empty(&self) -> bool {
+        match self {
+            AadPiece::Text(text) => text.is_empty(),
+            AadPiece::Bytes(bytes) => bytes.is_empty(),
+            AadPiece::U8(_)
+            | AadPiece::U16(_)
+            | AadPiece::U32(_)
+            | AadPiece::U64(_)
+            | AadPiece::U128(_)
+            | AadPiece::I8(_)
+            | AadPiece::I16(_)
+            | AadPiece::I32(_)
+            | AadPiece::I64(_)
+            | AadPiece::I128(_) => false,
+            AadPiece::List(parts) => parts.iter().all(MaybeEmpty::is_empty),
+        }
+    }
+}
+
 /// An injective rendering, in Rust literal syntax: text quoted and escaped
 /// as `Debug` does, integers with their type suffix, bytes as `0x`-prefixed
 /// hex, a list parenthesised and comma-separated — `("users/email", 7u64)`
@@ -294,6 +388,196 @@ mod tests {
         T: IntoAad<'a> + Clone,
     {
         value.clone().into_aad_piece().into_aad().as_bytes() == value.into_aad().as_bytes()
+    }
+
+    /// The other half of the law: the tree derives the value's own PRF
+    /// context. Together with [`agrees`], the parts view is the identity
+    /// of the context on both derivations.
+    fn prf_agrees<'a, T>(value: T) -> bool
+    where
+        T: IntoAad<'a> + IntoPrfContext<'a> + Clone,
+    {
+        value.clone().into_aad_piece().into_prf_context() == value.into_prf_context()
+    }
+
+    #[quickcheck]
+    fn text_derives_the_same_prf_context(s: String) -> bool {
+        prf_agrees(s.as_str()) && prf_agrees(s)
+    }
+
+    #[quickcheck]
+    fn bytes_derive_the_same_prf_context(b: Vec<u8>) -> bool {
+        prf_agrees(b.as_slice()) && prf_agrees(Cow::Borrowed(b.as_slice())) && prf_agrees(b)
+    }
+
+    #[quickcheck]
+    fn unsigned_integers_derive_the_same_prf_context(
+        a: u8,
+        b: u16,
+        c: u32,
+        d: u64,
+        e: u128,
+    ) -> bool {
+        prf_agrees(a) && prf_agrees(b) && prf_agrees(c) && prf_agrees(d) && prf_agrees(e)
+    }
+
+    #[quickcheck]
+    fn signed_integers_derive_the_same_prf_context(a: i8, b: i16, c: i32, d: i64, e: i128) -> bool {
+        prf_agrees(a) && prf_agrees(b) && prf_agrees(c) && prf_agrees(d) && prf_agrees(e)
+    }
+
+    #[quickcheck]
+    fn composites_derive_the_same_prf_context(
+        s: String,
+        n: u64,
+        o: Option<String>,
+        b: Vec<u8>,
+    ) -> bool {
+        // Pairs, options, nesting in both directions, and the proven
+        // wrapper — the shapes a runtime list has to be able to spell.
+        prf_agrees((s.as_str(), n))
+            && prf_agrees(o.clone())
+            && prf_agrees(((s.as_str(), n), b.as_slice()))
+            && prf_agrees((s.as_str(), (n, b.as_slice())))
+            && prf_agrees(Some((o.clone(), n)))
+            && prf_agrees(Some(Some(n)))
+            && prf_agrees(Option::<(String, u64)>::None)
+            && (s.is_empty() || {
+                let proven = NonEmpty::new(s.as_str()).unwrap();
+                prf_agrees(proven)
+                    && prf_agrees(proven.with(n))
+                    && prf_agrees(proven.with(n).with(o))
+            })
+    }
+
+    #[test]
+    fn the_law_says_what_a_runtime_list_spells() {
+        // What the module docs promise, pinned by value: a list of one is
+        // `Some`, the empty list is `None`, a list of two is the pair, and
+        // `with` chains nest to the left.
+        let some = AadPiece::List(vec![AadPiece::U64(7)]);
+        assert_eq!(some.clone().into_aad_piece(), Some(7u64).into_aad_piece());
+        assert_eq!(some.into_prf_context(), Some(7u64).into_prf_context());
+
+        let none = AadPiece::List(vec![]);
+        assert_eq!(
+            none.into_prf_context(),
+            Option::<u64>::None.into_prf_context()
+        );
+
+        let pair = AadPiece::List(vec![
+            AadPiece::Text(Cow::Borrowed("users/age")),
+            AadPiece::U64(7),
+        ]);
+        assert_eq!(
+            pair.clone().into_prf_context(),
+            ("users/age", 7u64).into_prf_context()
+        );
+        assert_eq!(
+            pair.into_prf_context(),
+            NonEmpty::new("users/age")
+                .unwrap()
+                .with(7u64)
+                .into_prf_context()
+        );
+
+        let chained = AadPiece::List(vec![
+            AadPiece::List(vec![
+                AadPiece::Text(Cow::Borrowed("users/age")),
+                AadPiece::U64(7),
+            ]),
+            AadPiece::Text(Cow::Borrowed("eu")),
+        ]);
+        assert_eq!(
+            chained.into_prf_context(),
+            NonEmpty::new("users/age")
+                .unwrap()
+                .with(7u64)
+                .with("eu")
+                .into_prf_context()
+        );
+        let flat = AadPiece::List(vec![
+            AadPiece::Text(Cow::Borrowed("users/age")),
+            AadPiece::U64(7),
+            AadPiece::Text(Cow::Borrowed("eu")),
+        ]);
+        assert_ne!(
+            flat.into_prf_context(),
+            NonEmpty::new("users/age")
+                .unwrap()
+                .with(7u64)
+                .with("eu")
+                .into_prf_context(),
+            "a flat n-ary list is its own context, not a chain"
+        );
+    }
+
+    #[test]
+    fn unit_is_the_documented_exception() {
+        // `()` is the empty PRF context by definition, and its parts view
+        // is an empty `Bytes` leaf, which encodes as typed empty bytes. The
+        // AAD half of the law still holds; the PRF half does not, and no
+        // context built from parts can reach `()`, which is empty anyway.
+        assert!(agrees(()));
+        assert!(!prf_agrees(()));
+        assert!(().into_aad_piece().is_empty());
+    }
+
+    #[quickcheck]
+    fn a_tree_is_empty_by_the_static_rule(tree: Tree) -> bool {
+        fn rule(piece: &AadPiece<'_>) -> bool {
+            match piece {
+                AadPiece::Text(t) => t.is_empty(),
+                AadPiece::Bytes(b) => b.is_empty(),
+                AadPiece::List(parts) => parts.iter().all(rule),
+                _ => false,
+            }
+        }
+        tree.0.is_empty() == rule(&tree.0)
+    }
+
+    #[quickcheck]
+    fn emptiness_agrees_with_the_static_types(s: String, n: u64, o: Option<String>) -> bool {
+        s.is_empty() == s.as_str().into_aad_piece().is_empty()
+            && !n.into_aad_piece().is_empty()
+            && o.is_empty() == o.clone().into_aad_piece().is_empty()
+            && (s.as_str(), n).is_empty() == (s.as_str(), n).into_aad_piece().is_empty()
+            && (o.clone(), s.as_str()).is_empty() == (o, s.as_str()).into_aad_piece().is_empty()
+    }
+
+    #[test]
+    fn emptiness_fixed_shapes() {
+        assert!(AadPiece::List(vec![]).is_empty());
+        assert!(AadPiece::List(vec![AadPiece::Text(Cow::Borrowed(""))]).is_empty());
+        assert!(
+            !AadPiece::List(vec![AadPiece::Text(Cow::Borrowed("")), AadPiece::U64(0)]).is_empty()
+        );
+        assert!(
+            !AadPiece::List(vec![AadPiece::List(vec![AadPiece::Bytes(Cow::Borrowed(
+                b"x"
+            ))])])
+            .is_empty()
+        );
+        assert!(NonEmpty::new(AadPiece::List(vec![AadPiece::U8(0)])).is_ok());
+        assert!(NonEmpty::new(AadPiece::Text(Cow::Borrowed(""))).is_err());
+    }
+
+    #[quickcheck]
+    fn a_list_derives_the_pae_of_its_parts(tree: Tree) -> bool {
+        // The PRF side of `list_encodes_as_pae_of_its_parts`: a list's
+        // context is `PrfContext::pae` of each part's context, at every
+        // level, which is exactly the pair impl's framing.
+        fn expected(piece: &AadPiece<'_>) -> PrfContext<'static> {
+            match piece {
+                AadPiece::List(parts) => {
+                    let parts: Vec<PrfContext<'static>> = parts.iter().map(expected).collect();
+                    let pieces: Vec<&[u8]> = parts.iter().map(PrfContext::as_bytes).collect();
+                    PrfContext::pae(&pieces)
+                }
+                leaf => leaf.clone().into_prf_context().into_owned(),
+            }
+        }
+        tree.0.clone().into_prf_context() == expected(&tree.0)
     }
 
     #[quickcheck]

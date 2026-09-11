@@ -248,6 +248,16 @@ assert_eq!(
 `into_aad()` still writes the bytes in one allocation. `Display` is injective (Rust literal
 syntax), so two contexts that authenticate different bytes never share a log line.
 
+The parts view is the *identity* of a context, on both derivations a context feeds: `AadPiece`
+implements `IntoPrfContext` as well as `IntoAad`, and every built-in context type upholds
+`x.into_aad_piece().into_aad() == x.into_aad()` and
+`x.into_aad_piece().into_prf_context() == x.into_prf_context()` (pinned by quickcheck; `()` is
+the one documented exception, being the empty PRF context by definition). So a context assembled
+at runtime from parts — one that arrived as data across an FFI boundary — *is* the static value
+with those parts: a list of one is `Some(x)`, the empty list is `None`, a list of two is `(a, b)`,
+and `nonempty!(a).with(b).with(c)` is the left-nested `((a, b), c)`. `AadPiece` also implements
+`MaybeEmpty` by the same rule the static types use, so a parts tree can be proven `NonEmpty`.
+
 ### Working with Protected Types
 
 The crate integrates with `vitaminc-protected` so sensitive plaintext stays wrapped:
