@@ -241,23 +241,23 @@ assert_eq!(
 );
 ```
 
-`into_aad_piece` is a provided method on `IntoAad`, defaulting to the whole encoding as one opaque
-`Bytes` leaf, so a context type of your own keeps compiling with only `into_aad` and overrides
+`into_aad_piece` has a default on `IntoAad` that returns the whole encoding as one opaque `Bytes`
+leaf, so a context type of your own keeps compiling with only `into_aad`, and overrides
 `into_aad_piece` when it wants its parts named. A `ContextTag` hands its cipher a context whose
 `into_aad_piece()` is `List([extra_aad, tag])`, so a backend can read the parts directly, while
-`into_aad()` still writes the bytes in one allocation. `Display` is injective (Rust literal
-syntax), so two contexts that authenticate different bytes never share a log line.
+`into_aad()` still writes the bytes in one allocation. `Display` renders different trees
+differently (in Rust literal syntax), so two contexts that authenticate different bytes never share
+a log line.
 
-The parts view is the *identity* of a context, on both derivations a context feeds: `AadPiece`
-implements `IntoPrfContext` as well as `IntoAad`, and every built-in context type upholds
+A parts tree is the same context as the value it came from, on both sides a context is used.
+`AadPiece` implements `IntoPrfContext` as well as `IntoAad`, and for every built-in context type
 `x.into_aad_piece().into_aad() == x.into_aad()` and
-`x.into_aad_piece().into_prf_context() == x.into_prf_context()` (pinned by quickcheck; `()`, and
-any composite containing it, is the one documented exception, `()` being the empty PRF context by
-definition while its parts view is an empty `Bytes` leaf; see #339). So a context assembled
-at runtime from parts — one that arrived as data across an FFI boundary — *is* the static value
-with those parts: a list of one is `Some(x)`, the empty list is `None`, a list of two is `(a, b)`,
-and `nonempty!(a).with(b).with(c)` is the left-nested `((a, b), c)`. `AadPiece` also implements
-`MaybeEmpty` by the same rule the static types use, so a parts tree can be proven `NonEmpty`.
+`x.into_aad_piece().into_prf_context() == x.into_prf_context()` (checked by quickcheck). So a
+context that arrives as data, for example across an FFI boundary, needs no mirror type: a list of
+one is `Some(x)`, the empty list is `None`, a list of two is `(a, b)`,
+`nonempty!(a).with(b).with(c)` is the nested `((a, b), c)`, and `AadPiece::Unit` is `()`.
+`AadPiece` also implements `MaybeEmpty` by the same rule the static types use, so a tree can be
+wrapped in `NonEmpty`.
 
 ### Working with Protected Types
 

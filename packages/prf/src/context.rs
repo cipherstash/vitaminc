@@ -55,11 +55,11 @@ impl<'a> PrfContext<'a> {
 
     /// Add a domain component without allowing concatenation ambiguities.
     ///
-    /// The leading domain tag keeps caller-refined contexts disjoint from the
-    /// contexts this crate assigns automatically. Without it, a context built
-    /// as `PrfContext::from_slice(OPTION_SOME_DOMAIN).refine(x)` would encode
-    /// identically to the one `for_option_some` assigns to the `Some` arm of
-    /// an optional *value* derived under `x`.
+    /// The leading domain tag keeps caller-refined contexts apart from the
+    /// contexts this crate assigns on its own. Without it, a caller could
+    /// build `PrfContext::from_slice(OPTION_SOME_DOMAIN).refine(x)` and get
+    /// the same bytes as the context `for_option_some` assigns when an
+    /// optional *value* is derived under `x`.
     pub fn refine<'b, C>(&self, component: C) -> PrfContext<'static>
     where
         C: IntoPrfContext<'b>,
@@ -184,17 +184,17 @@ integer_context!(
     i128 => PrfEncoding::I128,
 );
 
-/// An `Option` context follows its parts view: `Some(x)` is the one-element
-/// list `PAE([x])` and `None` the empty list `PAE([])`, exactly as
-/// `IntoAad` encodes them. A context built at runtime from parts (an
-/// `AadPiece` list of one) is therefore the same PRF context as the static
-/// `Some(x)`, on this side as on the AEAD side.
+/// `Some(x)` is the one-element list `PAE([x])` and `None` is the empty
+/// list `PAE([])`, the same shapes `IntoAad` gives them. A context built at
+/// runtime as a list of one part (an `AadPiece` list) is therefore the same
+/// PRF context as the static `Some(x)`, just as it is the same AAD.
 ///
-/// This is deliberately *not* the `PrfValue` `Option` encoding, which tags
-/// `Some` with a domain of its own: that tag keeps an optional *value*'s
-/// derivation apart from its inner value's, and a value is never compared
-/// with a context. Sharing the tag here bought nothing and cost the parts
-/// identity.
+/// This is deliberately different from how a `PrfValue` encodes an optional
+/// *value*, which tags `Some` with its own domain. That tag keeps the
+/// derivation of an optional value apart from the derivation of its inner
+/// value. A value is never compared with a context, so sharing the tag here
+/// gained nothing, and it broke the rule that a parts tree is the same
+/// context as the value it came from.
 impl<'a, T> IntoPrfContext<'a> for Option<T>
 where
     T: IntoPrfContext<'a>,
@@ -306,7 +306,7 @@ mod tests {
 
         #[quickcheck]
         fn some_is_the_one_element_list(bytes: Vec<u8>) -> bool {
-            // `Some(x)` is the single-piece PAE of `x`'s encoding — the same
+            // `Some(x)` is the single-piece PAE of `x`'s encoding, the same
             // shape `IntoAad` gives it, so a runtime list of one part is the
             // static `Some`. It is framed, so it is not `x` itself.
             let inner = bytes.clone().into_prf_context();
@@ -316,9 +316,10 @@ mod tests {
 
         #[test]
         fn some_does_not_carry_the_value_path_domain() {
-            // The `PrfValue` Option path tags `Some` with its own domain; a
-            // context does not. If this fails, the context encoding has grown
-            // a tag again and runtime parts can no longer spell `Some`.
+            // A `PrfValue` tags an optional value's `Some` with its own
+            // domain; an `Option` context does not. If this fails, the
+            // context encoding has grown a tag again and a runtime list of
+            // one part no longer matches `Some`.
             assert_ne!(
                 Some("value").into_prf_context(),
                 "value".into_prf_context().for_option_some(),
