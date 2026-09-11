@@ -187,9 +187,9 @@ Passwords are stored in `Protected<[char; N]>`, which ensures:
 - **No accidental leakage**: the opaque `Debug` impl prints only the type name (e.g. `Protected<[char; 16]>`), never the contents
 - **Constant-time operations**: Where applicable, to prevent timing side-channels
 
-### Unbiased Character Selection
+### Near-Uniform Character Selection
 
-The crate uses bounded random number generation to ensure each character in the character set has an equal probability of being selected, preventing bias that could reduce password entropy.
+Each character is one fixed-count bounded draw in `0..set.len()`, so every character of the set is reachable and the number of random words consumed never depends on the values drawn. The draw is not exactly uniform: `SafeRand`'s bounded reduction has a statistical distance from uniform of at most `set.len() / 2⁶⁴`, which for the 94-, 62- and 52-character sets in this crate is at most 2⁻⁶⁰ per character. That bias is far below anything an attacker could exploit, but a protocol that needs exact uniformity must account for it.
 
 ## Use Cases
 
