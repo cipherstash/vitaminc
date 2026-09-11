@@ -183,15 +183,24 @@ integer_context!(
     i128 => PrfEncoding::I128,
 );
 
+/// An `Option` context follows its parts view: `Some(x)` is the one-element
+/// list `PAE([x])` and `None` the empty list `PAE([])`, exactly as
+/// `IntoAad` encodes them. A context built at runtime from parts (an
+/// `AadPiece` list of one) is therefore the same PRF context as the static
+/// `Some(x)`, on this side as on the AEAD side.
+///
+/// This is deliberately *not* the `PrfValue` `Option` encoding, which tags
+/// `Some` with a domain of its own: that tag keeps an optional *value*'s
+/// derivation apart from its inner value's, and a value is never compared
+/// with a context. Sharing the tag here bought nothing and cost the parts
+/// identity.
 impl<'a, T> IntoPrfContext<'a> for Option<T>
 where
     T: IntoPrfContext<'a>,
 {
     fn into_prf_context(self) -> PrfContext<'a> {
         match self {
-            // Tagged with the same domain as the `PrfValue` Option path so the
-            // crate has exactly one `Some` encoding.
-            Some(value) => value.into_prf_context().for_option_some(),
+            Some(value) => PrfContext::pae(&[value.into_prf_context().as_bytes()]),
             None => PrfContext::pae(&[]),
         }
     }
@@ -291,23 +300,26 @@ mod tests {
         );
     }
 
+    #[quickcheck]
+    fn option_context_is_the_one_element_list(bytes: Vec<u8>) -> bool {
+        // `Some(x)` is the single-piece PAE of `x`'s encoding — the same
+        // shape `IntoAad` gives it, so a runtime list of one part is the
+        // static `Some`. It is framed, so it is not `x` itself.
+        let inner = bytes.clone().into_prf_context();
+        let some = Some(bytes).into_prf_context();
+        some == PrfContext::pae(&[inner.as_bytes()]) && some != inner
+    }
+
     #[test]
-    fn option_context_shares_the_value_path_some_domain() {
-        // Both Option paths must tag `Some` through `for_option_some`. If this
-        // fails, the crate has grown a second, divergent Option encoding.
-        assert_eq!(
+    fn option_context_does_not_share_the_value_path_some_domain() {
+        // The `PrfValue` Option path tags `Some` with its own domain; a
+        // context does not. If this fails, the context encoding has grown a
+        // tag again and runtime parts can no longer spell `Some`.
+        assert_ne!(
             Some("value").into_prf_context(),
             "value".into_prf_context().for_option_some()
         );
-    }
-
-    #[quickcheck]
-    fn option_context_some_cannot_collide_with_a_bare_pae(bytes: Vec<u8>) -> bool {
-        // Guards the invariant that no other construction produces the
-        // `Some` framing: a plain single-piece PAE of the inner encoding
-        // must never equal the Option encoding.
-        let inner = bytes.clone().into_prf_context();
-        Some(bytes).into_prf_context() != PrfContext::pae(&[inner.as_bytes()])
+        assert_eq!(None::<&str>.into_prf_context(), PrfContext::pae(&[]));
     }
 
     #[test]
@@ -374,10 +386,7 @@ mod tests {
 
         let some = Some("value").into_prf_context();
         let typed_value = PrfContext::typed(PrfEncoding::UTF8, b"value");
-        assert_eq!(
-            some,
-            PrfContext::pae(&[OPTION_SOME_DOMAIN, typed_value.as_bytes()])
-        );
+        assert_eq!(some, PrfContext::pae(&[typed_value.as_bytes()]));
         assert_eq!(None::<&str>.into_prf_context(), PrfContext::pae(&[]));
 
         let left = PrfContext::typed(PrfEncoding::UTF8, b"left");
