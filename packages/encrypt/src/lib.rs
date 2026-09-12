@@ -10,6 +10,8 @@ pub use cipher::{Aes256Cipher, AesCipherText, AesDecipher, BoxedPassthrough};
 pub use key::Key;
 
 // Re-exports
+#[allow(deprecated)]
+pub use vitaminc_aead::Aad;
 pub use vitaminc_aead::{
     Cipher, Context, IntoAad, IntoContext, LocalCipherText, Nonce, Unspecified,
 };

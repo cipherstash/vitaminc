@@ -1623,21 +1623,27 @@ mod test {
     }
 
     #[test]
-    fn empty_composite_markers_reject_nonempty_plaintext() {
+    fn empty_composite_markers_require_empty_plaintext() {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let aad = Context::from_encoded(b"context").for_empty_sequence();
-        let marker = match "not-empty"
-            .encrypt_with_aad(&cipher, aad)
-            .expect("Encryption failed")
-        {
-            AesCipherText::Single(marker) => marker,
-            _ => panic!("expected Single ciphertext"),
-        };
+        // The empty payload must authenticate, so an AAD mismatch cannot
+        // hide a regression in the nonempty-payload rejection.
+        for (payload, expected) in [("", Ok(Vec::new())), ("not-empty", Err(Unspecified))] {
+            let aad = "context".into_aad().for_empty_sequence();
+            let marker = match payload
+                .encrypt_with_aad(&cipher, aad)
+                .expect("Encryption failed")
+            {
+                AesCipherText::Single(marker) => marker,
+                _ => panic!("expected Single ciphertext"),
+            };
 
-        assert!(cipher
-            .decrypt_with_aad::<Vec<String>, _>(AesCipherText::EmptySequence(marker), "context",)
-            .is_err());
+            let result = cipher.decrypt_with_aad::<Vec<String>, _>(
+                AesCipherText::EmptySequence(marker),
+                "context",
+            );
+            assert_eq!(result, expected, "payload: {payload:?}");
+        }
     }
 
     #[test]
