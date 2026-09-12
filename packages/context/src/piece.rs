@@ -373,36 +373,42 @@ impl fmt::Display for ContextPiece<'_> {
     }
 }
 
-/// A random tree, depth-bounded, over every kind of leaf. Available with
-/// the `arbitrary` feature, so a downstream crate can state a property over
-/// every tree this crate can encode.
-#[cfg(feature = "arbitrary")]
+/// A random tree over every kind of leaf, at most three lists deep and at
+/// most three parts wide. Available with the `arbitrary` feature, so a
+/// downstream crate can state a property over every tree this crate can
+/// encode.
+#[cfg(any(test, feature = "arbitrary"))]
 impl quickcheck::Arbitrary for ContextPiece<'static> {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-        fn gen(g: &mut quickcheck::Gen, depth: u8) -> ContextPiece<'static> {
-            let kinds = if depth == 0 { 14 } else { 15 };
-            match u8::arbitrary(g) % kinds {
-                0 => ContextPiece::Text(Cow::Owned(String::arbitrary(g))),
-                1 => ContextPiece::Bytes(Cow::Owned(Vec::arbitrary(g))),
-                2 => ContextPiece::Unit,
-                3 => ContextPiece::U8(u8::arbitrary(g)),
-                4 => ContextPiece::U16(u16::arbitrary(g)),
-                5 => ContextPiece::U32(u32::arbitrary(g)),
-                6 => ContextPiece::U64(u64::arbitrary(g)),
-                7 => ContextPiece::U128(u128::arbitrary(g)),
-                8 => ContextPiece::I8(i8::arbitrary(g)),
-                9 => ContextPiece::I16(i16::arbitrary(g)),
-                10 => ContextPiece::I32(i32::arbitrary(g)),
-                11 => ContextPiece::I64(i64::arbitrary(g)),
-                12 => ContextPiece::I128(i128::arbitrary(g)),
-                13 => ContextPiece::Encoded(Cow::Owned(Vec::arbitrary(g))),
-                _ => {
-                    let n = usize::arbitrary(g) % 4;
-                    ContextPiece::List((0..n).map(|_| gen(g, depth - 1)).collect())
-                }
-            }
+        arbitrary_piece(g, 3)
+    }
+}
+
+/// A random piece. A list may appear only while `depth` is above zero, and
+/// its parts are drawn one level shallower, so `depth` bounds the nesting.
+#[cfg(any(test, feature = "arbitrary"))]
+fn arbitrary_piece(g: &mut quickcheck::Gen, depth: u8) -> ContextPiece<'static> {
+    use quickcheck::Arbitrary;
+    let kinds = if depth == 0 { 14 } else { 15 };
+    match u8::arbitrary(g) % kinds {
+        0 => ContextPiece::Text(Cow::Owned(String::arbitrary(g))),
+        1 => ContextPiece::Bytes(Cow::Owned(Vec::arbitrary(g))),
+        2 => ContextPiece::Unit,
+        3 => ContextPiece::U8(u8::arbitrary(g)),
+        4 => ContextPiece::U16(u16::arbitrary(g)),
+        5 => ContextPiece::U32(u32::arbitrary(g)),
+        6 => ContextPiece::U64(u64::arbitrary(g)),
+        7 => ContextPiece::U128(u128::arbitrary(g)),
+        8 => ContextPiece::I8(i8::arbitrary(g)),
+        9 => ContextPiece::I16(i16::arbitrary(g)),
+        10 => ContextPiece::I32(i32::arbitrary(g)),
+        11 => ContextPiece::I64(i64::arbitrary(g)),
+        12 => ContextPiece::I128(i128::arbitrary(g)),
+        13 => ContextPiece::Encoded(Cow::Owned(Vec::arbitrary(g))),
+        _ => {
+            let n = usize::arbitrary(g) % 4;
+            ContextPiece::List((0..n).map(|_| arbitrary_piece(g, depth - 1)).collect())
         }
-        gen(g, 3)
     }
 }
 
@@ -457,37 +463,112 @@ mod tests {
         ]
     }
 
-    /// A random tree for the property tests. Wraps the `arbitrary` feature's
-    /// generator so the tests do not depend on the feature being on.
+    /// A random tree for the property tests, from the `Arbitrary` impl above,
+    /// so the generator every downstream property relies on is the one
+    /// exercised here.
     #[derive(Debug, Clone)]
     struct Tree(ContextPiece<'static>);
 
     impl quickcheck::Arbitrary for Tree {
         fn arbitrary(g: &mut quickcheck::Gen) -> Self {
-            fn gen(g: &mut quickcheck::Gen, depth: u8) -> ContextPiece<'static> {
-                let kinds = if depth == 0 { 14 } else { 15 };
-                match u8::arbitrary(g) % kinds {
-                    0 => ContextPiece::Text(Cow::Owned(String::arbitrary(g))),
-                    1 => ContextPiece::Bytes(Cow::Owned(Vec::arbitrary(g))),
-                    2 => ContextPiece::Unit,
-                    3 => ContextPiece::U8(u8::arbitrary(g)),
-                    4 => ContextPiece::U16(u16::arbitrary(g)),
-                    5 => ContextPiece::U32(u32::arbitrary(g)),
-                    6 => ContextPiece::U64(u64::arbitrary(g)),
-                    7 => ContextPiece::U128(u128::arbitrary(g)),
-                    8 => ContextPiece::I8(i8::arbitrary(g)),
-                    9 => ContextPiece::I16(i16::arbitrary(g)),
-                    10 => ContextPiece::I32(i32::arbitrary(g)),
-                    11 => ContextPiece::I64(i64::arbitrary(g)),
-                    12 => ContextPiece::I128(i128::arbitrary(g)),
-                    13 => ContextPiece::Encoded(Cow::Owned(Vec::arbitrary(g))),
-                    _ => {
-                        let n = usize::arbitrary(g) % 4;
-                        ContextPiece::List((0..n).map(|_| gen(g, depth - 1)).collect())
+            Tree(ContextPiece::arbitrary(g))
+        }
+    }
+
+    /// Which kind of piece this is, as the index the generator draws.
+    fn kind(piece: &ContextPiece<'_>) -> usize {
+        match piece {
+            ContextPiece::Text(_) => 0,
+            ContextPiece::Bytes(_) => 1,
+            ContextPiece::Unit => 2,
+            ContextPiece::U8(_) => 3,
+            ContextPiece::U16(_) => 4,
+            ContextPiece::U32(_) => 5,
+            ContextPiece::U64(_) => 6,
+            ContextPiece::U128(_) => 7,
+            ContextPiece::I8(_) => 8,
+            ContextPiece::I16(_) => 9,
+            ContextPiece::I32(_) => 10,
+            ContextPiece::I64(_) => 11,
+            ContextPiece::I128(_) => 12,
+            ContextPiece::Encoded(_) => 13,
+            ContextPiece::List(_) => 14,
+        }
+    }
+
+    /// How many lists deep the tree goes: a leaf is 0, a list is one more
+    /// than its deepest part.
+    fn depth(piece: &ContextPiece<'_>) -> usize {
+        match piece {
+            ContextPiece::List(parts) => 1 + parts.iter().map(depth).max().unwrap_or(0),
+            _ => 0,
+        }
+    }
+
+    mod given_the_arbitrary_generator {
+        use super::*;
+        use quickcheck::Arbitrary;
+
+        #[test]
+        fn produces_every_kind_of_piece_at_every_depth() {
+            // Every leaf kind must show up both at the top and inside a
+            // list, and lists must show up at all, or a property stated over
+            // `ContextPiece` is weaker than it claims.
+            let mut g = quickcheck::Gen::new(64);
+            let mut at_top = [false; 15];
+            let mut nested = [false; 15];
+            for _ in 0..4000 {
+                let tree = ContextPiece::arbitrary(&mut g);
+                at_top[kind(&tree)] = true;
+                if let ContextPiece::List(parts) = &tree {
+                    for part in parts {
+                        nested[kind(part)] = true;
                     }
                 }
             }
-            Tree(gen(g, 3))
+            assert!(at_top.iter().all(|seen| *seen), "top level: {at_top:?}");
+            assert!(nested.iter().all(|seen| *seen), "inside a list: {nested:?}");
+        }
+
+        #[test]
+        fn depth_zero_never_draws_a_list() {
+            let mut g = quickcheck::Gen::new(64);
+            for _ in 0..4000 {
+                let piece = arbitrary_piece(&mut g, 0);
+                assert!(!matches!(piece, ContextPiece::List(_)), "{piece}");
+            }
+        }
+
+        #[test]
+        fn each_level_draws_its_parts_one_level_shallower() {
+            // At depth 1 a list may appear, but nothing inside it may be a
+            // list, and no list is wider than three parts.
+            let mut g = quickcheck::Gen::new(64);
+            let mut saw_a_list = false;
+            for _ in 0..4000 {
+                let piece = arbitrary_piece(&mut g, 1);
+                if let ContextPiece::List(parts) = &piece {
+                    saw_a_list = true;
+                    assert!(parts.len() <= 3, "{piece}");
+                    assert!(
+                        parts
+                            .iter()
+                            .all(|part| !matches!(part, ContextPiece::List(_))),
+                        "{piece}"
+                    );
+                }
+            }
+            assert!(saw_a_list, "depth 1 must be able to draw a list");
+        }
+
+        #[test]
+        fn the_impl_starts_three_deep() {
+            let mut g = quickcheck::Gen::new(64);
+            let deepest = (0..4000)
+                .map(|_| depth(&ContextPiece::arbitrary(&mut g)))
+                .max()
+                .unwrap();
+            assert!((2..=3).contains(&deepest), "deepest was {deepest}");
         }
     }
 
