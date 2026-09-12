@@ -76,6 +76,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Running the tests
+
+Most tests use `aws-smithy-mocks` and need no external service. A few
+(`AwsKmsHmac`'s `test_finalize`) exercise a real `aws-sdk-kms` client against
+[LocalStack](https://www.localstack.cloud/) on `localhost:4566` — bring it up
+with the bundled `docker-compose.yml`:
+
+```sh
+docker compose -f packages/kms/docker-compose.yml up -d
+cargo test -p vitaminc-kms
+docker compose -f packages/kms/docker-compose.yml down
+```
+
+LocalStack Community's `kms` service covers the operations this crate needs
+(`CreateKey`/`GenerateDataKey`/`Decrypt`/`GenerateMac`) — no Pro tier required.
+
 ## CipherStash
 
 Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
