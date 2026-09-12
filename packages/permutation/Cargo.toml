@@ -12,8 +12,8 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-vitaminc-protected = { version = "0.3.0", path = "../protected", features = ["bitvec"] }
-vitaminc-random = { version = "0.3.0", path = "../random" }
+vitaminc-protected = { version = "0.4.0", path = "../protected", features = ["bitvec"] }
+vitaminc-random = { version = "0.4.0", path = "../random" }
 
 bitvec = { workspace = true }
 rand = { workspace = true }

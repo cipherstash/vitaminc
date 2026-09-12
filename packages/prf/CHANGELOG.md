@@ -1,4 +1,10 @@
 
+## [0.4.0] - 2026-09-12
+
+### Breaking
+
+- **Breaking:** `AadPiece` is the identity of a context on both derivations ([#338](https://github.com/cipherstash/vitaminc/pull/338))
+
 ## [0.3.0] - 2026-09-07
 
 ### Breaking
