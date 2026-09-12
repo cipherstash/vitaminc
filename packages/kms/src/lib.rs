@@ -7,6 +7,8 @@ use vitaminc_protected::{AsProtectedRef, Controlled, Protected, ProtectedRef};
 use vitaminc_traits::Update;
 use zeroize::Zeroize;
 
+mod aws;
+mod caching;
 mod crypt;
 mod data_key;
 mod index_key;
@@ -14,6 +16,8 @@ mod key_id;
 mod mac;
 mod sign;
 
+pub use aws::{AwsDataKeySource, AwsPooledDataKeySource, Error as AwsDataKeySourceError};
+pub use caching::CachingRetrieveDataKey;
 pub use crypt::{DecryptWithKey, EncryptWithKey};
 pub use data_key::{
     dedup_retrieve, fan_out_generate, pooled_key_generate, BatchGenerateDataKey,
