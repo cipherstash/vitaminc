@@ -2440,6 +2440,7 @@ dependencies = [
  "vitaminc",
  "vitaminc-aead",
  "vitaminc-async-traits",
+ "vitaminc-context",
  "vitaminc-encrypt",
  "vitaminc-hmac",
  "vitaminc-kms",
@@ -2460,6 +2461,7 @@ dependencies = [
  "serde",
  "trybuild",
  "vitaminc-aead-derive",
+ "vitaminc-context",
  "vitaminc-prf",
  "vitaminc-protected",
  "vitaminc-random",
@@ -2502,6 +2504,16 @@ version = "0.4.0"
 dependencies = [
  "vitaminc-protected",
  "vitaminc-traits",
+]
+
+[[package]]
+name = "vitaminc-context"
+version = "0.4.0"
+dependencies = [
+ "mutants",
+ "quickcheck",
+ "quickcheck_macros",
+ "vitaminc-protected",
 ]
 
 [[package]]
@@ -2578,6 +2590,7 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "thiserror",
+ "vitaminc-context",
  "vitaminc-protected",
 ]
 

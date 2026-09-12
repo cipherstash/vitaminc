@@ -33,8 +33,8 @@ use std::borrow::Cow;
 /// Extending a proven value is [`NonEmpty::with`]'s job, and it checks
 /// nothing, so its tail needs no `MaybeEmpty` impl at all.
 ///
-/// Because the check runs before encoding, *already-encoded* contexts (a
-/// `PrfContext` or an `Aad`) do not implement `MaybeEmpty` either: framing makes
+/// Because the check runs before encoding, *already-encoded* contexts (an
+/// encoded `Context`) do not implement `MaybeEmpty` either: framing makes
 /// their bytes non-empty even when built from an empty value, so an encoded
 /// byte check would certify exactly the degenerate case `NonEmpty` exists to
 /// exclude. Check the value on its way *into* vitaminc, before it is framed.
@@ -293,7 +293,7 @@ impl<T> NonEmpty<T> {
     /// MaybeEmpty` leaking into the caller's bounds; the tail needs none
     /// because nothing is evaluated on it. Any type is a valid tail: a
     /// downstream context type with no `MaybeEmpty` impl, an already-encoded
-    /// `Aad` or `PrfContext`, even another `NonEmpty`. The pair frames it
+    /// `Context`, even another `NonEmpty`. The pair frames it
     /// once, as the tuple would.
     ///
     /// ```rust
@@ -406,8 +406,8 @@ macro_rules! nonempty {
 
 /// A [`NonEmpty<&'static [u8]>`](NonEmpty) checked at compile time.
 ///
-/// The byte-string twin of [`nonempty!`](crate::nonempty) — the `Aad` and
-/// `PrfContext` APIs are byte-oriented, so a domain tag that is naturally a
+/// The byte-string twin of [`nonempty!`](crate::nonempty) — the `Context` derivation
+/// APIs are byte-oriented, so a domain tag that is naturally a
 /// byte string deserves the same compile-time path as a `&str` one, instead
 /// of a runtime `NonEmpty::new(b"tag".as_slice()).unwrap()`.
 ///

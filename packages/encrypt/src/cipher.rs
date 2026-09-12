@@ -4,7 +4,7 @@ use std::any::Any;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use vitaminc_aead::{
-    Aad, Cipher, CipherText, CipherTextBuilder, Decipher, DecipherVisitor, Decrypt, Encrypt,
+    Cipher, CipherText, CipherTextBuilder, Context, Decipher, DecipherVisitor, Decrypt, Encrypt,
     IntoAad, LocalCipherText, MapAccess, MapCipher, NonceGenerator, RandomNonceGenerator,
     SeqAccess, SeqCipher, Unspecified, WIRE_VERSION,
 };
@@ -57,7 +57,7 @@ impl Aes256Cipher {
 }
 
 /// Seal one leaf: `version(1) ‖ nonce ‖ ciphertext ‖ tag`, with the wire
-/// version bound into the AAD via `Aad::for_leaf`.
+/// version bound into the AAD via `Context::for_leaf`.
 ///
 /// This is THE leaf seal path — the dynamic [`Cipher`] impl and the static
 /// hlist cipher (`cipher_static.rs`) both go through it, so a wire-format
@@ -76,7 +76,7 @@ where
     let nonce = cipher.nonce_generator.generate()?;
     let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
     // Outermost derivation: bind the wire version the builder prefixes to
-    // the stored leaf — see `Aad::for_leaf`.
+    // the stored leaf — see `Context::for_leaf`.
     let aad = aad.into_aad().for_leaf(WIRE_VERSION);
 
     CipherTextBuilder::new()
@@ -93,7 +93,7 @@ where
 
 /// Open one leaf sealed by [`seal_leaf`] (or the equivalent array fast
 /// path): checks the wire version before parsing, then verifies with the
-/// same `Aad::for_leaf` derivation. Shared by the dynamic decipher and the
+/// same `Context::for_leaf` derivation. Shared by the dynamic decipher and the
 /// static hlist path for the same anti-drift reason as [`seal_leaf`].
 pub(crate) fn open_leaf<'a, A>(
     cipher: &Aes256Cipher,
@@ -149,7 +149,7 @@ impl<'c> Cipher for &'c Aes256Cipher {
         // are identical to the default path.
         let nonce = self.nonce_generator.generate()?;
         let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().map_err(|_| Unspecified)?;
-        // Outermost derivation: bind the wire version — see `Aad::for_leaf`.
+        // Outermost derivation: bind the wire version — see `Context::for_leaf`.
         let aad = aad.into_aad().for_leaf(WIRE_VERSION);
 
         CipherTextBuilder::new()
@@ -227,13 +227,13 @@ pub struct AesSeqCipher<'c> {
     items: Vec<AesCipherText>,
     /// The AAD fixed at [`Cipher::encrypt_seq`]; the empty marker is sealed
     /// against its `for_empty_sequence` derivation.
-    aad: Aad<'static>,
-    /// [`Aad::for_sequence_element`] of `aad`, derived once and applied to
+    aad: Context<'static>,
+    /// [`Context::for_sequence_element`] of `aad`, derived once and applied to
     /// every element. The labelled derivation is what authenticates the
     /// container shape: a leaf sealed in element position can never verify
     /// as a top-level `Single` (or vice versa) — see
-    /// [`Aad::for_sequence_element`].
-    element_aad: Aad<'static>,
+    /// [`Context::for_sequence_element`].
+    element_aad: Context<'static>,
     /// Whether at least one item was appended through the authenticated
     /// [`encrypt_next`](SeqCipher::encrypt_next) path. Passthrough items
     /// authenticate nothing, so a sequence with items but no encrypted ones
@@ -251,8 +251,10 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
         T: Encrypt,
     {
         // Borrow the stored derived AAD — no allocation per element.
-        let encrypted =
-            data.encrypt_with_aad(self.cipher, Aad::from_slice(self.element_aad.as_bytes()))?;
+        let encrypted = data.encrypt_with_aad(
+            self.cipher,
+            Context::from_encoded(self.element_aad.as_bytes()),
+        )?;
         // A nested `Encrypt` impl may route through the passthrough channel
         // (e.g. `FfiValue::Passthrough`), producing an unauthenticated node
         // despite arriving via this method. Only a genuinely sealed node may
@@ -290,7 +292,7 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
 /// [`MapCipher`] driver for [`Aes256Cipher`]. Keys are stored in the clear;
 /// values are encrypted under their own fresh nonce and accumulated into an
 /// [`AesCipherText::Map`]. Each value is sealed against
-/// [`Aad::for_map_entry`] of the caller's AAD and its key, so swapping or
+/// [`Context::for_map_entry`] of the caller's AAD and its key, so swapping or
 /// renaming keys in a stored ciphertext fails decryption (passthrough
 /// entries excepted — they are unauthenticated by design).
 ///
@@ -314,7 +316,7 @@ pub struct AesMapCipher<'c> {
     /// The AAD fixed at [`Cipher::encrypt_map`]. Each entry's value is sealed
     /// against `for_map_entry` of this; the empty marker against
     /// `for_empty_map` of it.
-    aad: Aad<'static>,
+    aad: Context<'static>,
     /// Whether at least one entry was appended through the authenticated
     /// [`encrypt_value`](MapCipher::encrypt_value) path — see
     /// [`AesSeqCipher::encrypted`] and [`end`](MapCipher::end).
@@ -493,7 +495,7 @@ impl AesDecipher<'_> {
         ct: LocalCipherText,
         aad: &[u8],
     ) -> Result<Protected<Vec<u8>>, Unspecified> {
-        open_leaf(cipher, ct, Aad::from_slice(aad))
+        open_leaf(cipher, ct, Context::from_encoded(aad))
     }
 
     fn verify_empty_marker(
@@ -711,11 +713,11 @@ impl<'c> Decipher<'c> for AesDecipher<'c> {
 struct AesSeqAccess<'c> {
     cipher: &'c Aes256Cipher,
     items: std::vec::IntoIter<AesCipherText>,
-    /// [`Aad::for_sequence_element`] of the caller's AAD, derived once at
+    /// [`Context::for_sequence_element`] of the caller's AAD, derived once at
     /// construction. `next_element` re-supplies it per element by *borrowing*
     /// these bytes, so there is no per-element allocation. Mirrors
     /// `AesSeqCipher::element_aad` on the encrypt side.
-    element_aad: Aad<'static>,
+    element_aad: Context<'static>,
 }
 
 impl<'c> SeqAccess<'c> for AesSeqAccess<'c> {
@@ -730,14 +732,14 @@ impl<'c> SeqAccess<'c> for AesSeqAccess<'c> {
         // Each element was sealed against the derived element AAD; re-supply
         // it per element by *borrowing* the stored bytes. Mirrors
         // `SeqCipher::encrypt_next`.
-        T::decrypt_with_aad(decipher, self.element_aad.as_bytes()).map(Some)
+        T::decrypt_with_aad(decipher, Context::from_encoded(self.element_aad.as_bytes())).map(Some)
     }
 }
 
 struct AesMapAccess<'c, 'a> {
     cipher: &'c Aes256Cipher,
     entries: std::vec::IntoIter<(String, AesCipherText)>,
-    aad: Aad<'a>,
+    aad: Context<'a>,
     /// The entry handed out by `next_key` and not yet consumed by
     /// `next_value`. Holding the ciphertext here (rather than decrypting it
     /// up front) is what lets the caller choose the plaintext type *after*
@@ -1338,7 +1340,7 @@ mod test {
 
     // --- Map key authentication ---
     //
-    // Each map value is sealed against `Aad::for_map_entry(aad, key)`, so key
+    // Each map value is sealed against `Context::for_map_entry(aad, key)`, so key
     // and value are cryptographically inseparable: an attacker who swaps or
     // renames the cleartext keys inside a stored ciphertext cannot produce a
     // map that still decrypts.
@@ -1540,7 +1542,7 @@ mod test {
 
     // --- None marker integrity ---
     //
-    // The None marker is sealed under `Aad::for_none` and verified to contain
+    // The None marker is sealed under `Context::for_none` and verified to contain
     // an empty plaintext, so a `Single` leaf can't be re-tagged as an
     // authenticated absence (silent data deletion), nor an absence as an
     // encrypted empty byte string.
@@ -1624,7 +1626,7 @@ mod test {
     fn empty_composite_markers_reject_nonempty_plaintext() {
         let key = Key::from([42u8; 32]);
         let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-        let aad = Aad::from_slice(b"context").for_empty_sequence();
+        let aad = Context::from_encoded(b"context").for_empty_sequence();
         let marker = match "not-empty"
             .encrypt_with_aad(&cipher, aad)
             .expect("Encryption failed")
@@ -2076,7 +2078,7 @@ mod test {
         // Flipping the version byte must fail — first at the parse check
         // (unknown version), and even a version a future parser accepted
         // would fail the tag, because the byte is bound into the leaf AAD
-        // via `Aad::for_leaf`.
+        // via `Context::for_leaf`.
         let cipher = Aes256Cipher::new(&Key::from([55u8; 32])).expect("Failed to create cipher");
         let leaf = match "x".to_string().encrypt(&cipher).expect("encrypt") {
             AesCipherText::Single(leaf) => leaf,
