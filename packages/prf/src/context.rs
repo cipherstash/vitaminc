@@ -55,10 +55,11 @@ impl<'a> PrfContext<'a> {
 
     /// Add a domain component without allowing concatenation ambiguities.
     ///
-    /// The leading domain tag keeps caller-refined contexts disjoint from the
-    /// contexts this crate assigns automatically. Without it, a context built
-    /// as `PrfContext::from_slice(OPTION_SOME_DOMAIN).refine(x)` would encode
-    /// identically to the one derived for `Some(x)`.
+    /// The leading domain tag keeps caller-refined contexts apart from the
+    /// contexts this crate assigns on its own. Without it, a caller could
+    /// build `PrfContext::from_slice(OPTION_SOME_DOMAIN).refine(x)` and get
+    /// the same bytes as the context `for_option_some` assigns when an
+    /// optional *value* is derived under `x`.
     pub fn refine<'b, C>(&self, component: C) -> PrfContext<'static>
     where
         C: IntoPrfContext<'b>,
@@ -183,15 +184,24 @@ integer_context!(
     i128 => PrfEncoding::I128,
 );
 
+/// `Some(x)` is the one-element list `PAE([x])` and `None` is the empty
+/// list `PAE([])`, the same shapes `IntoAad` gives them. A context built at
+/// runtime as a list of one part (an `AadPiece` list) is therefore the same
+/// PRF context as the static `Some(x)`, just as it is the same AAD.
+///
+/// This is deliberately different from how a `PrfValue` encodes an optional
+/// *value*, which tags `Some` with its own domain. That tag keeps the
+/// derivation of an optional value apart from the derivation of its inner
+/// value. A value is never compared with a context, so sharing the tag here
+/// gained nothing, and it broke the rule that a parts tree is the same
+/// context as the value it came from.
 impl<'a, T> IntoPrfContext<'a> for Option<T>
 where
     T: IntoPrfContext<'a>,
 {
     fn into_prf_context(self) -> PrfContext<'a> {
         match self {
-            // Tagged with the same domain as the `PrfValue` Option path so the
-            // crate has exactly one `Some` encoding.
-            Some(value) => value.into_prf_context().for_option_some(),
+            Some(value) => PrfContext::pae(&[value.into_prf_context().as_bytes()]),
             None => PrfContext::pae(&[]),
         }
     }
@@ -291,23 +301,50 @@ mod tests {
         );
     }
 
-    #[test]
-    fn option_context_shares_the_value_path_some_domain() {
-        // Both Option paths must tag `Some` through `for_option_some`. If this
-        // fails, the crate has grown a second, divergent Option encoding.
-        assert_eq!(
-            Some("value").into_prf_context(),
-            "value".into_prf_context().for_option_some()
-        );
-    }
+    mod given_an_option_context {
+        use super::*;
 
-    #[quickcheck]
-    fn option_context_some_cannot_collide_with_a_bare_pae(bytes: Vec<u8>) -> bool {
-        // Guards the invariant that no other construction produces the
-        // `Some` framing: a plain single-piece PAE of the inner encoding
-        // must never equal the Option encoding.
-        let inner = bytes.clone().into_prf_context();
-        Some(bytes).into_prf_context() != PrfContext::pae(&[inner.as_bytes()])
+        #[quickcheck]
+        fn some_is_the_one_element_list(bytes: Vec<u8>) -> bool {
+            // `Some(x)` is the single-piece PAE of `x`'s encoding, the same
+            // shape `IntoAad` gives it, so a runtime list of one part is the
+            // static `Some`. It is framed, so it is not `x` itself.
+            let inner = bytes.clone().into_prf_context();
+            let some = Some(bytes).into_prf_context();
+            some == PrfContext::pae(&[inner.as_bytes()]) && some != inner
+        }
+
+        #[test]
+        fn some_does_not_carry_the_value_path_domain() {
+            // A `PrfValue` tags an optional value's `Some` with its own
+            // domain; an `Option` context does not. If this fails, the
+            // context encoding has grown a tag again and a runtime list of
+            // one part no longer matches `Some`.
+            assert_ne!(
+                Some("value").into_prf_context(),
+                "value".into_prf_context().for_option_some(),
+                "a `Some` context must not share the `PrfValue` option-some domain"
+            );
+        }
+
+        #[test]
+        fn some_frames_the_typed_inner_context() {
+            let typed_value = PrfContext::typed(PrfEncoding::UTF8, b"value");
+            assert_eq!(
+                Some("value").into_prf_context(),
+                PrfContext::pae(&[typed_value.as_bytes()]),
+                "`Some` frames the typed inner context as one piece"
+            );
+        }
+
+        #[test]
+        fn none_is_the_empty_list() {
+            assert_eq!(
+                None::<&str>.into_prf_context(),
+                PrfContext::pae(&[]),
+                "`None` is the PAE of zero pieces"
+            );
+        }
     }
 
     #[test]
@@ -363,28 +400,52 @@ mod tests {
         );
     }
 
-    #[test]
-    fn every_context_conversion_preserves_structure() {
-        let expected_bytes = PrfContext::typed(PrfEncoding::BYTES, b"abc");
-        let slice: &[u8] = b"abc";
-        assert_eq!(slice.into_prf_context(), expected_bytes);
-        assert_eq!((*b"abc").into_prf_context(), expected_bytes);
-        assert_eq!(b"abc".to_vec().into_prf_context(), expected_bytes);
-        assert_eq!(().into_prf_context(), PrfContext::default());
+    mod given_a_bytes_context {
+        use super::*;
 
-        let some = Some("value").into_prf_context();
-        let typed_value = PrfContext::typed(PrfEncoding::UTF8, b"value");
-        assert_eq!(
-            some,
-            PrfContext::pae(&[OPTION_SOME_DOMAIN, typed_value.as_bytes()])
-        );
-        assert_eq!(None::<&str>.into_prf_context(), PrfContext::pae(&[]));
+        #[test]
+        fn every_byte_shape_encodes_as_typed_bytes() {
+            let expected = PrfContext::typed(PrfEncoding::BYTES, b"abc");
+            let slice: &[u8] = b"abc";
+            assert_eq!(slice.into_prf_context(), expected, "a slice is typed bytes");
+            assert_eq!(
+                (*b"abc").into_prf_context(),
+                expected,
+                "an array is typed bytes"
+            );
+            assert_eq!(
+                b"abc".to_vec().into_prf_context(),
+                expected,
+                "a vector is typed bytes"
+            );
+        }
+    }
 
-        let left = PrfContext::typed(PrfEncoding::UTF8, b"left");
-        let right = PrfContext::typed(PrfEncoding::U16, &7_u16.to_le_bytes());
-        assert_eq!(
-            ("left", 7_u16).into_prf_context(),
-            PrfContext::pae(&[left.as_bytes(), right.as_bytes()])
-        );
+    mod given_the_unit_context {
+        use super::*;
+
+        #[test]
+        fn is_the_empty_context() {
+            assert_eq!(
+                ().into_prf_context(),
+                PrfContext::default(),
+                "`()` is the empty context by definition, with no framing"
+            );
+        }
+    }
+
+    mod given_a_pair_context {
+        use super::*;
+
+        #[test]
+        fn frames_both_typed_parts() {
+            let left = PrfContext::typed(PrfEncoding::UTF8, b"left");
+            let right = PrfContext::typed(PrfEncoding::U16, &7_u16.to_le_bytes());
+            assert_eq!(
+                ("left", 7_u16).into_prf_context(),
+                PrfContext::pae(&[left.as_bytes(), right.as_bytes()]),
+                "a pair is the PAE of its two typed parts"
+            );
+        }
     }
 }
