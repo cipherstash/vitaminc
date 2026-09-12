@@ -13,7 +13,12 @@
 #   docker compose -f packages/kms/docker-compose.yml down
 services:
   localstack:
-    image: localstack/localstack:stable
+    # Pinned to the last Community-only major: `:stable`/`:latest` now
+    # bundle LocalStack's "unified" image, which exits at startup
+    # requiring a paid LOCALSTACK_AUTH_TOKEN even for previously-free
+    # services (confirmed by actually running this — CIP-4035, Linear map
+    # CIP-4028). `:4` still runs the plain Community image with no token.
+    image: localstack/localstack:4
     ports:
       - "4566:4566"
     environment:
