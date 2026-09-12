@@ -13,5 +13,5 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-vitaminc-protected = { version = "0.3.0", path = "../protected" }
-vitaminc-traits = { version = "0.3.0", path = "../traits" }
+vitaminc-protected = { version = "0.4.0", path = "../protected" }
+vitaminc-traits = { version = "0.4.0", path = "../traits" }

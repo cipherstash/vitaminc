@@ -22,7 +22,7 @@ members = [
 
 [workspace.package]
 documentation = "https://docs.rs/vitaminc"
-version = "0.3.0"
+version = "0.4.0"
 repository = "https://github.com/cipherstash/vitaminc"
 authors = [
   "Dan Draper <dan@cipherstash.com>",

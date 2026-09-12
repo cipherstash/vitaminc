@@ -1,4 +1,10 @@
 
+## [0.4.0] - 2026-09-12
+
+### Breaking
+
+- **Breaking:** `Some(x)` PRF contexts now match equivalent runtime contexts built from `AadPiece`. Derived terms change for contexts containing `Some`; regenerate any saved terms using those contexts. `None` and optional-value encoding are unchanged. ([#338](https://github.com/cipherstash/vitaminc/pull/338))
+
 ## [0.3.0] - 2026-09-07
 
 ### Breaking
