@@ -115,7 +115,7 @@ the matching width (e.g. `int16`→`INT32`), and `uint`/`uintptr` map to
   are wiped on drop. Copies owned by the host language's runtime (e.g. the
   V8 heap) are outside this crate's control.
 - Object keys travel in the clear but are bound into each value's AAD via
-  [`Aad::for_map_entry`], so keys in a stored ciphertext cannot be swapped
+  [`Context::for_map_entry`], so keys in a stored ciphertext cannot be swapped
   or renamed undetected.
 - Decryption failures are reported as [`Unspecified`] with no detail, as
   everywhere in Vitamin-C.
@@ -123,5 +123,5 @@ the matching width (e.g. `int16`→`INT32`), and `uint`/`uintptr` map to
 [`FfiValue`]: crate::FfiValue
 [`Cipher`]: vitaminc_aead::Cipher
 [`Decipher`]: vitaminc_aead::Decipher
-[`Aad::for_map_entry`]: vitaminc_aead::Aad::for_map_entry
+[`Context::for_map_entry`]: vitaminc_aead::Context::for_map_entry
 [`Unspecified`]: vitaminc_aead::Unspecified

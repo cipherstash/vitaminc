@@ -14,8 +14,8 @@ use std::{
 use vitaminc_protected::{Controlled, Protected};
 
 use crate::{
-    visitor::ResolvedVisitor, MapPrf, Prf, PrfBuildError, PrfContext, PrfEncoding, PrfError,
-    PrfValue, PrfVisitor, ReadyPrf, ResolvedPrf, SeqPrf,
+    visitor::ResolvedVisitor, Context, MapPrf, Prf, PrfBuildError, PrfEncoding, PrfError, PrfValue,
+    PrfVisitor, ReadyPrf, ResolvedPrf, SeqPrf,
 };
 
 type PassthroughValue = Box<dyn Any + Send + 'static>;
@@ -24,7 +24,7 @@ type PassthroughValue = Box<dyn Any + Send + 'static>;
 pub(crate) struct MockPrf;
 
 impl MockPrf {
-    fn derive(data: &[u8], encoding: PrfEncoding, context: &PrfContext<'_>) -> [u8; 32] {
+    fn derive(data: &[u8], encoding: PrfEncoding, context: &Context<'_>) -> [u8; 32] {
         let mut block = [0_u8; 32];
         for (index, chunk) in block.chunks_mut(8).enumerate() {
             let mut hasher = DefaultHasher::new();
@@ -59,7 +59,7 @@ impl Prf for MockPrf {
         &self,
         data: Protected<Vec<u8>>,
         encoding: PrfEncoding,
-        context: PrfContext<'static>,
+        context: Context<'static>,
         visitor: V,
     ) -> Self::Ok<V::Value>
     where
@@ -73,7 +73,7 @@ impl Prf for MockPrf {
         &self,
         data: Protected<[u8; N]>,
         encoding: PrfEncoding,
-        context: PrfContext<'static>,
+        context: Context<'static>,
         visitor: V,
     ) -> Self::Ok<V::Value>
     where
@@ -100,7 +100,7 @@ impl Prf for MockPrf {
         }
     }
 
-    fn prf_none<V>(&self, _context: PrfContext<'static>, visitor: V) -> Self::Ok<V::Value>
+    fn prf_none<V>(&self, _context: Context<'static>, visitor: V) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>,
     {
@@ -145,7 +145,7 @@ impl SeqPrf for MockSeqPrf<'_> {
     type BackendError = Infallible;
     type Passthrough = PassthroughValue;
 
-    fn prf_next<T>(mut self, value: T, context: PrfContext<'static>) -> Self
+    fn prf_next<T>(mut self, value: T, context: Context<'static>) -> Self
     where
         T: PrfValue,
     {
@@ -224,7 +224,7 @@ impl MapPrf for MockMapPrf<'_> {
         self
     }
 
-    fn prf_value<T>(mut self, value: T, context: PrfContext<'static>) -> Self
+    fn prf_value<T>(mut self, value: T, context: Context<'static>) -> Self
     where
         T: PrfValue,
     {

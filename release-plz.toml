@@ -31,6 +31,10 @@ name = "vitaminc-async-traits"
 version_group = "vitaminc"
 
 [[package]]
+name = "vitaminc-context"
+version_group = "vitaminc"
+
+[[package]]
 name = "vitaminc-encrypt"
 version_group = "vitaminc"
 

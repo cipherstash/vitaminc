@@ -20,7 +20,7 @@
 
 use std::fs;
 
-use vitaminc_aead::{Aad, Encrypt};
+use vitaminc_aead::{Context, Encrypt};
 use vitaminc_aead_value::transport as codec;
 use vitaminc_aead_value::FfiValue;
 use vitaminc_encrypt::{Aes256Cipher, Key};
@@ -84,7 +84,7 @@ fn main() {
     let cipher = Aes256Cipher::new(&Key::from(key_bytes)).unwrap();
 
     let ct = fixture_value()
-        .encrypt_with_aad(&cipher, Aad::from_slice(AAD))
+        .encrypt_with_aad(&cipher, Context::from_encoded(AAD))
         .unwrap();
     let mut ct_bytes = Vec::new();
     // Re-home the Box passthrough payload type to FfiValue value-nodes for the wire.

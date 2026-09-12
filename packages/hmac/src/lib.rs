@@ -15,8 +15,8 @@ use vitaminc_protected::{Acceptable, Controlled, DefaultScope, Protected, Protec
 use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 use vitaminc_prf::{
-    MapPrf, Prf, PrfBuildError, PrfContext, PrfEncoding, PrfError, PrfKeyInit, PrfValue,
-    PrfVisitor, ReadyPrf, ResolvedPrf, ResolvedVisitor, SeqPrf,
+    Context, MapPrf, Prf, PrfBuildError, PrfEncoding, PrfError, PrfKeyInit, PrfValue, PrfVisitor,
+    ReadyPrf, ResolvedPrf, ResolvedVisitor, SeqPrf,
 };
 
 type PassthroughValue = Box<dyn Any + Send + 'static>;
@@ -238,7 +238,7 @@ impl HmacSha256Prf {
         Self { key }
     }
 
-    fn derive<T>(&self, data: &T, encoding: PrfEncoding, context: &PrfContext<'_>) -> [u8; 32]
+    fn derive<T>(&self, data: &T, encoding: PrfEncoding, context: &Context<'_>) -> [u8; 32]
     where
         T: Controlled + Acceptable<DefaultScope>,
         T::Inner: AsRef<[u8]>,
@@ -284,7 +284,7 @@ impl Prf for HmacSha256Prf {
         &self,
         data: Protected<Vec<u8>>,
         encoding: PrfEncoding,
-        context: PrfContext<'static>,
+        context: Context<'static>,
         visitor: V,
     ) -> Self::Ok<V::Value>
     where
@@ -300,7 +300,7 @@ impl Prf for HmacSha256Prf {
         &self,
         data: Protected<[u8; N]>,
         encoding: PrfEncoding,
-        context: PrfContext<'static>,
+        context: Context<'static>,
         visitor: V,
     ) -> Self::Ok<V::Value>
     where
@@ -327,7 +327,7 @@ impl Prf for HmacSha256Prf {
         }
     }
 
-    fn prf_none<V>(&self, _context: PrfContext<'static>, visitor: V) -> Self::Ok<V::Value>
+    fn prf_none<V>(&self, _context: Context<'static>, visitor: V) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>,
     {
@@ -373,7 +373,7 @@ impl SeqPrf for HmacSeqPrf<'_> {
     type BackendError = Infallible;
     type Passthrough = PassthroughValue;
 
-    fn prf_next<T>(mut self, value: T, context: PrfContext<'static>) -> Self
+    fn prf_next<T>(mut self, value: T, context: Context<'static>) -> Self
     where
         T: PrfValue,
     {
@@ -453,7 +453,7 @@ impl MapPrf for HmacMapPrf<'_> {
         self
     }
 
-    fn prf_value<T>(mut self, value: T, context: PrfContext<'static>) -> Self
+    fn prf_value<T>(mut self, value: T, context: Context<'static>) -> Self
     where
         T: PrfValue,
     {
