@@ -1,0 +1,25 @@
+# LocalStack for this crate's AWS KMS-backed tests (`AwsKmsHmac`'s
+# `test_finalize`, and `aws.rs`'s adapter tests where they're not covered by
+# `aws-smithy-mocks`). This assumption already existed implicitly in
+# `get_config()`'s hardcoded `http://localhost:4566` — documented here for
+# the first time (see CIP-4029, Linear map CIP-4028).
+#
+# LocalStack Community's `kms` service covers CreateKey/GenerateDataKey/
+# Decrypt/GenerateMac — no Pro tier needed.
+#
+# Usage:
+#   docker compose -f packages/kms/docker-compose.yml up -d
+#   cargo test -p vitaminc-kms
+#   docker compose -f packages/kms/docker-compose.yml down
+services:
+  localstack:
+    image: localstack/localstack:stable
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=kms
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
