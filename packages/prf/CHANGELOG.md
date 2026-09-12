@@ -3,7 +3,7 @@
 
 ### Breaking
 
-- **Breaking:** `AadPiece` is the identity of a context on both derivations ([#338](https://github.com/cipherstash/vitaminc/pull/338))
+- **Breaking:** `Some(x)` PRF contexts now match equivalent runtime contexts built from `AadPiece`. Derived terms change for contexts containing `Some`; regenerate any saved terms using those contexts. `None` and optional-value encoding are unchanged. ([#338](https://github.com/cipherstash/vitaminc/pull/338))
 
 ## [0.3.0] - 2026-09-07
 
