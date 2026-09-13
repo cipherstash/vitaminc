@@ -626,6 +626,7 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
  "rand_core",
+ "zeroize",
 ]
 
 [[package]]
@@ -2558,6 +2559,7 @@ dependencies = [
  "rand",
  "serde",
  "subtle",
+ "thiserror",
  "vitaminc-protected",
  "vitaminc-random",
  "zeroize",
@@ -2607,6 +2609,7 @@ dependencies = [
 name = "vitaminc-random"
 version = "0.4.0"
 dependencies = [
+ "chacha20",
  "getrandom 0.4.3",
  "rand",
  "thiserror",
@@ -2720,7 +2723,7 @@ dependencies = [
  "bumpalo",
  "proc-macro2",
  "quote",
- "syn 3.0.4",
+ "syn 3.0.5",
  "wasm-bindgen-shared",
 ]
 
@@ -2763,7 +2766,7 @@ checksum = "8c89dcab8b516b6b603baca9d550b7282d68fcc7f367e3956cff7ebf406a3f12"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.4",
+ "syn 3.0.5",
 ]
 
 [[package]]

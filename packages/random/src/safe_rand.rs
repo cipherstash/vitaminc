@@ -2,15 +2,27 @@
 //! It is intentionally opinionated so that developers don't have to think about what Rng they should use
 //! for cryptographic purposes.
 //!
-//! Internally it uses `ChaCha20Rng` from the RustCrypto `chacha20` crate (via `rand`), which supports zeroization.
+//! Internally it uses `ChaCha20Rng` from the RustCrypto `chacha20` crate (via `rand`), built with
+//! its `zeroize` feature so the generator's key schedule and buffered keystream are wiped on drop.
 use std::convert::Infallible;
 
 use rand::{rngs::SysRng, Rng, SeedableRng, TryCryptoRng, TryRng};
 use vitaminc_protected::Controlled;
-use zeroize::Zeroize;
+use zeroize::{ZeroizeOnDrop, Zeroizing};
 
 /// A secure random number generator that is safe to use for cryptographic purposes.
+///
+/// Wipes its key schedule and buffered keystream on drop.
 pub struct SafeRand(rand::rngs::ChaCha20Rng);
+
+// `SafeRand` has no `Drop` of its own; the wipe is the field's drop glue,
+// which is `ChaCha20Rng`'s `ZeroizeOnDrop`. That impl exists only when
+// `chacha20` is built with its `zeroize` feature (see this crate's
+// `Cargo.toml`). The bound below fails to compile if the feature ever lapses,
+// so the marker impl can never silently become a lie.
+impl ZeroizeOnDrop for SafeRand {}
+const _: fn() = assert_zeroize_on_drop::<rand::rngs::ChaCha20Rng>;
+fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
 
 impl SafeRand {
     /// A value in `0..n`: at least `0`, strictly below `n`, uniform to
@@ -76,15 +88,20 @@ impl SafeRand {
         Ok(Self::try_from_rng(&mut SysRng)?)
     }
 
-    /// A safer alternative to `from_seed` that the seed is zeroized after use.
+    /// A safer alternative to `from_seed`: the seed is wiped once the
+    /// generator is built, on every exit from this function.
+    ///
+    /// The unwrapped bytes live in a [`Zeroizing`] wrapper from the moment
+    /// they leave `seed`'s custody, so the wipe is done by drop glue rather
+    /// than by a trailing statement. An unwind between unwrapping and
+    /// returning (e.g. a panic in the generator's constructor) still wipes
+    /// them.
     pub fn from_controlled_seed<C>(seed: C) -> Self
     where
         C: Controlled<Inner = [u8; 32]>,
     {
-        let mut seed = seed.risky_unwrap();
-        let rng = Self(rand::rngs::ChaCha20Rng::from_seed(seed));
-        seed.zeroize();
-        rng
+        let seed = Zeroizing::new(seed.risky_unwrap());
+        Self(rand::rngs::ChaCha20Rng::from_seed(*seed))
     }
 }
 
