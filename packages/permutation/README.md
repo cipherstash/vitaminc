@@ -26,7 +26,7 @@ use vitaminc_protected::{Controlled, Protected};
 let mut rng = SafeRand::from_seed([0; 32]);
 let key = PermutationKey::random(&mut rng).expect("Random error");
 let input: [u8; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
-assert_eq!(key.permute(input), [7, 8, 6, 3, 4, 1, 2, 5]);
+assert_eq!(key.permute(input), [4, 1, 5, 6, 8, 7, 2, 3]);
 ```
 
 ## Bitwise Permutations
@@ -41,7 +41,7 @@ use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 let mut rng = SafeRand::from_seed([0; 32]);
 let key = PermutationKey::random(&mut rng).expect("Random error");
 let input: u32 = 1000;
-assert_eq!(key.bitwise_permute(input), 2250248200);
+assert_eq!(key.bitwise_permute(input), 606208516);
 ```
 
 ## Permutations and Security

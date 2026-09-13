@@ -35,6 +35,13 @@ impl<const N: usize> PermutationKey<N> {
     }
 
     /// Creates a new permutation key from a seed.
+    ///
+    /// Derivation is deterministic: a given seed always yields the same key.
+    /// If it returns [`RandomError::SeedRejected`] (probability ≈ N²/2⁵⁷,
+    /// at most ≈ 2⁻⁴³ for N = 128), the seed can *never* derive a key —
+    /// discard it and provision a fresh seed. Only retain seeds whose first
+    /// derivation succeeds.
+    ///
     /// TODO: Perhaps seed should be protected?
     pub fn from_seed(seed: [u8; 32]) -> Result<Self, RandomError>
     where
@@ -93,23 +100,18 @@ where
     [u8; N]: IsPermutable,
 {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        let key = KeyInner::<N>::generate(identity).map(|mut key| {
-            // Fisher–Yates: step `i` needs `j` uniform in `0..=i`, so the
-            // half-open bound is `i + 1`. `j == i` (no swap) must be as likely
-            // as any other choice or the permutation is not uniform. The loop
-            // stops at `i == 1`: the `i == 0` step could only draw `j == 0`
-            // and swap an element with itself, so it would spend a draw for
-            // no entropy.
-            for i in (1..N).rev() {
-                let mut j = rng.next_below(i as u32 + 1) as usize;
-                key.swap(i, j);
-                // `j` is derived from the (possibly secret-seeded) key stream;
-                // wipe it as this crate does for every secret intermediate.
-                j.zeroize();
-            }
-            key
-        });
-
+        // Oblivious sort-by-random-key shuffle: unlike Fisher–Yates, whose
+        // `swap(i, j)` addresses memory with the secret draw `j`, timing and
+        // access patterns here are functions of `N` only. See `crate::shuffle`.
+        //
+        // Exactly one batch is attempted: `Err(SeedRejected)` means the seed
+        // behind `rng` is unusable and must be replaced, not retried.
+        //
+        // The permutation is written straight into the key's own wiped-on-
+        // drop slot, so no plain `[u8; N]` copy of it exists at any point;
+        // on failure the zeroed slot is dropped and wiped like any key.
+        let mut key = KeyInner::<N>::generate(|| [0; N]);
+        crate::shuffle::random_permutation(rng, key.inner_mut())?;
         Ok(Self(key))
     }
 }
@@ -178,31 +180,14 @@ mod tests {
         test_key_invert::<16>()?;
         test_key_invert::<32>()?;
         test_key_invert::<64>()?;
+        test_key_invert::<128>()?;
         Ok(())
-    }
-
-    /// The generator is Fisher-Yates over the identity, drawing
-    /// `next_below(i + 1)` for `i` from `N - 1` down to `1` (the `i == 0`
-    /// step is a no-op and draws nothing). Replaying that with a second
-    /// generator on the same seed must reproduce the key exactly, which pins
-    /// the draw order, the bound, and that no extra draw is spent.
-    #[test]
-    fn key_is_fisher_yates_over_next_below() {
-        let key = PermutationKey::<16>::from_seed([7u8; 32]).expect("random");
-        let mut rng = SafeRand::from_seed([7u8; 32]);
-        let mut expected: [u8; 16] = core::array::from_fn(|i| i as u8);
-        for i in (1..16).rev() {
-            let j = rng.next_below(i as u32 + 1) as usize;
-            expected.swap(i, j);
-        }
-        let got: Vec<u8> = key.iter().map(|b| b.risky_unwrap()).collect();
-        assert_eq!(got, expected);
     }
 
     /// A generated key is a valid permutation: every value in `0..N` present
     /// exactly once. The invert / complement round-trips imply this only
-    /// transitively; checking it directly fails loudly if the Fisher–Yates
-    /// loop bounds regress.
+    /// transitively; checking it directly at the `PermutationKey` level fails
+    /// loudly if the generator regresses, whichever shuffle it uses.
     fn test_key_is_a_permutation<const N: usize>() -> Result<(), Box<dyn std::error::Error>>
     where
         [u8; N]: IsPermutable,
@@ -251,7 +236,7 @@ mod tests {
             }
         }
         let expected = (SAMPLES / N) as f64;
-        let chi2: f64 = counts
+        let raw: f64 = counts
             .iter()
             .flatten()
             .map(|&c| {
@@ -259,9 +244,15 @@ mod tests {
                 d * d / expected
             })
             .sum();
-        // The position matrix is doubly stochastic, so (N - 1)² = 49 degrees
-        // of freedom; p = 0.001 critical value is 85.35. The seed is fixed, so
-        // this is deterministic — no flakiness.
+        // Each sample is a permutation matrix, not N independent draws, so
+        // the raw Pearson sum over the N² cells is not χ² on (N − 1)² = 49
+        // degrees of freedom: its mean is N/(N − 1) times that. Scaling by
+        // (N − 1)/N recovers a χ²(49) statistic (verified by simulation:
+        // mean 49.0, 0.1% above the threshold). p = 0.001 critical value for
+        // χ²(49) is 85.35. The seed is fixed, so the value is reproducible;
+        // an honest generator would exceed the threshold for about one seed
+        // in a thousand.
+        let chi2 = raw * (N - 1) as f64 / N as f64;
         assert!(chi2 < 85.35, "chi-squared too high: {chi2}");
         Ok(())
     }
@@ -272,6 +263,7 @@ mod tests {
         test_key_complement::<16>()?;
         test_key_complement::<32>()?;
         test_key_complement::<64>()?;
+        test_key_complement::<128>()?;
         Ok(())
     }
 }
