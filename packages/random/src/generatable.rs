@@ -162,9 +162,13 @@ mod tests {
         let mut got = SafeRand::from_seed([11u8; 32]);
         let mut reference = SafeRand::from_seed([11u8; 32]);
         for _ in 0..256 {
-            let value: NonZeroU16 = Generatable::random(&mut got).unwrap();
+            let value: NonZeroU16 = Generatable::random(&mut got).expect("random");
             let want = reference.next_below(u32::from(u16::MAX)) as u16 + 1;
-            assert_eq!(value.get(), want);
+            assert_eq!(
+                value.get(),
+                want,
+                "the draw must be one bounded call plus one, not a retry on zero"
+            );
         }
     }
 

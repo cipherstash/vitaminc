@@ -80,12 +80,10 @@ impl SafeRand {
     /// use [`Rng::next_u32`](rand::Rng::next_u32)), or `next_below(n)` when
     /// the caller has a length `n` rather than a maximum.
     ///
-    /// Besides the power-of-two case, two things changed for existing
-    /// callers: every call now consumes exactly one 64-bit word of the
-    /// stream, where it previously consumed one or more 32-bit words, so a
-    /// fixed-seed sequence that interleaves bounded and raw draws yields
-    /// different values than before; and the value drawn for a given seed
-    /// is different, because the reduction is different.
+    /// Besides the power-of-two case, both the value drawn for a given seed
+    /// and the number of words taken from the stream changed; see
+    /// [`BoundedRngInclusive`](crate::BoundedRngInclusive) for what that
+    /// means for existing callers.
     ///
     /// [`BoundedRngInclusive::next_bounded`]: crate::BoundedRngInclusive::next_bounded
     #[deprecated(

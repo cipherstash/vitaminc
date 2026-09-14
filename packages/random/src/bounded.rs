@@ -18,8 +18,9 @@ use vitaminc_protected::{Controlled, Protected};
 /// rejected somewhere; a `Protected<u32>` bound can only be rejected by
 /// checking the secret at the call, which is a branch on a secret. A
 /// [`NonZeroU32`] moves that check to construction, where the caller
-/// decides how to handle it, and the draw itself is then total: no branch,
-/// no panic, one draw for every input.
+/// decides how to handle it, so every bound the type admits takes the same
+/// path through the draw: no branch on the secret, and nothing left to
+/// panic on.
 ///
 /// The older **inclusive** form, `0..=max`, lives on the deprecated
 /// [`BoundedRngInclusive`] trait so that it can be removed later without a
@@ -35,6 +36,10 @@ pub trait BoundedRng<T> {
     /// The type of the value drawn. This is the bound's own type for `u32`
     /// and [`Protected<u32>`], and [`Protected<u32>`] for a
     /// [`Protected<NonZeroU32>`] bound, since `0` is a valid draw.
+    ///
+    /// The result no longer has the bound's own type, so a call that leaves
+    /// the drawn value's type to inference may now need an annotation where
+    /// it did not before.
     type Output;
 
     /// A value in `0..n`: at least `0`, strictly below `n`, uniform to
@@ -118,8 +123,9 @@ impl BoundedRng<Protected<NonZeroU32>> for SafeRand {
     type Output = Protected<u32>;
 
     /// See [`BoundedRng::next_below`]. The bound carries its own non-zero
-    /// proof, so this impl has no check and no panic: every input takes the
-    /// same path.
+    /// proof, so every input takes the same path here: nothing checks the
+    /// secret, and the non-zero assertion in the shared reduction cannot
+    /// fire for a bound of this type.
     fn next_below(&mut self, n: Protected<NonZeroU32>) -> Protected<u32> {
         n.map(|n| below_u32(self, n.get()))
     }
@@ -309,7 +315,7 @@ mod test {
     }
 
     #[test]
-    fn a_nonzero_protected_bound_of_one_is_total() {
+    fn a_nonzero_protected_bound_of_one_draws_without_rejecting() {
         use crate::SafeRand;
         use rand::SeedableRng;
         use vitaminc_protected::{Controlled, Protected};
@@ -319,7 +325,7 @@ mod test {
         let mut rng = SafeRand::from_seed([5u8; 32]);
         for _ in 0..16 {
             let p: Protected<u32> = rng.next_below(Protected::new(NonZeroU32::MIN));
-            assert_eq!(0, p.risky_unwrap());
+            assert_eq!(0, p.risky_unwrap(), "`0..1` has only one value to draw");
         }
     }
 }

@@ -77,9 +77,9 @@ impl<const N: usize> AlphaPassword<N> {
 /// character of the set is reachable. Each draw is uniform to within the
 /// `set.len() / 2⁶⁴` bias bound documented on
 /// [`BoundedRng`](vitaminc_random::BoundedRng); for the sets in this crate
-/// the exact statistical distance from uniform is at most 2⁻⁶⁰ per
+/// the exact statistical distance from uniform is at most 2⁻⁵⁹ per
 /// character.
-fn fill<const N: usize>(rng: &mut SafeRand, set: &[char]) -> [char; N] {
+fn draw_chars<const N: usize>(rng: &mut SafeRand, set: &[char]) -> [char; N] {
     let mut password: [char; N] = [0x00 as char; N];
     for slot in password.iter_mut() {
         *slot = set[rng.next_below(set.len() as u32) as usize];
@@ -89,13 +89,13 @@ fn fill<const N: usize>(rng: &mut SafeRand, set: &[char]) -> [char; N] {
 
 impl<const N: usize> Generatable for Password<N> {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        Ok(Password::new(fill(rng, &STANDARD_CHARS)))
+        Ok(Password::new(draw_chars(rng, &STANDARD_CHARS)))
     }
 }
 
 impl<const N: usize> Generatable for AlphaNumericPassword<N> {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        Ok(Self(Password::new(fill(
+        Ok(Self(Password::new(draw_chars(
             rng,
             &STANDARD_CHARS[..ALPHANUMERIC_LEN],
         ))))
@@ -104,7 +104,10 @@ impl<const N: usize> Generatable for AlphaNumericPassword<N> {
 
 impl<const N: usize> Generatable for AlphaPassword<N> {
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError> {
-        Ok(Self(Password::new(fill(rng, &STANDARD_CHARS[..ALPHA_LEN]))))
+        Ok(Self(Password::new(draw_chars(
+            rng,
+            &STANDARD_CHARS[..ALPHA_LEN],
+        ))))
     }
 }
 
@@ -182,7 +185,7 @@ mod tests {
 
     /// Every character of each narrow set is drawn, and nothing outside it:
     /// the position lookup is into the *whole* table, so a character past
-    /// the narrow set's end indexes past the tally array and panics. A
+    /// the narrow set's end is caught by the check on its index. A
     /// membership-only check would still pass if a set's bound shrank by
     /// one (dropping `'9'` or `'z'`); the tally catches that too.
     #[test]
@@ -193,11 +196,21 @@ mod tests {
         for _ in 0..SAMPLES {
             let value: AlphaNumericPassword<16> = Generatable::random(&mut rng).expect("random");
             for c in chars(value.0) {
-                alnum[STANDARD_CHARS.iter().position(|&s| s == c).expect("in set")] = true;
+                let idx = STANDARD_CHARS.iter().position(|&s| s == c).expect("in set");
+                assert!(
+                    idx < ALPHANUMERIC_LEN,
+                    "alphanumeric password drew {c:?}, which is outside its set"
+                );
+                alnum[idx] = true;
             }
             let value: AlphaPassword<16> = Generatable::random(&mut rng).expect("random");
             for c in chars(value.0) {
-                alpha[STANDARD_CHARS.iter().position(|&s| s == c).expect("in set")] = true;
+                let idx = STANDARD_CHARS.iter().position(|&s| s == c).expect("in set");
+                assert!(
+                    idx < ALPHA_LEN,
+                    "alpha password drew {c:?}, which is outside its set"
+                );
+                alpha[idx] = true;
             }
         }
         assert!(
