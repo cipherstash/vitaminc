@@ -6,6 +6,7 @@ members = [
     "packages/aead-napi",
     "packages/aead-value",
     "packages/async-traits",
+    "packages/context",
     "packages/encrypt",
     "packages/kms",
     "packages/protected",

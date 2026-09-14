@@ -12,7 +12,9 @@ mod visitor;
 #[cfg(test)]
 mod test_backend;
 
-pub use context::{IntoPrfContext, PrfContext};
+#[allow(deprecated)]
+pub use context::PrfContext;
+pub use context::{Context, ContextPiece, IntoContext, IntoPrfContext};
 pub use encoding::PrfEncoding;
 pub use error::{PrfBuildError, PrfError, PrfVisitorError};
 pub use impls::Passthrough;

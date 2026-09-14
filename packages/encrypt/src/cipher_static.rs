@@ -26,7 +26,7 @@ impl StaticCipher for &Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        // `Aad::for_none` domain-separates the absence marker from an empty
+        // `Context::for_none` domain-separates the absence marker from an empty
         // `Encrypted`: both seal an empty plaintext, so without it an
         // `Absent` slot could be swapped for an empty `Encrypted` one (and
         // vice versa) without tripping tag verification. Shared with the
@@ -74,7 +74,7 @@ impl Aes256Cipher {
     }
 
     /// Open a map [`Entry`]'s encrypted value, deriving the same
-    /// [`Aad::for_map_entry`](vitaminc_aead::Aad::for_map_entry) binding
+    /// [`Context::for_map_entry`](vitaminc_aead::Context::for_map_entry) binding
     /// [`StaticMapBuilder::encrypt_entry`] sealed it under — so an entry
     /// whose cleartext key was renamed or swapped fails to open.
     ///
@@ -122,7 +122,7 @@ mod test {
     use crate::Key;
     use quickcheck_macros::quickcheck;
     use vitaminc_aead::hlist::{Entry, HCons, HNil, Map, Passthrough, StaticCipher};
-    use vitaminc_aead::{Aad, LocalCipherText};
+    use vitaminc_aead::LocalCipherText;
 
     // A worked example. In production this type alias would be generated
     // by a derive macro from the user's struct definition.
@@ -206,7 +206,7 @@ mod test {
         assert_eq!(theme, "midnight");
     }
 
-    // Entry values are sealed against `Aad::for_map_entry(aad, key)`, so a
+    // Entry values are sealed against `Context::for_map_entry(aad, key)`, so a
     // stored entry whose cleartext key is renamed (the untrusted-input path a
     // future deserializer would expose) must fail to open — the same key-swap
     // resistance the dynamic MapCipher enforces.
@@ -363,20 +363,28 @@ mod test {
     }
 
     #[test]
-    fn verify_absent_rejects_a_nonempty_payload_under_the_none_derivation() {
+    fn verify_absent_requires_empty_payload_under_the_none_derivation() {
         // Even a key-holding writer must not be able to pass a nonempty
         // payload off as an absence marker: verify_absent requires the sealed
         // plaintext to be empty, not merely the tag to bind `for_none(aad)`.
         let cipher = Aes256Cipher::new(&Key::from([6u8; 32])).unwrap();
         let aad = b"aad".as_slice();
-        let forged = (&cipher)
-            .encrypt_bytes(
-                Protected::new(b"payload".to_vec()),
-                Aad::from_slice(aad).for_none(),
-            )
-            .unwrap();
-        let as_absent = Absent::from_local(forged.into_local());
-        assert!(cipher.verify_absent(as_absent, aad).is_err());
+        // The empty payload proves the fixture passes authentication before
+        // verify_absent checks whether its plaintext is empty.
+        for (payload, expected) in [("", Ok(())), ("payload", Err(Unspecified))] {
+            let sealed = (&cipher)
+                .encrypt_bytes(
+                    Protected::new(payload.as_bytes().to_vec()),
+                    aad.into_aad().for_none(),
+                )
+                .unwrap();
+            let as_absent = Absent::from_local(sealed.into_local());
+            assert_eq!(
+                cipher.verify_absent(as_absent, aad),
+                expected,
+                "payload: {payload:?}"
+            );
+        }
     }
 
     // An empty `Encrypted` and an `Absent` seal the same empty plaintext; the

@@ -88,7 +88,7 @@ pub enum FfiValue {
     Array(Vec<FfiValue>),
     /// String-keyed object/map. Encrypts via the cipher's map mode: keys
     /// travel in the clear (bound into each value's AAD — see
-    /// [`Aad::for_map_entry`](vitaminc_aead::Aad::for_map_entry)); values are
+    /// [`Context::for_map_entry`](vitaminc_aead::Context::for_map_entry)); values are
     /// sealed.
     Object(Vec<(String, FfiValue)>),
     /// A subtree that travels alongside the ciphertext **unencrypted and
@@ -202,12 +202,12 @@ impl Encrypt for FfiValue {
             // Delegate to the built-in `Vec<T>` impl (`FfiValue: Encrypt`)
             // so the sequence wire protocol has exactly one definition —
             // element positions are carried structurally, not authenticated;
-            // see `Aad::for_sequence_element`. A nested `Passthrough`
+            // see `Context::for_sequence_element`. A nested `Passthrough`
             // element routes identically either way, via its own arm below.
             FfiValue::Array(items) => items.encrypt_with_aad(cipher, aad),
             FfiValue::Object(entries) => {
                 // Mirror the built-in `HashMap` impls; the cipher binds each
-                // key into its value's AAD via `Aad::for_map_entry`.
+                // key into its value's AAD via `Context::for_map_entry`.
                 entries
                     .into_iter()
                     .try_fold(cipher.encrypt_map(aad), |c, (key, value)| {
@@ -955,7 +955,7 @@ mod tests {
         let bad = (&cipher)
             .encrypt_bytes_vec(
                 Protected::new(vec![tags::STRING, 0xff]),
-                vitaminc_aead::Aad::empty(),
+                vitaminc_aead::Context::empty(),
             )
             .expect("encrypt raw");
         assert!(cipher.decrypt::<FfiValue>(bad).is_err());
@@ -981,7 +981,7 @@ mod tests {
             let mut short = vec![tag];
             short.extend(std::iter::repeat_n(0u8, width - 1));
             let bad = (&cipher)
-                .encrypt_bytes_vec(Protected::new(short), vitaminc_aead::Aad::empty())
+                .encrypt_bytes_vec(Protected::new(short), vitaminc_aead::Context::empty())
                 .expect("encrypt raw");
             assert!(
                 cipher.decrypt::<FfiValue>(bad).is_err(),
@@ -991,7 +991,7 @@ mod tests {
             let mut long = vec![tag];
             long.extend(std::iter::repeat_n(0u8, width + 1));
             let bad = (&cipher)
-                .encrypt_bytes_vec(Protected::new(long), vitaminc_aead::Aad::empty())
+                .encrypt_bytes_vec(Protected::new(long), vitaminc_aead::Context::empty())
                 .expect("encrypt raw");
             assert!(
                 cipher.decrypt::<FfiValue>(bad).is_err(),
@@ -1013,7 +1013,10 @@ mod tests {
             tags::BOOL_TRUE,
         ] {
             let bad = (&cipher)
-                .encrypt_bytes_vec(Protected::new(vec![tag, 0]), vitaminc_aead::Aad::empty())
+                .encrypt_bytes_vec(
+                    Protected::new(vec![tag, 0]),
+                    vitaminc_aead::Context::empty(),
+                )
                 .expect("encrypt raw");
             assert!(cipher.decrypt::<FfiValue>(bad).is_err());
         }
@@ -1024,12 +1027,12 @@ mod tests {
         let cipher = cipher();
         use vitaminc_aead::Cipher as _;
         let bad = (&cipher)
-            .encrypt_bytes_vec(Protected::new(vec![0x7f]), vitaminc_aead::Aad::empty())
+            .encrypt_bytes_vec(Protected::new(vec![0x7f]), vitaminc_aead::Context::empty())
             .expect("encrypt raw");
         assert!(cipher.decrypt::<FfiValue>(bad).is_err());
         // Empty plaintext (no tag at all) also fails.
         let empty = (&cipher)
-            .encrypt_bytes_vec(Protected::new(vec![]), vitaminc_aead::Aad::empty())
+            .encrypt_bytes_vec(Protected::new(vec![]), vitaminc_aead::Context::empty())
             .expect("encrypt raw");
         assert!(cipher.decrypt::<FfiValue>(empty).is_err());
     }

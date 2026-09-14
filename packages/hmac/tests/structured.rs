@@ -18,7 +18,7 @@ use vitaminc_protected::{Controlled, Protected};
 
 use vitaminc_hmac::HmacSha256Prf;
 use vitaminc_prf::{
-    BlockVisitor, IntoPrfContext, MapAccess, MapPrf, Prf, PrfBuildError, PrfContext, PrfEncoding,
+    BlockVisitor, Context, IntoPrfContext, MapAccess, MapPrf, Prf, PrfBuildError, PrfEncoding,
     PrfError, PrfKeyInit, PrfValue, PrfVisitor, PrfVisitorError, ReadyPrf, ResolvedPrf,
     ResolvedVisitor, SeqAccess, SeqPrf,
 };
@@ -140,7 +140,7 @@ fn custom_leaf_encoding_domains_are_separated() {
             .prf_bytes_vec(
                 Protected::new(vec![1, 2, 3]),
                 encoding,
-                PrfContext::empty(),
+                Context::empty(),
                 BlockVisitor,
             )
             .into_result()
@@ -262,7 +262,7 @@ fn handwritten_mixed_record_resolves_heterogeneous_children() {
 }
 
 enum PendingNode {
-    Leaf(Protected<Vec<u8>>, PrfEncoding, PrfContext<'static>),
+    Leaf(Protected<Vec<u8>>, PrfEncoding, Context<'static>),
     Sequence(Vec<PendingNode>),
     Map(Vec<(String, PendingNode)>),
     Absent,
@@ -331,7 +331,7 @@ impl DeferredPrf {
         Ok(match node {
             PendingNode::Leaf(data, encoding, context) => {
                 let framed =
-                    PrfContext::pae(&[encoding.as_bytes(), context.as_bytes(), data.risky_ref()]);
+                    Context::pae(&[encoding.as_bytes(), context.as_bytes(), data.risky_ref()]);
                 let mut mac = Hmac::<Sha256>::new_from_slice(self.key.risky_ref()).unwrap();
                 mac.update(framed.as_bytes());
                 let bytes = mac.finalize().into_bytes();
@@ -372,7 +372,7 @@ impl Prf for DeferredPrf {
         &self,
         data: Protected<Vec<u8>>,
         encoding: PrfEncoding,
-        context: PrfContext<'static>,
+        context: Context<'static>,
         visitor: V,
     ) -> Self::Ok<V::Value>
     where
@@ -400,7 +400,7 @@ impl Prf for DeferredPrf {
         }
     }
 
-    fn prf_none<V>(&self, _context: PrfContext<'static>, visitor: V) -> Self::Ok<V::Value>
+    fn prf_none<V>(&self, _context: Context<'static>, visitor: V) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>,
     {
@@ -445,7 +445,7 @@ impl SeqPrf for DeferredSeq<'_> {
     type BackendError = Infallible;
     type Passthrough = Boxed;
 
-    fn prf_next<T: PrfValue>(mut self, value: T, context: PrfContext<'static>) -> Self {
+    fn prf_next<T: PrfValue>(mut self, value: T, context: Context<'static>) -> Self {
         if self.error.is_none() {
             match value
                 .prf_visit_with_context(self.backend, context, ResolvedVisitor)
@@ -510,7 +510,7 @@ impl MapPrf for DeferredMap<'_> {
         self
     }
 
-    fn prf_value<T: PrfValue>(mut self, value: T, context: PrfContext<'static>) -> Self {
+    fn prf_value<T: PrfValue>(mut self, value: T, context: Context<'static>) -> Self {
         let Some(key) = self.pending.take() else {
             self.build_error(PrfBuildError::ValueWithoutKey);
             return self;
@@ -785,8 +785,8 @@ fn structural_and_visitor_errors_remain_distinct() {
 fn duplicate_map_keys_are_rejected() {
     let duplicated = local()
         .prf_map(None)
-        .prf_entry("email", "a@example.com", PrfContext::empty())
-        .prf_entry("email", "b@example.com", PrfContext::empty())
+        .prf_entry("email", "a@example.com", Context::empty())
+        .prf_entry("email", "b@example.com", Context::empty())
         .end(ResolvedVisitor)
         .into_result();
     assert!(matches!(
@@ -799,7 +799,7 @@ fn duplicate_map_keys_are_rejected() {
 fn duplicate_passthrough_map_keys_are_rejected() {
     let duplicated = local()
         .prf_map(None)
-        .prf_entry("field", "value", PrfContext::empty())
+        .prf_entry("field", "value", Context::empty())
         .passthrough_entry("field", Box::new(1_u32))
         .end(ResolvedVisitor)
         .into_result();

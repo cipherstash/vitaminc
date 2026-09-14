@@ -66,7 +66,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use vitaminc_aead::{Aad, Element, Encrypt};
+use vitaminc_aead::{Context, Element, Encrypt};
 use vitaminc_aead_value::{transport as codec, FfiValue};
 use vitaminc_encrypt::{Aes256Cipher, AesCipherText};
 use zeroize::Zeroize;
@@ -303,7 +303,7 @@ fn encrypt(handle: u32, aad: &[u8], val: &[u8], as_element: bool) -> Result<Vec<
     // error even for an unknown handle.
     let value = codec::decode_value(&mut codec::Reader::new(val)).map_err(|_| STATUS_ENCODING)?;
     with_cipher(handle, |cipher| {
-        let aad = Aad::from_slice(aad);
+        let aad = Context::from_encoded(aad);
         let ct: AesCipherText = if as_element {
             Element(value).encrypt_with_aad(cipher, aad)
         } else {
@@ -380,7 +380,7 @@ fn decrypt(handle: u32, aad: &[u8], ct: &[u8], as_element: bool) -> Result<Vec<u
     let ct: AesCipherText =
         codec::decode_ciphertext_boxed(&mut codec::Reader::new(ct)).map_err(|_| STATUS_ENCODING)?;
     with_cipher(handle, |cipher| {
-        let aad = Aad::from_slice(aad);
+        let aad = Context::from_encoded(aad);
         let value: FfiValue = if as_element {
             cipher
                 .decrypt_with_aad::<Element<FfiValue>, _>(ct, aad)

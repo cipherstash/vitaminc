@@ -10,7 +10,11 @@ pub use cipher::{Aes256Cipher, AesCipherText, AesDecipher, BoxedPassthrough};
 pub use key::Key;
 
 // Re-exports
-pub use vitaminc_aead::{Aad, Cipher, IntoAad, LocalCipherText, Nonce, Unspecified};
+#[allow(deprecated)]
+pub use vitaminc_aead::Aad;
+pub use vitaminc_aead::{
+    Cipher, Context, IntoAad, IntoContext, LocalCipherText, Nonce, Unspecified,
+};
 // The `Encrypt`/`Decrypt` names each cover a trait and a derive macro, so one
 // re-export carries both. Inlined so the derives' `#[aead(...)]` reference
 // renders here too — a caller who depends only on this crate should not have to
