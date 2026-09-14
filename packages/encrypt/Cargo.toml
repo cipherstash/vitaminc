@@ -24,7 +24,7 @@ zeroize = { workspace = true }
 # CI testing of the wasm32 backend on a native runner.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 aws-lc-rs = "1.17.0"
-aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc", "zeroize"], optional = true }
+aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc", "zeroize"], optional = true }
 
 # Wasm32: pure-Rust AES-256-GCM. aws-lc-rs has C deps (aws-lc-sys) that
 # don't compile on wasm32-unknown-unknown. `zeroize` clears the AES round-key
