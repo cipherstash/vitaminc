@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use crate::SafeRand;
 use rand::CryptoRng;
 use vitaminc_protected::{Controlled, Protected};
@@ -6,9 +8,19 @@ use vitaminc_protected::{Controlled, Protected};
 ///
 /// [`next_below(n)`](BoundedRng::next_below) is the primitive: a value in
 /// `0..n`, the half-open bound every index-shaped use wants (`n` items, pick
-/// one) and the one `std` and `rand` ranges use. It is implemented for `u32`
-/// and for a [`Protected<u32>`] bound, and is also reachable as
+/// one) and the one `std` and `rand` ranges use. It is implemented for a
+/// `u32` bound, for a [`Protected<u32>`] bound, and for a
+/// [`Protected<NonZeroU32>`] bound, and is also reachable as
 /// [`SafeRand::next_below`] without importing this trait.
+///
+/// The [`Protected<NonZeroU32>`] form is the one to use when the bound is a
+/// secret. `0..n` is empty when `n == 0`, so a bound of zero has to be
+/// rejected somewhere; a `Protected<u32>` bound can only be rejected by
+/// checking the secret at the call, which is a branch on a secret. A
+/// [`NonZeroU32`] moves that check to construction, where the caller
+/// decides how to handle it, so every bound the type admits takes the same
+/// path through the draw: no branch on the secret, and nothing left to
+/// panic on.
 ///
 /// The older **inclusive** form, `0..=max`, lives on the deprecated
 /// [`BoundedRngInclusive`] trait so that it can be removed later without a
@@ -18,9 +30,22 @@ use vitaminc_protected::{Controlled, Protected};
 /// Lemire's multiply-high method: no rejection loop and no branch on the
 /// value drawn, so the number of draws does not depend on the values drawn.
 /// The reduction's statistical distance from uniform is at most `n / 2⁶⁴`:
-/// below 2⁻⁵⁵ for `n ≤ 256` and still at most 2⁻³² at `n = u32::MAX`. A
-/// protocol that needs exact uniformity must account for that term.
+/// below 2⁻⁵⁵ for `n ≤ 256` and still at most 2⁻³² at `n = u32::MAX`. That
+/// is a ceiling, and a loose one for most bounds. The distance for a given
+/// `n` is exactly `r(n − r) / (n · 2⁶⁴)`, where `r = 2⁶⁴ mod n` is the
+/// number of values that get one extra word of the draw space; it is zero
+/// when `n` divides `2⁶⁴`, and largest when `r` is near `n / 2`. A protocol
+/// that needs exact uniformity must account for that term.
 pub trait BoundedRng<T> {
+    /// The type of the value drawn. This is the bound's own type for `u32`
+    /// and [`Protected<u32>`], and [`Protected<u32>`] for a
+    /// [`Protected<NonZeroU32>`] bound, since `0` is a valid draw.
+    ///
+    /// The result no longer has the bound's own type, so a call that leaves
+    /// the drawn value's type to inference may now need an annotation where
+    /// it did not before.
+    type Output;
+
     /// A value in `0..n`: at least `0`, strictly below `n`, uniform to
     /// within the `n / 2⁶⁴` bias bound documented on [`BoundedRng`].
     ///
@@ -28,9 +53,11 @@ pub trait BoundedRng<T> {
     ///
     /// Panics if `n == 0`: the range `0..0` is empty and has no value to
     /// return. Callers that compute `n` should check it first. When `n` is
-    /// a [`Protected<u32>`] the panic is observable on a secret, so a caller
-    /// whose secret bound may be zero must rule that out before calling.
-    fn next_below(&mut self, n: T) -> T;
+    /// a [`Protected<u32>`] the panic is observable on a secret; a caller
+    /// whose secret bound may be zero should construct a
+    /// [`Protected<NonZeroU32>`] instead, for which this method never
+    /// panics.
+    fn next_below(&mut self, n: T) -> Self::Output;
 }
 
 /// The older **inclusive** bounded draw, `0..=max`.
@@ -41,6 +68,13 @@ pub trait BoundedRng<T> {
 /// doc always said, for every `max` up to and including `u32::MAX`, with the
 /// same fixed-count draw and the same `(max + 1) / 2⁶⁴` bias bound as
 /// [`BoundedRng::next_below`].
+///
+/// Two things changed for existing callers besides the power-of-two case.
+/// Every call now consumes exactly one 64-bit word of the generator's
+/// stream, where it previously consumed one or more 32-bit words, so any
+/// sequence that interleaves bounded and raw draws from a fixed seed yields
+/// different values than before. And the value drawn for a given seed is
+/// different, because the reduction is different.
 ///
 /// This is a separate trait rather than a deprecated method on
 /// [`BoundedRng`] so that implementors of `BoundedRng` are not forced to
@@ -61,19 +95,23 @@ pub trait BoundedRngInclusive<T> {
 }
 
 impl BoundedRng<u32> for SafeRand {
+    type Output = u32;
+
     fn next_below(&mut self, n: u32) -> u32 {
         below_u32(self, n)
     }
 }
 
 impl BoundedRng<Protected<u32>> for SafeRand {
+    type Output = Protected<u32>;
+
     /// See [`BoundedRng::next_below`].
     ///
     /// # Panics
     ///
     /// Panics if the wrapped bound is zero. That panic is observable on a
-    /// secret, so a caller whose secret bound may be zero must rule that out
-    /// before calling.
+    /// secret; a caller whose secret bound may be zero should construct a
+    /// [`Protected<NonZeroU32>`] and use that impl, which never panics.
     fn next_below(&mut self, n: Protected<u32>) -> Protected<u32> {
         // Check the bound before `map` unwraps it: `Controlled::map` hands
         // the raw inner value to the closure, so a zero check inside the
@@ -82,6 +120,18 @@ impl BoundedRng<Protected<u32>> for SafeRand {
         // still wrapped, and `Protected`'s drop glue zeroizes it.
         assert!(*n.risky_ref() != 0, "range must be non-zero");
         n.map(|n| below_u32(self, n))
+    }
+}
+
+impl BoundedRng<Protected<NonZeroU32>> for SafeRand {
+    type Output = Protected<u32>;
+
+    /// See [`BoundedRng::next_below`]. The bound carries its own non-zero
+    /// proof, so every input takes the same path here: nothing checks the
+    /// secret, and the non-zero assertion in the shared reduction cannot
+    /// fire for a bound of this type.
+    fn next_below(&mut self, n: Protected<NonZeroU32>) -> Protected<u32> {
+        n.map(|n| below_u32(self, n.get()))
     }
 }
 
@@ -131,6 +181,7 @@ pub(crate) fn upto_u32<R: CryptoRng>(rng: &mut R, max: u32) -> u32 {
 #[cfg(test)]
 mod test {
     use std::convert::Infallible;
+    use std::num::NonZeroU32;
 
     use rand::TryCryptoRng;
 
@@ -237,18 +288,22 @@ mod test {
         use rand::SeedableRng;
         use vitaminc_protected::{Controlled, Protected};
 
-        // The plain and `Protected<u32>` impls, and the inherent
-        // `SafeRand::next_below`, must all be the same draw and reduction as
-        // the helpers over the same seed: not a constant, not a differently
-        // reduced value, and one draw per call.
+        // The plain, `Protected<u32>` and `Protected<NonZeroU32>` impls,
+        // and the inherent `SafeRand::next_below`, must all be the same draw
+        // and reduction as the helpers over the same seed: not a constant,
+        // not a differently reduced value, and one draw per call.
         let mut helper = SafeRand::from_seed([5u8; 32]);
         let mut plain = SafeRand::from_seed([5u8; 32]);
         let mut protected = SafeRand::from_seed([5u8; 32]);
+        let mut nonzero = SafeRand::from_seed([5u8; 32]);
         let mut inherent = SafeRand::from_seed([5u8; 32]);
         for _ in 0..100 {
             let want = below_u32(&mut helper, 1000);
             assert_eq!(want, BoundedRng::next_below(&mut plain, 1000u32));
             let p: Protected<u32> = protected.next_below(Protected::new(1000));
+            assert_eq!(want, p.risky_unwrap());
+            let bound = Protected::new(NonZeroU32::new(1000).unwrap());
+            let p: Protected<u32> = nonzero.next_below(bound);
             assert_eq!(want, p.risky_unwrap());
             assert_eq!(want, inherent.next_below(1000));
         }
@@ -260,6 +315,21 @@ mod test {
             let p: Protected<u32> = protected.next_bounded(Protected::new(999));
             assert_eq!(want, p.risky_unwrap());
             assert_eq!(want, inherent.next_bounded_u32(999));
+        }
+    }
+
+    #[test]
+    fn a_nonzero_protected_bound_of_one_draws_without_rejecting() {
+        use crate::SafeRand;
+        use rand::SeedableRng;
+        use vitaminc_protected::{Controlled, Protected};
+
+        // The smallest bound the type admits: `0..1` has exactly one value,
+        // and the impl has no check that could reject it.
+        let mut rng = SafeRand::from_seed([5u8; 32]);
+        for _ in 0..16 {
+            let p: Protected<u32> = rng.next_below(Protected::new(NonZeroU32::MIN));
+            assert_eq!(0, p.risky_unwrap(), "`0..1` has only one value to draw");
         }
     }
 }
