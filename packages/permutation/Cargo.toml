@@ -20,7 +20,3 @@ rand = { workspace = true }
 serde = { workspace = true }
 subtle = "2.6.1"
 zeroize = { workspace = true }
-paste = "1.0.15"
-
-[dev-dependencies]
-paste = "1.0.15"
