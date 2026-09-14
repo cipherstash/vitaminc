@@ -5,6 +5,8 @@ mod generatable;
 mod safe_rand;
 
 pub use bounded::BoundedRng;
+#[allow(deprecated)]
+pub use bounded::BoundedRngInclusive;
 #[doc(inline)]
 pub use generatable::Generatable;
 pub use safe_rand::SafeRand;
