@@ -30,8 +30,12 @@ use vitaminc_protected::{Controlled, Protected};
 /// Lemire's multiply-high method: no rejection loop and no branch on the
 /// value drawn, so the number of draws does not depend on the values drawn.
 /// The reduction's statistical distance from uniform is at most `n / 2⁶⁴`:
-/// below 2⁻⁵⁵ for `n ≤ 256` and still at most 2⁻³² at `n = u32::MAX`. A
-/// protocol that needs exact uniformity must account for that term.
+/// below 2⁻⁵⁵ for `n ≤ 256` and still at most 2⁻³² at `n = u32::MAX`. That
+/// is a ceiling, and a loose one for most bounds. The distance for a given
+/// `n` is exactly `r(n − r) / (n · 2⁶⁴)`, where `r = 2⁶⁴ mod n` is the
+/// number of values that get one extra word of the draw space; it is zero
+/// when `n` divides `2⁶⁴`, and largest when `r` is near `n / 2`. A protocol
+/// that needs exact uniformity must account for that term.
 pub trait BoundedRng<T> {
     /// The type of the value drawn. This is the bound's own type for `u32`
     /// and [`Protected<u32>`], and [`Protected<u32>`] for a

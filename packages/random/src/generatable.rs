@@ -29,7 +29,10 @@ impl Generatable for NonZeroU16 {
     /// Exactly one bounded draw: an offset in `0..u16::MAX` is drawn with
     /// [`SafeRand::next_below`] and added to one, so the result is uniform
     /// over `1..=u16::MAX` to within the `u16::MAX / 2⁶⁴` bias bound
-    /// documented on [`BoundedRng`](crate::BoundedRng) (exactly 2⁻⁶⁴ here).
+    /// documented on [`BoundedRng`](crate::BoundedRng). The exact distance
+    /// is just under 2⁻⁶⁴: `2⁶⁴ mod 65535` is 1, so the exact
+    /// `r(n − r) / (n · 2⁶⁴)` form documented there gives
+    /// `65534 / (65535 · 2⁶⁴)`.
     /// Drawing a raw `u16` and retrying on zero would be just as
     /// deterministic for a given seed, but would consume a data-dependent
     /// number of words from the stream, and on a secret-seeded generator
