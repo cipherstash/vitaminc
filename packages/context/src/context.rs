@@ -43,8 +43,11 @@ const REFINE_DOMAIN: &[u8] = b"vitaminc/context/refine/v1";
 /// `Context` deliberately does not implement `MaybeEmpty`. An encoded
 /// context can only be judged on its bytes, and framing makes the encoding
 /// of an empty value non-empty, so `NonEmpty<Context>` would certify exactly
-/// the degenerate value it exists to exclude. Prove non-emptiness on the
-/// value before it is encoded: `NonEmpty<T>` where `T: IntoContext`.
+/// the degenerate value it exists to exclude. Its parts view, the
+/// [`ContextPiece::Encoded`] leaf, counts as empty for the same reason, so
+/// routing bytes through [`into_context`](IntoContext::into_context) is not
+/// a way around the rule. Prove non-emptiness on the value before it is
+/// encoded: `NonEmpty<T>` where `T: IntoContext`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Context<'a>(pub(crate) Cow<'a, [u8]>);
 

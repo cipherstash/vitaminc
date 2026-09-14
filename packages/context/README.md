@@ -82,3 +82,8 @@ a part of a larger context it is the `ContextPiece::Encoded` leaf, written
 verbatim. `Context::pae` frames a list of pieces exactly as a composite is
 framed, for a crate that defines a domain-separated shape of its own under
 a label that is not `vitaminc/context/…`.
+
+Encoded bytes prove nothing about emptiness. Framing gives an empty value a
+non-empty encoding — `None` encodes to an eight-byte count word — so an
+`Encoded` leaf counts as empty and `NonEmpty` will not certify it. Prove a
+context non-empty on the value, before it is encoded.

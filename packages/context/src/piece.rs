@@ -106,8 +106,10 @@ mod tag {
 ///
 /// [`MaybeEmpty`] is implemented by the same rule the static types use, so
 /// a tree can be wrapped in [`NonEmpty`](vitaminc_protected::NonEmpty):
-/// text, bytes and encoded bytes are empty at zero length, unit is empty,
-/// an integer never is, and a list is empty only when every part is.
+/// text and bytes are empty at zero length, unit is empty, an integer never
+/// is, and a list is empty only when every part is.
+/// [`Encoded`](Self::Encoded) counts as empty whatever its bytes, because
+/// framing hides whether the value behind them carried anything.
 ///
 /// The enum is `#[non_exhaustive]`, so a new kind of leaf must not break a
 /// downstream `match`.
@@ -147,7 +149,9 @@ pub enum ContextPiece<'a> {
     /// Bytes this encoder already produced; encodes as itself, untagged. The
     /// parts view of a [`Context`], which is how a stored or derived context
     /// is passed back in as a value. Only [`Context::from_encoded`] and the
-    /// derived-context methods on [`Context`] produce one.
+    /// derived-context methods on [`Context`] produce one. It counts as
+    /// [empty](MaybeEmpty) whatever its bytes, because framing hides
+    /// whether the value behind them carried anything.
     Encoded(Cow<'a, [u8]>),
     /// A list of parts; encodes as their PAE. A tuple is the list of its
     /// halves, `Some(x)` the one-element list, `None` the empty list.
@@ -293,18 +297,29 @@ fn write_typed(buf: &mut Vec<u8>, tag: &[u8], value: &[u8]) {
     pae::write(buf, &[VALUE_DOMAIN, tag, value]);
 }
 
-/// The same emptiness rule the static types use, applied to the tree. Text,
-/// bytes and encoded bytes are empty at zero length. Unit is empty. An
-/// integer is never empty, because even zero is information the caller
-/// chose. A list is empty only when every part is, so `None` and `Some("")`
-/// are empty and `("", 7u64)` is not, matching what `Option<T>` and `(A, B)`
-/// decide.
+/// The same emptiness rule the static types use, applied to the tree. Text
+/// and bytes are empty at zero length. Unit is empty. An integer is never
+/// empty, because even zero is information the caller chose. A list is
+/// empty only when every part is, so `None` and `Some("")` are empty and
+/// `("", 7u64)` is not, matching what `Option<T>` and `(A, B)` decide.
+///
+/// An [`Encoded`](ContextPiece::Encoded) leaf counts as empty whatever its
+/// bytes, because those bytes cannot say whether the value behind them
+/// carried anything: framing gives an empty value a non-empty encoding, so
+/// `None` arrives back as an eight-byte count word and a byte check would
+/// certify exactly the degenerate context [`NonEmpty`](vitaminc_protected::NonEmpty)
+/// exists to exclude.
+/// It is the same reason [`Context`] has no `MaybeEmpty` impl of its own.
+/// An encoded context therefore never contributes to a proof: prove the
+/// value non-empty before it is encoded, or extend a proven head with
+/// [`NonEmpty::with`](vitaminc_protected::NonEmpty::with), which pairs a
+/// tail in without checking it.
 impl MaybeEmpty for ContextPiece<'_> {
     fn is_empty(&self) -> bool {
         match self {
             ContextPiece::Text(text) => text.is_empty(),
-            ContextPiece::Bytes(bytes) | ContextPiece::Encoded(bytes) => bytes.is_empty(),
-            ContextPiece::Unit => true,
+            ContextPiece::Bytes(bytes) => bytes.is_empty(),
+            ContextPiece::Unit | ContextPiece::Encoded(_) => true,
             ContextPiece::U8(_)
             | ContextPiece::U16(_)
             | ContextPiece::U32(_)
@@ -1008,20 +1023,53 @@ mod tests {
             );
             assert!(ContextPiece::Unit.is_empty(), "unit is empty");
             assert!(
-                ContextPiece::Encoded(Cow::Borrowed(b"")).is_empty(),
-                "encoded bytes are empty at zero length"
-            );
-            assert!(
-                !ContextPiece::Encoded(Cow::Borrowed(b"x")).is_empty(),
-                "encoded bytes are non-empty otherwise"
-            );
-            assert!(
                 NonEmpty::new(ContextPiece::List(vec![ContextPiece::U8(0)])).is_ok(),
                 "a tree with an integer is provable non-empty"
             );
             assert!(
                 NonEmpty::new(text("")).is_err(),
                 "an empty text leaf is not provable non-empty"
+            );
+        }
+
+        #[test]
+        fn an_encoded_part_proves_nothing() {
+            // Framing gives an empty value non-empty bytes, so an encoded
+            // context cannot be judged on its length: `None` comes back as
+            // an eight-byte count word. Counting it as empty is what keeps
+            // `NonEmpty` from certifying the degenerate context.
+            let stored = Option::<u8>::None.into_context().encode();
+            assert!(!stored.is_empty(), "the empty list is framed, not empty");
+            let restored = Context::from_encoded(stored.as_bytes()).into_context();
+            assert!(
+                restored.is_empty(),
+                "an encoded context carries no proof of its own"
+            );
+            assert!(
+                NonEmpty::new(restored).is_err(),
+                "and so cannot be certified non-empty"
+            );
+            assert!(
+                ContextPiece::Encoded(Cow::Borrowed(b"users/email")).is_empty(),
+                "bytes that look like content prove nothing either"
+            );
+            assert!(
+                ContextPiece::List(vec![
+                    ContextPiece::Encoded(Cow::Borrowed(b"x")),
+                    ContextPiece::Encoded(Cow::Borrowed(b"y")),
+                ])
+                .is_empty(),
+                "nor does a list of them"
+            );
+            assert!(
+                NonEmpty::new(text("users"))
+                    .expect("text is not empty")
+                    .with(Context::from_encoded(b"x".as_slice()))
+                    .get()
+                    .1
+                    .as_bytes()
+                    == b"x",
+                "a proven head still carries an encoded tail, unchecked"
             );
         }
     }
