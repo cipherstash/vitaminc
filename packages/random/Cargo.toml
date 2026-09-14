@@ -18,6 +18,14 @@ rand = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { workspace = true }
 
+# `rand`'s `chacha` feature pulls in `chacha20` without its `zeroize` feature,
+# which leaves `ChaCha20Rng` with no `ZeroizeOnDrop` impl: the key schedule
+# and buffered keystream would outlive the generator. `SafeRand` wraps that
+# generator and promises to wipe both on drop, so enable the feature here;
+# Cargo's feature unification applies it to the copy `rand` uses.
+# `safe_rand.rs` asserts the impl exists at compile time.
+chacha20 = { version = "0.10", default-features = false, features = ["zeroize"] }
+
 vitaminc-random-derives = { version = "0.4.0", path = "../random-derives" }
 vitaminc-protected = { version = "0.4.0", path = "../protected" }
 

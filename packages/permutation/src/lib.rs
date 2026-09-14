@@ -8,7 +8,7 @@ mod shuffle;
 
 pub use bitwise::BitwisePermute;
 pub use elementwise::{Depermute, Permute};
-pub use key::PermutationKey;
+pub use key::{BatchSeedError, PermutationKey};
 
 mod private {
     use crate::shuffle::{batcher_gate_count, batcher_schedule};
