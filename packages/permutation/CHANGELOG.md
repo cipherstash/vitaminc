@@ -1,4 +1,15 @@
 
+## [0.5.0] - 2026-09-14
+
+### Breaking
+
+- **Breaking:** replace rejection sampling with fixed-count Lemire draw ([#281](https://github.com/cipherstash/vitaminc/pull/281))
+- **Breaking:** oblivious key generation via sort-by-random-key ([#282](https://github.com/cipherstash/vitaminc/pull/282))
+
+### Features
+
+- batch key derivation API (plan step 1) ([#283](https://github.com/cipherstash/vitaminc/pull/283))
+
 ## [0.4.0] - 2026-09-12
 
 ## [0.3.0] - 2026-09-07

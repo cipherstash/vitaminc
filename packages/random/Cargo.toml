@@ -26,8 +26,8 @@ zeroize = { workspace = true }
 # `safe_rand.rs` asserts the impl exists at compile time.
 chacha20 = { version = "0.10", default-features = false, features = ["zeroize"] }
 
-vitaminc-random-derives = { version = "0.4.0", path = "../random-derives" }
-vitaminc-protected = { version = "0.4.0", path = "../protected" }
+vitaminc-random-derives = { version = "0.5.0", path = "../random-derives" }
+vitaminc-protected = { version = "0.5.0", path = "../protected" }
 
 # Wasm32: route `getrandom` to the browser/Deno crypto API. Pulled in
 # transitively via `rand` -> `getrandom 0.4`. Must be paired with the
