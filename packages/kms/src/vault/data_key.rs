@@ -352,9 +352,14 @@ impl<const N: usize> DecryptWithKey for VaultDataKeySource<N> {
     async fn decrypt(&self, ciphertext: &[u8]) -> Result<Protected<Vec<u8>>, Self::Error> {
         let ciphertext = std::str::from_utf8(ciphertext).map_err(|_| Error::CiphertextNotUtf8)?;
 
-        let response =
-            vaultrs::transit::data::decrypt(&self.client, &self.mount, &self.name, ciphertext, None)
-                .await?;
+        let response = vaultrs::transit::data::decrypt(
+            &self.client,
+            &self.mount,
+            &self.name,
+            ciphertext,
+            None,
+        )
+        .await?;
 
         Ok(Protected::new(b64_decode(&response.plaintext)?))
     }
@@ -494,8 +499,9 @@ mod tests {
             .mock_async(|when, then| {
                 when.method(POST)
                     .path(format!("/v1/transit/datakeys/plaintext/{KEY_NAME}"));
-                then.status(404)
-                    .json_body(json!({ "errors": ["1 error occurred:\n\t* unsupported path\n\n"] }));
+                then.status(404).json_body(
+                    json!({ "errors": ["1 error occurred:\n\t* unsupported path\n\n"] }),
+                );
             })
             .await;
         let singular = server
@@ -532,7 +538,8 @@ mod tests {
             .mock_async(|when, then| {
                 when.method(POST)
                     .path(format!("/v1/transit/datakeys/plaintext/{KEY_NAME}"));
-                then.status(404).json_body(json!({ "errors": ["no such key"] }));
+                then.status(404)
+                    .json_body(json!({ "errors": ["no such key"] }));
             })
             .await;
 

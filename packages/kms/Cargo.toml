@@ -27,15 +27,17 @@ zeroize = { workspace = true }
 # --- `aws` feature -----------------------------------------------------------
 aws-sdk-kms = { version = "1.109.0", optional = true }
 
+# --- shared by `azure` and `gcp` ---------------------------------------------
+# Neither Azure Key Vault nor Google Cloud KMS has a "generate data key"
+# call, so those adapters mint the plaintext locally with this workspace's
+# own CSPRNG before wrapping it.
+vitaminc-random = { version = "0.5.0", path = "../random", optional = true }
+
 # --- `azure` feature ---------------------------------------------------------
 # Official Microsoft SDK (GA). The pre-1.0 `azure_security_keyvault` crate is
 # the abandoned unofficial predecessor; do not use it.
 azure_core = { version = "1", optional = true }
 azure_security_keyvault_keys = { version = "1", optional = true }
-# Azure Key Vault has no "generate data key" call, so the adapter mints the
-# plaintext locally with this workspace's own CSPRNG before wrapping it.
-vitaminc-random = { version = "0.5.0", path = "../random", optional = true }
-
 # --- `gcp` feature -----------------------------------------------------------
 # `google-cloud-kms-v1` is Google's official crate (REST over reqwest). The
 # similarly named `google-cloud-kms` on crates.io is a stale community crate.
@@ -44,9 +46,6 @@ vitaminc-random = { version = "0.5.0", path = "../random", optional = true }
 google-cloud-kms-v1 = { version = "1", optional = true }
 google-cloud-auth = { version = "1", optional = true }
 crc32c = { version = "0.6", optional = true }
-# GCP has no GenerateDataKey call, so the data key source mints the key
-# locally with this workspace's own CSPRNG.
-vitaminc-random = { version = "0.5.0", path = "../random", optional = true }
 # GCP has no server-side asymmetric verify (it is the one surveyed backend
 # without one), so the signing adapter verifies locally against the public
 # key it fetched at construction. `PrehashVerifier` consumes the caller's
