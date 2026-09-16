@@ -2773,6 +2773,7 @@ dependencies = [
 name = "vitaminc-kms"
 version = "0.5.1"
 dependencies = [
+ "async-trait",
  "aws-config",
  "aws-sdk-kms",
  "futures",
@@ -2780,6 +2781,7 @@ dependencies = [
  "tokio",
  "vitaminc-async-traits",
  "vitaminc-protected",
+ "vitaminc-random",
  "vitaminc-traits",
  "zeroize",
 ]
