@@ -83,6 +83,15 @@ jobs:
         env:
           LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
 
+      - name: Start Vault and Lowkey Vault
+        # vitaminc-kms' Vault and Azure adapter tests talk to a Vault dev
+        # server on localhost:8200 and Lowkey Vault (an Azure Key Vault
+        # emulator) on localhost:8443, the same way its AWS tests talk to
+        # LocalStack; cargo-mutants runs with --all-features (.cargo/mutants.toml). Google Cloud KMS has no viable emulator; its adapter is
+        # tested against the SDK's stub trait only. LocalStack itself stays on
+        # the action above so LOCALSTACK_AUTH_TOKEN keeps working.
+        run: docker compose -f packages/kms/docker-compose.yml up -d --wait vault lowkey-vault
+
       - name: install cargo-binstall and cargo-mutants
         # Install via cargo-binstall (prebuilt binaries — far faster than
         # `cargo install` from source), the same curl-pipe pattern crap.yml uses,
