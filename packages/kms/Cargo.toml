@@ -44,7 +44,6 @@ azure_security_keyvault_keys = { version = "1", optional = true }
 # The crate leaves CRC32C request/response integrity entirely to the caller,
 # hence `crc32c`.
 google-cloud-kms-v1 = { version = "1", optional = true }
-google-cloud-auth = { version = "1", optional = true }
 crc32c = { version = "0.6", optional = true }
 # GCP has no server-side asymmetric verify (it is the one surveyed backend
 # without one), so the signing adapter verifies locally against the public
@@ -109,13 +108,13 @@ aws = ["dep:aws-sdk-kms"]
 azure = ["dep:azure_core", "dep:azure_security_keyvault_keys", "dep:vitaminc-random", "canonical-encoding"]
 gcp = [
     "dep:google-cloud-kms-v1",
-    "dep:google-cloud-auth",
     "dep:crc32c",
     "dep:vitaminc-random",
     "dep:p256",
     "dep:p384",
     "dep:rsa",
     "dep:sha2",
+    "dep:spki",
 ]
 vault = ["dep:vaultrs", "dep:rustify", "dep:rustify_derive", "dep:serde", "dep:serde_json", "dep:base64", "canonical-encoding"]
 # Internal: the DER/PEM helpers behind ADR 0001. Not meant to be enabled
