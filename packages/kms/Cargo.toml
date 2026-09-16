@@ -44,6 +44,21 @@ vitaminc-random = { version = "0.5.0", path = "../random", optional = true }
 google-cloud-kms-v1 = { version = "1", optional = true }
 google-cloud-auth = { version = "1", optional = true }
 crc32c = { version = "0.6", optional = true }
+# GCP has no GenerateDataKey call, so the data key source mints the key
+# locally with this workspace's own CSPRNG.
+vitaminc-random = { version = "0.5.0", path = "../random", optional = true }
+# GCP has no server-side asymmetric verify (it is the one surveyed backend
+# without one), so the signing adapter verifies locally against the public
+# key it fetched at construction. `PrehashVerifier` consumes the caller's
+# digest as-is, matching what `Sign` sent to GCP.
+p256 = { version = "0.14", default-features = false, features = ["alloc", "ecdsa", "pkcs8"], optional = true }
+p384 = { version = "0.14", default-features = false, features = ["alloc", "ecdsa", "pkcs8"], optional = true }
+# `rsa` 0.10 is still a release candidate, and is the only line of the crate
+# that speaks the same traits (`sha2` 0.11/`digest` 0.11, `signature` 3,
+# `spki` 0.8) as the rest of this workspace; 0.9 would pull a second, older
+# copy of all four into the tree.
+rsa = { version = "0.10.0-rc.18", optional = true }
+sha2 = { version = "0.11.0", optional = true }
 
 # --- `vault` feature ---------------------------------------------------------
 # `vaultrs` covers every single-item Transit call but no batch endpoint; the
@@ -72,8 +87,11 @@ tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "macros"] }
 aws-smithy-mocks = "0.3.0"
 aws-sdk-kms = { version = "1.109.0", features = ["test-util"] }
 aws-config = "1.8.18"
-# GCP adapter unit tests mock the official crate's `stub` trait.
+# GCP adapter unit tests mock the official crate's `stub` trait; its method
+# signatures name `google-cloud-gax`'s request-options and response types,
+# so the mock has to name them too.
 mockall = "0.15"
+google-cloud-gax = "1"
 # Azure integration tests build a transport that trusts Lowkey Vault's
 # self-signed certificate explicitly, without touching the OS trust store.
 reqwest = { version = "0.13", features = ["rustls"] }
@@ -90,7 +108,16 @@ httpmock = "0.8"
 default = ["aws"]
 aws = ["dep:aws-sdk-kms"]
 azure = ["dep:azure_core", "dep:azure_security_keyvault_keys", "dep:vitaminc-random", "canonical-encoding"]
-gcp = ["dep:google-cloud-kms-v1", "dep:google-cloud-auth", "dep:crc32c"]
+gcp = [
+    "dep:google-cloud-kms-v1",
+    "dep:google-cloud-auth",
+    "dep:crc32c",
+    "dep:vitaminc-random",
+    "dep:p256",
+    "dep:p384",
+    "dep:rsa",
+    "dep:sha2",
+]
 vault = ["dep:vaultrs", "dep:rustify", "dep:rustify_derive", "dep:serde", "dep:serde_json", "dep:base64", "canonical-encoding"]
 # Internal: the DER/PEM helpers behind ADR 0001. Not meant to be enabled
 # directly.
