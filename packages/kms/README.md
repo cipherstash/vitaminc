@@ -55,8 +55,10 @@ Design notes that apply across vendors:
 - **Pooled batches.** AWS, Azure and Google have no batch primitive, so
   their batch traits fan out one call per key. `PooledDataKeySource<T>`
   wraps any of them to mint one key per batch instead, trading per-value
-  isolation for one round trip. Vault batches natively at per-value
-  isolation, so it needs no pooled variant.
+  isolation for one round trip. Vault batches retrieval natively on every
+  edition and generation natively on Vault Enterprise (on Community the
+  adapter falls back to one call per key, see `docs/adr/0002`), always at
+  per-value isolation, so it needs no pooled variant.
 - **Signature algorithms** are named once, by [`SignatureAlgorithm`], and
   mapped by each adapter. ECDSA signatures are DER, public keys are DER
   `SubjectPublicKeyInfo`, whatever the vendor returns natively
