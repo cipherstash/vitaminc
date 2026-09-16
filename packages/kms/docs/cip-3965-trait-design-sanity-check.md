@@ -90,6 +90,13 @@ are real one-round-trip batch primitives. A Vault adapter should implement
 back to `fan_out_generate`/`dedup_retrieve` — `KeyIsolation::PerValue` at
 native-batch cost, the best outcome any vendor offers here.
 
+> **Correction (2026-09-16, found during implementation):** the plural
+> `datakeys` endpoint is **Vault Enterprise only**; Community Vault 2.1.0
+> answers it with `404 unsupported path`. Batch `decrypt` is in every
+> edition. The shipped adapter tries `datakeys` once and falls back to
+> `fan_out_generate` on Community, so batch *generation* is one round trip
+> only on Enterprise. See ADR 0002.
+
 **`load_index_key`.** The one vendor with a partial *native* answer —
 `derived: true` + convergent encryption gives deterministic output for the
 same context. CIP-3988 explicitly deferred relying on this pending its own
@@ -196,7 +203,8 @@ decision made without vendor-specific knowledge at the time:
   one exception (GCP's integrity flag) to be resolved inside the adapter,
   not leaked into the trait.
 - The **explicit, never-defaulted batch strategy split** (CIP-3987) is
-  necessary precisely because only Vault has a native batch primitive —
+  necessary precisely because only Vault has a native batch primitive (and,
+  per the correction above, only Enterprise Vault has one for generation) —
   Azure and GCP both fall through to the same shim helpers AWS does.
 - No vendor forced a change to any already-closed ticket's trait shape.
   The one real per-vendor *constraint* surfaced here — Azure's EC keys

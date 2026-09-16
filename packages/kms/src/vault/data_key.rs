@@ -5,11 +5,12 @@ use super::batch::{
 use super::{b64_decode, b64_encode};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
-    BatchGenerateDataKey, BatchRetrieveDataKey, GenerateDataKey, GeneratedDataKey, KeyIsolation,
-    KeyReconstruction, RetrieveDataKey,
+    fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, GenerateDataKey,
+    GeneratedDataKey, KeyIsolation, KeyReconstruction, RetrieveDataKey,
 };
 use crate::key_id::KeyId;
 use private::ValidDataKeySize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use thiserror::Error;
 use vaultrs::api::transit::requests::{DataKeyType, GenerateDataKeyRequest};
 use vaultrs::client::VaultClient;
@@ -63,16 +64,16 @@ fn into_sized<const N: usize>(bytes: Vec<u8>) -> Result<[u8; N], Error> {
 /// A Vault Transit-backed data key source with per-value key isolation
 /// (`KeyIsolation::PerValue`), bound to one Transit key at construction.
 ///
-/// Vault is the only backend of the four with a native batch primitive on
-/// both sides — `datakeys/plaintext/:name` with a `count`, and `decrypt`
-/// with a `batch_input` — so this is the one adapter that gets per-value
-/// isolation at one round trip per batch instead of N (ADR 0002). There is
-/// deliberately no pooled Vault source: pooling trades isolation for round
-/// trips, and here there is nothing to trade.
-///
-/// One caveat the vendor documentation omits: the `datakeys` half is
-/// Enterprise-only, so batch *generation* fails against Community Vault.
-/// See [`generate_data_keys`](BatchGenerateDataKey::generate_data_keys).
+/// Vault is the only backend of the four with native batch primitives:
+/// `decrypt` with a `batch_input` (every edition) and
+/// `datakeys/plaintext/:name` with a `count` (Vault Enterprise only, a
+/// restriction HashiCorp's API reference omits). Batch retrieval is one
+/// round trip everywhere. Batch generation is one round trip on
+/// Enterprise and falls back to one `datakey` call per key on Community,
+/// after the server has once answered `404 unsupported path`; see
+/// [`generate_data_keys`](BatchGenerateDataKey::generate_data_keys).
+/// Isolation is per value either way, so there is deliberately no pooled
+/// Vault source (ADR 0002).
 ///
 /// `N` is the data key size in bytes and must be 16, 32 or 64; Vault
 /// accepts only 128-, 256- and 512-bit data keys.
@@ -88,6 +89,11 @@ pub struct VaultDataKeySource<const N: usize> {
     client: VaultClient,
     mount: String,
     name: String,
+    /// Set once the server has answered the plural `datakeys` path with
+    /// `404 unsupported path` (Community Vault), so later batches go
+    /// straight to the fan-out without probing again. Never reset: an
+    /// edition does not change under a running client.
+    native_batch_unsupported: AtomicBool,
 }
 
 impl<const N: usize> VaultDataKeySource<N>
@@ -103,7 +109,52 @@ where
             client,
             mount: mount.into(),
             name: name.into(),
+            native_batch_unsupported: AtomicBool::new(false),
         }
+    }
+
+    /// Community Vault registers only the singular `datakey/...` path and
+    /// answers the plural one with this exact error.
+    fn is_unsupported_path(error: &Error) -> bool {
+        matches!(
+            error,
+            Error::Vault(vaultrs::error::ClientError::APIError { code: 404, errors })
+                if errors.iter().any(|e| e.contains("unsupported path"))
+        )
+    }
+
+    /// One round trip via the Enterprise-only `datakeys` endpoint.
+    async fn generate_data_keys_natively(
+        &self,
+        count: usize,
+    ) -> Result<Vec<GeneratedDataKey<N>>, Error> {
+        let endpoint = GenerateDataKeysRequest {
+            mount: self.mount.clone(),
+            name: self.name.clone(),
+            count: count as u64,
+            bits: Self::BITS,
+        };
+
+        let response: GenerateDataKeysResponse =
+            vaultrs::api::exec_with_result(&self.client, endpoint).await?;
+
+        if response.key_pairs.len() != count {
+            return Err(Error::UnexpectedBatchLength {
+                expected: count,
+                received: response.key_pairs.len(),
+            });
+        }
+
+        response
+            .key_pairs
+            .into_iter()
+            .map(|pair| {
+                Ok(GeneratedDataKey {
+                    plaintext: Self::decode_key(&pair.plaintext)?,
+                    key_id: KeyId::new(pair.ciphertext.into_bytes()),
+                })
+            })
+            .collect()
     }
 
     fn decode_key(plaintext: &str) -> Result<Protected<[u8; N]>, Error> {
@@ -178,19 +229,19 @@ where
     /// without a batch primitive need.
     const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
 
-    /// One round trip, `count` distinct keys.
+    /// `count` distinct keys: one round trip on Vault Enterprise, `count`
+    /// concurrent `datakey` calls on Community.
     ///
     /// # Editions
     ///
     /// `POST {mount}/datakeys/:type/:name` is **Vault Enterprise only**,
     /// although HashiCorp's API reference does not mark it so: Community
     /// Vault registers only the singular `datakey/...` path and answers
-    /// this one with `404 unsupported path`. Against Community Vault this
-    /// call therefore fails, and the caller can either batch with
-    /// [`fan_out_generate`](crate::fan_out_generate) over
-    /// [`generate_data_key`](GenerateDataKey::generate_data_key) or wrap
-    /// this source in a [`PooledDataKeySource`](crate::PooledDataKeySource)
-    /// and accept pooled isolation.
+    /// this one with `404 unsupported path`. The first batch against a
+    /// Community server pays that one failed probe, then this adapter
+    /// remembers the answer and uses [`fan_out_generate`] for every batch
+    /// after it. The result is the same either way: `count` distinct keys
+    /// at `KeyIsolation::PerValue`; only the round-trip count differs.
     ///
     /// [`retrieve_data_keys`](BatchRetrieveDataKey::retrieve_data_keys) is
     /// unaffected: `batch_input` on `decrypt` is in both editions.
@@ -202,33 +253,16 @@ where
             return Ok(Vec::new());
         }
 
-        let endpoint = GenerateDataKeysRequest {
-            mount: self.mount.clone(),
-            name: self.name.clone(),
-            count: count as u64,
-            bits: Self::BITS,
-        };
-
-        let response: GenerateDataKeysResponse =
-            vaultrs::api::exec_with_result(&self.client, endpoint).await?;
-
-        if response.key_pairs.len() != count {
-            return Err(Error::UnexpectedBatchLength {
-                expected: count,
-                received: response.key_pairs.len(),
-            });
+        if !self.native_batch_unsupported.load(Ordering::Relaxed) {
+            match self.generate_data_keys_natively(count).await {
+                Err(e) if Self::is_unsupported_path(&e) => {
+                    self.native_batch_unsupported.store(true, Ordering::Relaxed);
+                }
+                result => return result,
+            }
         }
 
-        response
-            .key_pairs
-            .into_iter()
-            .map(|pair| {
-                Ok(GeneratedDataKey {
-                    plaintext: Self::decode_key(&pair.plaintext)?,
-                    key_id: KeyId::new(pair.ciphertext.into_bytes()),
-                })
-            })
-            .collect()
+        fan_out_generate(self, count).await
     }
 }
 
@@ -454,6 +488,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn batch_generate_falls_back_to_singular_calls_on_community_vault() {
+        let server = MockServer::start_async().await;
+        let plural = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path(format!("/v1/transit/datakeys/plaintext/{KEY_NAME}"));
+                then.status(404)
+                    .json_body(json!({ "errors": ["1 error occurred:\n\t* unsupported path\n\n"] }));
+            })
+            .await;
+        let singular = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path(format!("/v1/transit/datakey/plaintext/{KEY_NAME}"))
+                    .json_body(json!({ "bits": 256 }));
+                then.status(200).json_body(data(json!({
+                    "plaintext": b64_encode(&[9u8; 32]),
+                    "ciphertext": "vault:v1:single",
+                })));
+            })
+            .await;
+
+        let source = VaultDataKeySource::<32>::new(test_client(&server), "transit", KEY_NAME);
+
+        let first = source.generate_data_keys(3).await.unwrap();
+        assert_eq!(first.len(), 3);
+        plural.assert_calls_async(1).await;
+        singular.assert_calls_async(3).await;
+
+        // The 404 is remembered: the second batch never probes the plural
+        // path again.
+        let second = source.generate_data_keys(2).await.unwrap();
+        assert_eq!(second.len(), 2);
+        plural.assert_calls_async(1).await;
+        singular.assert_calls_async(5).await;
+    }
+
+    #[tokio::test]
+    async fn batch_generate_does_not_treat_other_404s_as_community_vault() {
+        let server = MockServer::start_async().await;
+        let plural = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path(format!("/v1/transit/datakeys/plaintext/{KEY_NAME}"));
+                then.status(404).json_body(json!({ "errors": ["no such key"] }));
+            })
+            .await;
+
+        let source = VaultDataKeySource::<32>::new(test_client(&server), "transit", KEY_NAME);
+
+        let Err(err) = source.generate_data_keys(2).await else {
+            panic!("a 404 that is not `unsupported path` must not be swallowed");
+        };
+        assert!(matches!(err, Error::Vault(_)), "{err}");
+        plural.assert_calls_async(1).await;
+        assert!(!source.native_batch_unsupported.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
     async fn batch_retrieve_sends_batch_input_and_keeps_the_order() {
         let server = MockServer::start_async().await;
         let mock = server
@@ -623,31 +716,16 @@ mod integration_tests {
         );
     }
 
-    /// `datakeys` (plural) is Vault **Enterprise**-only, so it answers 404
-    /// on the Community server the rest of these tests run against. See
-    /// the note on [`generate_data_keys`](BatchGenerateDataKey).
-    fn is_enterprise_only(error: &Error) -> bool {
-        matches!(
-            error,
-            Error::Vault(vaultrs::error::ClientError::APIError { code: 404, errors })
-                if errors.iter().any(|e| e.contains("unsupported path"))
-        )
-    }
-
+    /// On Enterprise this is one `datakeys` round trip; on the Community
+    /// server the compose file runs, the adapter falls back to five
+    /// `datakey` calls. Either way the contract below must hold.
     #[tokio::test]
-    async fn a_native_batch_mints_distinct_keys() {
+    async fn a_batch_mints_distinct_keys_on_either_edition() {
         let source = source().await;
 
         assert_eq!(VaultDataKeySource::<32>::ISOLATION, KeyIsolation::PerValue);
 
-        let keys = match source.generate_data_keys(5).await {
-            Ok(keys) => keys,
-            Err(e) if is_enterprise_only(&e) => {
-                eprintln!("`datakeys` is Enterprise-only; this Vault has no such path");
-                return;
-            }
-            Err(e) => panic!("generate_data_keys failed: {e}"),
-        };
+        let keys = source.generate_data_keys(5).await.unwrap();
 
         assert_eq!(keys.len(), 5);
 
