@@ -46,7 +46,8 @@ pub enum Error {
 ///
 /// ```no_run
 /// # use aws_sdk_kms::Client;
-/// # use vitaminc_kms::{AwsMacKey, GenerateMac, VerifyMac};
+/// # use vitaminc_kms::aws::AwsMacKey;
+/// # use vitaminc_kms::{GenerateMac, VerifyMac};
 /// # use vitaminc_protected::Protected;
 /// # async fn example(client: Client) -> Result<(), Box<dyn std::error::Error>> {
 /// let key = AwsMacKey::<32>::new(client, "arn:aws:kms:...");
@@ -62,7 +63,7 @@ pub enum Error {
 ///
 /// ```compile_fail
 /// # use aws_sdk_kms::Client;
-/// # use vitaminc_kms::AwsMacKey;
+/// # use vitaminc_kms::aws::AwsMacKey;
 /// # fn example(client: Client) {
 /// let key = AwsMacKey::<31>::new(client, "arn:aws:kms:...");
 /// # }

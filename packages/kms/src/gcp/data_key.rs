@@ -41,9 +41,8 @@ impl From<CallError> for Error {
 }
 
 fn into_sized<const N: usize>(bytes: Vec<u8>) -> Result<[u8; N], Error> {
-    let received = bytes.len();
-    bytes.try_into().map_err(|_| Error::UnexpectedKeyLength {
-        expected: N,
+    crate::data_key::into_sized(bytes, |expected, received| Error::UnexpectedKeyLength {
+        expected,
         received,
     })
 }
