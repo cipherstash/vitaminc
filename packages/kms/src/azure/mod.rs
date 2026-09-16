@@ -25,5 +25,12 @@ mod sign;
 mod testing;
 
 pub use data_key::{AzureDataKeySource, AzureKeyKind, Error as AzureDataKeySourceError};
+
+/// [`AzureDataKeySource`] with pooled key isolation: one key shared across
+/// a batch, one `wrapKey` per batch. Build it as
+/// `PooledDataKeySource::new(AzureDataKeySource::new(...))`. See
+/// [`PooledDataKeySource`](crate::PooledDataKeySource) for the trade-off.
+pub type AzurePooledDataKeySource<const N: usize> =
+    crate::PooledDataKeySource<AzureDataKeySource<N>>;
 pub use mac::{AzureMacKey, Error as AzureMacKeyError};
 pub use sign::{AzureSigningKey, Error as AzureSigningKeyError};

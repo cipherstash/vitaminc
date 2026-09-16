@@ -54,9 +54,8 @@ pub enum Error {
 }
 
 fn into_sized<const N: usize>(bytes: Vec<u8>) -> Result<[u8; N], Error> {
-    let received = bytes.len();
-    bytes.try_into().map_err(|_| Error::UnexpectedKeyLength {
-        expected: N,
+    crate::data_key::into_sized(bytes, |expected, received| Error::UnexpectedKeyLength {
+        expected,
         received,
     })
 }
@@ -330,7 +329,10 @@ where
 /// Direct encryption under the bound Transit key — not envelope
 /// encryption. Vault's 32MB request cap is the most generous of the four
 /// backends, but the trait still promises nothing about size.
-impl<const N: usize> EncryptWithKey for VaultDataKeySource<N> {
+impl<const N: usize> EncryptWithKey for VaultDataKeySource<N>
+where
+    Self: ValidDataKeySize<N>,
+{
     type Error = Error;
 
     async fn encrypt(&self, plaintext: Protected<Vec<u8>>) -> Result<Vec<u8>, Self::Error> {
@@ -346,7 +348,10 @@ impl<const N: usize> EncryptWithKey for VaultDataKeySource<N> {
     }
 }
 
-impl<const N: usize> DecryptWithKey for VaultDataKeySource<N> {
+impl<const N: usize> DecryptWithKey for VaultDataKeySource<N>
+where
+    Self: ValidDataKeySize<N>,
+{
     type Error = Error;
 
     async fn decrypt(&self, ciphertext: &[u8]) -> Result<Protected<Vec<u8>>, Self::Error> {

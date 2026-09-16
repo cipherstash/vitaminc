@@ -180,9 +180,12 @@ impl<const N: usize> AzureDataKeySource<N> {
                 found: resource.name,
             });
         }
-        // An empty version means "current", which is what the service does
-        // with an empty path segment.
-        Ok(resource.version.unwrap_or_default())
+        // The vault always writes the version into `kid`; a reference
+        // without one did not come from here, and unwrapping it under
+        // "current" would silently pick the wrong key after a rotation.
+        resource
+            .version
+            .ok_or_else(|| what.malformed("the kid carries no key version".to_owned()))
     }
 }
 
@@ -211,9 +214,8 @@ impl Reference {
 }
 
 fn into_sized<const N: usize>(bytes: Vec<u8>) -> Result<[u8; N], Error> {
-    let received = bytes.len();
-    bytes.try_into().map_err(|_| Error::UnexpectedKeyLength {
-        expected: N,
+    crate::data_key::into_sized(bytes, |expected, received| Error::UnexpectedKeyLength {
+        expected,
         received,
     })
 }
@@ -272,6 +274,11 @@ impl<const N: usize> RetrieveDataKey<N> for AzureDataKeySource<N> {
         let envelope = Envelope::decode(key_id.as_bytes())
             .map_err(|e| Error::MalformedKeyId(e.to_string()))?;
         let version = self.version_of(&envelope.kid, Reference::KeyId)?;
+        if envelope.iv.is_some() || envelope.tag.is_some() {
+            return Err(Error::MalformedKeyId(
+                "carries an IV and tag, so it is a ciphertext, not a KeyId".to_owned(),
+            ));
+        }
 
         let parameters = KeyOperationParameters {
             algorithm: Some(self.kind.wrap_algorithm()),

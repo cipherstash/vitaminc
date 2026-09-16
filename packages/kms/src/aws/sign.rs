@@ -13,11 +13,10 @@ use vitaminc_protected::{Controlled, Protected};
 pub enum Error {
     #[error(transparent)]
     AwsSdk(#[from] aws_sdk_kms::Error),
-    /// The caller's digest is not the length the configured algorithm's
-    /// hash produces. Caught before the call goes out: AWS would either
-    /// reject it or, worse for a `RAW` mix-up, sign the wrong bytes.
-    #[error("expected a {expected}-byte digest, got {received} bytes")]
-    DigestLength { expected: usize, received: usize },
+    /// Caught before the call goes out: AWS would either reject a wrong
+    /// length or, worse for a `RAW` mix-up, sign the wrong bytes.
+    #[error(transparent)]
+    DigestLength(#[from] crate::DigestLengthError),
     /// AWS KMS returned a successful `Sign` response with no `Signature`
     /// field — should not happen, but the SDK models the field as optional.
     #[error("AWS KMS returned no signature")]
@@ -62,7 +61,8 @@ fn signing_algorithm_spec(algorithm: SignatureAlgorithm) -> SigningAlgorithmSpec
 ///
 /// ```no_run
 /// # use aws_sdk_kms::Client;
-/// # use vitaminc_kms::{AwsSigningKey, GetPublicKey, SignatureAlgorithm, Sign, Verify};
+/// # use vitaminc_kms::aws::AwsSigningKey;
+/// # use vitaminc_kms::{GetPublicKey, SignatureAlgorithm, Sign, Verify};
 /// # use vitaminc_protected::Protected;
 /// # async fn example(client: Client, sha256_of_message: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
 /// let key = AwsSigningKey::new(
@@ -110,13 +110,7 @@ impl AwsSigningKey {
     #[allow(clippy::result_large_err)]
     fn checked_digest(&self, digest: &Protected<Vec<u8>>) -> Result<Vec<u8>, Error> {
         let bytes = digest.clone().risky_unwrap();
-        let expected = self.algorithm.digest_len();
-        if bytes.len() != expected {
-            return Err(Error::DigestLength {
-                expected,
-                received: bytes.len(),
-            });
-        }
+        self.algorithm.check_digest_len(bytes.len())?;
         Ok(bytes)
     }
 }
@@ -262,10 +256,11 @@ mod tests {
 
         assert!(matches!(
             error,
-            Error::DigestLength {
+            Error::DigestLength(crate::DigestLengthError {
                 expected: 32,
-                received: 48
-            }
+                received: 48,
+                ..
+            })
         ));
         assert_eq!(sign_rule.num_calls(), 0);
     }
@@ -325,10 +320,11 @@ mod tests {
 
         assert!(matches!(
             error,
-            Error::DigestLength {
+            Error::DigestLength(crate::DigestLengthError {
                 expected: 32,
-                received: 20
-            }
+                received: 20,
+                ..
+            })
         ));
         assert_eq!(verify_rule.num_calls(), 0);
     }

@@ -26,12 +26,8 @@ pub enum Error {
     /// [`Sign`] takes a pre-computed digest, so the adapter can check its
     /// length against the configured algorithm before spending a round
     /// trip on a digest Vault would reject anyway.
-    #[error("digest is {received} bytes, expected {expected} for {algorithm:?}")]
-    UnexpectedDigestLength {
-        algorithm: SignatureAlgorithm,
-        expected: usize,
-        received: usize,
-    },
+    #[error(transparent)]
+    DigestLength(#[from] crate::DigestLengthError),
     /// The adapter is bound to one key version and asks for it by number,
     /// so a signature under any other version means the response does not
     /// match the request.
@@ -73,12 +69,18 @@ pub struct VaultSigningKey {
     algorithm: SignatureAlgorithm,
 }
 
-/// Vault's `hash_algorithm` for a digest of this size.
+/// Vault's `hash_algorithm` for the digest the scheme was built on.
 const fn hash_algorithm(algorithm: SignatureAlgorithm) -> HashAlgorithm {
-    match algorithm.digest_len() {
-        32 => HashAlgorithm::Sha2_256,
-        48 => HashAlgorithm::Sha2_384,
-        _ => HashAlgorithm::Sha2_512,
+    match algorithm {
+        SignatureAlgorithm::EcdsaP256Sha256
+        | SignatureAlgorithm::RsaPssSha256
+        | SignatureAlgorithm::RsaPkcs1Sha256 => HashAlgorithm::Sha2_256,
+        SignatureAlgorithm::EcdsaP384Sha384
+        | SignatureAlgorithm::RsaPssSha384
+        | SignatureAlgorithm::RsaPkcs1Sha384 => HashAlgorithm::Sha2_384,
+        SignatureAlgorithm::EcdsaP521Sha512
+        | SignatureAlgorithm::RsaPssSha512
+        | SignatureAlgorithm::RsaPkcs1Sha512 => HashAlgorithm::Sha2_512,
     }
 }
 
@@ -122,14 +124,7 @@ impl VaultSigningKey {
 
     fn checked_digest(&self, digest: &Protected<Vec<u8>>) -> Result<String, Error> {
         let digest = digest.clone().risky_unwrap();
-        let expected = self.algorithm.digest_len();
-        if digest.len() != expected {
-            return Err(Error::UnexpectedDigestLength {
-                algorithm: self.algorithm,
-                expected,
-                received: digest.len(),
-            });
-        }
+        self.algorithm.check_digest_len(digest.len())?;
         Ok(b64_encode(&digest))
     }
 }
@@ -367,13 +362,13 @@ mod tests {
 
         assert!(matches!(
             sign,
-            Error::UnexpectedDigestLength {
+            Error::DigestLength(crate::DigestLengthError {
                 expected: 32,
                 received: 31,
                 ..
-            }
+            })
         ));
-        assert!(matches!(verify, Error::UnexpectedDigestLength { .. }));
+        assert!(matches!(verify, Error::DigestLength(_)));
         anything.assert_calls_async(0).await;
     }
 

@@ -18,20 +18,15 @@ pub enum Error {
     /// A successful response left out a field the operation must produce.
     #[error("Azure Key Vault returned no {0}")]
     MissingField(&'static str),
-    /// The caller's digest is the wrong length for the configured algorithm.
     /// Checked before any network call: Key Vault signs a pre-computed
     /// digest and will not hash for you, and `RS*` in particular demands an
     /// exact length.
-    #[error("the digest is {received} bytes, but {algorithm:?} signs a {expected}-byte digest")]
-    DigestLength {
-        algorithm: SignatureAlgorithm,
-        expected: usize,
-        received: usize,
-    },
+    #[error(transparent)]
+    DigestLength(#[from] crate::DigestLengthError),
     /// A signature or public key could not be converted to or from the
     /// canonical encoding of ADR 0001.
     #[error("canonical encoding failed: {0}")]
-    Encoding(String),
+    Encoding(#[from] crate::encoding::EncodingError),
     /// `getKey` returned a key with no public part. Key Vault releases no
     /// key material at all for a symmetric key.
     #[error("key {key_name:?} is a {kty} key, which has no public key to return")]
@@ -124,14 +119,7 @@ impl AzureSigningKey {
     }
 
     fn check_digest(&self, digest: &[u8]) -> Result<(), Error> {
-        let expected = self.algorithm.digest_len();
-        if digest.len() != expected {
-            return Err(Error::DigestLength {
-                algorithm: self.algorithm,
-                expected,
-                received: digest.len(),
-            });
-        }
+        self.algorithm.check_digest_len(digest.len())?;
         Ok(())
     }
 
@@ -141,7 +129,7 @@ impl AzureSigningKey {
             KeyType::Rsa | KeyType::RsaHsm => {
                 let n = jwk.n.ok_or(Error::MissingField("an RSA modulus"))?;
                 let e = jwk.e.ok_or(Error::MissingField("an RSA exponent"))?;
-                rsa_spki(&n, &e).map_err(|e| Error::Encoding(e.to_string()))
+                rsa_spki(&n, &e).map_err(Error::Encoding)
             }
             KeyType::Ec | KeyType::EcHsm => {
                 let crv = jwk.crv.ok_or(Error::MissingField("a curve name"))?;
@@ -158,7 +146,7 @@ impl AzureSigningKey {
                 };
                 let x = jwk.x.ok_or(Error::MissingField("an EC x coordinate"))?;
                 let y = jwk.y.ok_or(Error::MissingField("an EC y coordinate"))?;
-                ec_spki(curve, &x, &y).map_err(|e| Error::Encoding(e.to_string()))
+                ec_spki(curve, &x, &y).map_err(Error::Encoding)
             }
             other => Err(Error::NoPublicKey {
                 key_name: self.key_name.clone(),
@@ -192,9 +180,7 @@ impl Sign for AzureSigningKey {
         let signature = result.result.ok_or(Error::MissingField("a signature"))?;
         match self.algorithm.ecdsa_field_len() {
             // Key Vault returns `r || s`; the traits promise DER.
-            Some(field_len) => {
-                ecdsa_raw_to_der(&signature, field_len).map_err(|e| Error::Encoding(e.to_string()))
-            }
+            Some(field_len) => ecdsa_raw_to_der(&signature, field_len).map_err(Error::Encoding),
             None => Ok(signature),
         }
     }
@@ -352,11 +338,11 @@ mod tests {
 
         assert!(matches!(
             error,
-            Error::DigestLength {
+            Error::DigestLength(crate::DigestLengthError {
                 expected: 32,
                 received: 31,
                 ..
-            }
+            })
         ));
         assert_eq!(transport.call_count(), 0);
 
@@ -365,7 +351,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(error, Error::DigestLength { .. }));
+        assert!(matches!(error, Error::DigestLength(_)));
         assert_eq!(transport.call_count(), 0);
     }
 
