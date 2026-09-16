@@ -22,7 +22,7 @@ pub mod gcp;
 #[cfg(feature = "vault")]
 pub mod vault;
 
-pub use algorithm::SignatureAlgorithm;
+pub use algorithm::{DigestLengthError, SignatureAlgorithm};
 pub use caching::CachingRetrieveDataKey;
 pub use crypt::{DecryptWithKey, EncryptWithKey};
 pub use data_key::{
@@ -36,18 +36,15 @@ pub use mac::{GenerateMac, VerifyMac};
 pub use pooled::PooledDataKeySource;
 pub use sign::{GetPublicKey, Sign, Verify};
 
+// The AWS names below predate the vendor modules and stay at the crate
+// root for compatibility. Every other adapter lives in its vendor module
+// (`aws::AwsMacKey`, `azure::AzureDataKeySource`, ...).
 /// The error type of [`AwsKmsHmac`], re-exported at the crate root under
 /// its pre-adapter name for compatibility.
 #[cfg(feature = "aws")]
 pub use aws::AwsKmsHmacError as Error;
 #[cfg(feature = "aws")]
-pub use aws::*;
-#[cfg(feature = "azure")]
-pub use azure::*;
-#[cfg(feature = "gcp")]
-pub use gcp::*;
-#[cfg(feature = "vault")]
-pub use vault::*;
+pub use aws::{AwsDataKeySource, AwsDataKeySourceError, AwsKmsHmac, AwsPooledDataKeySource};
 
 /// Named type to represent _non-sensitive_ data that is passed to the `update` method.
 /// Using a specific type allows us to reason about the input type and its sensitivity.

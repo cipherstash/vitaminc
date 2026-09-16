@@ -2,6 +2,17 @@ use crate::key_id::KeyId;
 use futures::future::try_join_all;
 use vitaminc_protected::Protected;
 
+/// `Vec<u8>` to `[u8; N]`, with a wrong length reported through the
+/// caller's own error rather than a panic. Every adapter's key-material
+/// path ends here.
+pub(crate) fn into_sized<const N: usize, E>(
+    bytes: Vec<u8>,
+    wrong_length: impl FnOnce(usize, usize) -> E,
+) -> Result<[u8; N], E> {
+    let received = bytes.len();
+    bytes.try_into().map_err(|_| wrong_length(N, received))
+}
+
 pub struct GeneratedDataKey<const N: usize> {
     pub plaintext: Protected<[u8; N]>,
     pub key_id: KeyId,

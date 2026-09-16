@@ -32,7 +32,32 @@ pub enum SignatureAlgorithm {
     RsaPkcs1Sha512,
 }
 
+/// The caller's digest is the wrong length for the algorithm a signing key
+/// was constructed with. Every adapter raises this before any network call,
+/// since no vendor hashes on the caller's behalf through these traits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the digest is {received} bytes, but {algorithm:?} signs a {expected}-byte digest")]
+pub struct DigestLengthError {
+    pub algorithm: SignatureAlgorithm,
+    pub expected: usize,
+    pub received: usize,
+}
+
 impl SignatureAlgorithm {
+    /// Check a caller's digest length against [`digest_len`](Self::digest_len).
+    pub const fn check_digest_len(self, received: usize) -> Result<(), DigestLengthError> {
+        let expected = self.digest_len();
+        if received == expected {
+            Ok(())
+        } else {
+            Err(DigestLengthError {
+                algorithm: self,
+                expected,
+                received,
+            })
+        }
+    }
+
     /// Length in bytes of the digest this algorithm signs. Adapters check
     /// the caller's digest against it before making a network call.
     pub const fn digest_len(self) -> usize {
