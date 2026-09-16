@@ -462,11 +462,17 @@ ciphertext) or `wrapped` (ciphertext only); `name` (required).
 **Response:** `{ "plaintext": "<b64>", "ciphertext": "vault:v<N>:..." }`
 (`plaintext` field omitted for `type=wrapped`).
 
-### Generate multiple data keys — `POST /transit/datakeys/:type/:name`
+### Generate multiple data keys — `POST /transit/datakeys/:type/:name` **(Enterprise)**
 
 The genuine batch-generation endpoint (plural path) — distinct from the
 singular `datakey` endpoint above, and the only native "N keys, one round
 trip" primitive across all four CIP-3965 vendors surveyed for *generation*.
+
+> **Enterprise only, although the API reference does not say so.**
+> Verified against `hashicorp/vault:2.1.0` (Community): the path answers
+> `404 unsupported path`, the server's OpenAPI listing has no `datakeys`
+> or `derivedkeys`, and the open-source Transit backend registers only the
+> singular path. Batch `decrypt` via `batch_input` is in every edition.
 
 **Path parameters:** `type` (`plaintext`|`wrapped`, required), `name`
 (required).
