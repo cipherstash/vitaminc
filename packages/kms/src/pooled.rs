@@ -53,13 +53,21 @@ impl<T: RetrieveDataKey<N>, const N: usize> RetrieveDataKey<N> for PooledDataKey
 impl<T: GenerateDataKey<N>, const N: usize> BatchGenerateDataKey<N> for PooledDataKeySource<T> {
     const ISOLATION: KeyIsolation = KeyIsolation::Pooled;
 
-    async fn generate_data_keys(&self, count: usize) -> Result<Vec<GeneratedDataKey<N>>, Self::Error> {
+    async fn generate_data_keys(
+        &self,
+        count: usize,
+    ) -> Result<Vec<GeneratedDataKey<N>>, Self::Error> {
         pooled_key_generate(&self.0, count).await
     }
 }
 
-impl<T: RetrieveDataKey<N> + Sync, const N: usize> BatchRetrieveDataKey<N> for PooledDataKeySource<T> {
-    async fn retrieve_data_keys(&self, key_ids: &[KeyId]) -> Result<Vec<Protected<[u8; N]>>, Self::Error> {
+impl<T: RetrieveDataKey<N> + Sync, const N: usize> BatchRetrieveDataKey<N>
+    for PooledDataKeySource<T>
+{
+    async fn retrieve_data_keys(
+        &self,
+        key_ids: &[KeyId],
+    ) -> Result<Vec<Protected<[u8; N]>>, Self::Error> {
         // Retrieve doesn't need its own pooled/non-pooled split — it just
         // needs to be correct given whatever generate already decided
         // upstream (CIP-3987/CIP-3988). Dedup degrades gracefully to a
@@ -96,7 +104,10 @@ mod tests {
         type Error = std::convert::Infallible;
         const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
 
-        async fn retrieve_data_key(&self, key_id: &KeyId) -> Result<Protected<[u8; 4]>, Self::Error> {
+        async fn retrieve_data_key(
+            &self,
+            key_id: &KeyId,
+        ) -> Result<Protected<[u8; 4]>, Self::Error> {
             self.retrieves.fetch_add(1, Ordering::SeqCst);
             Ok(Protected::new([key_id.as_bytes()[0]; 4]))
         }
@@ -127,7 +138,10 @@ mod tests {
 
         assert_eq!(retrieved.len(), 3);
         assert_eq!(pooled.inner().retrieves.load(Ordering::SeqCst), 1);
-        assert_eq!(retrieved[2].clone().risky_unwrap(), keys[2].plaintext.clone().risky_unwrap());
+        assert_eq!(
+            retrieved[2].clone().risky_unwrap(),
+            keys[2].plaintext.clone().risky_unwrap()
+        );
     }
 
     #[test]

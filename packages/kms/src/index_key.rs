@@ -22,5 +22,8 @@ pub async fn load_index_key<const N: usize, T: RetrieveDataKey<N>>(
     backend: &T,
     key_id: &KeyId,
 ) -> Result<IndexKeyMaterial<N>, T::Error> {
-    backend.retrieve_data_key(key_id).await.map(IndexKeyMaterial)
+    backend
+        .retrieve_data_key(key_id)
+        .await
+        .map(IndexKeyMaterial)
 }
