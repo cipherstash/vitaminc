@@ -29,6 +29,8 @@ pub enum EncodingError {
     PemLabel(String),
     #[error("unknown elliptic curve for an EC public key")]
     UnknownCurve,
+    #[error("a public-key component is empty")]
+    EmptyComponent,
 }
 
 /// The named curve of an EC public key, for [`ec_spki`].
@@ -103,6 +105,9 @@ struct RsaPublicKey<'a> {
 /// DER `SubjectPublicKeyInfo` for an RSA public key given its big-endian
 /// modulus `n` and exponent `e` (the JWK `n`/`e` fields, base64url-decoded).
 pub fn rsa_spki(n: &[u8], e: &[u8]) -> Result<Vec<u8>, EncodingError> {
+    if n.is_empty() || e.is_empty() {
+        return Err(EncodingError::EmptyComponent);
+    }
     let key = RsaPublicKey {
         modulus: UintRef::new(strip_leading_zeros(n))?,
         public_exponent: UintRef::new(strip_leading_zeros(e))?,
@@ -122,6 +127,9 @@ pub fn rsa_spki(n: &[u8], e: &[u8]) -> Result<Vec<u8>, EncodingError> {
 /// big-endian affine coordinates (the JWK `x`/`y` fields, base64url-decoded).
 /// Coordinates shorter than the field width are left-padded.
 pub fn ec_spki(curve: EcCurve, x: &[u8], y: &[u8]) -> Result<Vec<u8>, EncodingError> {
+    if x.is_empty() || y.is_empty() {
+        return Err(EncodingError::EmptyComponent);
+    }
     let field_len = curve.field_len();
     let mut point = vec![0u8; 1 + 2 * field_len];
     point[0] = 0x04;
@@ -147,12 +155,14 @@ pub fn pem_public_key_to_der(pem: &str) -> Result<Vec<u8>, EncodingError> {
     Ok(der)
 }
 
+/// Drop leading zero bytes, keeping one byte for an all-zero value. An
+/// empty slice stays empty and is rejected further down as an invalid
+/// INTEGER, not a panic.
 fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
-    let first_nonzero = bytes
-        .iter()
-        .position(|b| *b != 0)
-        .unwrap_or(bytes.len() - 1);
-    &bytes[first_nonzero.min(bytes.len().saturating_sub(1))..]
+    match bytes.iter().position(|b| *b != 0) {
+        Some(first_nonzero) => &bytes[first_nonzero..],
+        None => &bytes[bytes.len().saturating_sub(1)..],
+    }
 }
 
 fn left_pad_into(out: &mut [u8], value: &[u8]) -> Result<(), EncodingError> {
@@ -210,6 +220,22 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn empty_and_all_zero_inputs_are_errors_not_panics() {
+        assert!(matches!(
+            rsa_spki(&[], &[0x01, 0x00, 0x01]),
+            Err(EncodingError::EmptyComponent)
+        ));
+        assert!(matches!(
+            ec_spki(EcCurve::P256, &[], &[0x02]),
+            Err(EncodingError::EmptyComponent)
+        ));
+        assert!(
+            ecdsa_raw_to_der(&[0u8; 64], 32).is_ok(),
+            "all-zero r and s still encode"
+        );
     }
 
     #[test]

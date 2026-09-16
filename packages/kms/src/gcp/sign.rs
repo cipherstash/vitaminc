@@ -37,12 +37,11 @@ pub enum Error {
     /// The public key Google Cloud KMS returned is not a DER
     /// `SubjectPublicKeyInfo` this adapter can verify against.
     #[error("Google Cloud KMS returned a public key that could not be parsed: {0}")]
-    MalformedPublicKey(#[from] rsa::pkcs8::spki::Error),
-    /// The digest handed to [`Sign`]/[`Verify`] is not the length the
-    /// adapter's algorithm hashes to, so it cannot be the digest this key
+    MalformedPublicKey(#[from] spki::Error),
+    /// The digest handed to [`Sign`]/[`Verify`] cannot be one this key
     /// signs. Checked before any network call.
-    #[error("expected a {expected}-byte digest, got {received}")]
-    UnexpectedDigestLength { expected: usize, received: usize },
+    #[error(transparent)]
+    DigestLength(#[from] crate::DigestLengthError),
 }
 
 impl From<CallError> for Error {
@@ -140,16 +139,8 @@ impl GcpSigningKey {
 
     fn checked_digest(&self, digest: &Protected<Vec<u8>>) -> Result<Vec<u8>, Error> {
         let digest = digest.clone().risky_unwrap();
-        let expected = self.algorithm.digest_len();
-
-        if digest.len() == expected {
-            Ok(digest)
-        } else {
-            Err(Error::UnexpectedDigestLength {
-                expected,
-                received: digest.len(),
-            })
-        }
+        self.algorithm.check_digest_len(digest.len())?;
+        Ok(digest)
     }
 }
 
@@ -604,10 +595,11 @@ mod tests {
 
         assert!(matches!(
             error,
-            Error::UnexpectedDigestLength {
+            Error::DigestLength(crate::DigestLengthError {
                 expected: 32,
-                received: 48
-            }
+                received: 48,
+                ..
+            })
         ));
     }
 

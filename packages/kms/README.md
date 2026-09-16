@@ -46,6 +46,9 @@ symmetric adapter never exposes `GetPublicKey`.
 
 Every adapter takes a ready vendor client. Credentials, endpoints and TLS
 are the caller's concern; the adapter holds a client and one bound key.
+Adapters live in their vendor module (`vitaminc_kms::azure::AzureMacKey`,
+`vitaminc_kms::vault::VaultSigningKey`, ...); only the AWS data key source
+and [`AwsKmsHmac`], which predate the modules, are also at the crate root.
 
 Design notes that apply across vendors:
 
