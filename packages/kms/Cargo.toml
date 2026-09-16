@@ -32,6 +32,9 @@ aws-sdk-kms = { version = "1.109.0", optional = true }
 # the abandoned unofficial predecessor; do not use it.
 azure_core = { version = "1", optional = true }
 azure_security_keyvault_keys = { version = "1", optional = true }
+# Azure Key Vault has no "generate data key" call, so the adapter mints the
+# plaintext locally with this workspace's own CSPRNG before wrapping it.
+vitaminc-random = { version = "0.3.0", path = "../random", optional = true }
 
 # --- `gcp` feature -----------------------------------------------------------
 # `google-cloud-kms-v1` is Google's official crate (REST over reqwest). The
@@ -71,11 +74,16 @@ mockall = "0.15"
 # Azure integration tests build a transport that trusts Lowkey Vault's
 # self-signed certificate explicitly, without touching the OS trust store.
 reqwest = { version = "0.13", features = ["rustls"] }
+# The Azure unit tests stub `azure_core`'s `HttpClient` and `TokenCredential`,
+# both of which are `#[async_trait]` traits.
+async-trait = "0.1"
+# Reads back the JSON request bodies that the stub transport records.
+serde_json = "1"
 
 [features]
 default = ["aws"]
 aws = ["dep:aws-sdk-kms"]
-azure = ["dep:azure_core", "dep:azure_security_keyvault_keys", "canonical-encoding"]
+azure = ["dep:azure_core", "dep:azure_security_keyvault_keys", "dep:vitaminc-random", "canonical-encoding"]
 gcp = ["dep:google-cloud-kms-v1", "dep:google-cloud-auth", "dep:crc32c"]
 vault = ["dep:vaultrs", "dep:rustify", "dep:serde", "dep:serde_json", "dep:base64", "canonical-encoding"]
 # Internal: the DER/PEM helpers behind ADR 0001. Not meant to be enabled
