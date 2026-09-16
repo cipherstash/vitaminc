@@ -17,7 +17,11 @@ pub trait Sign {
 pub trait Verify {
     type Error: std::error::Error + Send + Sync + 'static;
 
-    async fn verify(&self, digest: &Protected<Vec<u8>>, signature: &[u8]) -> Result<bool, Self::Error>;
+    async fn verify(
+        &self,
+        digest: &Protected<Vec<u8>>,
+        signature: &[u8],
+    ) -> Result<bool, Self::Error>;
 }
 
 #[allow(async_fn_in_trait)]
