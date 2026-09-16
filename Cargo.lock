@@ -4536,6 +4536,7 @@ dependencies = [
 name = "vitaminc-kms"
 version = "0.5.0"
 dependencies = [
+ "async-trait",
  "aws-config",
  "aws-sdk-kms",
  "aws-smithy-mocks",
@@ -4561,6 +4562,7 @@ dependencies = [
  "vaultrs",
  "vitaminc-async-traits",
  "vitaminc-protected",
+ "vitaminc-random",
  "vitaminc-traits",
  "zeroize",
 ]
