@@ -1,9 +1,9 @@
 use crate::data_key::{
-    dedup_retrieve, fan_out_generate, pooled_key_generate, BatchGenerateDataKey,
-    BatchRetrieveDataKey, GenerateDataKey, GeneratedDataKey, KeyIsolation, KeyReconstruction,
-    RetrieveDataKey,
+    dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey,
+    GenerateDataKey, GeneratedDataKey, KeyIsolation, KeyReconstruction, RetrieveDataKey,
 };
 use crate::key_id::KeyId;
+use crate::pooled::PooledDataKeySource;
 use aws_sdk_kms::{primitives::Blob, Client};
 use thiserror::Error;
 use vitaminc_protected::Protected;
@@ -30,6 +30,10 @@ pub enum Error {
     UnexpectedKeyLength { expected: usize, received: usize },
 }
 
+// `aws_sdk_kms::Error` is large and we re-export it as-is through our own
+// `Error`, so shrinking it would mean boxing a public variant. Not worth a
+// breaking change for an error on a network round-trip.
+#[allow(clippy::result_large_err)]
 fn into_sized<const N: usize>(bytes: Vec<u8>) -> Result<[u8; N], Error> {
     let received = bytes.len();
     bytes
@@ -119,56 +123,11 @@ impl<const N: usize> BatchRetrieveDataKey<N> for AwsDataKeySource<N> {
     }
 }
 
-/// AWS KMS-backed data key source with pooled key isolation
-/// (`KeyIsolation::Pooled`) — one key shared across the whole batch, via
-/// [`pooled_key_generate`]. One round trip per batch regardless of size,
-/// at the cost of weaker per-value isolation than [`AwsDataKeySource`] —
-/// a compromised key's blast radius is the whole batch, not one value.
-/// Opt in deliberately; this type exists so that choice is explicit and
-/// visible in code, never a silent default. See CIP-4030.
-pub struct AwsPooledDataKeySource<const N: usize>(AwsDataKeySource<N>);
-
-impl<const N: usize> AwsPooledDataKeySource<N> {
-    pub fn new(client: Client, key_id: impl Into<String>) -> Self {
-        Self(AwsDataKeySource::new(client, key_id))
-    }
-}
-
-impl<const N: usize> GenerateDataKey<N> for AwsPooledDataKeySource<N> {
-    type Error = Error;
-
-    async fn generate_data_key(&self) -> Result<GeneratedDataKey<N>, Self::Error> {
-        self.0.generate_data_key().await
-    }
-}
-
-impl<const N: usize> RetrieveDataKey<N> for AwsPooledDataKeySource<N> {
-    type Error = Error;
-
-    const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
-
-    async fn retrieve_data_key(&self, key_id: &KeyId) -> Result<Protected<[u8; N]>, Self::Error> {
-        self.0.retrieve_data_key(key_id).await
-    }
-}
-
-impl<const N: usize> BatchGenerateDataKey<N> for AwsPooledDataKeySource<N> {
-    const ISOLATION: KeyIsolation = KeyIsolation::Pooled;
-
-    async fn generate_data_keys(&self, count: usize) -> Result<Vec<GeneratedDataKey<N>>, Self::Error> {
-        pooled_key_generate(&self.0, count).await
-    }
-}
-
-impl<const N: usize> BatchRetrieveDataKey<N> for AwsPooledDataKeySource<N> {
-    async fn retrieve_data_keys(&self, key_ids: &[KeyId]) -> Result<Vec<Protected<[u8; N]>>, Self::Error> {
-        // Retrieve doesn't need its own pooled/non-pooled split — it just
-        // needs to be correct given whatever generate already decided
-        // upstream (CIP-3987/CIP-3988). Dedup degrades gracefully to a
-        // single retrieve when every id is identical, as it will be here.
-        dedup_retrieve(&self.0, key_ids).await
-    }
-}
+/// [`AwsDataKeySource`] with pooled key isolation (`KeyIsolation::Pooled`):
+/// one key shared across the whole batch, one round trip per batch. Build
+/// it as `PooledDataKeySource::new(AwsDataKeySource::new(client, key_id))`.
+/// See [`PooledDataKeySource`] for the trade-off; opt in deliberately.
+pub type AwsPooledDataKeySource<const N: usize> = PooledDataKeySource<AwsDataKeySource<N>>;
 
 #[cfg(test)]
 mod tests {
@@ -250,14 +209,14 @@ mod tests {
                 .build()
         });
         let client = mock_client!(aws_sdk_kms, RuleMode::MatchAny, &[&generate_rule]);
-        let source = AwsPooledDataKeySource::<32>::new(client, TEST_KEY_ID);
+        let source: AwsPooledDataKeySource<32> = PooledDataKeySource::new(AwsDataKeySource::new(client, TEST_KEY_ID));
 
         let keys = source.generate_data_keys(5).await.unwrap();
 
         assert_eq!(keys.len(), 5);
         assert_eq!(generate_rule.num_calls(), 1);
         assert_eq!(
-            AwsPooledDataKeySource::<32>::ISOLATION,
+            <AwsPooledDataKeySource<32> as BatchGenerateDataKey<32>>::ISOLATION,
             KeyIsolation::Pooled
         );
     }
