@@ -13,7 +13,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum EncodingError {
-    #[error("ECDSA signature is {received} bytes, expected {expected} (two {field_len}-byte integers)")]
+    #[error(
+        "ECDSA signature is {received} bytes, expected {expected} (two {field_len}-byte integers)"
+    )]
     EcdsaSignatureLength {
         expected: usize,
         received: usize,
@@ -146,7 +148,10 @@ pub fn pem_public_key_to_der(pem: &str) -> Result<Vec<u8>, EncodingError> {
 }
 
 fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
-    let first_nonzero = bytes.iter().position(|b| *b != 0).unwrap_or(bytes.len() - 1);
+    let first_nonzero = bytes
+        .iter()
+        .position(|b| *b != 0)
+        .unwrap_or(bytes.len() - 1);
     &bytes[first_nonzero.min(bytes.len().saturating_sub(1))..]
 }
 
@@ -199,7 +204,11 @@ mod tests {
         let err = ecdsa_raw_to_der(&[0u8; 63], 32).unwrap_err();
         assert!(matches!(
             err,
-            EncodingError::EcdsaSignatureLength { expected: 64, received: 63, .. }
+            EncodingError::EcdsaSignatureLength {
+                expected: 64,
+                received: 63,
+                ..
+            }
         ));
     }
 
@@ -225,7 +234,10 @@ mod tests {
         let y = [0x22u8; 32];
         let spki = ec_spki(EcCurve::P256, &x, &y).unwrap();
         let parsed = spki::SubjectPublicKeyInfoRef::from_der(&spki).unwrap();
-        assert_eq!(parsed.algorithm.oid, const_oid::db::rfc5912::ID_EC_PUBLIC_KEY);
+        assert_eq!(
+            parsed.algorithm.oid,
+            const_oid::db::rfc5912::ID_EC_PUBLIC_KEY
+        );
         let point = parsed.subject_public_key.raw_bytes();
         assert_eq!(point[0], 0x04);
         assert_eq!(&point[1..33], &x);
@@ -245,10 +257,15 @@ mod tests {
     #[test]
     fn pem_public_key_round_trips_and_rejects_other_labels() {
         let spki = ec_spki(EcCurve::P256, &[0x01], &[0x02]).unwrap();
-        let pem = pem_rfc7468::encode_string("PUBLIC KEY", pem_rfc7468::LineEnding::LF, &spki).unwrap();
+        let pem =
+            pem_rfc7468::encode_string("PUBLIC KEY", pem_rfc7468::LineEnding::LF, &spki).unwrap();
         assert_eq!(pem_public_key_to_der(&pem).unwrap(), spki);
 
-        let wrong = pem_rfc7468::encode_string("CERTIFICATE", pem_rfc7468::LineEnding::LF, &spki).unwrap();
-        assert!(matches!(pem_public_key_to_der(&wrong), Err(EncodingError::PemLabel(_))));
+        let wrong =
+            pem_rfc7468::encode_string("CERTIFICATE", pem_rfc7468::LineEnding::LF, &spki).unwrap();
+        assert!(matches!(
+            pem_public_key_to_der(&wrong),
+            Err(EncodingError::PemLabel(_))
+        ));
     }
 }
