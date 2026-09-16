@@ -51,6 +51,15 @@ jobs:
         env:
           LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
 
+      - name: Start Vault and Lowkey Vault
+        # vitaminc-kms' Vault and Azure adapter tests talk to a Vault dev
+        # server on localhost:8200 and Lowkey Vault (an Azure Key Vault
+        # emulator) on localhost:8443, the same way its AWS tests talk to
+        # LocalStack. Google Cloud KMS has no viable emulator; its adapter is
+        # tested against the SDK's stub trait only. LocalStack itself stays on
+        # the action above so LOCALSTACK_AUTH_TOKEN keeps working.
+        run: docker compose -f packages/kms/docker-compose.yml up -d --wait vault lowkey-vault
+
       - name: clippy (all features)
         # `--all-features` enables `_test-rust-crypto-backend`, which selects
         # the RustCrypto encrypt backend on native. The step below covers the
@@ -86,6 +95,12 @@ jobs:
           ulimit -l "$(ulimit -H -l)" || true
           echo "RLIMIT_MEMLOCK soft: $(ulimit -l) KiB"
           cargo test
+
+      - name: test (vitaminc-kms, every vendor adapter)
+        # The `azure`, `gcp` and `vault` features are off by default (each
+        # pulls in a whole vendor SDK), so plain `cargo test` above only
+        # exercises the AWS adapter. Needs the containers started above.
+        run: cargo test -p vitaminc-kms --all-features
 
       - name: test (vitaminc-encrypt, RustCrypto backend on native)
         # Forces the RustCrypto path that wasm32 uses, so the same property
