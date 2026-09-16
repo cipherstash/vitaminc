@@ -435,8 +435,8 @@ mod tests {
 
     #[tokio::test]
     async fn the_public_key_comes_back_as_der_spki() {
-        let spki = crate::encoding::ec_spki(crate::encoding::EcCurve::P256, &[0x01], &[0x02])
-            .unwrap();
+        let spki =
+            crate::encoding::ec_spki(crate::encoding::EcCurve::P256, &[0x01], &[0x02]).unwrap();
         let pem =
             pem_rfc7468::encode_string("PUBLIC KEY", pem_rfc7468::LineEnding::LF, &spki).unwrap();
 
@@ -527,10 +527,7 @@ mod integration_tests {
     use crate::vault::tests::DEFAULT_MOUNT;
     use vaultrs::api::transit::KeyType;
 
-    async fn signing_key(
-        key_type: KeyType,
-        algorithm: SignatureAlgorithm,
-    ) -> VaultSigningKey {
+    async fn signing_key(key_type: KeyType, algorithm: SignatureAlgorithm) -> VaultSigningKey {
         let (client, name) = transit_key(key_type).await;
         VaultSigningKey::new(client, DEFAULT_MOUNT, name, 1, algorithm)
     }
@@ -560,7 +557,10 @@ mod integration_tests {
         // A different digest of the same length must not verify either.
         let mut other = digest.clone().risky_unwrap();
         other[0] ^= 0xFF;
-        assert!(!key.verify(&Protected::new(other), &signature).await.unwrap());
+        assert!(!key
+            .verify(&Protected::new(other), &signature)
+            .await
+            .unwrap());
     }
 
     #[tokio::test]

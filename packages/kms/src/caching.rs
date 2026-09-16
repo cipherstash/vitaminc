@@ -65,7 +65,10 @@ mod tests {
         type Error = std::convert::Infallible;
         const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
 
-        async fn retrieve_data_key(&self, _key_id: &KeyId) -> Result<Protected<[u8; 4]>, Self::Error> {
+        async fn retrieve_data_key(
+            &self,
+            _key_id: &KeyId,
+        ) -> Result<Protected<[u8; 4]>, Self::Error> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(Protected::new([1, 2, 3, 4]))
         }
@@ -73,7 +76,8 @@ mod tests {
 
     #[tokio::test]
     async fn second_retrieve_for_the_same_key_id_is_a_cache_hit() {
-        let caching = CachingRetrieveDataKey::new(CountingSource::default(), 10, Duration::from_secs(60));
+        let caching =
+            CachingRetrieveDataKey::new(CountingSource::default(), 10, Duration::from_secs(60));
         let key_id = KeyId::new(vec![0xAB; 8]);
 
         let first = caching.retrieve_data_key(&key_id).await.unwrap();
@@ -85,10 +89,17 @@ mod tests {
 
     #[tokio::test]
     async fn different_key_ids_both_reach_the_inner_source() {
-        let caching = CachingRetrieveDataKey::new(CountingSource::default(), 10, Duration::from_secs(60));
+        let caching =
+            CachingRetrieveDataKey::new(CountingSource::default(), 10, Duration::from_secs(60));
 
-        caching.retrieve_data_key(&KeyId::new(vec![1])).await.unwrap();
-        caching.retrieve_data_key(&KeyId::new(vec![2])).await.unwrap();
+        caching
+            .retrieve_data_key(&KeyId::new(vec![1]))
+            .await
+            .unwrap();
+        caching
+            .retrieve_data_key(&KeyId::new(vec![2]))
+            .await
+            .unwrap();
 
         assert_eq!(caching.inner.calls.load(Ordering::SeqCst), 2);
     }

@@ -11,7 +11,6 @@ use vitaminc_protected::{AsProtectedRef, Controlled, Protected, ProtectedRef};
 use vitaminc_traits::Update;
 use zeroize::Zeroize;
 
-
 /// A `Mac` implementation that uses AWS KMS to generate HMACs of `N` bytes.
 /// Valid sizes are 28, 32, 48, and 64 bytes.
 ///

@@ -66,7 +66,10 @@ pub enum KeyIsolation {
 pub trait BatchGenerateDataKey<const N: usize>: GenerateDataKey<N> {
     const ISOLATION: KeyIsolation;
 
-    async fn generate_data_keys(&self, count: usize) -> Result<Vec<GeneratedDataKey<N>>, Self::Error>;
+    async fn generate_data_keys(
+        &self,
+        count: usize,
+    ) -> Result<Vec<GeneratedDataKey<N>>, Self::Error>;
 }
 
 #[allow(async_fn_in_trait)]
@@ -122,8 +125,5 @@ pub async fn dedup_retrieve<const N: usize, T: RetrieveDataKey<N> + Sync>(
     let by_id: HashMap<&KeyId, &Protected<[u8; N]>> =
         distinct.iter().copied().zip(retrieved.iter()).collect();
 
-    Ok(key_ids
-        .iter()
-        .map(|id| by_id[id].clone())
-        .collect())
+    Ok(key_ids.iter().map(|id| by_id[id].clone()).collect())
 }
