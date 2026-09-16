@@ -1,6 +1,6 @@
 [package]
 name = "vitaminc-kms"
-description = "AWS KMS implementation for Vitamin C traits"
+description = "KMS key-provider traits for Vitamin C, with adapters for AWS KMS, Azure Key Vault, Google Cloud KMS and HashiCorp Vault"
 documentation = "https://docs.rs/vitaminc-kms"
 version.workspace = true
 repository.workspace = true
@@ -15,8 +15,6 @@ categories.workspace = true
 vitaminc-async-traits = { version = "0.5.0", path = "../async-traits" }
 vitaminc-traits = { version = "0.5.0", path = "../traits" }
 vitaminc-protected = { version = "0.5.0", path = "../protected" }
-aws-sdk-kms = "1.109.0"
-aws-config = "1.8.18"
 futures = "0.3.31"
 # Generic RetrieveDataKey cache (CIP-4031/CIP-4033) — correct concurrent
 # LRU+TTL eviction is easy to get subtly wrong to hand-roll, and this
@@ -26,6 +24,40 @@ moka = { version = "0.12.16", features = ["future"] }
 thiserror = { workspace = true }
 zeroize = { workspace = true }
 
+# --- `aws` feature -----------------------------------------------------------
+aws-sdk-kms = { version = "1.109.0", optional = true }
+
+# --- `azure` feature ---------------------------------------------------------
+# Official Microsoft SDK (GA). The pre-1.0 `azure_security_keyvault` crate is
+# the abandoned unofficial predecessor; do not use it.
+azure_core = { version = "1", optional = true }
+azure_security_keyvault_keys = { version = "1", optional = true }
+
+# --- `gcp` feature -----------------------------------------------------------
+# `google-cloud-kms-v1` is Google's official crate (REST over reqwest). The
+# similarly named `google-cloud-kms` on crates.io is a stale community crate.
+# The crate leaves CRC32C request/response integrity entirely to the caller,
+# hence `crc32c`.
+google-cloud-kms-v1 = { version = "1", optional = true }
+google-cloud-auth = { version = "1", optional = true }
+crc32c = { version = "0.6", optional = true }
+
+# --- `vault` feature ---------------------------------------------------------
+# `vaultrs` covers every single-item Transit call but no batch endpoint; the
+# adapter defines `datakeys` and batch `decrypt` itself with `rustify`, the
+# same endpoint macro `vaultrs` uses (ADR 0002).
+vaultrs = { version = "0.8", optional = true }
+rustify = { version = "0.7", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+base64 = { version = "0.23", optional = true }
+
+# --- shared by `azure` and `vault`: canonical DER encodings (ADR 0001) -------
+pem-rfc7468 = { version = "1", features = ["alloc"], optional = true }
+der = { version = "0.8", features = ["derive", "alloc", "oid"], optional = true }
+spki = { version = "0.8", features = ["alloc"], optional = true }
+const-oid = { version = "0.10", features = ["db"], optional = true }
+
 [dev-dependencies]
 tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "macros"] }
 # Zero-network unit testing of aws-sdk-kms calls (CIP-4029's recommended
@@ -33,3 +65,19 @@ tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "macros"] }
 # here since Cargo unifies dev-dependency features into test builds.
 aws-smithy-mocks = "0.3.0"
 aws-sdk-kms = { version = "1.109.0", features = ["test-util"] }
+aws-config = "1.8.18"
+# GCP adapter unit tests mock the official crate's `stub` trait.
+mockall = "0.15"
+# Azure integration tests build a transport that trusts Lowkey Vault's
+# self-signed certificate explicitly, without touching the OS trust store.
+reqwest = { version = "0.13", features = ["rustls"] }
+
+[features]
+default = ["aws"]
+aws = ["dep:aws-sdk-kms"]
+azure = ["dep:azure_core", "dep:azure_security_keyvault_keys", "canonical-encoding"]
+gcp = ["dep:google-cloud-kms-v1", "dep:google-cloud-auth", "dep:crc32c"]
+vault = ["dep:vaultrs", "dep:rustify", "dep:serde", "dep:serde_json", "dep:base64", "canonical-encoding"]
+# Internal: the DER/PEM helpers behind ADR 0001. Not meant to be enabled
+# directly.
+canonical-encoding = ["dep:der", "dep:spki", "dep:const-oid", "dep:pem-rfc7468"]
