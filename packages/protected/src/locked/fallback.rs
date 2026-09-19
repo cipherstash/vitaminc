@@ -1,9 +1,11 @@
-//! The backend for targets with no memory locking (non-Unix builds, and
-//! Miri, which has no `mlock`): a plain heap allocation that is wiped on
-//! release. Every region reports its lock as unavailable.
+//! The backend for targets with no memory locking (non-Unix builds) and for
+//! Kani, which cannot execute system calls: a plain heap allocation, wiped
+//! on release, with no lock and no guard pages. Every region reports its
+//! lock as unavailable.
 //!
-//! Also compiled into Unix test builds, where it is not the backend in use,
-//! so that its own tests below run (and are mutated) on the platforms CI has.
+//! Also compiled into Unix test builds, where it is not the backend in use
+//! (Miri included: Miri runs the `mmap`-backed backend), so that its own
+//! tests below run, and are mutated, on the platforms CI has.
 
 use super::LockError;
 use core::ptr::NonNull;

@@ -120,10 +120,19 @@ impl Region {
                 source: io::Error::last_os_error(),
             });
         }
-        let base = NonNull::new(base.cast::<u8>()).ok_or_else(|| LockError::Map {
-            bytes: total,
-            source: io::Error::other("mmap returned a null mapping"),
-        })?;
+        let Some(base) = NonNull::new(base.cast::<u8>()) else {
+            // A mapping at address zero is a success the kernel may hand
+            // out where low mappings are permitted, but not one a
+            // `NonNull` region can own. Give it back rather than leak it.
+            // SAFETY: `base..base+total` is the mapping just returned.
+            unsafe {
+                let _ = libc::munmap(base, total);
+            }
+            return Err(LockError::Map {
+                bytes: total,
+                source: io::Error::other("mmap returned a mapping at address zero"),
+            });
+        };
         // From here on `region` owns the mapping; an early return unmaps it.
         let region = Self { base, interior_len };
 

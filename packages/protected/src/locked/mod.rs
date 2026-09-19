@@ -236,12 +236,12 @@ impl LockPolicy {
 /// swap, and at every address a move left them at.
 ///
 /// `Locked<T>` closes each of those at allocation time, where the caller
-/// cannot get it wrong, instead of at exit time, where they can:
+/// cannot get it wrong, instead of at exit time, where they can. On Unix:
 ///
 /// - **The value never moves.** It is written once into a region obtained
-///   from the operating system (`mmap` on Unix) and only ever reached by
-///   reference. The `Locked<T>` handle itself is three words on Unix;
-///   moving it moves no secret bytes.
+///   from the operating system with `mmap` and only ever reached by
+///   reference. The `Locked<T>` handle itself is three words; moving it
+///   moves no secret bytes.
 /// - **Not swapped.** The region is `mlock`ed, so the kernel keeps it
 ///   resident. This can be refused; see [`LockPolicy`].
 /// - **Not dumped.** On Linux the region is marked `MADV_DONTDUMP`, so a core
@@ -256,6 +256,14 @@ impl LockPolicy {
 ///   cannot be elided, and it is part of releasing the region rather than
 ///   of `Locked`'s destructor, so a panic in `T`'s destructor cannot skip it.
 ///
+/// # Elsewhere
+///
+/// On targets other than Unix, and under Kani, the value lives in an
+/// ordinary heap allocation: wiped on drop exactly as above, but neither
+/// locked nor fenced, and [`lock_error`](Self::lock_error) reports
+/// [`LockError::Unavailable`]. Under Miri the region is mapped for real but
+/// not locked or fenced, since Miri has no model for those calls.
+///
 /// # What it cannot do
 ///
 /// `Locked` protects the bytes `T` occupies *inline*. A `T` that owns a heap
@@ -263,12 +271,12 @@ impl LockPolicy {
 /// heap buffer is ordinary memory. Use it for inline types: `[u8; N]`, or a
 /// struct of them.
 ///
-/// Constructing from an existing value costs one copy from the caller's
-/// value into the region. The parameter's bytes are wiped on the way, and
-/// zeroized if the region could not be obtained at all, but the caller's own
-/// copy, if one exists at another address, is the caller's.
-/// [`generate`](Self::generate) avoids the copy entirely by building the
-/// value in place.
+/// Constructing from an existing value with [`new`](Self::new) copies it
+/// into the region and wipes the parameter slot, but a Rust move is a
+/// bitwise copy the compiler may leave behind, so a value that existed
+/// before the call may survive it in ordinary memory.
+/// [`generate`](Self::generate) builds the value in place and is the
+/// constructor to prefer for a secret that does not yet exist.
 ///
 /// # Example
 ///
@@ -381,10 +389,13 @@ impl<T: Zeroize> Locked<T> {
 
     /// Move `value` into locked storage.
     ///
-    /// The bytes of the parameter are wiped after the copy, without running
-    /// `T`'s destructor, so the only copy of the value left in ordinary
-    /// memory is any the caller still holds. If no region can be obtained
-    /// the parameter is zeroized and dropped before the error is returned.
+    /// The parameter slot is wiped after the copy, without running `T`'s
+    /// destructor, and zeroized if no region could be obtained. That is
+    /// the most this constructor can do: a Rust move is a bitwise copy the
+    /// compiler is free to leave behind, in the caller's frame or in a
+    /// spill, so a value that existed before the call may survive it in
+    /// ordinary memory. [`generate`](Self::generate) is the constructor
+    /// that never has the secret outside the region.
     ///
     /// ```
     /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
@@ -757,9 +768,9 @@ mod tests {
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(key)));
         assert!(r.is_err());
         assert_eq!(DROPS.load(Ordering::SeqCst), 1);
-        // No double drop, no leak: the region was released once. The bytes
-        // themselves are checked by `tests/locked_fallback_wipe.rs`, where
-        // an observing allocator can see them at release.
+        // No double drop, no leak: the region was released once. That a
+        // release always wipes is checked at the region level, in
+        // `fallback::tests`, where an observing allocator sees the bytes.
     }
 
     #[cfg(all(unix, not(miri)))]
