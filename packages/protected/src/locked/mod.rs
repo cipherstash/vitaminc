@@ -994,35 +994,10 @@ mod tests {
         }
     }
 
-    /// Whether a sanitizer runtime is loaded. The sanitizers intercept
-    /// `mlock` and report success without locking anything (their shadow
-    /// memory must never be pinned), so under them `locked()` says nothing
-    /// about what the kernel did.
+    /// The `Locked:` count (KiB) and `VmFlags:` of the `/proc/self/smaps`
+    /// entry that contains `addr`.
     #[cfg(all(target_os = "linux", not(miri)))]
-    fn sanitizer_runtime_loaded() -> bool {
-        [c"__asan_init", c"__msan_init", c"__tsan_init"]
-            .iter()
-            // SAFETY: dlsym with RTLD_DEFAULT and a valid C string has no
-            // preconditions; a missing symbol is a null result, not an error.
-            .any(|name| !unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) }.is_null())
-    }
-
-    #[cfg(all(target_os = "linux", not(miri)))]
-    #[test]
-    fn the_kernel_reports_the_region_locked_and_not_dumpable() {
-        let key = Locked::new([1u8; 32]).unwrap();
-        // The dump exclusion does not depend on the lock, and nothing on an
-        // unfiltered host refuses it, so it is never the reported
-        // degradation here. A refused lock (a small RLIMIT_MEMLOCK) is
-        // possible and is covered by the process tests; it only skips the
-        // `Locked:` check below, not the `dd` flag.
-        assert!(
-            !matches!(key.lock_error(), Some(LockError::Dump { .. })),
-            "{:?}",
-            key.lock_error()
-        );
-        let expect_locked = key.locked() && !sanitizer_runtime_loaded();
-        let addr = key.region.ptr().as_ptr() as usize;
+    fn smaps_entry(addr: usize) -> (Option<u64>, Option<String>) {
         let smaps = std::fs::read_to_string("/proc/self/smaps").unwrap();
         let mut in_region = false;
         let mut locked_kb = None;
@@ -1052,6 +1027,57 @@ mod tests {
                 flags = Some(v.trim().to_string());
             }
         }
+        (locked_kb, flags)
+    }
+
+    /// Whether `mlock` reports success without locking anything, as the
+    /// sanitizer runtimes make it do (their shadow memory must never be
+    /// pinned). Judged from a page of our own: if a successful `mlock` on
+    /// it leaves the kernel counting nothing locked, `locked()` says
+    /// nothing about what the kernel did in this process.
+    #[cfg(all(target_os = "linux", not(miri)))]
+    fn mlock_is_a_no_op() -> bool {
+        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+        // SAFETY: an anonymous private mapping of one page; checked below.
+        let probe = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                page,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+        assert_ne!(probe, libc::MAP_FAILED);
+        // SAFETY: `probe` is a page we own.
+        let locked = unsafe { libc::mlock(probe, page) } == 0;
+        let counted = smaps_entry(probe as usize).0.unwrap_or(0) > 0;
+        // SAFETY: still our page, unlocked and unmapped exactly once.
+        unsafe {
+            let _ = libc::munlock(probe, page);
+            let _ = libc::munmap(probe, page);
+        }
+        locked && !counted
+    }
+
+    #[cfg(all(target_os = "linux", not(miri)))]
+    #[test]
+    fn the_kernel_reports_the_region_locked_and_not_dumpable() {
+        let key = Locked::new([1u8; 32]).unwrap();
+        // The dump exclusion does not depend on the lock, and nothing on an
+        // unfiltered host refuses it, so it is never the reported
+        // degradation here. A refused lock (a small RLIMIT_MEMLOCK) is
+        // possible and is covered by the process tests; it only skips the
+        // `Locked:` check below, not the `dd` flag. So does an `mlock` that
+        // is a no-op in this process.
+        assert!(
+            !matches!(key.lock_error(), Some(LockError::Dump { .. })),
+            "{:?}",
+            key.lock_error()
+        );
+        let expect_locked = key.locked() && !mlock_is_a_no_op();
+        let (locked_kb, flags) = smaps_entry(key.region.ptr().as_ptr() as usize);
         if expect_locked {
             assert!(locked_kb.unwrap_or(0) > 0, "Locked: {locked_kb:?}");
         }
