@@ -43,6 +43,16 @@ impl Region {
         self.ptr
     }
 
+    /// The heap is shared with a forked child the same way the lock would
+    /// not be: there is no lock to lose, so every process is the same one.
+    pub(super) fn same_process(&self) -> bool {
+        true
+    }
+
+    pub(super) fn relock(&mut self) -> Option<LockError> {
+        Some(LockError::Unavailable)
+    }
+
     pub(super) fn wipe(&mut self) {
         // SAFETY: the allocation is live, exclusively borrowed and writable
         // for `layout.size()` bytes. Written as `MaybeUninit<u8>` because a
@@ -130,6 +140,13 @@ mod tests {
     fn the_value_is_at_the_start_of_the_allocation() {
         let (region, _) = Region::allocate(24, 8).unwrap();
         assert_eq!(region.value_ptr(24, 8), region.ptr());
+    }
+
+    #[test]
+    fn a_heap_region_has_no_lock_to_lose_or_regain() {
+        let (mut region, _) = Region::allocate(8, 1).unwrap();
+        assert!(region.same_process());
+        assert!(matches!(region.relock(), Some(LockError::Unavailable)));
     }
 
     #[test]

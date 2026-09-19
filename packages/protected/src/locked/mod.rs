@@ -75,6 +75,10 @@ pub enum LockError {
     /// (which maps the region but cannot lock it) and Kani. The value is
     /// wiped on drop as usual.
     Unavailable,
+    /// The value was created in another process. Memory locks are not
+    /// inherited across `fork`, so in the child the region is unlocked
+    /// until [`Locked::relock`] is called there.
+    Forked,
     /// `T` needs an alignment larger than a page, which the region cannot
     /// provide.
     Alignment {
@@ -109,6 +113,9 @@ impl fmt::Display for LockError {
                 write!(f, "excluding the region from core dumps was refused ({source})")
             }
             Self::Unavailable => f.write_str("memory locking is not available on this platform"),
+            Self::Forked => f.write_str(
+                "the lock belongs to the process that created the value; a forked child inherits the memory but not the lock",
+            ),
             Self::Alignment { align, page } => write!(
                 f,
                 "alignment {align} exceeds the page size {page}; locked storage cannot hold this type"
@@ -124,7 +131,7 @@ impl std::error::Error for LockError {
             | Self::Guard { source }
             | Self::Refused { source, .. }
             | Self::Dump { source } => Some(source),
-            Self::Unavailable | Self::Alignment { .. } => None,
+            Self::Unavailable | Self::Forked | Self::Alignment { .. } => None,
         }
     }
 }
@@ -255,6 +262,16 @@ impl LockPolicy {
 ///   store goes through a pointer the compiler cannot prove dead, so it
 ///   cannot be elided, and it is part of releasing the region rather than
 ///   of `Locked`'s destructor, so a panic in `T`'s destructor cannot skip it.
+///
+/// # Forking
+///
+/// A forked child inherits the mapping, its guard pages and, on Linux, the
+/// dump exclusion, but the kernel does not carry memory locks across
+/// `fork`. A `Locked` value knows which process locked it: in a child,
+/// [`locked`](Self::locked) is `false`, [`lock_error`](Self::lock_error)
+/// is [`LockError::Forked`] and [`require_locked`](Self::require_locked)
+/// fails, until [`relock`](Self::relock) is called there. Where the choice
+/// exists, create keys after forking rather than before.
 ///
 /// # Elsewhere
 ///
@@ -494,16 +511,33 @@ impl<T: Zeroize> Locked<T> {
         }
     }
 
-    /// Whether every protection the platform offers was applied: the memory
-    /// is locked against swapping and, on Linux, excluded from core dumps.
-    /// [`lock_error`](Self::lock_error) says which one was refused.
+    /// Whether every protection the platform offers was applied, in this
+    /// process: the memory is locked against swapping and, on Linux,
+    /// excluded from core dumps. [`lock_error`](Self::lock_error) says which
+    /// one was refused, or that the lock was left behind by a `fork`.
     pub fn locked(&self) -> bool {
-        self.lock.is_none()
+        self.lock.is_none() && self.region.same_process()
     }
 
     /// Why the memory is not fully protected, when it is not.
     pub fn lock_error(&self) -> Option<&LockError> {
-        self.lock.as_deref()
+        static FORKED: LockError = LockError::Forked;
+        self.lock
+            .as_deref()
+            .or_else(|| (!self.region.same_process()).then_some(&FORKED))
+    }
+
+    /// Take the lock again in the current process. For a forked child that
+    /// needs a value its parent created; in any other situation it is a
+    /// no-op that reports the state already known. On success the value is
+    /// locked here; on refusal the reason is kept and returned, exactly as
+    /// after construction under [`LockPolicy::BestEffort`].
+    pub fn relock(&mut self) -> Result<(), &LockError> {
+        self.lock = self.region.relock().map(Box::new);
+        match self.lock.as_deref() {
+            None => Ok(()),
+            Some(err) => Err(err),
+        }
     }
 
     /// Demand the lock: `Ok(self)` when locked, otherwise the refusal, with
@@ -519,6 +553,9 @@ impl<T: Zeroize> Locked<T> {
     /// }
     /// ```
     pub fn require_locked(mut self) -> Result<Self, LockError> {
+        if !self.region.same_process() {
+            return Err(LockError::Forked);
+        }
         match self.lock.take() {
             None => Ok(self),
             Some(err) => Err(*err),
@@ -794,8 +831,18 @@ mod tests {
                 assert_eq!(self.0, 0, "dropped before being zeroized");
             }
         }
-        let r = Locked::new(Wide(0x5A));
-        assert!(matches!(r, Err(LockError::Alignment { .. })), "{r:?}");
+        // A 128 KiB value crosses the stack a few times on its way in and
+        // out of `new`; the harness's 2 MiB thread is enough natively but
+        // not with a sanitizer's redzones around every frame.
+        std::thread::Builder::new()
+            .stack_size(16 << 20)
+            .spawn(|| {
+                let r = Locked::new(Wide(0x5A));
+                assert!(matches!(r, Err(LockError::Alignment { .. })), "{r:?}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
         assert!(ZEROIZED.load(Ordering::SeqCst));
     }
 
@@ -821,11 +868,15 @@ mod tests {
             },
             LockError::Dump { source: os() },
             LockError::Unavailable,
+            LockError::Forked,
             LockError::Alignment { align: 8, page: 4 },
         ];
         for err in &errors {
             assert!(!err.to_string().is_empty());
-            let has_source = !matches!(err, LockError::Unavailable | LockError::Alignment { .. });
+            let has_source = !matches!(
+                err,
+                LockError::Unavailable | LockError::Forked | LockError::Alignment { .. }
+            );
             assert_eq!(err.source().is_some(), has_source, "{err}");
         }
         assert!(errors[4].to_string().contains("core dumps"));
@@ -939,6 +990,14 @@ mod tests {
     }
 
     #[test]
+    fn relock_in_the_same_process_reports_the_known_state() {
+        let mut key = Locked::new([1u8; 8]).unwrap();
+        let before = key.locked();
+        assert_eq!(key.relock().is_ok(), before);
+        assert_eq!(key.locked(), before);
+    }
+
+    #[test]
     fn require_locked_passes_a_locked_value_through() {
         let key = Locked::new([1u8; 8]).unwrap();
         if key.locked() {
@@ -983,8 +1042,8 @@ mod tests {
     #[test]
     fn the_handle_is_a_few_words_whatever_the_value_size() {
         let words = mem::size_of::<Locked<[u8; 1024]>>() / mem::size_of::<usize>();
-        // Two for the Unix region (three for the fallback's `Layout`), one
-        // for the boxed lock error.
+        // Three for the Unix region (base, length, owning pid; the
+        // fallback's `Layout` costs the same), one for the boxed lock error.
         assert!(words <= 4, "{words} words");
         assert_eq!(
             mem::size_of::<Locked<[u8; 1024]>>(),

@@ -19,6 +19,14 @@ use std::io;
 pub(super) struct Region {
     base: NonNull<u8>,
     interior_len: usize,
+    /// The process that holds the lock. A forked child inherits the
+    /// mapping, the guards and the dump exclusion, but not the lock.
+    pid: libc::pid_t,
+}
+
+fn process_id() -> libc::pid_t {
+    // SAFETY: getpid has no preconditions and cannot fail.
+    unsafe { libc::getpid() }
 }
 
 fn page_size() -> usize {
@@ -134,7 +142,11 @@ impl Region {
             });
         };
         // From here on `region` owns the mapping; an early return unmaps it.
-        let region = Self { base, interior_len };
+        let region = Self {
+            base,
+            interior_len,
+            pid: process_id(),
+        };
 
         // Miri has no model for guard pages, the lock or the dump exclusion;
         // the region is still mapped, used and released for real, and its
@@ -167,18 +179,7 @@ impl Region {
         // SAFETY: the trailing guard starts at base + page + interior_len, inside the mapping.
         guard(unsafe { self.base.as_ptr().add(page + interior_len) })?;
 
-        let interior = self.interior();
-        // SAFETY: the interior is a page-aligned, mapped, writable range.
-        let rc = unsafe { libc::mlock(interior.as_ptr().cast(), interior_len) };
-        let lock = (rc != 0).then(|| {
-            // errno first: reading the limit is another system call.
-            let source = io::Error::last_os_error();
-            LockError::Refused {
-                bytes: interior_len,
-                limit: memlock_limit(),
-                source,
-            }
-        });
+        let lock = self.lock();
 
         // Exclusion from core dumps, applied whether or not the lock was
         // refused: the two protections are independent, and a value that
@@ -188,6 +189,7 @@ impl Region {
         // `mlock` does not imply this protection.
         #[cfg(target_os = "linux")]
         let dump = {
+            let interior = self.interior();
             // SAFETY: same range as the mlock above.
             let rc = unsafe {
                 libc::madvise(interior.as_ptr().cast(), interior_len, libc::MADV_DONTDUMP)
@@ -200,6 +202,42 @@ impl Region {
         let dump: Option<LockError> = None;
 
         Ok(lock.or(dump))
+    }
+
+    /// Lock the interior against swapping; the refusal, if any.
+    #[cfg(not(miri))]
+    fn lock(&self) -> Option<LockError> {
+        let interior_len = self.interior_len;
+        // SAFETY: the interior is a page-aligned, mapped, writable range.
+        let rc = unsafe { libc::mlock(self.interior().as_ptr().cast(), interior_len) };
+        (rc != 0).then(|| {
+            // errno first: reading the limit is another system call.
+            let source = io::Error::last_os_error();
+            LockError::Refused {
+                bytes: interior_len,
+                limit: memlock_limit(),
+                source,
+            }
+        })
+    }
+
+    /// Whether this is the process the lock was taken in.
+    pub(super) fn same_process(&self) -> bool {
+        self.pid == process_id()
+    }
+
+    /// Take the lock again in the current process, and own it here from now
+    /// on; the refusal, if any.
+    pub(super) fn relock(&mut self) -> Option<LockError> {
+        self.pid = process_id();
+        #[cfg(miri)]
+        {
+            Some(LockError::Unavailable)
+        }
+        #[cfg(not(miri))]
+        {
+            self.lock()
+        }
     }
 
     fn interior(&self) -> NonNull<u8> {
