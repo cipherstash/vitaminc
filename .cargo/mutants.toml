@@ -31,6 +31,10 @@ exclude_globs = [
     # one delegates to lives in `encrypt.rs`/`decrypt.rs` and is mutated
     # normally: 14 of the crate's mutants are caught by its unit tests.
     "packages/aead-derive/src/lib.rs",
+    # Kani proof harnesses: built only under `cfg(kani)`, so no test binary
+    # ever contains them and every mutant there would survive spuriously.
+    # The Kani gate (.github/workflows/kani.yml) is what checks this file.
+    "packages/protected/src/locked/proofs.rs",
 ]
 
 # Skip mutants inside the `vitaminc-aead-napi` conversion functions and their

@@ -994,6 +994,19 @@ mod tests {
         }
     }
 
+    /// Whether a sanitizer runtime is loaded. The sanitizers intercept
+    /// `mlock` and report success without locking anything (their shadow
+    /// memory must never be pinned), so under them `locked()` says nothing
+    /// about what the kernel did.
+    #[cfg(all(target_os = "linux", not(miri)))]
+    fn sanitizer_runtime_loaded() -> bool {
+        [c"__asan_init", c"__msan_init", c"__tsan_init"]
+            .iter()
+            // SAFETY: dlsym with RTLD_DEFAULT and a valid C string has no
+            // preconditions; a missing symbol is a null result, not an error.
+            .any(|name| !unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) }.is_null())
+    }
+
     #[cfg(all(target_os = "linux", not(miri)))]
     #[test]
     fn the_kernel_reports_the_region_locked_and_not_dumpable() {
@@ -1008,7 +1021,7 @@ mod tests {
             "{:?}",
             key.lock_error()
         );
-        let expect_locked = key.locked();
+        let expect_locked = key.locked() && !sanitizer_runtime_loaded();
         let addr = key.region.ptr().as_ptr() as usize;
         let smaps = std::fs::read_to_string("/proc/self/smaps").unwrap();
         let mut in_region = false;
