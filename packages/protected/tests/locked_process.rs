@@ -78,6 +78,36 @@ fn child_entry() {
             let err = LockPolicy::BestEffort.set().unwrap_err();
             assert_eq!(err.current, LockPolicy::Strict);
         }
+        "drop_unmaps" => {
+            // `msync` answers ENOMEM for a range with no mapping. Single-
+            // threaded here, so nothing can reuse the address between the
+            // drop and the probe.
+            let probe = |addr: *mut u8, len: usize| -> Option<i32> {
+                // SAFETY: msync on an arbitrary page-aligned range has no
+                // preconditions; an unmapped range is an error, not UB.
+                let rc = unsafe { libc::msync(addr.cast(), len, libc::MS_ASYNC) };
+                (rc != 0).then(|| std::io::Error::last_os_error().raw_os_error().unwrap())
+            };
+            let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+            let key = Locked::new([1u8; 32]).unwrap();
+            let interior = key.risky_ref().as_ptr().cast_mut();
+            assert_eq!(
+                probe(interior, page),
+                None,
+                "the interior is mapped while live"
+            );
+            drop(key);
+            // The interior and both guards: a partial unmap leaves one of them.
+            for addr in [unsafe { interior.sub(page) }, interior, unsafe {
+                interior.add(page)
+            }] {
+                assert_eq!(
+                    probe(addr, page),
+                    Some(libc::ENOMEM),
+                    "{addr:?} still mapped"
+                );
+            }
+        }
         "overrun_faults" => {
             let key = Locked::new([1u8; 32]).unwrap();
             let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
@@ -120,6 +150,11 @@ fn a_refused_lock_fails_the_constructor_under_strict() {
 #[test]
 fn the_policy_is_set_once_per_process() {
     assert_passed(&child("policy_is_set_once"));
+}
+
+#[test]
+fn dropping_the_value_unmaps_the_interior_and_both_guards() {
+    assert_passed(&child("drop_unmaps"));
 }
 
 #[test]

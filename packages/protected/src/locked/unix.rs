@@ -33,60 +33,84 @@ fn page_size() -> usize {
     }
 }
 
-/// The soft `RLIMIT_MEMLOCK`, for the error message when a lock is refused.
-/// `None` when the limit is unlimited or could not be read.
+/// The `mmap` arguments that are data rather than logic.
 ///
-/// Only the Unix families that have the resource are asked. `mlock` exists
-/// everywhere this backend builds, but the limit that governs it does not
-/// (illumos and Solaris, for instance, have no `RLIMIT_MEMLOCK`), and a
-/// refusal there simply goes unexplained.
-#[cfg(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "emscripten",
-    target_os = "l4re",
-    target_vendor = "apple",
-    target_os = "freebsd",
-    target_os = "dragonfly",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "fuchsia",
-    target_os = "redox",
-    target_os = "nto",
-    target_os = "hurd",
-))]
-fn memlock_limit() -> Option<u64> {
-    let mut lim = libc::rlimit {
-        rlim_cur: 0,
-        rlim_max: 0,
-    };
-    // SAFETY: `lim` is a valid, writable rlimit for the duration of the call.
-    let rc = unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut lim) };
-    if rc != 0 || lim.rlim_cur == libc::RLIM_INFINITY {
-        return None;
-    }
-    // `rlim_t` is `u64` on Linux and macOS but not on every Unix.
-    #[allow(clippy::useless_conversion)]
-    u64::try_from(lim.rlim_cur).ok()
+/// The flag bits are disjoint, so `|`, `^` and `+` all produce the same
+/// value: every operator mutation in here is equivalent, hence the skip
+/// (cargo-mutants honours it on a module, not on a `const`).
+#[mutants::skip]
+mod flags {
+    /// The interior is readable and writable; the guard pages are
+    /// re-protected to `PROT_NONE` after the map.
+    pub(super) const INTERIOR_PROT: libc::c_int = libc::PROT_READ | libc::PROT_WRITE;
+    pub(super) const MAP_FLAGS: libc::c_int = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
+    /// No file backs an anonymous mapping; portable code passes `-1`.
+    pub(super) const NO_FILE: libc::c_int = -1;
+}
+use flags::{INTERIOR_PROT, MAP_FLAGS, NO_FILE};
+
+/// The whole mapping: a guard page, the interior, a guard page. Both the map
+/// and the unmap go through here, so the two lengths cannot drift.
+fn total_len(interior_len: usize, page: usize) -> usize {
+    interior_len + 2 * page
 }
 
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "emscripten",
-    target_os = "l4re",
-    target_vendor = "apple",
-    target_os = "freebsd",
-    target_os = "dragonfly",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "fuchsia",
-    target_os = "redox",
-    target_os = "nto",
-    target_os = "hurd",
-)))]
+/// The soft `RLIMIT_MEMLOCK`, for the error message when a lock is refused.
+/// `None` when the limit is unlimited, could not be read, or does not exist:
+/// `mlock` exists everywhere this backend builds, but the limit that governs
+/// it does not (illumos and Solaris, for instance, have no `RLIMIT_MEMLOCK`),
+/// and a refusal there simply goes unexplained.
 fn memlock_limit() -> Option<u64> {
-    None
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "emscripten",
+        target_os = "l4re",
+        target_vendor = "apple",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "fuchsia",
+        target_os = "redox",
+        target_os = "nto",
+        target_os = "hurd",
+    )))]
+    {
+        None
+    }
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "emscripten",
+        target_os = "l4re",
+        target_vendor = "apple",
+        target_os = "freebsd",
+        target_os = "dragonfly",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "fuchsia",
+        target_os = "redox",
+        target_os = "nto",
+        target_os = "hurd",
+    ))]
+    {
+        let mut lim = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: `lim` is a valid, writable rlimit for the duration of the call.
+        let rc = unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut lim) };
+        if rc != 0 {
+            return None;
+        }
+        if lim.rlim_cur == libc::RLIM_INFINITY {
+            return None;
+        }
+        // `rlim_t` is `u64` on Linux and macOS but not on every Unix.
+        #[allow(clippy::useless_conversion)]
+        u64::try_from(lim.rlim_cur).ok()
+    }
 }
 
 impl Region {
@@ -107,7 +131,7 @@ impl Region {
         // At least one page, so a zero-sized `T` still has a real interior
         // to point into and guards on both sides of it.
         let interior_len = size.max(1).div_ceil(page) * page;
-        let total = interior_len + 2 * page;
+        let total = total_len(interior_len, page);
 
         // SAFETY: an anonymous private mapping with no address hint has no
         // preconditions; the result is checked against MAP_FAILED below.
@@ -115,9 +139,9 @@ impl Region {
             libc::mmap(
                 core::ptr::null_mut(),
                 total,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
-                -1,
+                INTERIOR_PROT,
+                MAP_FLAGS,
+                NO_FILE,
                 0,
             )
         };
@@ -182,7 +206,7 @@ impl Region {
     }
 
     fn total(&self) -> usize {
-        self.interior_len + 2 * page_size()
+        total_len(self.interior_len, page_size())
     }
 
     /// The interior: `interior_len` bytes, page-aligned, readable and writable.
@@ -216,5 +240,49 @@ impl Drop for Region {
             let _ = libc::munlock(self.interior().as_ptr().cast(), self.interior_len);
             let _ = libc::munmap(self.base.as_ptr().cast(), self.total());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_total_is_the_interior_plus_a_guard_page_each_side() {
+        assert_eq!(total_len(4096, 4096), 3 * 4096);
+        assert_eq!(total_len(2 * 16384, 16384), 4 * 16384);
+        let page = page_size();
+        let (region, _) = Region::allocate(1, 1).unwrap();
+        assert_eq!(region.total(), 3 * page);
+        let (region, _) = Region::allocate(page + 1, 1).unwrap();
+        assert_eq!(region.total(), 4 * page);
+    }
+
+    #[test]
+    fn an_alignment_of_one_page_is_the_most_the_region_offers() {
+        let page = page_size();
+        assert!(Region::allocate(1, page).is_ok());
+        assert!(matches!(
+            Region::allocate(1, page * 2),
+            Err(LockError::Alignment { align, page: p }) if align == page * 2 && p == page
+        ));
+    }
+
+    #[test]
+    fn the_memlock_limit_is_the_soft_limit_when_finite() {
+        let mut lim = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: `lim` is a valid, writable rlimit for the duration of the call.
+        let rc = unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut lim) };
+        assert_eq!(rc, 0);
+        let expected = if lim.rlim_cur == libc::RLIM_INFINITY {
+            None
+        } else {
+            #[allow(clippy::useless_conversion)]
+            u64::try_from(lim.rlim_cur).ok()
+        };
+        assert_eq!(memlock_limit(), expected);
     }
 }

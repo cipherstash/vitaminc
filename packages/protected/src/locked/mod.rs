@@ -18,7 +18,9 @@ mod unix;
 #[cfg(all(unix, not(miri)))]
 use unix::Region;
 
-#[cfg(not(all(unix, not(miri))))]
+// The fallback is the backend off Unix and under Miri, and is also built
+// into every test binary so that its own tests run on the platforms CI has.
+#[cfg(any(test, not(all(unix, not(miri)))))]
 mod fallback;
 #[cfg(not(all(unix, not(miri))))]
 use fallback::Region;
@@ -778,6 +780,23 @@ mod tests {
     }
 
     #[test]
+    fn zeroize_clears_the_value_in_place() {
+        let mut key = Locked::new([0x77u8; 24]).unwrap();
+        let before = key.risky_ref().as_ptr();
+        key.zeroize();
+        assert_eq!(key.risky_ref(), &[0u8; 24]);
+        assert_eq!(before, key.risky_ref().as_ptr());
+    }
+
+    #[test]
+    fn the_policy_error_names_the_policy_in_force() {
+        let err = LockPolicyError {
+            current: LockPolicy::Strict,
+        };
+        assert_eq!(err.to_string(), "the lock policy is already set to Strict");
+    }
+
+    #[test]
     fn the_parameter_slot_is_wiped_by_new() {
         // `new` takes the value by move; the slot it wipes is its own parameter.
         // Observe through a type whose bytes we can locate: after the call the
@@ -886,9 +905,17 @@ mod tests {
     #[test]
     fn the_kernel_reports_the_region_locked_and_not_dumpable() {
         let key = Locked::new([1u8; 32]).unwrap();
-        if !key.locked() {
-            return; // constrained environment; covered by the process tests
-        }
+        // The dump exclusion does not depend on the lock, and nothing on an
+        // unfiltered host refuses it, so it is never the reported
+        // degradation here. A refused lock (a small RLIMIT_MEMLOCK) is
+        // possible and is covered by the process tests; it only skips the
+        // `Locked:` check below, not the `dd` flag.
+        assert!(
+            !matches!(key.lock_error(), Some(LockError::Dump { .. })),
+            "{:?}",
+            key.lock_error()
+        );
+        let expect_locked = key.locked();
         let addr = key.region.ptr().as_ptr() as usize;
         let smaps = std::fs::read_to_string("/proc/self/smaps").unwrap();
         let mut in_region = false;
@@ -919,7 +946,9 @@ mod tests {
                 flags = Some(v.trim().to_string());
             }
         }
-        assert!(locked_kb.unwrap_or(0) > 0, "Locked: {locked_kb:?}");
+        if expect_locked {
+            assert!(locked_kb.unwrap_or(0) > 0, "Locked: {locked_kb:?}");
+        }
         assert!(
             flags.as_deref().unwrap_or("").split(' ').any(|f| f == "dd"),
             "VmFlags: {flags:?}"
