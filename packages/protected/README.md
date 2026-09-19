@@ -187,7 +187,7 @@ assert_eq!(NonEmpty::new(("", None::<&str>)).unwrap_err(), EmptyError);
 
 ### Locked storage for long-lived secrets
 
-`Protected` wipes a value when it is dropped, which is the right guarantee for a value that lives for one call. Nothing drops a static, a leaked `Arc`, or anything at all when the process dies on `SIGTERM`, `SIGKILL` or `process::exit`, so a key that lives for the process needs its protection applied when it is allocated, not when it is dropped. `Locked<T>` stores the value in memory obtained from the operating system that is locked against swapping (`mlock`), excluded from core dumps on Linux (`MADV_DONTDUMP`), fenced by guard pages, and never moved. It is wiped on drop like `Protected`, but the bytes cannot reach a swap file or a dump if the drop never happens.
+`Protected` wipes a value when it is dropped, which is the right guarantee for a value that lives for one call. Nothing drops a static, a leaked `Arc`, or anything at all when the process dies on `SIGTERM`, `SIGKILL` or `process::exit`, so a key that lives for the process needs its protection applied when it is allocated, not when it is dropped. `Locked<T>` stores the value in memory obtained from the operating system that is locked against swapping (`mlock`), excluded from core dumps on Linux (`MADV_DONTDUMP`), fenced by guard pages, and never moved. It is wiped on drop like `Protected`, and while `locked()` is true the bytes cannot reach a swap file, or on Linux a core dump, even if the drop never happens.
 
 ```rust
 # use vitaminc_protected::{Locked, LockError};

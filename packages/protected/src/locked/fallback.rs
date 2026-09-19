@@ -8,7 +8,6 @@
 use super::LockError;
 use core::ptr::NonNull;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
-use zeroize::Zeroize;
 
 pub(super) struct Region {
     ptr: NonNull<u8>,
@@ -36,12 +35,17 @@ impl Region {
         self.ptr
     }
 
+    /// The allocation is exactly the value's size, so the value is at its
+    /// start; there is no guard to sit against.
+    pub(super) fn value_ptr(&self, _size: usize, _align: usize) -> NonNull<u8> {
+        self.ptr
+    }
+
     pub(super) fn wipe(&mut self) {
-        // SAFETY: the allocation is live, exclusively borrowed, and was
-        // zero-initialised, so every byte is initialised.
-        let bytes =
-            unsafe { core::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.layout.size()) };
-        bytes.zeroize();
+        // SAFETY: the allocation is live, exclusively borrowed and writable
+        // for `layout.size()` bytes. Written as `MaybeUninit<u8>` because a
+        // `T` may have left padding in it.
+        unsafe { super::wipe_raw(self.ptr.as_ptr(), self.layout.size()) };
     }
 }
 
@@ -79,7 +83,16 @@ mod tests {
             System.alloc_zeroed(layout)
         }
         unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-            if ptr == WATCHED.load(Ordering::SeqCst) {
+            // Only the first release of the watched address is the region's
+            // own; the address is free to be reused afterwards, and a later
+            // occupant's bytes are neither ours nor necessarily initialised.
+            let watched = WATCHED.compare_exchange(
+                ptr,
+                std::ptr::null_mut(),
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+            if watched.is_ok() {
                 let bytes = core::slice::from_raw_parts(ptr, layout.size());
                 RELEASED_ZEROED.store(bytes.iter().all(|&b| b == 0), Ordering::SeqCst);
                 RELEASED.store(true, Ordering::SeqCst);
@@ -109,6 +122,12 @@ mod tests {
         // SAFETY: 32 live, zero-initialised bytes.
         let bytes = unsafe { core::slice::from_raw_parts(region.ptr().as_ptr(), 32) };
         assert!(bytes.iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn the_value_is_at_the_start_of_the_allocation() {
+        let (region, _) = Region::allocate(24, 8).unwrap();
+        assert_eq!(region.value_ptr(24, 8), region.ptr());
     }
 
     #[test]

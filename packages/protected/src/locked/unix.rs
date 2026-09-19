@@ -1,12 +1,17 @@
 //! The Unix backend: an anonymous `mmap` region with guard pages, locked with
 //! `mlock` and, on Linux, excluded from core dumps with `MADV_DONTDUMP`.
 //! Releasing the region wipes it first, whatever path led to the release.
+//!
+//! Under Miri the same code maps, uses and releases the region: Miri models
+//! `mmap` and `munmap`, so the pointer arithmetic is checked for real, and
+//! only the calls it has no model for (`mprotect`, `mlock`, `madvise`) are
+//! skipped.
 
+use super::layout;
 use super::LockError;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use std::io;
-use zeroize::Zeroize;
 
 /// One mapping: a guard page, the interior, a guard page. Two words: the
 /// page size is a process constant, so the interior and the total length
@@ -49,51 +54,17 @@ mod flags {
 }
 use flags::{INTERIOR_PROT, MAP_FLAGS, NO_FILE};
 
-/// The whole mapping: a guard page, the interior, a guard page. Both the map
-/// and the unmap go through here, so the two lengths cannot drift.
-fn total_len(interior_len: usize, page: usize) -> usize {
-    interior_len + 2 * page
-}
-
 /// The soft `RLIMIT_MEMLOCK`, for the error message when a lock is refused.
 /// `None` when the limit is unlimited, could not be read, or does not exist:
 /// `mlock` exists everywhere this backend builds, but the limit that governs
-/// it does not (illumos and Solaris, for instance, have no `RLIMIT_MEMLOCK`),
-/// and a refusal there simply goes unexplained.
-fn memlock_limit() -> Option<u64> {
-    #[cfg(not(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "emscripten",
-        target_os = "l4re",
-        target_vendor = "apple",
-        target_os = "freebsd",
-        target_os = "dragonfly",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "fuchsia",
-        target_os = "redox",
-        target_os = "nto",
-        target_os = "hurd",
-    )))]
+/// it does not (illumos and Solaris, for instance, have no `RLIMIT_MEMLOCK`;
+/// see `build.rs`), and a refusal there simply goes unexplained.
+pub(super) fn memlock_limit() -> Option<u64> {
+    #[cfg(not(memlock_limit))]
     {
         None
     }
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "emscripten",
-        target_os = "l4re",
-        target_vendor = "apple",
-        target_os = "freebsd",
-        target_os = "dragonfly",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "fuchsia",
-        target_os = "redox",
-        target_os = "nto",
-        target_os = "hurd",
-    ))]
+    #[cfg(memlock_limit)]
     {
         let mut lim = libc::rlimit {
             rlim_cur: 0,
@@ -128,10 +99,8 @@ impl Region {
         if align > page {
             return Err(LockError::Alignment { align, page });
         }
-        // At least one page, so a zero-sized `T` still has a real interior
-        // to point into and guards on both sides of it.
-        let interior_len = size.max(1).div_ceil(page) * page;
-        let total = total_len(interior_len, page);
+        let interior_len = layout::interior_len(size, page);
+        let total = layout::total_len(interior_len, page);
 
         // SAFETY: an anonymous private mapping with no address hint has no
         // preconditions; the result is checked against MAP_FAILED below.
@@ -158,6 +127,22 @@ impl Region {
         // From here on `region` owns the mapping; an early return unmaps it.
         let region = Self { base, interior_len };
 
+        // Miri has no model for guard pages, the lock or the dump exclusion;
+        // the region is still mapped, used and released for real, and its
+        // lock is reported as unavailable.
+        #[cfg(miri)]
+        let lock = Some(LockError::Unavailable);
+        #[cfg(not(miri))]
+        let lock = region.protect(page)?;
+
+        Ok((region, lock))
+    }
+
+    /// The guard pages, the lock and, on Linux, the dump exclusion. A guard
+    /// that cannot be protected is an error; the other two are reported.
+    #[cfg(not(miri))]
+    fn protect(&self, page: usize) -> Result<Option<LockError>, LockError> {
+        let interior_len = self.interior_len;
         let guard = |ptr: *mut u8| -> Result<(), LockError> {
             // SAFETY: both guard pages are page-aligned ranges inside the mapping.
             let rc = unsafe { libc::mprotect(ptr.cast(), page, libc::PROT_NONE) };
@@ -169,25 +154,31 @@ impl Region {
                 })
             }
         };
-        guard(base.as_ptr())?;
+        guard(self.base.as_ptr())?;
         // SAFETY: the trailing guard starts at base + page + interior_len, inside the mapping.
-        guard(unsafe { base.as_ptr().add(page + interior_len) })?;
+        guard(unsafe { self.base.as_ptr().add(page + interior_len) })?;
 
-        let interior = region.interior();
+        let interior = self.interior();
         // SAFETY: the interior is a page-aligned, mapped, writable range.
         let rc = unsafe { libc::mlock(interior.as_ptr().cast(), interior_len) };
-        let lock = (rc != 0).then(|| LockError::Refused {
-            bytes: interior_len,
-            limit: memlock_limit(),
-            source: io::Error::last_os_error(),
+        let lock = (rc != 0).then(|| {
+            // errno first: reading the limit is another system call.
+            let source = io::Error::last_os_error();
+            LockError::Refused {
+                bytes: interior_len,
+                limit: memlock_limit(),
+                source,
+            }
         });
 
+        // Exclusion from core dumps, applied whether or not the lock was
+        // refused: the two protections are independent, and a value that
+        // could not be locked is exactly the one a dump would otherwise
+        // carry. A private anonymous mapping we own cannot be refused on its
+        // own account, but a seccomp filter can refuse the call itself, and
+        // `mlock` does not imply this protection.
         #[cfg(target_os = "linux")]
-        let lock = lock.or_else(|| {
-            // Exclusion from core dumps. A private anonymous mapping we own
-            // cannot be refused on its own account, but a seccomp filter
-            // can refuse the call itself, and `mlock` does not imply this
-            // protection, so a refusal here is reported like a lock refusal.
+        let dump = {
             // SAFETY: same range as the mlock above.
             let rc = unsafe {
                 libc::madvise(interior.as_ptr().cast(), interior_len, libc::MADV_DONTDUMP)
@@ -195,9 +186,11 @@ impl Region {
             (rc != 0).then(|| LockError::Dump {
                 source: io::Error::last_os_error(),
             })
-        });
+        };
+        #[cfg(not(target_os = "linux"))]
+        let dump: Option<LockError> = None;
 
-        Ok((region, lock))
+        Ok(lock.or(dump))
     }
 
     fn interior(&self) -> NonNull<u8> {
@@ -206,23 +199,36 @@ impl Region {
     }
 
     fn total(&self) -> usize {
-        total_len(self.interior_len, page_size())
+        layout::total_len(self.interior_len, page_size())
     }
 
-    /// The interior: `interior_len` bytes, page-aligned, readable and writable.
+    /// The interior: `interior_len` bytes, page-aligned, readable and
+    /// writable. The value itself is at [`value_ptr`](Self::value_ptr);
+    /// tests use this to look at the whole interior.
+    #[cfg(test)]
     pub(super) fn ptr(&self) -> NonNull<u8> {
         self.interior()
     }
 
+    /// Where a value of `size` bytes at `align` lives: as close to the
+    /// trailing guard page as its alignment allows, so a write past its end
+    /// reaches the guard within `align` bytes instead of wandering through
+    /// the rest of the page. `size` never exceeds `interior_len`, which was
+    /// rounded up from it.
+    pub(super) fn value_ptr(&self, size: usize, align: usize) -> NonNull<u8> {
+        let offset = layout::value_offset(self.interior_len, size, align);
+        // SAFETY: `offset + size <= interior_len`, so the result is inside
+        // the interior.
+        unsafe { NonNull::new_unchecked(self.interior().as_ptr().add(offset)) }
+    }
+
     /// Overwrite the whole interior with zeros using volatile writes and a
-    /// compiler fence (`zeroize`'s own primitive), so the wipe cannot be
-    /// elided as a dead store.
+    /// compiler fence, so the wipe cannot be elided as a dead store.
     pub(super) fn wipe(&mut self) {
-        // SAFETY: the interior is a live, exclusively borrowed, writable range
-        // of `interior_len` initialised bytes (mmap zero-fills).
-        let bytes =
-            unsafe { core::slice::from_raw_parts_mut(self.interior().as_ptr(), self.interior_len) };
-        bytes.zeroize();
+        // SAFETY: the interior is a live, exclusively borrowed, writable
+        // range of `interior_len` bytes. It is written byte by byte as
+        // `MaybeUninit<u8>` because a `T` may have left padding in it.
+        unsafe { super::wipe_raw(self.interior().as_ptr(), self.interior_len) };
     }
 }
 
@@ -237,6 +243,7 @@ impl Drop for Region {
         // Neither call can meaningfully fail on a mapping we own, and there is
         // no caller to report to from a destructor.
         unsafe {
+            #[cfg(not(miri))]
             let _ = libc::munlock(self.interior().as_ptr().cast(), self.interior_len);
             let _ = libc::munmap(self.base.as_ptr().cast(), self.total());
         }
@@ -249,8 +256,6 @@ mod tests {
 
     #[test]
     fn the_total_is_the_interior_plus_a_guard_page_each_side() {
-        assert_eq!(total_len(4096, 4096), 3 * 4096);
-        assert_eq!(total_len(2 * 16384, 16384), 4 * 16384);
         let page = page_size();
         let (region, _) = Region::allocate(1, 1).unwrap();
         assert_eq!(region.total(), 3 * page);
@@ -268,6 +273,40 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn the_value_sits_against_the_trailing_guard() {
+        let page = page_size();
+        let (region, _) = Region::allocate(32, 1).unwrap();
+        let end = region.ptr().as_ptr() as usize + page;
+        assert_eq!(region.value_ptr(32, 1).as_ptr() as usize + 32, end);
+        // Alignment can hold it back, but by less than one alignment unit.
+        let (region, _) = Region::allocate(24, 16).unwrap();
+        let end = region.ptr().as_ptr() as usize + page;
+        let value = region.value_ptr(24, 16).as_ptr() as usize;
+        assert_eq!(value % 16, 0);
+        assert!(
+            end - (value + 24) < 16,
+            "{} bytes of slack",
+            end - (value + 24)
+        );
+        // A value that fills the interior exactly starts at its start.
+        let (region, _) = Region::allocate(page, 1).unwrap();
+        assert_eq!(region.value_ptr(page, 1), region.ptr());
+    }
+
+    #[test]
+    fn a_wipe_zeroes_the_whole_interior() {
+        let page = page_size();
+        let (mut region, _) = Region::allocate(1, 1).unwrap();
+        // SAFETY: the interior is `page` live, writable bytes.
+        unsafe { core::slice::from_raw_parts_mut(region.ptr().as_ptr(), page).fill(0xEE) };
+        region.wipe();
+        // SAFETY: `page` initialised bytes; the wipe writes every one.
+        let bytes = unsafe { core::slice::from_raw_parts(region.ptr().as_ptr(), page) };
+        assert!(bytes.iter().all(|&b| b == 0));
+    }
+
+    #[cfg(all(memlock_limit, not(miri)))]
     #[test]
     fn the_memlock_limit_is_the_soft_limit_when_finite() {
         let mut lim = libc::rlimit {

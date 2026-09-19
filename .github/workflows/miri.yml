@@ -61,9 +61,20 @@ jobs:
           components: miri
 
       - name: miri test (vitaminc-protected)
-        # Interprets the protected unit tests + doctests under Miri. The
-        # move-out regression tests (drop_zeroizes_inner /
-        # risky_unwrap_does_not_zeroize / flatten / transpose) exercise the one
-        # unsafe block; Miri proves it has no UB. The first run builds a Miri
-        # sysroot (a few minutes); subsequent cached runs are quick.
+        # Interprets the protected unit tests + doctests under Miri: the
+        # move-out in `move_inner_out`, and the `Locked` region code, which
+        # Miri runs on the real `mmap`-backed Unix backend (only `mprotect`,
+        # `mlock` and `madvise` are skipped, having no Miri model). The first
+        # run builds a Miri sysroot (a few minutes); cached runs are quick.
         run: cargo +nightly miri test -p vitaminc-protected
+
+      - name: miri test, strict models (vitaminc-protected)
+        # The same suite under Tree Borrows instead of Stacked Borrows, with
+        # strict provenance (no integer-to-pointer casts may be dereferenced)
+        # and symbolic alignment (alignment judged from the allocation, not
+        # the address). Each model rejects code the default run accepts, and
+        # the region code lives on raw pointers, so it must satisfy all of
+        # them.
+        env:
+          MIRIFLAGS: "-Zmiri-tree-borrows -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check"
+        run: cargo +nightly miri test -p vitaminc-protected --target-dir target/miri-strict

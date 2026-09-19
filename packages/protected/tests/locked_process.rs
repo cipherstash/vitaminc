@@ -2,12 +2,15 @@
 //! `RLIMIT_MEMLOCK`, a write into a guard page, and the once-only policy.
 //! Each case re-executes this test binary with `LOCKED_CHILD_CASE` set and
 //! inspects the exit status. None of this can run under Miri, which has no
-//! `mlock`, `mprotect`, or subprocesses.
+//! `mlock`, `mprotect`, or subprocesses. The `RLIMIT_MEMLOCK` cases build
+//! only where the limit exists (`cfg(memlock_limit)`, from `build.rs`).
 #![cfg(all(unix, not(miri)))]
 
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, Output};
-use vitaminc_protected::{LockError, LockPolicy, Locked};
+#[cfg(memlock_limit)]
+use vitaminc_protected::LockError;
+use vitaminc_protected::{LockPolicy, Locked};
 
 const CASE: &str = "LOCKED_CHILD_CASE";
 
@@ -19,6 +22,7 @@ fn child(case: &str) -> Output {
         .unwrap()
 }
 
+#[cfg(memlock_limit)]
 fn lower_memlock_to_zero() {
     let lim = libc::rlimit {
         rlim_cur: 0,
@@ -29,11 +33,39 @@ fn lower_memlock_to_zero() {
     assert_eq!(rc, 0, "setrlimit: {}", std::io::Error::last_os_error());
 }
 
-/// Root (or CAP_IPC_LOCK) is exempt from RLIMIT_MEMLOCK, so a refusal cannot
-/// be provoked.
-fn privileged() -> bool {
-    // SAFETY: geteuid has no preconditions.
-    unsafe { libc::geteuid() == 0 }
+/// Lower the limit to zero and confirm the process now cannot lock a page.
+/// Root and `CAP_IPC_LOCK` are exempt from `RLIMIT_MEMLOCK`, and the
+/// sanitizer runtimes intercept `mlock` to return success without locking
+/// (their shadow memory must never be pinned), so in those processes a
+/// refusal cannot be provoked and the case is skipped, loudly.
+#[cfg(memlock_limit)]
+fn refusal_can_be_provoked() -> bool {
+    lower_memlock_to_zero();
+    let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+    // SAFETY: an anonymous private mapping of one page; checked below.
+    let probe = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            page,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            -1,
+            0,
+        )
+    };
+    assert_ne!(probe, libc::MAP_FAILED);
+    // SAFETY: `probe` is a page we own.
+    let locked = unsafe { libc::mlock(probe, page) } == 0;
+    unsafe {
+        let _ = libc::munmap(probe, page);
+    }
+    if locked {
+        eprintln!(
+            "skipped: this process can lock memory with RLIMIT_MEMLOCK at zero \
+             (root, CAP_IPC_LOCK, or a sanitizer's mlock interceptor)"
+        );
+    }
+    !locked
 }
 
 /// The child half of every case. With the variable unset this is a no-op
@@ -44,10 +76,20 @@ fn child_entry() {
         return;
     };
     match case.as_str() {
+        #[cfg(memlock_limit)]
         "refused_best_effort" => {
-            lower_memlock_to_zero();
+            if !refusal_can_be_provoked() {
+                return;
+            }
             let key = Locked::new([1u8; 32]).unwrap();
             assert!(!key.locked());
+            // The dump exclusion does not depend on the lock: a value that
+            // could not be locked is still kept out of core dumps.
+            #[cfg(target_os = "linux")]
+            {
+                let flags = vm_flags(key.risky_ref().as_ptr() as usize);
+                assert!(flags.split(' ').any(|f| f == "dd"), "VmFlags: {flags}");
+            }
             assert!(
                 matches!(key.lock_error(), Some(LockError::Refused { .. })),
                 "{:?}",
@@ -64,8 +106,11 @@ fn child_entry() {
                 Err(LockError::Refused { .. })
             ));
         }
+        #[cfg(memlock_limit)]
         "refused_strict" => {
-            lower_memlock_to_zero();
+            if !refusal_can_be_provoked() {
+                return;
+            }
             LockPolicy::Strict.set().unwrap();
             assert_eq!(LockPolicy::current(), LockPolicy::Strict);
             let r: Result<Locked<[u8; 32]>, _> = Locked::new([1u8; 32]);
@@ -90,7 +135,9 @@ fn child_entry() {
             };
             let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
             let key = Locked::new([1u8; 32]).unwrap();
-            let interior = key.risky_ref().as_ptr().cast_mut();
+            // The value sits at the end of its page; the interior is that
+            // page, and `msync` wants the page-aligned start.
+            let interior = (key.risky_ref().as_ptr() as usize & !(page - 1)) as *mut u8;
             assert_eq!(
                 probe(interior, page),
                 None,
@@ -110,16 +157,40 @@ fn child_entry() {
         }
         "overrun_faults" => {
             let key = Locked::new([1u8; 32]).unwrap();
-            let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
             let start = key.risky_ref().as_ptr();
-            // The interior is exactly one page for a 32-byte value; the byte
-            // after it is the trailing guard.
-            let past = unsafe { start.add(page) } as *mut u8;
+            // A byte-aligned value sits flush against the trailing guard:
+            // the very next byte after it must fault.
+            let past = unsafe { start.add(32) } as *mut u8;
             unsafe { std::ptr::write_volatile(past, 1) };
             unreachable!("the write into the guard page must fault");
         }
         other => panic!("unknown case {other}"),
     }
+}
+
+/// The `VmFlags:` line of the `/proc/self/smaps` entry containing `addr`.
+#[cfg(target_os = "linux")]
+fn vm_flags(addr: usize) -> String {
+    let smaps = std::fs::read_to_string("/proc/self/smaps").unwrap();
+    let mut in_region = false;
+    for line in smaps.lines() {
+        if let Some((range, _)) = line.split_once(' ') {
+            if let Some((lo, hi)) = range.split_once('-') {
+                if let (Ok(lo), Ok(hi)) =
+                    (usize::from_str_radix(lo, 16), usize::from_str_radix(hi, 16))
+                {
+                    in_region = lo <= addr && addr < hi;
+                    continue;
+                }
+            }
+        }
+        if in_region {
+            if let Some(v) = line.strip_prefix("VmFlags:") {
+                return v.trim().to_string();
+            }
+        }
+    }
+    panic!("no smaps entry contains {addr:#x}");
 }
 
 fn assert_passed(out: &Output) {
@@ -131,19 +202,15 @@ fn assert_passed(out: &Output) {
     );
 }
 
+#[cfg(memlock_limit)]
 #[test]
 fn a_refused_lock_is_reported_under_best_effort() {
-    if privileged() {
-        return;
-    }
     assert_passed(&child("refused_best_effort"));
 }
 
+#[cfg(memlock_limit)]
 #[test]
 fn a_refused_lock_fails_the_constructor_under_strict() {
-    if privileged() {
-        return;
-    }
     assert_passed(&child("refused_strict"));
 }
 

@@ -13,16 +13,21 @@ use core::sync::atomic::{AtomicU8, Ordering};
 use std::io;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-#[cfg(all(unix, not(miri)))]
+mod layout;
+#[cfg(kani)]
+mod proofs;
+
+#[cfg(all(unix, not(kani)))]
 mod unix;
-#[cfg(all(unix, not(miri)))]
+#[cfg(all(unix, not(kani)))]
 use unix::Region;
 
-// The fallback is the backend off Unix and under Miri, and is also built
-// into every test binary so that its own tests run on the platforms CI has.
-#[cfg(any(test, not(all(unix, not(miri)))))]
+// The fallback is the backend off Unix and under Kani, which cannot execute
+// system calls. It is also built into every test binary so that its own
+// tests run on the platforms CI has.
+#[cfg(any(test, not(unix), kani))]
 mod fallback;
-#[cfg(not(all(unix, not(miri))))]
+#[cfg(any(not(unix), kani))]
 use fallback::Region;
 
 /// Why a [`Locked`] value could not be created, or why its memory is not
@@ -66,8 +71,9 @@ pub enum LockError {
         /// The OS error.
         source: io::Error,
     },
-    /// This platform or build has no memory locking (non-Unix targets, and
-    /// Miri). The value is stored on the ordinary heap and wiped on drop.
+    /// This platform or build has no memory locking: non-Unix targets, Miri
+    /// (which maps the region but cannot lock it) and Kani. The value is
+    /// wiped on drop as usual.
     Unavailable,
     /// `T` needs an alignment larger than a page, which the region cannot
     /// provide.
@@ -240,8 +246,10 @@ impl LockPolicy {
 ///   resident. This can be refused; see [`LockPolicy`].
 /// - **Not dumped.** On Linux the region is marked `MADV_DONTDUMP`, so a core
 ///   dump does not contain it.
-/// - **Fenced.** A `PROT_NONE` guard page either side turns an overrun into a
-///   fault instead of a silent read or write of a neighbour.
+/// - **Fenced.** The value sits against a `PROT_NONE` guard page, within
+///   `align_of::<T>()` bytes of it, so a write past its end faults instead
+///   of silently reaching a neighbour. A second guard page precedes the
+///   region and catches an underrun that crosses it.
 /// - **Wiped.** On drop, `T`'s own destructor runs, then every byte of the
 ///   region is overwritten with volatile stores before it is unmapped. The
 ///   store goes through a pointer the compiler cannot prove dead, so it
@@ -320,7 +328,10 @@ impl<T> Unfilled<T> {
     }
 
     fn as_ptr(&self) -> *mut T {
-        self.region.ptr().as_ptr().cast::<T>()
+        self.region
+            .value_ptr(mem::size_of::<T>(), mem::align_of::<T>())
+            .as_ptr()
+            .cast::<T>()
     }
 
     /// # Safety
@@ -336,11 +347,36 @@ impl<T> Unfilled<T> {
             _value: PhantomData,
         }
     }
+
+    /// Copy the `T` in `slot` into the region, wipe `slot`'s bytes, and
+    /// become a [`Locked`].
+    ///
+    /// # Safety
+    ///
+    /// `slot` must never be read as a `T` again: after this call its bytes
+    /// are zero and no destructor has run on the value they held.
+    unsafe fn move_in(self, slot: &mut ManuallyDrop<T>) -> Locked<T>
+    where
+        T: Zeroize,
+    {
+        // SAFETY (for the caller's contract): the interior is at least
+        // `size_of::<T>()` bytes, aligned to `align_of::<T>()`, and holds no
+        // `T` yet, so a bitwise copy in is a move. The source is then wiped
+        // bitwise, with no semantic effect on `T` since it is never read
+        // again. After the copy the interior holds a live `T`, which
+        // `filled` requires.
+        ptr::copy_nonoverlapping(&**slot as *const T, self.as_ptr(), 1);
+        wipe_bytes(&mut **slot as *mut T);
+        self.filled()
+    }
 }
 
 impl<T: Zeroize> Locked<T> {
     fn as_ptr(&self) -> *mut T {
-        self.region.ptr().as_ptr().cast::<T>()
+        self.region
+            .value_ptr(mem::size_of::<T>(), mem::align_of::<T>())
+            .as_ptr()
+            .cast::<T>()
     }
 
     /// Move `value` into locked storage.
@@ -371,16 +407,9 @@ impl<T: Zeroize> Locked<T> {
             }
         };
         let mut slot = ManuallyDrop::new(value);
-        // SAFETY: the interior is at least `size_of::<T>()` bytes, aligned to
-        // `align_of::<T>()`, and holds no `T` yet, so a bitwise copy in is a
-        // move. `slot` is `ManuallyDrop` and never read again, so the source
-        // is wiped bitwise below without any semantic effect on `T`. After
-        // the copy the interior holds a live `T`, which `filled` requires.
-        unsafe {
-            ptr::copy_nonoverlapping(&*slot as *const T, unfilled.as_ptr(), 1);
-            wipe_bytes(&mut *slot as *mut T);
-            Ok(unfilled.filled())
-        }
+        // SAFETY: `slot` is this function's own parameter and is never read
+        // again after the move.
+        Ok(unsafe { unfilled.move_in(&mut slot) })
     }
 
     /// Build the value in place: the region is filled with `T::zeroed()` and
@@ -537,20 +566,31 @@ impl<T: Zeroize> Locked<T> {
     }
 }
 
-/// Overwrite the bytes of a `T` with volatile zero stores, without any
-/// semantic effect on `T`. For a moved-from slot only.
+/// Overwrite `len` bytes at `ptr` with volatile zero stores and a compiler
+/// fence, so the wipe cannot be elided as a dead store. The bytes are
+/// written as `MaybeUninit<u8>`, never read, so storage that holds padding
+/// or a dropped value is fine.
+///
+/// # Safety
+///
+/// `ptr` must be valid for writes of `len` bytes.
+pub(super) unsafe fn wipe_raw(ptr: *mut u8, len: usize) {
+    let bytes = core::slice::from_raw_parts_mut(ptr.cast::<MaybeUninit<u8>>(), len);
+    for b in bytes {
+        ptr::write_volatile(b, MaybeUninit::new(0));
+    }
+    core::sync::atomic::compiler_fence(Ordering::SeqCst);
+}
+
+/// [`wipe_raw`] over the bytes of a `T`, without any semantic effect on
+/// `T`. For a moved-from slot only.
 ///
 /// # Safety
 ///
 /// `slot` must point to `size_of::<T>()` writable bytes that will never be
 /// read as a `T` again.
 unsafe fn wipe_bytes<T>(slot: *mut T) {
-    let bytes =
-        core::slice::from_raw_parts_mut(slot.cast::<MaybeUninit<u8>>(), mem::size_of::<T>());
-    for b in bytes {
-        ptr::write_volatile(b, MaybeUninit::new(0));
-    }
-    core::sync::atomic::compiler_fence(Ordering::SeqCst);
+    wipe_raw(slot.cast::<u8>(), mem::size_of::<T>());
 }
 
 impl<T: Zeroize> Drop for Locked<T> {
@@ -613,7 +653,7 @@ mod tests {
         assert_eq!(key.risky_ref(), &[9u8; 32]);
         assert!(std::ptr::eq(
             key.risky_ref().as_ptr(),
-            key.region.ptr().as_ptr()
+            key.region.value_ptr(32, 1).as_ptr()
         ));
     }
 
@@ -646,8 +686,9 @@ mod tests {
     fn the_region_is_all_zero_after_the_wipe() {
         let key = Locked::new([0xFFu8; 64]).unwrap();
         let region = key.into_wiped_region();
-        // SAFETY: the region is still mapped; the interior holds 64 initialised bytes.
-        let bytes = unsafe { core::slice::from_raw_parts(region.ptr().as_ptr(), 64) };
+        // SAFETY: the region is still mapped; the value's 64 bytes are
+        // initialised, by the value and then by the wipe.
+        let bytes = unsafe { core::slice::from_raw_parts(region.value_ptr(64, 1).as_ptr(), 64) };
         assert!(bytes.iter().all(|&b| b == 0));
     }
 
@@ -796,12 +837,69 @@ mod tests {
         assert_eq!(err.to_string(), "the lock policy is already set to Strict");
     }
 
+    /// A `T` with padding. Its bytes must only ever be handled as bytes: a
+    /// `u8` slice over them would claim initialisation the padding lacks.
+    #[derive(Zeroize, Clone, PartialEq, Eq, Debug)]
+    #[repr(C)]
+    struct Padded {
+        a: u8,
+        b: u32,
+        c: u16,
+    }
+    impl Zeroed for Padded {
+        fn zeroed() -> Self {
+            Padded { a: 0, b: 0, c: 0 }
+        }
+    }
+
+    const PADDED_SIZE: usize = mem::size_of::<Padded>();
+    const PADDED_ALIGN: usize = mem::align_of::<Padded>();
+    const _: () = assert!(
+        PADDED_SIZE > 1 + 4 + 2,
+        "the type must actually have padding"
+    );
+
     #[test]
-    fn the_parameter_slot_is_wiped_by_new() {
-        // `new` takes the value by move; the slot it wipes is its own parameter.
-        // Observe through a type whose bytes we can locate: after the call the
-        // region holds the value and the source no longer does. This pins the
-        // bitwise wipe by checking that no `Drop` ran on the source.
+    fn a_padded_value_moves_in_clones_generates_zeroizes_and_wipes() {
+        const SIZE: usize = PADDED_SIZE;
+        const ALIGN: usize = PADDED_ALIGN;
+
+        let key = Locked::new(Padded { a: 1, b: 2, c: 3 }).unwrap();
+        assert_eq!(*key.risky_ref(), Padded { a: 1, b: 2, c: 3 });
+        let copy = key.try_clone().unwrap();
+        assert_eq!(copy.risky_ref(), key.risky_ref());
+
+        let mut made = Locked::<Padded>::generate(|p| p.b = 9).unwrap();
+        assert_eq!(made.risky_ref().b, 9);
+        made.zeroize();
+        assert_eq!(*made.risky_ref(), Padded::zeroed());
+
+        let region = key.into_wiped_region();
+        // SAFETY: the region is still mapped, and the wipe initialised every
+        // byte of the value's storage, padding included.
+        let bytes =
+            unsafe { core::slice::from_raw_parts(region.value_ptr(SIZE, ALIGN).as_ptr(), SIZE) };
+        assert!(bytes.iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn move_in_wipes_the_source_slot() {
+        let mut slot = ManuallyDrop::new([0xA5u8; 16]);
+        let unfilled = Unfilled::<[u8; 16]>::allocate().unwrap();
+        // SAFETY: `slot` is read below only as bytes, never as the array.
+        let key = unsafe { unfilled.move_in(&mut slot) };
+        assert_eq!(key.risky_ref(), &[0xA5u8; 16]);
+        // SAFETY: the wipe initialises every byte of the slot to zero.
+        let left_behind: [u8; 16] = unsafe { ptr::read((&*slot as *const [u8; 16]).cast()) };
+        assert_eq!(left_behind, [0u8; 16]);
+    }
+
+    #[test]
+    fn new_moves_without_running_drop_on_the_source() {
+        // `new` takes the value by move; the slot it wipes is its own
+        // parameter, observed directly in `move_in_wipes_the_source_slot`.
+        // This pins the other half of the contract: no `Drop` runs on the
+        // source, only on the value in the region, exactly once.
         struct NoDrop([u8; 4]);
         impl Zeroize for NoDrop {
             fn zeroize(&mut self) {
@@ -890,13 +988,8 @@ mod tests {
         // The interior is one page. If the soft limit cannot hold even a
         // megabyte the environment is deliberately constrained; the
         // process-level tests cover that case.
-        let mut lim = libc::rlimit {
-            rlim_cur: 0,
-            rlim_max: 0,
-        };
-        let rc = unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut lim) };
-        let generous = rc == 0 && (lim.rlim_cur == libc::RLIM_INFINITY || lim.rlim_cur >= 1 << 20);
-        if generous {
+        let constrained = matches!(unix::memlock_limit(), Some(limit) if limit < 1 << 20);
+        if !constrained {
             assert!(key.locked(), "{:?}", key.lock_error());
         }
     }
