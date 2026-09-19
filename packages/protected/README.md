@@ -185,6 +185,28 @@ assert!(NonEmpty::new(String::from("users/email")).is_ok());
 assert_eq!(NonEmpty::new(("", None::<&str>)).unwrap_err(), EmptyError);
 ```
 
+### Locked storage for long-lived secrets
+
+`Protected` wipes a value when it is dropped, which is the right guarantee for a value that lives for one call. Nothing drops a static, a leaked `Arc`, or anything at all when the process dies on `SIGTERM`, `SIGKILL` or `process::exit`, so a key that lives for the process needs its protection applied when it is allocated, not when it is dropped. `Locked<T>` stores the value in memory obtained from the operating system that is locked against swapping (`mlock`), excluded from core dumps on Linux (`MADV_DONTDUMP`), fenced by guard pages, and never moved. It is wiped on drop like `Protected`, but the bytes cannot reach a swap file or a dump if the drop never happens.
+
+```rust
+# use vitaminc_protected::{Locked, LockError};
+# fn fill_from_csprng(buf: &mut [u8; 32]) { buf.copy_from_slice(&[7u8; 32]); }
+# fn main() -> Result<(), LockError> {
+// Built in place: the key bytes are never on the stack.
+let key: Locked<[u8; 32]> = Locked::generate(fill_from_csprng)?;
+
+key.with(|k| assert_eq!(k[0], 7));
+if !key.locked() {
+    // Best-effort by default: the value exists, and says why it is not locked.
+    eprintln!("key memory is not locked: {}", key.lock_error().unwrap());
+}
+# Ok(())
+# }
+```
+
+The operating system can refuse to lock memory, most often because `RLIMIT_MEMLOCK` (64 KiB by default on many Linux hosts) is too small. By default the value is created anyway and the refusal is readable from `lock_error`; call `require_locked()` on a value that must be locked, or set `LockPolicy::Strict` once at startup to make every constructor fail instead. `Locked` protects the bytes of `T` itself, so use it for inline types such as `[u8; N]`; a `Vec<u8>` inside it has only its header in the locked region.
+
 ### Generators
 
 `Protected` supports generating new values from functions that return the inner value.

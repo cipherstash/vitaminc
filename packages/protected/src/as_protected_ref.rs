@@ -68,7 +68,7 @@ impl<'a> AsProtectedRef<'a, [u8]> for Cow<'a, str> {
 
 /// A wrapper around a reference to prevent inner access.
 /// Conceptually similar to `&T` but prevents direct access to the inner value outside of this crate.
-pub struct ProtectedRef<'a, T>(&'a T)
+pub struct ProtectedRef<'a, T>(pub(crate) &'a T)
 where
     T: ?Sized;
 
