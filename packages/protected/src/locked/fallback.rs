@@ -44,6 +44,9 @@ impl Region {
 
 impl Drop for Region {
     fn drop(&mut self) {
+        // The wipe is part of the release so that a panicking `T::drop`, or
+        // a constructor that never wrote a `T`, still hands back zeroed bytes.
+        self.wipe();
         // SAFETY: `ptr` was returned by `alloc_zeroed` with this exact layout.
         unsafe { dealloc(self.ptr.as_ptr(), self.layout) };
     }

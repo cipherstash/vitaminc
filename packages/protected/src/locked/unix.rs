@@ -1,5 +1,6 @@
 //! The Unix backend: an anonymous `mmap` region with guard pages, locked with
 //! `mlock` and, on Linux, excluded from core dumps with `MADV_DONTDUMP`.
+//! Releasing the region wipes it first, whatever path led to the release.
 
 use super::LockError;
 use core::ptr::NonNull;
@@ -34,6 +35,26 @@ fn page_size() -> usize {
 
 /// The soft `RLIMIT_MEMLOCK`, for the error message when a lock is refused.
 /// `None` when the limit is unlimited or could not be read.
+///
+/// Only the Unix families that have the resource are asked. `mlock` exists
+/// everywhere this backend builds, but the limit that governs it does not
+/// (illumos and Solaris, for instance, have no `RLIMIT_MEMLOCK`), and a
+/// refusal there simply goes unexplained.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "emscripten",
+    target_os = "l4re",
+    target_vendor = "apple",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "fuchsia",
+    target_os = "redox",
+    target_os = "nto",
+    target_os = "hurd",
+))]
 fn memlock_limit() -> Option<u64> {
     let mut lim = libc::rlimit {
         rlim_cur: 0,
@@ -49,11 +70,32 @@ fn memlock_limit() -> Option<u64> {
     u64::try_from(lim.rlim_cur).ok()
 }
 
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "emscripten",
+    target_os = "l4re",
+    target_vendor = "apple",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "fuchsia",
+    target_os = "redox",
+    target_os = "nto",
+    target_os = "hurd",
+)))]
+fn memlock_limit() -> Option<u64> {
+    None
+}
+
 impl Region {
     /// Map a guarded region whose interior can hold `size` bytes at `align`,
-    /// and try to lock it. The lock outcome is returned separately from the
-    /// region: a refused lock is a degraded region, not a failed one, and the
-    /// caller's policy decides which it is.
+    /// try to lock it and, on Linux, exclude it from core dumps. Those two
+    /// outcomes are returned separately from the region: a protection that
+    /// was refused is a degraded region, not a failed one, and the caller's
+    /// policy decides which it is. When both are refused the lock refusal is
+    /// the one reported.
     pub(super) fn allocate(
         size: usize,
         align: usize,
@@ -117,15 +159,19 @@ impl Region {
         });
 
         #[cfg(target_os = "linux")]
-        {
-            // Exclusion from core dumps. This cannot fail for a private
-            // anonymous mapping we own, and there is nothing to do if it did:
-            // the mapping is still usable and still locked.
+        let lock = lock.or_else(|| {
+            // Exclusion from core dumps. A private anonymous mapping we own
+            // cannot be refused on its own account, but a seccomp filter
+            // can refuse the call itself, and `mlock` does not imply this
+            // protection, so a refusal here is reported like a lock refusal.
             // SAFETY: same range as the mlock above.
-            let _ = unsafe {
+            let rc = unsafe {
                 libc::madvise(interior.as_ptr().cast(), interior_len, libc::MADV_DONTDUMP)
             };
-        }
+            (rc != 0).then(|| LockError::Dump {
+                source: io::Error::last_os_error(),
+            })
+        });
 
         Ok((region, lock))
     }
@@ -158,6 +204,10 @@ impl Region {
 
 impl Drop for Region {
     fn drop(&mut self) {
+        // The wipe lives here, not in `Locked::drop`, so that it runs on
+        // every path that releases the region: a `T` whose destructor
+        // panics, a constructor that never got as far as writing a `T`.
+        self.wipe();
         // SAFETY: the interior was locked (or the lock was refused, in which
         // case munlock is a no-op) and `base..base+total` is our mapping.
         // Neither call can meaningfully fail on a mapping we own, and there is

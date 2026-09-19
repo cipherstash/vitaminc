@@ -26,10 +26,10 @@ use fallback::Region;
 /// Why a [`Locked`] value could not be created, or why its memory is not
 /// locked.
 ///
-/// Only [`Refused`](LockError::Refused) and [`Unavailable`](LockError::Unavailable)
-/// describe a *degraded* value: under [`LockPolicy::BestEffort`] the value is
-/// still created and reports them from [`Locked::lock_error`]. The other
-/// variants mean no value exists.
+/// Only [`Refused`](LockError::Refused), [`Dump`](LockError::Dump) and
+/// [`Unavailable`](LockError::Unavailable) describe a *degraded* value: under
+/// [`LockPolicy::BestEffort`] the value is still created and reports them
+/// from [`Locked::lock_error`]. The other variants mean no value exists.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum LockError {
@@ -54,6 +54,13 @@ pub enum LockError {
         bytes: usize,
         /// The soft `RLIMIT_MEMLOCK` at the time, when it is finite and readable.
         limit: Option<u64>,
+        /// The OS error.
+        source: io::Error,
+    },
+    /// The region is locked but could not be excluded from core dumps
+    /// (`madvise(MADV_DONTDUMP)` on Linux was refused, which a seccomp
+    /// filter can do). The bytes would appear in a core dump.
+    Dump {
         /// The OS error.
         source: io::Error,
     },
@@ -90,6 +97,9 @@ impl fmt::Display for LockError {
                 limit: None,
                 source,
             } => write!(f, "locking {bytes} bytes was refused ({source})"),
+            Self::Dump { source } => {
+                write!(f, "excluding the region from core dumps was refused ({source})")
+            }
             Self::Unavailable => f.write_str("memory locking is not available on this platform"),
             Self::Alignment { align, page } => write!(
                 f,
@@ -102,16 +112,17 @@ impl fmt::Display for LockError {
 impl std::error::Error for LockError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Map { source, .. } | Self::Guard { source } | Self::Refused { source, .. } => {
-                Some(source)
-            }
+            Self::Map { source, .. }
+            | Self::Guard { source }
+            | Self::Refused { source, .. }
+            | Self::Dump { source } => Some(source),
             Self::Unavailable | Self::Alignment { .. } => None,
         }
     }
 }
 
 /// What a [`Locked`] constructor does when the operating system refuses to
-/// lock the memory.
+/// lock the memory or, on Linux, to exclude it from core dumps.
 ///
 /// The policy is process-wide and set at most once, with [`LockPolicy::set`].
 /// Until it is set, [`BestEffort`](LockPolicy::BestEffort) applies.
@@ -122,7 +133,8 @@ impl std::error::Error for LockError {
 /// pages holding the secret may be written to swap, which is not wiped when
 /// the process exits. On a host with no swap there is nothing to lose.
 /// Everything else, including the wipe on drop and the exclusion from core
-/// dumps on Linux, still holds.
+/// dumps on Linux, still holds. A refused dump exclusion, which is rare and
+/// takes a seccomp filter to provoke, is treated the same way.
 ///
 /// `BestEffort` is the default because a strict default fails in development
 /// and CI, where swap exposure is irrelevant, and teaches people to turn it
@@ -131,7 +143,8 @@ impl std::error::Error for LockError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LockPolicy {
     /// Create the value anyway and record the refusal, readable from
-    /// [`Locked::lock_error`].
+    /// [`Locked::lock_error`]. When more than one protection is refused,
+    /// the lock refusal is the one recorded.
     #[default]
     BestEffort,
     /// Fail the constructor with the refusal.
@@ -230,7 +243,8 @@ impl LockPolicy {
 /// - **Wiped.** On drop, `T`'s own destructor runs, then every byte of the
 ///   region is overwritten with volatile stores before it is unmapped. The
 ///   store goes through a pointer the compiler cannot prove dead, so it
-///   cannot be elided.
+///   cannot be elided, and it is part of releasing the region rather than
+///   of `Locked`'s destructor, so a panic in `T`'s destructor cannot skip it.
 ///
 /// # What it cannot do
 ///
@@ -240,8 +254,9 @@ impl LockPolicy {
 /// struct of them.
 ///
 /// Constructing from an existing value costs one copy from the caller's
-/// value into the region. The parameter's bytes are wiped on the way, but
-/// the caller's own copy, if one exists at another address, is the caller's.
+/// value into the region. The parameter's bytes are wiped on the way, and
+/// zeroized if the region could not be obtained at all, but the caller's own
+/// copy, if one exists at another address, is the caller's.
 /// [`generate`](Self::generate) avoids the copy entirely by building the
 /// value in place.
 ///
@@ -275,14 +290,23 @@ pub struct Locked<T: Zeroize> {
 unsafe impl<T: Zeroize + Send> Send for Locked<T> {}
 unsafe impl<T: Zeroize + Sync> Sync for Locked<T> {}
 
-impl<T: Zeroize> Locked<T> {
-    /// Map a region for a `T` and apply the process [`LockPolicy`] to the
-    /// lock outcome. The interior is zero-filled and holds no `T` yet.
+/// A region sized for a `T` with the process [`LockPolicy`] applied, holding
+/// no `T` yet. Only once a `T` has been written does a constructor turn this
+/// into a [`Locked`]: dropping this drops no `T`, so a panic between the
+/// allocation and the write (in `T::zeroed()`, say) releases zero-filled
+/// bytes instead of running `T`'s destructor over them.
+struct Unfilled<T> {
+    region: Region,
+    lock: Option<Box<LockError>>,
+    _value: PhantomData<T>,
+}
+
+impl<T> Unfilled<T> {
     fn allocate() -> Result<Self, LockError> {
         let (region, lock) = Region::allocate(mem::size_of::<T>(), mem::align_of::<T>())?;
         if LockPolicy::current() == LockPolicy::Strict {
             if let Some(err) = lock {
-                // `region` is dropped here, wiped and unmapped.
+                // `region` is dropped here, wiped and released.
                 return Err(err);
             }
         }
@@ -297,11 +321,32 @@ impl<T: Zeroize> Locked<T> {
         self.region.ptr().as_ptr().cast::<T>()
     }
 
+    /// # Safety
+    ///
+    /// The interior must hold a live `T`.
+    unsafe fn filled(self) -> Locked<T>
+    where
+        T: Zeroize,
+    {
+        Locked {
+            region: self.region,
+            lock: self.lock,
+            _value: PhantomData,
+        }
+    }
+}
+
+impl<T: Zeroize> Locked<T> {
+    fn as_ptr(&self) -> *mut T {
+        self.region.ptr().as_ptr().cast::<T>()
+    }
+
     /// Move `value` into locked storage.
     ///
     /// The bytes of the parameter are wiped after the copy, without running
     /// `T`'s destructor, so the only copy of the value left in ordinary
-    /// memory is any the caller still holds.
+    /// memory is any the caller still holds. If no region can be obtained
+    /// the parameter is zeroized and dropped before the error is returned.
     ///
     /// ```
     /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
@@ -313,18 +358,27 @@ impl<T: Zeroize> Locked<T> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(value: T) -> Result<Self, LockError> {
-        let this = Self::allocate()?;
+    pub fn new(mut value: T) -> Result<Self, LockError> {
+        let unfilled = match Unfilled::allocate() {
+            Ok(unfilled) => unfilled,
+            Err(err) => {
+                // `T: Zeroize` does not imply `ZeroizeOnDrop`; the input is
+                // ours now and must not leave here intact.
+                value.zeroize();
+                return Err(err);
+            }
+        };
         let mut slot = ManuallyDrop::new(value);
         // SAFETY: the interior is at least `size_of::<T>()` bytes, aligned to
         // `align_of::<T>()`, and holds no `T` yet, so a bitwise copy in is a
         // move. `slot` is `ManuallyDrop` and never read again, so the source
-        // is wiped bitwise below without any semantic effect on `T`.
+        // is wiped bitwise below without any semantic effect on `T`. After
+        // the copy the interior holds a live `T`, which `filled` requires.
         unsafe {
-            ptr::copy_nonoverlapping(&*slot as *const T, this.as_ptr(), 1);
+            ptr::copy_nonoverlapping(&*slot as *const T, unfilled.as_ptr(), 1);
             wipe_bytes(&mut *slot as *mut T);
+            Ok(unfilled.filled())
         }
-        Ok(this)
     }
 
     /// Build the value in place: the region is filled with `T::zeroed()` and
@@ -386,18 +440,26 @@ impl<T: Zeroize> Locked<T> {
     where
         T: Zeroed,
     {
-        let this = Self::allocate()?;
-        // SAFETY: the interior is sized and aligned for a `T` and holds none yet.
-        unsafe { ptr::write(this.as_ptr(), T::zeroed()) };
-        Ok(this)
+        let unfilled = Unfilled::allocate()?;
+        // A panic in `T::zeroed()` unwinds through `unfilled`, which releases
+        // the region without treating its zero-filled bytes as a `T`.
+        let zeroed = T::zeroed();
+        // SAFETY: the interior is sized and aligned for a `T` and holds none
+        // yet; after the write it holds one, which `filled` requires.
+        unsafe {
+            ptr::write(unfilled.as_ptr(), zeroed);
+            Ok(unfilled.filled())
+        }
     }
 
-    /// Whether the memory is locked against swapping.
+    /// Whether every protection the platform offers was applied: the memory
+    /// is locked against swapping and, on Linux, excluded from core dumps.
+    /// [`lock_error`](Self::lock_error) says which one was refused.
     pub fn locked(&self) -> bool {
         self.lock.is_none()
     }
 
-    /// Why the memory is not locked, when it is not.
+    /// Why the memory is not fully protected, when it is not.
     pub fn lock_error(&self) -> Option<&LockError> {
         self.lock.as_deref()
     }
@@ -493,8 +555,9 @@ impl<T: Zeroize> Drop for Locked<T> {
     fn drop(&mut self) {
         // SAFETY: the interior holds a live `T`; this is the only drop.
         unsafe { ptr::drop_in_place(self.as_ptr()) };
-        self.region.wipe();
-        // `region` is then dropped by the field destructor, which releases it.
+        // `region` is then dropped by the field destructor, which wipes and
+        // releases it. Field destructors run even when this body unwinds,
+        // so a panicking `T::drop` cannot skip the wipe.
     }
 }
 
@@ -603,6 +666,115 @@ mod tests {
         }
         drop(Locked::new(Counted(1)).unwrap());
         assert_eq!(DROPS.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_panicking_zeroed_releases_the_region_without_dropping_a_value() {
+        // `Boom` owns a heap allocation, so `drop_in_place` over the zero-
+        // filled interior would free a null pointer. `T::zeroed()` panics
+        // before any `T` exists, and the region must be released as bytes.
+        struct Boom(#[allow(dead_code)] Box<u8>);
+        impl Zeroize for Boom {
+            fn zeroize(&mut self) {
+                *self.0 = 0;
+            }
+        }
+        impl Zeroed for Boom {
+            fn zeroed() -> Self {
+                panic!("no zero value");
+            }
+        }
+        let r = std::panic::catch_unwind(Locked::<Boom>::zeroed);
+        assert!(r.is_err());
+        let r = std::panic::catch_unwind(|| Locked::<Boom>::generate(|_| {}));
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn the_region_is_wiped_when_the_values_destructor_panics() {
+        // The wipe belongs to the region's release, which runs during the
+        // unwind out of `Locked::drop`. Observed directly through the
+        // region: `into_wiped_region` is not used here because the point is
+        // the path that does not go through it.
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static DROPS: AtomicUsize = AtomicUsize::new(0);
+        struct Angry([u8; 16]);
+        impl Zeroize for Angry {
+            fn zeroize(&mut self) {
+                self.0.zeroize();
+            }
+        }
+        impl Drop for Angry {
+            fn drop(&mut self) {
+                let _ = DROPS.fetch_add(1, Ordering::SeqCst);
+                panic!("angry");
+            }
+        }
+        let key = Locked::new(Angry([0xEE; 16])).unwrap();
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(key)));
+        assert!(r.is_err());
+        assert_eq!(DROPS.load(Ordering::SeqCst), 1);
+        // No double drop, no leak: the region was released once. The bytes
+        // themselves are checked by `tests/locked_fallback_wipe.rs`, where
+        // an observing allocator can see them at release.
+    }
+
+    #[cfg(all(unix, not(miri)))]
+    #[test]
+    fn a_failed_allocation_zeroizes_the_input() {
+        // 128 KiB alignment exceeds every page size this crate is built for,
+        // so the region cannot be mapped and `new` must fail. The input is
+        // ours by then; it must be zeroized, not merely dropped.
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static ZEROIZED: AtomicBool = AtomicBool::new(false);
+        #[repr(align(131072))]
+        struct Wide(u8);
+        impl Zeroize for Wide {
+            fn zeroize(&mut self) {
+                self.0 = 0;
+                ZEROIZED.store(true, Ordering::SeqCst);
+            }
+        }
+        impl Drop for Wide {
+            fn drop(&mut self) {
+                assert_eq!(self.0, 0, "dropped before being zeroized");
+            }
+        }
+        let r = Locked::new(Wide(0x5A));
+        assert!(matches!(r, Err(LockError::Alignment { .. })), "{r:?}");
+        assert!(ZEROIZED.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn every_error_displays_and_only_os_errors_have_a_source() {
+        use std::error::Error;
+        let os = || io::Error::from_raw_os_error(1);
+        let errors = [
+            LockError::Map {
+                bytes: 3,
+                source: os(),
+            },
+            LockError::Guard { source: os() },
+            LockError::Refused {
+                bytes: 3,
+                limit: Some(0),
+                source: os(),
+            },
+            LockError::Refused {
+                bytes: 3,
+                limit: None,
+                source: os(),
+            },
+            LockError::Dump { source: os() },
+            LockError::Unavailable,
+            LockError::Alignment { align: 8, page: 4 },
+        ];
+        for err in &errors {
+            assert!(!err.to_string().is_empty());
+            let has_source = !matches!(err, LockError::Unavailable | LockError::Alignment { .. });
+            assert_eq!(err.source().is_some(), has_source, "{err}");
+        }
+        assert!(errors[4].to_string().contains("core dumps"));
     }
 
     #[test]

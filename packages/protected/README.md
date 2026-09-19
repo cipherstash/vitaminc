@@ -205,7 +205,7 @@ if !key.locked() {
 # }
 ```
 
-The operating system can refuse to lock memory, most often because `RLIMIT_MEMLOCK` (64 KiB by default on many Linux hosts) is too small. By default the value is created anyway and the refusal is readable from `lock_error`; call `require_locked()` on a value that must be locked, or set `LockPolicy::Strict` once at startup to make every constructor fail instead. `Locked` protects the bytes of `T` itself, so use it for inline types such as `[u8; N]`; a `Vec<u8>` inside it has only its header in the locked region.
+The operating system can refuse to lock memory, most often because `RLIMIT_MEMLOCK` (64 KiB by default on many Linux hosts) is too small, and a seccomp filter can refuse the core-dump exclusion. By default the value is created anyway and the refusal is readable from `lock_error`; call `require_locked()` on a value that must be locked, or set `LockPolicy::Strict` once at startup to make every constructor fail instead. `Locked` protects the bytes of `T` itself, so use it for inline types such as `[u8; N]`; a `Vec<u8>` inside it has only its header in the locked region.
 
 ### Generators
 
