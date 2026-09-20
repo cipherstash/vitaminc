@@ -69,9 +69,7 @@ fn skipping_a_value_is_rejected() {
     let cipher = cipher();
     let ciphertext = two_entry_ciphertext(&cipher);
 
-    let result = cipher
-        .decipher(ciphertext)
-        .decrypt_map(SkipsAValue, "".as_bytes());
+    let result = cipher.decipher(ciphertext).decrypt_map(SkipsAValue, ());
     assert!(result.is_err());
 }
 
@@ -80,9 +78,7 @@ fn value_without_a_key_is_rejected() {
     let cipher = cipher();
     let ciphertext = two_entry_ciphertext(&cipher);
 
-    let result = cipher
-        .decipher(ciphertext)
-        .decrypt_map(ValueWithoutKey, "".as_bytes());
+    let result = cipher.decipher(ciphertext).decrypt_map(ValueWithoutKey, ());
     assert!(result.is_err());
 }
 
@@ -93,7 +89,7 @@ fn key_then_value_reads_every_entry() {
 
     let mut entries = cipher
         .decipher(ciphertext)
-        .decrypt_map(ReadsEveryEntry, "".as_bytes())
+        .decrypt_map(ReadsEveryEntry, ())
         .expect("decryption failed");
     entries.sort();
 

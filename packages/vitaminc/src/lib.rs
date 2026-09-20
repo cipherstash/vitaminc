@@ -9,6 +9,10 @@ pub use vitaminc_aead as aead;
 #[cfg_attr(docsrs, doc(cfg(feature = "async-traits")))]
 pub use vitaminc_async_traits as async_traits;
 
+#[cfg(feature = "context")]
+#[cfg_attr(docsrs, doc(cfg(feature = "context")))]
+pub use vitaminc_context as context;
+
 #[cfg(feature = "encrypt")]
 #[cfg_attr(docsrs, doc(cfg(feature = "encrypt")))]
 pub use vitaminc_encrypt as encrypt;

@@ -1,4 +1,4 @@
-//! Expectation-side leaf-type binding as an [`IntoAad`] type.
+//! Expectation-side leaf-type binding as a context type.
 //!
 //! [`LeafTypeAad`] lets a **schema-aware** caller — one that already knows
 //! what type a field must hold — bind the *expected* leaf tag into the AAD at
@@ -18,17 +18,17 @@
 
 use std::borrow::Cow;
 
-use vitaminc_aead::{Aad, AadPiece, IntoAad};
+use vitaminc_aead::{ContextPiece, IntoContext};
 
-/// Domain-separation label for the leaf-type AAD binding. The leading label
-/// keeps the encoding disjoint from `Aad::for_map_entry` and from
-/// user-supplied composite AAD.
+/// Domain-separation label for the leaf-type binding. Leading the list
+/// keeps the context disjoint from a caller binding `(base, tag)` as a pair
+/// of its own.
 const LEAF_TYPE_DOMAIN: &[u8] = b"vitaminc/aead-value/leaf-type/v1";
 
-/// An [`IntoAad`] wrapper that binds an expected leaf type tag onto a base AAD.
+/// A context that binds an expected leaf type tag onto a base context.
 ///
-/// Construct it with a base AAD (anything implementing [`IntoAad`], typically
-/// the caller's schema context) and the expected tag — e.g. from a
+/// Construct it with a base context (anything implementing [`IntoContext`],
+/// typically the caller's schema context) and the expected tag — e.g. from a
 /// `Tagged*::TAG` associated const:
 ///
 /// ```ignore
@@ -36,39 +36,30 @@ const LEAF_TYPE_DOMAIN: &[u8] = b"vitaminc/aead-value/leaf-type/v1";
 /// value.encrypt_with_aad(&cipher, aad);
 /// ```
 ///
-/// The resulting AAD is `PAE(domain, base_aad_bytes, [tag])`. The same tag
-/// must be supplied on decrypt or authentication fails.
+/// As a context it is the three-part list `(domain, base, tag)`, with the
+/// base's own parts intact and the tag as a `u8` leaf. The same tag must be
+/// supplied on decrypt or authentication fails.
 pub struct LeafTypeAad<'a> {
-    base: Aad<'a>,
+    base: ContextPiece<'a>,
     tag: u8,
 }
 
 impl<'a> LeafTypeAad<'a> {
     /// Bind `tag` as the expected leaf type onto `base`.
-    pub fn new(base: impl IntoAad<'a>, tag: u8) -> Self {
+    pub fn new(base: impl IntoContext<'a>, tag: u8) -> Self {
         Self {
-            base: base.into_aad(),
+            base: base.into_context(),
             tag,
         }
     }
 }
 
-impl<'a> IntoAad<'a> for LeafTypeAad<'a> {
-    fn into_aad(self) -> Aad<'a> {
-        // PAE(domain, base, [tag]) — the pinned wire encoding. `Aad::pae` is
-        // the generic PAE facility exposed by the AEAD crate; the leaf-type
-        // semantics live here, in the value crate that owns the tag table.
-        Aad::pae(&[LEAF_TYPE_DOMAIN, self.base.as_bytes(), &[self.tag]])
-    }
-
-    /// The same three PAE parts as `into_aad`: domain label, base, tag. The
-    /// base was encoded by [`LeafTypeAad::new`], so it appears as opaque
-    /// bytes here rather than as its own parts.
-    fn into_aad_piece(self) -> AadPiece<'a> {
-        AadPiece::List(vec![
-            AadPiece::Bytes(Cow::Borrowed(LEAF_TYPE_DOMAIN)),
-            self.base.into_aad_piece(),
-            AadPiece::Bytes(Cow::Owned(vec![self.tag])),
+impl<'a> IntoContext<'a> for LeafTypeAad<'a> {
+    fn into_context(self) -> ContextPiece<'a> {
+        ContextPiece::List(vec![
+            ContextPiece::Bytes(Cow::Borrowed(LEAF_TYPE_DOMAIN)),
+            self.base,
+            ContextPiece::U8(self.tag),
         ])
     }
 }
@@ -76,56 +67,45 @@ impl<'a> IntoAad<'a> for LeafTypeAad<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vitaminc_aead::{Context, IntoAad};
 
     #[test]
     fn leaf_type_pins_encoding() {
         // The exact bytes are the expectation-side type-binding commitment:
-        // PAE(domain, aad, [tag]). Changing them breaks decryption of existing
-        // schema-bound ciphertexts.
-        let bound = LeafTypeAad::new(Aad::from_slice(b"ctx"), 0x05).into_aad();
-        let expected = Aad::pae(&[b"vitaminc/aead-value/leaf-type/v1", b"ctx", &[0x05]]);
-        assert_eq!(bound.as_bytes(), expected.as_bytes());
+        // the list (domain, base, tag) of typed parts. Changing them breaks
+        // decryption of existing schema-bound ciphertexts.
+        let bound = LeafTypeAad::new("ctx", 0x05).into_aad();
+        let expected = Context::pae(&[
+            LEAF_TYPE_DOMAIN.into_aad().as_bytes(),
+            "ctx".into_aad().as_bytes(),
+            0x05u8.into_aad().as_bytes(),
+        ]);
+        assert_eq!(bound, expected);
     }
 
     #[test]
-    fn leaf_type_parts_encode_to_the_pinned_bytes() {
-        // The parts view must agree with the bytes view byte for byte, as
-        // every override in the workspace does.
-        let bound = LeafTypeAad::new(Aad::from_slice(b"ctx"), 0x05);
-        let expected = Aad::pae(&[b"vitaminc/aead-value/leaf-type/v1", b"ctx", &[0x05]]);
-        assert_eq!(
-            bound.into_aad_piece().into_aad().as_bytes(),
-            expected.as_bytes()
-        );
-        assert_eq!(
-            LeafTypeAad::new("ctx", 0x05)
-                .into_aad_piece()
-                .leaves()
-                .count(),
-            3
-        );
+    fn leaf_type_keeps_the_base_parts_intact() {
+        let parts = LeafTypeAad::new(("schema", 7u64), 0x05).into_context();
+        assert_eq!(parts.to_string(), "(0x766974616d696e632f616561642d76616c75652f6c6561662d747970652f7631, (\"schema\", 7u64), 5u8)");
+        assert_eq!(parts.leaves().count(), 4);
     }
 
     #[test]
     fn leaf_type_differs_from_map_entry_and_tuple_aad() {
         // The domain label keeps leaf-type AAD disjoint from the map-entry
-        // binding and from a user binding (aad, tag) as tuple AAD.
-        let leaf = LeafTypeAad::new(Aad::from_slice(b"ctx"), b'n').into_aad();
-        let map_entry = Aad::from_slice(b"ctx").for_map_entry("n");
-        assert_ne!(leaf.as_bytes(), map_entry.as_bytes());
-        let tuple = (Aad::from_slice(b"ctx"), *b"n").into_aad();
-        assert_ne!(leaf.as_bytes(), tuple.as_bytes());
+        // binding and from a user binding (base, tag) as a pair.
+        let leaf = LeafTypeAad::new("ctx", b'n').into_aad();
+        let map_entry = "ctx".into_aad().for_map_entry("n");
+        assert_ne!(leaf, map_entry);
+        let tuple = ("ctx", b'n').into_aad();
+        assert_ne!(leaf, tuple);
     }
 
     #[test]
     fn leaf_type_is_tag_sensitive() {
         assert_ne!(
-            LeafTypeAad::new(Aad::from_slice(b"ctx"), 0x05)
-                .into_aad()
-                .as_bytes(),
-            LeafTypeAad::new(Aad::from_slice(b"ctx"), 0x09)
-                .into_aad()
-                .as_bytes()
+            LeafTypeAad::new("ctx", 0x05).into_aad(),
+            LeafTypeAad::new("ctx", 0x09).into_aad()
         );
     }
 
@@ -141,18 +121,18 @@ mod tests {
         use vitaminc_encrypt::{Aes256Cipher, Key};
 
         let cipher = Aes256Cipher::new(&Key::from([9u8; 32])).expect("cipher");
-        let base = Aad::from_slice(b"schema-ctx");
+        let base = "schema-ctx";
 
         let ct = TaggedInt64::from(42i64)
-            .encrypt_with_aad(&cipher, LeafTypeAad::new(base.clone(), TaggedInt64::TAG))
+            .encrypt_with_aad(&cipher, LeafTypeAad::new(base, TaggedInt64::TAG))
             .expect("encrypt");
 
         // Same expected type → authenticates and decrypts.
         let ct_ok = TaggedInt64::from(42i64)
-            .encrypt_with_aad(&cipher, LeafTypeAad::new(base.clone(), TaggedInt64::TAG))
+            .encrypt_with_aad(&cipher, LeafTypeAad::new(base, TaggedInt64::TAG))
             .expect("encrypt");
         let value: FfiValue = cipher
-            .decrypt_with_aad(ct_ok, LeafTypeAad::new(base.clone(), TaggedInt64::TAG))
+            .decrypt_with_aad(ct_ok, LeafTypeAad::new(base, TaggedInt64::TAG))
             .expect("decrypt with matching leaf-type AAD");
         assert_eq!(value, FfiValue::Int64(42));
 

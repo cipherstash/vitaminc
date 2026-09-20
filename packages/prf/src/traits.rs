@@ -3,7 +3,7 @@ use std::{any::Any, borrow::Cow, future::IntoFuture};
 use vitaminc_protected::{Controlled, Protected};
 
 use crate::BlockVisitor;
-use crate::{IntoPrfContext, PrfContext, PrfEncoding, PrfError, PrfVisitor};
+use crate::{Context, IntoPrfContext, PrfEncoding, PrfError, PrfVisitor};
 
 /// A type that can describe its structure to a [`Prf`] backend.
 ///
@@ -32,7 +32,7 @@ pub trait PrfValue {
         P: Prf,
         V: PrfVisitor<P::Block, P::Passthrough>,
     {
-        self.prf_visit_with_context(prf, PrfContext::empty(), visitor)
+        self.prf_visit_with_context(prf, Context::empty(), visitor)
     }
 
     /// Derive one raw backend block under `context`.
@@ -148,7 +148,7 @@ pub trait Prf: Sized {
         &self,
         data: Protected<Vec<u8>>,
         encoding: PrfEncoding,
-        context: PrfContext<'static>,
+        context: Context<'static>,
         visitor: V,
     ) -> Self::Ok<V::Value>
     where
@@ -159,7 +159,7 @@ pub trait Prf: Sized {
         &self,
         data: Protected<[u8; N]>,
         encoding: PrfEncoding,
-        context: PrfContext<'static>,
+        context: Context<'static>,
         visitor: V,
     ) -> Self::Ok<V::Value>
     where
@@ -176,12 +176,7 @@ pub trait Prf: Sized {
     fn prf_seq(&self, size_hint: Option<usize>) -> Self::SeqPrf<'_>;
     fn prf_map(&self, size_hint: Option<usize>) -> Self::MapPrf<'_>;
 
-    fn prf_some<T, V>(
-        &self,
-        value: T,
-        context: PrfContext<'static>,
-        visitor: V,
-    ) -> Self::Ok<V::Value>
+    fn prf_some<T, V>(&self, value: T, context: Context<'static>, visitor: V) -> Self::Ok<V::Value>
     where
         T: PrfValue,
         V: PrfVisitor<Self::Block, Self::Passthrough>,
@@ -189,7 +184,7 @@ pub trait Prf: Sized {
         value.prf_visit_with_context(self, context, visitor)
     }
 
-    fn prf_none<V>(&self, context: PrfContext<'static>, visitor: V) -> Self::Ok<V::Value>
+    fn prf_none<V>(&self, context: Context<'static>, visitor: V) -> Self::Ok<V::Value>
     where
         V: PrfVisitor<Self::Block, Self::Passthrough>;
 
@@ -230,7 +225,7 @@ pub trait SeqPrf: Sized {
 
     /// Sequence positions deliberately do not refine `context`. Equal values
     /// in one equality-search domain therefore derive equal terms.
-    fn prf_next<T>(self, value: T, context: PrfContext<'static>) -> Self
+    fn prf_next<T>(self, value: T, context: Context<'static>) -> Self
     where
         T: PrfValue;
 
@@ -258,12 +253,12 @@ pub trait MapPrf: Sized {
         K: Into<Cow<'static, str>>;
 
     /// Implementations automatically refine the supplied context with the
-    /// pending map key using `vitaminc/prf/map-entry/v1`.
-    fn prf_value<T>(self, value: T, context: PrfContext<'static>) -> Self
+    /// pending map key through `Context::for_map_entry`.
+    fn prf_value<T>(self, value: T, context: Context<'static>) -> Self
     where
         T: PrfValue;
 
-    fn prf_entry<K, T>(self, key: K, value: T, context: PrfContext<'static>) -> Self
+    fn prf_entry<K, T>(self, key: K, value: T, context: Context<'static>) -> Self
     where
         K: Into<Cow<'static, str>>,
         T: PrfValue,

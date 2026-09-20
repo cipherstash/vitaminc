@@ -3,7 +3,7 @@
 //! decrypt → transport-encode. This is the same code path `vc_encrypt` /
 //! `vc_decrypt` drive inside the wasm module, minus the linear-memory ABI.
 
-use vitaminc_aead::{Aad, Encrypt};
+use vitaminc_aead::{Context, Encrypt};
 use vitaminc_aead_value::transport::{self as codec, Reader};
 use vitaminc_aead_value::FfiValue;
 use vitaminc_encrypt::{Aes256Cipher, AesCipherText, Key};
@@ -58,14 +58,16 @@ fn transport_pipeline_round_trips() {
     // Encrypt side, as vc_encrypt does it.
     let value = codec::decode_value(&mut Reader::new(&encoded(sample()))).unwrap();
     let ct = value
-        .encrypt_with_aad(&cipher, Aad::from_slice(aad))
+        .encrypt_with_aad(&cipher, Context::from_encoded(aad))
         .unwrap();
     let mut ct_bytes = Vec::new();
     codec::encode_ciphertext_boxed(ct, &mut ct_bytes).unwrap();
 
     // Decrypt side, as vc_decrypt does it.
     let ct: AesCipherText = codec::decode_ciphertext_boxed(&mut Reader::new(&ct_bytes)).unwrap();
-    let decrypted: FfiValue = cipher.decrypt_with_aad(ct, Aad::from_slice(aad)).unwrap();
+    let decrypted: FfiValue = cipher
+        .decrypt_with_aad(ct, Context::from_encoded(aad))
+        .unwrap();
 
     assert_eq!(encoded(decrypted), encoded(sample()));
 }
@@ -74,13 +76,13 @@ fn transport_pipeline_round_trips() {
 fn aad_mismatch_fails() {
     let cipher = cipher();
     let ct = sample()
-        .encrypt_with_aad(&cipher, Aad::from_slice(b"right"))
+        .encrypt_with_aad(&cipher, Context::from_encoded(b"right"))
         .unwrap();
     let mut ct_bytes = Vec::new();
     codec::encode_ciphertext_boxed(ct, &mut ct_bytes).unwrap();
 
     let ct: AesCipherText = codec::decode_ciphertext_boxed(&mut Reader::new(&ct_bytes)).unwrap();
     assert!(cipher
-        .decrypt_with_aad::<FfiValue, _>(ct, Aad::from_slice(b"wrong"))
+        .decrypt_with_aad::<FfiValue, _>(ct, Context::from_encoded(b"wrong"))
         .is_err());
 }

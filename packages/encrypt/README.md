@@ -165,6 +165,20 @@ let result: Result<String, _> = cipher.decrypt_with_aad(ciphertext, b"context_2"
 assert!(result.is_err());
 ```
 
+#### Deprecated `Aad` alias
+
+`Aad` remains available as a deprecated alias of [`Context`] during the
+transition. Existing imports continue to compile; use `Context` in new code.
+
+```rust
+#![allow(deprecated)]
+use vitaminc_encrypt::{Aad, Context};
+
+let aad: Aad<'static> = Aad::empty();
+let context: Context<'static> = aad;
+assert!(context.is_empty());
+```
+
 ### Working with Protected Types
 
 Vitamin C Encrypt integrates with `vitaminc-protected` to ensure sensitive data is handled securely:

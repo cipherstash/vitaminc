@@ -1,0 +1,27 @@
+[package]
+name = "vitaminc-context"
+description = "One canonical encoding for the context an AEAD authenticates and a PRF derives under. Part of the VitaminC cryptographic suite."
+documentation = "https://docs.rs/vitaminc-context"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+mutants = "0.0.4"
+vitaminc-protected = { version = "0.4.0", path = "../protected" }
+
+quickcheck = { version = "1.1.0", optional = true }
+
+[dev-dependencies]
+quickcheck = "1.1.0"
+quickcheck_macros = "1.2.0"
+
+[features]
+# `quickcheck::Arbitrary` for `ContextPiece`, so a downstream crate can state
+# a property over every tree this crate can encode.
+arbitrary = ["dep:quickcheck"]
