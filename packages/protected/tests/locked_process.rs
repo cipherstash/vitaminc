@@ -4,11 +4,19 @@
 //! inspects the exit status. None of this can run under Miri, which has no
 //! `mlock`, `mprotect`, or subprocesses. The `RLIMIT_MEMLOCK` cases build
 //! only where the limit exists (`cfg(memlock_limit)`, from `build.rs`).
+//! The `fork` case is not here: a libtest process is never single-threaded,
+//! so it lives in `locked_fork.rs`, which has no harness.
 #![cfg(all(unix, not(miri)))]
 
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, Output};
-use vitaminc_protected::{LockError, LockPolicy, Locked};
+#[cfg(memlock_limit)]
+use vitaminc_protected::LockError;
+use vitaminc_protected::{LockPolicy, Locked};
+
+mod common;
+#[cfg(target_os = "linux")]
+use common::vm_flags;
 
 const CASE: &str = "LOCKED_CHILD_CASE";
 
@@ -153,47 +161,6 @@ fn child_entry() {
                 );
             }
         }
-        "fork_drops_the_lock" => {
-            let mut key = Locked::new([1u8; 32]).unwrap();
-            if !key.locked() {
-                eprintln!("skipped: not locked in the parent, so there is nothing to lose");
-                return;
-            }
-            #[cfg(target_os = "linux")]
-            let mlock_lies = mlock_is_a_no_op();
-            // SAFETY: this child of the harness is single-threaded, so
-            // fork has no other thread to leave half-way through anything.
-            let pid = unsafe { libc::fork() };
-            assert!(pid >= 0, "fork: {}", std::io::Error::last_os_error());
-            if pid == 0 {
-                // The child. The memory came along; the lock did not, and
-                // the value must say so before and after `relock`.
-                let mut ok = !key.locked() && matches!(key.lock_error(), Some(LockError::Forked));
-                #[cfg(target_os = "linux")]
-                {
-                    ok &= smaps_field(key.risky_ref().as_ptr() as usize, "Locked:") == Some(0);
-                }
-                ok &= key.relock().is_ok() && key.locked();
-                #[cfg(target_os = "linux")]
-                if !mlock_lies {
-                    ok &= smaps_field(key.risky_ref().as_ptr() as usize, "Locked:") > Some(0);
-                }
-                ok &= key.require_locked().is_ok();
-                // SAFETY: _exit ends the child without running the
-                // parent's destructors or the harness's exit handlers.
-                unsafe { libc::_exit(if ok { 0 } else { 1 }) };
-            }
-            let mut status = 0;
-            // SAFETY: `status` is a valid, writable int for the call.
-            let waited = unsafe { libc::waitpid(pid, &mut status, 0) };
-            assert_eq!(waited, pid);
-            assert!(
-                libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
-                "the child's checks failed (status {status})"
-            );
-            // The parent is untouched.
-            assert!(key.locked());
-        }
         "overrun_faults" => {
             let key = Locked::new([1u8; 32]).unwrap();
             let start = key.risky_ref().as_ptr();
@@ -205,72 +172,6 @@ fn child_entry() {
         }
         other => panic!("unknown case {other}"),
     }
-}
-
-/// The line with `prefix` in the `/proc/self/smaps` entry containing
-/// `addr`, trimmed, with the prefix removed.
-#[cfg(target_os = "linux")]
-fn smaps_line(addr: usize, prefix: &str) -> String {
-    let smaps = std::fs::read_to_string("/proc/self/smaps").unwrap();
-    let mut in_region = false;
-    for line in smaps.lines() {
-        if let Some((range, _)) = line.split_once(' ') {
-            if let Some((lo, hi)) = range.split_once('-') {
-                if let (Ok(lo), Ok(hi)) =
-                    (usize::from_str_radix(lo, 16), usize::from_str_radix(hi, 16))
-                {
-                    in_region = lo <= addr && addr < hi;
-                    continue;
-                }
-            }
-        }
-        if in_region {
-            if let Some(v) = line.strip_prefix(prefix) {
-                return v.trim().to_string();
-            }
-        }
-    }
-    panic!("no smaps entry contains {addr:#x} with a {prefix} line");
-}
-
-/// The `VmFlags:` of the smaps entry containing `addr`.
-#[cfg(target_os = "linux")]
-fn vm_flags(addr: usize) -> String {
-    smaps_line(addr, "VmFlags:")
-}
-
-/// A numeric smaps field (KiB) of the entry containing `addr`.
-#[cfg(target_os = "linux")]
-fn smaps_field(addr: usize, prefix: &str) -> Option<u64> {
-    smaps_line(addr, prefix).split(' ').next()?.parse().ok()
-}
-
-/// Whether `mlock` reports success without locking (the sanitizer
-/// runtimes make it do so), judged from a page of our own.
-#[cfg(target_os = "linux")]
-fn mlock_is_a_no_op() -> bool {
-    let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
-    // SAFETY: an anonymous private mapping of one page; checked below.
-    let probe = unsafe {
-        libc::mmap(
-            std::ptr::null_mut(),
-            page,
-            libc::PROT_READ | libc::PROT_WRITE,
-            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
-            -1,
-            0,
-        )
-    };
-    assert_ne!(probe, libc::MAP_FAILED);
-    // SAFETY: `probe` is a page we own.
-    let locked = unsafe { libc::mlock(probe, page) } == 0;
-    let counted = smaps_field(probe as usize, "Locked:").unwrap_or(0) > 0;
-    // SAFETY: still our page, released exactly once.
-    unsafe {
-        let _ = libc::munlock(probe, page);
-        let _ = libc::munmap(probe, page);
-    }
-    locked && !counted
 }
 
 fn assert_passed(out: &Output) {
@@ -302,11 +203,6 @@ fn the_policy_is_set_once_per_process() {
 #[test]
 fn dropping_the_value_unmaps_the_interior_and_both_guards() {
     assert_passed(&child("drop_unmaps"));
-}
-
-#[test]
-fn a_forked_child_reports_the_lock_gone_until_it_relocks() {
-    assert_passed(&child("fork_drops_the_lock"));
 }
 
 #[test]

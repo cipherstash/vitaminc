@@ -38,6 +38,12 @@ serde_json = "1.0.150"
 sha2 = { version = "0.11.0", features = ["zeroize"] }
 trybuild = "1.0.118"
 
+# The fork test forks, and a libtest process is never single-threaded (the
+# harness keeps a coordinator thread), so it runs as a plain `main`.
+[[test]]
+name = "locked_fork"
+harness = false
+
 [features]
 bitvec = []
 arbitrary = ["dep:quickcheck"]

@@ -68,7 +68,7 @@ jobs:
           RUSTFLAGS: "-Zsanitizer=address"
         run: >
           cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu
-          -p vitaminc-protected --lib --test locked_process
+          -p vitaminc-protected --lib --test locked_process --test locked_fork
           --target-dir target/asan
 
       - name: test under MemorySanitizer (vitaminc-protected)
@@ -76,5 +76,5 @@ jobs:
           RUSTFLAGS: "-Zsanitizer=memory -Zsanitizer-memory-track-origins"
         run: >
           cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu
-          -p vitaminc-protected --lib --test locked_process
+          -p vitaminc-protected --lib --test locked_process --test locked_fork
           --target-dir target/msan

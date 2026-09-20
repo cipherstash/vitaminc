@@ -33,10 +33,14 @@ use fallback::Region;
 /// Why a [`Locked`] value could not be created, or why its memory is not
 /// locked.
 ///
-/// Only [`Refused`](LockError::Refused), [`Dump`](LockError::Dump) and
-/// [`Unavailable`](LockError::Unavailable) describe a *degraded* value: under
-/// [`LockPolicy::BestEffort`] the value is still created and reports them
-/// from [`Locked::lock_error`]. The other variants mean no value exists.
+/// [`Refused`](LockError::Refused), [`Dump`](LockError::Dump),
+/// [`Unavailable`](LockError::Unavailable) and [`Forked`](LockError::Forked)
+/// describe a *degraded* value that exists: under
+/// [`LockPolicy::BestEffort`] the first three are reported by
+/// [`Locked::lock_error`] from construction on, and `Forked` from the moment
+/// a forked child looks. [`Locked::require_locked`] turns any of them into
+/// an error and drops the value. The other variants mean no value was
+/// created.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum LockError {
@@ -540,9 +544,10 @@ impl<T: Zeroize> Locked<T> {
         }
     }
 
-    /// Demand the lock: `Ok(self)` when locked, otherwise the refusal, with
-    /// the value dropped and wiped. This is the per-value form of
-    /// [`LockPolicy::Strict`]:
+    /// Demand the lock: `Ok(self)` when locked here, otherwise the refusal
+    /// (or [`LockError::Forked`] in a child that has not called
+    /// [`relock`](Self::relock)), with the value dropped and wiped. This is
+    /// the per-value form of [`LockPolicy::Strict`]:
     ///
     /// ```
     /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
