@@ -75,7 +75,17 @@ jobs:
           RUSTDOCFLAGS: -D warnings
 
       - name: test (default — aws-lc-rs backend)
-        run: cargo test
+        # This host locks memory for real (no sanitizer, not root), so the
+        # `Locked` tests are told to require it: a case that would skip
+        # elsewhere fails here, and a regression that never took a lock
+        # cannot pass every job. The soft limit is raised to the hard one
+        # first; every `Locked` value costs a page of it.
+        env:
+          LOCKED_TESTS_REQUIRE_LOCK: "1"
+        run: |
+          ulimit -l "$(ulimit -H -l)" || true
+          echo "RLIMIT_MEMLOCK soft: $(ulimit -l) KiB"
+          cargo test
 
       - name: test (vitaminc-encrypt, RustCrypto backend on native)
         # Forces the RustCrypto path that wasm32 uses, so the same property

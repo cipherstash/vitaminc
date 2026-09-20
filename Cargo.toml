@@ -38,6 +38,7 @@ categories = ["cryptography"]
 bitvec = "1.0.1"
 rand = { version = "0.10.1", features = ["chacha"] }
 thiserror = "2.0.18"
+libc = "0.2"
 zeroize = { version = "1", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"

@@ -1,0 +1,70 @@
+name: "Kani"
+
+# Proves, rather than tests, the invariants the `Locked` region code relies
+# on: for every page size, value size and alignment within the stated
+# bounds, the value lies inside the interior, aligned, against the trailing
+# guard; the mapping length is the interior plus two guards; and the wipe
+# touches exactly the bytes it is given. The harnesses live in
+# packages/protected/src/locked/proofs.rs and build only under `cfg(kani)`;
+# the four of them verify in well under a minute.
+#
+# Kani installs its own pinned nightly and CBMC on first use (`cargo kani
+# setup`, a few minutes); the cache keeps that between runs.
+on:
+  # No branch filter: a stacked PR (a feature branch as base) must run this
+  # gate too; see go.yml.
+  pull_request:
+    paths:
+      - "packages/protected/**"
+      - ".github/workflows/kani.yml"
+      - "!**.md"
+
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kani-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KANI_VERSION: "0.67.0"
+
+jobs:
+  kani:
+    runs-on: ubuntu-latest
+    name: "📐 Kani (proofs)"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin/cargo-kani
+            ~/.cargo/bin/kani
+            ~/.kani/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-kani-${{ env.KANI_VERSION }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: setup rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: install kani
+        # A plain `cargo install`, like the mutants and crap gates, rather
+        # than the Kani GitHub Action the org allowlist may not permit.
+        run: |
+          if ! cargo kani --version 2>/dev/null | grep -q "$KANI_VERSION"; then
+            cargo install --locked kani-verifier --version "$KANI_VERSION"
+            cargo kani setup
+          fi
+
+      - name: prove (vitaminc-protected)
+        run: cargo kani -p vitaminc-protected

@@ -1,0 +1,80 @@
+name: "Sanitizers"
+
+# Runs the vitaminc-protected tests under AddressSanitizer and
+# MemorySanitizer. Miri interprets the `Locked` region code but has no model
+# for guard pages or the lock, and cannot see what the real kernel and
+# allocator do with the mapping; the sanitizers run the native code path
+# instead. ASan catches out-of-bounds and use-after-release around the
+# region; MSan catches any read of memory that was never written, which is
+# the class of bug a `u8` view over a padded value would be. Both need the
+# standard library instrumented too (`-Zbuild-std`), hence nightly.
+#
+# Scoped to `vitaminc-protected` like the Miri gate: it is the crate with
+# first-party `unsafe`. The other crates are pure safe Rust over FFI the
+# sanitizers cannot instrument.
+on:
+  # No branch filter: a stacked PR (a feature branch as base) must run this
+  # gate too; see go.yml.
+  pull_request:
+    paths:
+      - "packages/protected/**"
+      - ".github/workflows/sanitizers.yml"
+      - "!**.md"
+
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sanitizers-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The guard-page test expects the kernel's own SIGSEGV, not a sanitizer
+  # report; leak detection is off because the process tests exit children
+  # by signal on purpose.
+  ASAN_OPTIONS: "handle_segv=0:handle_sigbus=0:detect_leaks=0"
+  MSAN_OPTIONS: "handle_segv=0:handle_sigbus=0"
+
+jobs:
+  sanitizers:
+    runs-on: ubuntu-latest
+    name: "🧯 Sanitizers (ASan + MSan)"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-sanitizers-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: setup rust nightly + rust-src
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: test under AddressSanitizer (vitaminc-protected)
+        env:
+          RUSTFLAGS: "-Zsanitizer=address"
+        run: >
+          cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu
+          -p vitaminc-protected --lib --test locked_process --test locked_fork
+          --target-dir target/asan
+
+      - name: test under MemorySanitizer (vitaminc-protected)
+        env:
+          RUSTFLAGS: "-Zsanitizer=memory -Zsanitizer-memory-track-origins"
+        run: >
+          cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu
+          -p vitaminc-protected --lib --test locked_process --test locked_fork
+          --target-dir target/msan
