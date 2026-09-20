@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-20
+
+### Breaking
+
+- **Breaking:** replace rejection sampling with fixed-count Lemire draw ([#281](https://github.com/cipherstash/vitaminc/pull/281))
+- **Breaking:** oblivious key generation via sort-by-random-key ([#282](https://github.com/cipherstash/vitaminc/pull/282))
+- **Breaking:** make a secret bound total with `Protected<NonZeroU32>`
+- **Breaking:** draw `NonZeroU16` with one bounded call, not an in-stream retry
+
+### Documentation
+
+- qualify "uniform" with the reduction's bias bound
+
+### Features
+
+- batch key derivation API (plan step 1) ([#283](https://github.com/cipherstash/vitaminc/pull/283))
+
+### Fixes
+
+- correct the bias ceiling and the claims around it
+- the NonZeroU16 draw's distance is just under 2⁻⁶⁴, not exactly
+
 ## [0.4.0] - 2026-09-12
 
 ## [0.3.0] - 2026-09-07

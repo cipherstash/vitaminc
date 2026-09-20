@@ -1,4 +1,14 @@
 
+## [0.5.0] - 2026-09-20
+
+### Breaking
+
+- **Breaking:** one canonical context encoding shared by AAD and PRF derivations
+
+### Fixes
+
+- preserve Aad compatibility
+
 ## [0.4.0] - 2026-09-12
 
 ## [0.3.0] - 2026-09-07
