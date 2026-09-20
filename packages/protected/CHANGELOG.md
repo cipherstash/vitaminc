@@ -1,4 +1,22 @@
 
+## [0.5.0] - 2026-09-20
+
+### Documentation
+
+- `Locked` says what each backend gives, and `new` what a move can leave behind
+
+### Features
+
+- `Locked<T>`, mlock-backed storage for secrets that outlive a call
+
+### Fixes
+
+- a `Locked` region is wiped on every release and holds a `T` before it is one
+- `Locked` applies each protection independently and wipes storage as bytes
+- a `Locked` value knows which process holds its lock
+- `Locked` relocks every protection, zeroizes `T` before dropping it, and survives a local review
+- a process that cannot track forks says so on every `Locked` value
+
 ## [0.4.0] - 2026-09-12
 
 ## [0.3.0] - 2026-09-07

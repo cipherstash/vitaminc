@@ -1,4 +1,19 @@
 
+## [0.5.0] - 2026-09-20
+
+### Breaking
+
+- **Breaking:** replace rejection sampling with fixed-count Lemire draw ([#281](https://github.com/cipherstash/vitaminc/pull/281))
+
+### Documentation
+
+- qualify "uniform" with the reduction's bias bound
+- state the bounded draw's bias bound in the README
+
+### Fixes
+
+- correct the bias ceiling and the claims around it
+
 ## [0.4.0] - 2026-09-12
 
 ## [0.3.0] - 2026-09-07
