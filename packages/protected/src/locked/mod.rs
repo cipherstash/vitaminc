@@ -43,9 +43,9 @@ use fallback::Region;
 /// locked.
 ///
 /// [`Refused`](LockError::Refused), [`Dump`](LockError::Dump),
-/// [`Unavailable`](LockError::Unavailable) and [`Forked`](LockError::Forked)
-/// describe a *degraded* value that exists: under
-/// [`LockPolicy::BestEffort`] the first three are reported by
+/// [`Untracked`](LockError::Untracked), [`Unavailable`](LockError::Unavailable)
+/// and [`Forked`](LockError::Forked) describe a *degraded* value that
+/// exists: under [`LockPolicy::BestEffort`] the first four are reported by
 /// [`Locked::lock_error`] from construction on, and `Forked` from the moment
 /// a forked child looks. [`Locked::require_locked`] turns any of them into
 /// an error and drops the value. The other variants mean no value was
@@ -94,6 +94,15 @@ pub enum LockError {
     /// inherited across `fork`, so in the child the region is unlocked
     /// until [`Locked::relock`] is called there.
     Forked,
+    /// This process cannot tell its values when they cross a `fork`: the
+    /// atfork handler that counts forks could not be registered (only want
+    /// of memory makes `pthread_atfork` fail). A forked child would then
+    /// inherit a lock it does not have with nothing to say so, so the
+    /// value is treated as unlocked here.
+    Untracked {
+        /// The OS error.
+        source: io::Error,
+    },
     /// `T` needs an alignment larger than a page, which the region cannot
     /// provide.
     Alignment {
@@ -131,6 +140,10 @@ impl fmt::Display for LockError {
             Self::Forked => f.write_str(
                 "the lock belongs to the process that created the value; a forked child inherits the memory but not the lock",
             ),
+            Self::Untracked { source } => write!(
+                f,
+                "forks cannot be tracked in this process ({source}), so a forked child would misreport the lock"
+            ),
             Self::Alignment { align, page } => write!(
                 f,
                 "alignment {align} exceeds the page size {page}; locked storage cannot hold this type"
@@ -145,7 +158,8 @@ impl std::error::Error for LockError {
             Self::Map { source, .. }
             | Self::Guard { source }
             | Self::Refused { source, .. }
-            | Self::Dump { source } => Some(source),
+            | Self::Dump { source }
+            | Self::Untracked { source } => Some(source),
             Self::Unavailable | Self::Forked | Self::Alignment { .. } => None,
         }
     }
@@ -958,6 +972,7 @@ mod tests {
                 source: os(),
             },
             LockError::Dump { source: os() },
+            LockError::Untracked { source: os() },
             LockError::Unavailable,
             LockError::Forked,
             LockError::Alignment { align: 8, page: 4 },

@@ -14,7 +14,7 @@ use super::layout;
 use super::LockError;
 use core::alloc::Layout;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicI32, AtomicU32, AtomicUsize, Ordering};
 use std::io;
 use std::sync::Once;
 
@@ -42,19 +42,43 @@ extern "C" fn note_fork_in_child() {
     let _ = FORK_GENERATION.fetch_add(1, Ordering::AcqRel);
 }
 
+/// How registering the handler went: 0 once it is in place, otherwise the
+/// errno `pthread_atfork` returned. A process that cannot track forks must
+/// say so on every value, since a child would otherwise inherit a lock it
+/// does not have without the value knowing.
+static ATFORK_RC: AtomicI32 = AtomicI32::new(0);
+
 fn fork_generation() -> u32 {
     static REGISTERED: Once = Once::new();
     REGISTERED.call_once(|| {
         // Miri has neither fork nor atfork. Registration fails only for
-        // want of memory.
+        // want of memory, and the outcome is kept for `fork_tracking`.
         #[cfg(not(miri))]
         // SAFETY: the handler touches one atomic and nothing else.
         unsafe {
             let rc = libc::pthread_atfork(None, None, Some(note_fork_in_child));
-            debug_assert_eq!(rc, 0, "pthread_atfork");
+            ATFORK_RC.store(rc, Ordering::Release);
         }
     });
     FORK_GENERATION.load(Ordering::Acquire)
+}
+
+/// Why forks cannot be tracked in this process, if they cannot: the
+/// handler was never registered. Registration is attempted first, so the
+/// answer is never "not yet". The failure cannot be provoked in a test (it
+/// takes an allocation failure inside libc), hence the mutation skip; the
+/// error it would produce is tested through [`untracked`].
+#[cfg_attr(test, mutants::skip)]
+fn fork_tracking() -> Option<LockError> {
+    let _ = fork_generation();
+    untracked(ATFORK_RC.load(Ordering::Acquire))
+}
+
+/// The degradation for a registration that returned `rc`.
+fn untracked(rc: i32) -> Option<LockError> {
+    (rc != 0).then(|| LockError::Untracked {
+        source: io::Error::from_raw_os_error(rc),
+    })
 }
 
 fn page_size() -> usize {
@@ -198,8 +222,9 @@ impl Region {
     /// exclusion.
     fn lock_and_exclude(&self) -> Option<LockError> {
         let lock = self.lock();
+        let tracking = fork_tracking();
         let dump = self.exclude_from_dumps();
-        lock.or(dump)
+        lock.or(tracking).or(dump)
     }
 
     /// Make the page at `ptr` inaccessible. Miri has no `mprotect`; the
@@ -357,6 +382,17 @@ mod tests {
         assert_eq!(region.total(), 3 * page);
         let (region, _) = Region::allocate(layout(page + 1, 1)).unwrap();
         assert_eq!(region.total(), 4 * page);
+    }
+
+    #[test]
+    fn a_failed_atfork_registration_is_a_degradation_naming_its_errno() {
+        assert!(untracked(0).is_none());
+        match untracked(libc::ENOMEM) {
+            Some(LockError::Untracked { source }) => {
+                assert_eq!(source.raw_os_error(), Some(libc::ENOMEM));
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

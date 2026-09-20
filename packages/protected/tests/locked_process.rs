@@ -152,31 +152,33 @@ fn child_entry() {
             // `msync` answers ENOMEM for a range with no mapping. Single-
             // threaded here, so nothing can reuse the address between the
             // drop and the probe.
-            let probe = |addr: *mut u8, len: usize| -> Option<i32> {
+            // Addresses, not pointers: once the mapping is gone, pointer
+            // arithmetic into it is undefined even if nothing is read.
+            let probe = |addr: usize, len: usize| -> Option<i32> {
                 // SAFETY: msync on an arbitrary page-aligned range has no
                 // preconditions; an unmapped range is an error, not UB.
-                let rc = unsafe { libc::msync(addr.cast(), len, libc::MS_ASYNC) };
+                let rc = unsafe { libc::msync(addr as *mut libc::c_void, len, libc::MS_ASYNC) };
                 (rc != 0).then(|| std::io::Error::last_os_error().raw_os_error().unwrap())
             };
             let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
             let key = Locked::new([1u8; 32]).unwrap();
             // The value sits at the end of its page; the interior is that
             // page, and `msync` wants the page-aligned start.
-            let interior = (key.risky_ref().as_ptr() as usize & !(page - 1)) as *mut u8;
+            let interior = key.risky_ref().as_ptr() as usize & !(page - 1);
             assert_eq!(
                 probe(interior, page),
                 None,
                 "the interior is mapped while live"
             );
+            // The interior and both guards, computed while the mapping is
+            // still there: a partial unmap leaves one of them.
+            let ranges = [interior - page, interior, interior + page];
             drop(key);
-            // The interior and both guards: a partial unmap leaves one of them.
-            for addr in [unsafe { interior.sub(page) }, interior, unsafe {
-                interior.add(page)
-            }] {
+            for addr in ranges {
                 assert_eq!(
                     probe(addr, page),
                     Some(libc::ENOMEM),
-                    "{addr:?} still mapped"
+                    "{addr:#x} still mapped"
                 );
             }
         }
