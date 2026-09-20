@@ -23,11 +23,16 @@ fn run() {
 
     let mut key = Locked::new([1u8; 32]).unwrap();
     if !key.locked() {
+        assert!(
+            !common::lock_required(),
+            "not locked in the parent ({:?}), and this job requires it",
+            key.lock_error()
+        );
         println!("skipped: not locked in the parent, so there is nothing to lose");
         return;
     }
     #[cfg(target_os = "linux")]
-    let mlock_lies = mlock_is_a_no_op();
+    let mlock_no_op = mlock_is_a_no_op();
     // SAFETY: this process has no test harness and spawns no threads, so
     // fork has no other thread to leave half-way through anything.
     let pid = unsafe { libc::fork() };
@@ -42,7 +47,7 @@ fn run() {
         }
         ok &= key.relock().is_ok() && key.locked();
         #[cfg(target_os = "linux")]
-        if !mlock_lies {
+        if !mlock_no_op {
             ok &= smaps_field(key.risky_ref().as_ptr() as usize, "Locked:") > Some(0);
         }
         ok &= key.require_locked().is_ok();

@@ -17,12 +17,10 @@ pub(super) struct Region {
 }
 
 impl Region {
-    pub(super) fn allocate(
-        size: usize,
-        align: usize,
-    ) -> Result<(Self, Option<LockError>), LockError> {
+    pub(super) fn allocate(layout: Layout) -> Result<(Self, Option<LockError>), LockError> {
         // `alloc_zeroed` requires a non-zero size; a zero-sized `T` gets one byte.
-        let layout = Layout::from_size_align(size.max(1), align)
+        let align = layout.align();
+        let layout = Layout::from_size_align(layout.size().max(1), align)
             .map_err(|_| LockError::Alignment { align, page: 0 })?;
         // SAFETY: the layout has non-zero size.
         let raw = unsafe { alloc_zeroed(layout) };
@@ -33,13 +31,16 @@ impl Region {
         Ok((Self { ptr, layout }, Some(LockError::Unavailable)))
     }
 
+    /// The whole allocation; tests look at it. The value is at
+    /// [`value_ptr`](Self::value_ptr).
+    #[cfg(test)]
     pub(super) fn ptr(&self) -> NonNull<u8> {
         self.ptr
     }
 
     /// The allocation is exactly the value's size, so the value is at its
     /// start; there is no guard to sit against.
-    pub(super) fn value_ptr(&self, _size: usize, _align: usize) -> NonNull<u8> {
+    pub(super) fn value_ptr(&self, _layout: Layout) -> NonNull<u8> {
         self.ptr
     }
 
@@ -74,6 +75,10 @@ impl Drop for Region {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn layout(size: usize, align: usize) -> Layout {
+        Layout::from_size_align(size, align).unwrap()
+    }
     use std::alloc::{GlobalAlloc, System};
     use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
@@ -127,7 +132,7 @@ mod tests {
 
     #[test]
     fn a_region_is_a_zeroed_heap_allocation_that_reports_no_lock() {
-        let (region, lock) = Region::allocate(32, 8).unwrap();
+        let (region, lock) = Region::allocate(layout(32, 8)).unwrap();
         assert!(matches!(lock, Some(LockError::Unavailable)), "{lock:?}");
         assert_eq!(region.ptr().as_ptr() as usize % 8, 0);
         assert_eq!(region.layout.size(), 32);
@@ -138,26 +143,26 @@ mod tests {
 
     #[test]
     fn the_value_is_at_the_start_of_the_allocation() {
-        let (region, _) = Region::allocate(24, 8).unwrap();
-        assert_eq!(region.value_ptr(24, 8), region.ptr());
+        let (region, _) = Region::allocate(layout(24, 8)).unwrap();
+        assert_eq!(region.value_ptr(layout(24, 8)), region.ptr());
     }
 
     #[test]
     fn a_heap_region_has_no_lock_to_lose_or_regain() {
-        let (mut region, _) = Region::allocate(8, 1).unwrap();
+        let (mut region, _) = Region::allocate(layout(8, 1)).unwrap();
         assert!(region.same_process());
         assert!(matches!(region.relock(), Some(LockError::Unavailable)));
     }
 
     #[test]
     fn a_zero_sized_request_still_gets_a_byte() {
-        let (region, _) = Region::allocate(0, 1).unwrap();
+        let (region, _) = Region::allocate(layout(0, 1)).unwrap();
         assert_eq!(region.layout.size(), 1);
     }
 
     #[test]
     fn a_wipe_zeroes_the_whole_allocation() {
-        let (mut region, _) = Region::allocate(48, 1).unwrap();
+        let (mut region, _) = Region::allocate(layout(48, 1)).unwrap();
         assert!(fill(&region, 48, 0xAB).iter().all(|&b| b == 0xAB));
         region.wipe();
         // SAFETY: 48 live bytes.
@@ -167,7 +172,7 @@ mod tests {
 
     #[test]
     fn dropping_a_region_releases_it_zeroed() {
-        let (region, _) = Region::allocate(64, 1).unwrap();
+        let (region, _) = Region::allocate(layout(64, 1)).unwrap();
         fill(&region, 64, 0xCD);
         WATCHED.store(region.ptr().as_ptr(), Ordering::SeqCst);
         drop(region);

@@ -3,6 +3,14 @@
 //! in this process is real.
 #![allow(dead_code)]
 
+/// Set by the CI job whose host is known to lock memory for real: there,
+/// a case that would otherwise skip (a small limit, a privileged user, a
+/// sanitizer's `mlock` interceptor) must fail instead, so that a
+/// regression that never took a lock cannot pass every job.
+pub fn lock_required() -> bool {
+    std::env::var_os("LOCKED_TESTS_REQUIRE_LOCK").is_some()
+}
+
 /// The line with `prefix` in the `/proc/self/smaps` entry containing
 /// `addr`, trimmed, with the prefix removed.
 #[cfg(target_os = "linux")]

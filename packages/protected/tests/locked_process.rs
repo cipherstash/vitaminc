@@ -15,8 +15,27 @@ use vitaminc_protected::LockError;
 use vitaminc_protected::{LockPolicy, Locked};
 
 mod common;
+#[cfg(memlock_limit)]
+use common::lock_required;
 #[cfg(target_os = "linux")]
 use common::vm_flags;
+
+/// What a child case prints as its last line, and the parent insists on:
+/// a child that never reached its case (a renamed entry point, a stripped
+/// variable) exits 0 too, and must not pass for it.
+fn case_ok(case: &str) {
+    println!("case ok: {case}");
+}
+
+/// A case that cannot run here says so, unless the job requires it to.
+#[cfg(memlock_limit)]
+fn case_skipped(case: &str, why: &str) {
+    assert!(
+        !lock_required(),
+        "{case} cannot run here ({why}), and this job requires it"
+    );
+    println!("case skipped: {case}: {why}");
+}
 
 const CASE: &str = "LOCKED_CHILD_CASE";
 
@@ -45,7 +64,7 @@ fn lower_memlock_to_zero() {
 /// (their shadow memory must never be pinned), so in those processes a
 /// refusal cannot be provoked and the case is skipped, loudly.
 #[cfg(memlock_limit)]
-fn refusal_can_be_provoked() -> bool {
+fn refusal_can_be_provoked(case: &str) -> bool {
     lower_memlock_to_zero();
     let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
     // SAFETY: an anonymous private mapping of one page; checked below.
@@ -66,9 +85,9 @@ fn refusal_can_be_provoked() -> bool {
         let _ = libc::munmap(probe, page);
     }
     if locked {
-        eprintln!(
-            "skipped: this process can lock memory with RLIMIT_MEMLOCK at zero \
-             (root, CAP_IPC_LOCK, or a sanitizer's mlock interceptor)"
+        case_skipped(
+            case,
+            "this process can lock memory with RLIMIT_MEMLOCK at zero (root, CAP_IPC_LOCK, or a sanitizer's mlock interceptor)",
         );
     }
     !locked
@@ -84,7 +103,7 @@ fn child_entry() {
     match case.as_str() {
         #[cfg(memlock_limit)]
         "refused_best_effort" => {
-            if !refusal_can_be_provoked() {
+            if !refusal_can_be_provoked(&case) {
                 return;
             }
             let key = Locked::new([1u8; 32]).unwrap();
@@ -114,7 +133,7 @@ fn child_entry() {
         }
         #[cfg(memlock_limit)]
         "refused_strict" => {
-            if !refusal_can_be_provoked() {
+            if !refusal_can_be_provoked(&case) {
                 return;
             }
             LockPolicy::Strict.set().unwrap();
@@ -172,37 +191,52 @@ fn child_entry() {
         }
         other => panic!("unknown case {other}"),
     }
+    case_ok(&case);
 }
 
-fn assert_passed(out: &Output) {
+/// The child exited cleanly and its case ran to the end, or said why not.
+fn assert_case(out: &Output, case: &str) {
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let ran = stdout.contains(&format!("case ok: {case}"));
+    let skipped = stdout.contains(&format!("case skipped: {case}"));
     assert!(
-        out.status.success(),
-        "child failed: {}\n{}",
-        String::from_utf8_lossy(&out.stdout),
+        out.status.success() && (ran || skipped),
+        "child did not complete case {case}: {}\n{}\n{}",
+        out.status,
+        stdout,
         String::from_utf8_lossy(&out.stderr)
     );
+    if skipped {
+        eprintln!(
+            "{}",
+            stdout
+                .lines()
+                .find(|l| l.contains("case skipped"))
+                .unwrap_or("")
+        );
+    }
 }
 
 #[cfg(memlock_limit)]
 #[test]
 fn a_refused_lock_is_reported_under_best_effort() {
-    assert_passed(&child("refused_best_effort"));
+    assert_case(&child("refused_best_effort"), "refused_best_effort");
 }
 
 #[cfg(memlock_limit)]
 #[test]
 fn a_refused_lock_fails_the_constructor_under_strict() {
-    assert_passed(&child("refused_strict"));
+    assert_case(&child("refused_strict"), "refused_strict");
 }
 
 #[test]
 fn the_policy_is_set_once_per_process() {
-    assert_passed(&child("policy_is_set_once"));
+    assert_case(&child("policy_is_set_once"), "policy_is_set_once");
 }
 
 #[test]
 fn dropping_the_value_unmaps_the_interior_and_both_guards() {
-    assert_passed(&child("drop_unmaps"));
+    assert_case(&child("drop_unmaps"), "drop_unmaps");
 }
 
 #[test]

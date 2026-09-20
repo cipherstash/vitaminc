@@ -187,7 +187,7 @@ assert_eq!(NonEmpty::new(("", None::<&str>)).unwrap_err(), EmptyError);
 
 ### Locked storage for long-lived secrets
 
-`Protected` wipes a value when it is dropped, which is the right guarantee for a value that lives for one call. Nothing drops a static, a leaked `Arc`, or anything at all when the process dies on `SIGTERM`, `SIGKILL` or `process::exit`, so a key that lives for the process needs its protection applied when it is allocated, not when it is dropped. On Unix, `Locked<T>` stores the value in memory obtained from the operating system that is locked against swapping (`mlock`), excluded from core dumps on Linux (`MADV_DONTDUMP`), fenced by guard pages, and never moved. It is wiped on drop like `Protected`, and while `locked()` is true the bytes cannot reach a swap file, or on Linux a core dump, even if the drop never happens. On other targets the value lives on the ordinary heap, wiped on drop but neither locked nor fenced, and `lock_error()` reports `Unavailable`.
+`Protected` wipes a value when it is dropped, which is the right guarantee for a value that lives for one call. Nothing drops a static, a leaked `Arc`, or anything at all when the process dies on `SIGTERM`, `SIGKILL` or `process::exit`, so a key that lives for the process needs its protection applied when it is allocated, not when it is dropped. On Unix, `Locked<T>` stores the value in memory obtained from the operating system that is locked against swapping (`mlock`), excluded from core dumps on Linux (`MADV_DONTDUMP`), fenced by guard pages, and never moved. It is wiped on drop like `Protected`, and while `locked()` is true the kernel will not page the bytes out to swap, nor on Linux include them in a core dump, even if the drop never happens (a hibernation image is written outside that mechanism and is not covered). On other targets the value lives on the ordinary heap, wiped on drop but neither locked nor fenced, and `lock_error()` reports `Unavailable`.
 
 ```rust
 # use vitaminc_protected::{Locked, LockError};
@@ -205,7 +205,7 @@ if !key.locked() {
 # }
 ```
 
-The operating system can refuse to lock memory, most often because `RLIMIT_MEMLOCK` (64 KiB by default on many Linux hosts) is too small, and a seccomp filter can refuse the core-dump exclusion. By default the value is created anyway and the refusal is readable from `lock_error`; call `require_locked()` on a value that must be locked, or set `LockPolicy::Strict` once at startup to make every constructor fail instead. `Locked` protects the bytes of `T` itself, so use it for inline types such as `[u8; N]`; a `Vec<u8>` inside it has only its header in the locked region.
+The operating system can refuse to lock memory, most often because `RLIMIT_MEMLOCK` (64 KiB by default on many Linux hosts) is too small; every value costs at least one page of it, whatever its size. A seccomp filter can refuse the core-dump exclusion. By default the value is created anyway and the refusal is readable from `lock_error`; call `require_locked()` on a value that must be locked, or set `LockPolicy::Strict` once at startup to make every constructor fail instead. `Locked` protects the bytes of `T` itself, so use it for inline types such as `[u8; N]`; a `Vec<u8>` inside it has only its header in the locked region.
 
 ### Generators
 

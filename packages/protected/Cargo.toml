@@ -14,7 +14,6 @@ categories.workspace = true
 
 [dependencies]
 bitvec = { workspace = true }
-mutants = "0.0.4"
 serde = { workspace = true }
 serde_bytes = { workspace = true }
 zeroize = { workspace = true }
@@ -31,6 +30,8 @@ libc = { workspace = true }
 
 [dev-dependencies]
 libc = { workspace = true }
+# Only for `#[cfg_attr(test, mutants::skip)]`; consumers never see it.
+mutants = "0.0.4"
 quickcheck = "1.1.0"
 quickcheck_macros = "1.2.0"
 rmp-serde = "1.3.1"
