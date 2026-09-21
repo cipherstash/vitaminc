@@ -15,6 +15,8 @@
 //! [`BindingSupport`] whether it binds the bytes into the key server-side
 //! or ignores them.
 
+#[cfg(feature = "caching")]
+mod caching;
 mod fixed_index_key;
 mod maybe_send;
 mod sources;
@@ -27,6 +29,8 @@ use std::future::Future;
 use crate::{GeneratedDataKey, IndexKeyMaterial, KeyId, KeyIsolation, KeyReconstruction};
 use vitaminc_protected::Protected;
 
+#[cfg(feature = "caching")]
+pub use caching::CachingKeyProvider;
 #[cfg(feature = "test-support")]
 pub use fake::{FakeKeyProvider, FakeKeyProviderError};
 pub use fixed_index_key::FixedIndexKeySource;
