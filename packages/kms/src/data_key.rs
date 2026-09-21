@@ -5,6 +5,7 @@ use vitaminc_protected::Protected;
 /// `Vec<u8>` to `[u8; N]`, with a wrong length reported through the
 /// caller's own error rather than a panic. Every adapter's key-material
 /// path ends here.
+#[cfg(any(feature = "aws", feature = "azure", feature = "gcp", feature = "vault"))]
 pub(crate) fn into_sized<const N: usize, E>(
     bytes: Vec<u8>,
     wrong_length: impl FnOnce(usize, usize) -> E,
