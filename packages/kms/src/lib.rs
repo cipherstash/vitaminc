@@ -1,8 +1,6 @@
 #![doc = include_str!("../README.md")]
 
 mod algorithm;
-#[cfg(feature = "caching")]
-mod caching;
 mod crypt;
 mod data_key;
 mod index_key;
@@ -25,8 +23,6 @@ pub mod gcp;
 pub mod vault;
 
 pub use algorithm::{DigestLengthError, SignatureAlgorithm};
-#[cfg(feature = "caching")]
-pub use caching::CachingRetrieveDataKey;
 pub use crypt::{DecryptWithKey, EncryptWithKey};
 pub use data_key::{
     dedup_retrieve, fan_out_generate, pooled_key_generate, BatchGenerateDataKey,
