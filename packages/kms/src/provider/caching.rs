@@ -1,6 +1,6 @@
-use super::{Binding, BindingSupport, IndexKeyProvider, KeyProvider};
+use super::{Binding, BindingSupport, DelegatedError, IndexKeyProvider, KeyProvider};
 use crate::{GeneratedDataKey, IndexKeyMaterial, KeyId, KeyIsolation, KeyReconstruction};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use vitaminc_protected::Protected;
 
@@ -68,7 +68,7 @@ impl<T, const N: usize> CachingKeyProvider<T, N> {
 }
 
 impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for CachingKeyProvider<T, N> {
-    type Error = T::Error;
+    type Error = DelegatedError<T::Error>;
 
     const RECONSTRUCTION: KeyReconstruction = T::RECONSTRUCTION;
     const ISOLATION: KeyIsolation = T::ISOLATION;
@@ -80,7 +80,10 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for CachingKeyProv
         &self,
         bindings: &[Binding<'_>],
     ) -> Result<Vec<GeneratedDataKey<N>>, Self::Error> {
-        self.inner.generate_keys(bindings).await
+        self.inner
+            .generate_keys(bindings)
+            .await
+            .map_err(DelegatedError::Inner)
     }
 
     async fn retrieve_keys(
@@ -95,11 +98,9 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for CachingKeyProv
         // The misses, deduped by `(KeyId, binding)`: a batch that repeats a
         // pair costs one fetch, as `dedup_retrieve` does for bare ids.
         let mut misses: Vec<(KeyId, Binding<'_>)> = Vec::new();
+        let mut queued: HashSet<CacheKey> = HashSet::new();
         for ((id, binding), hit) in requests.iter().zip(&hits) {
-            let queued = misses
-                .iter()
-                .any(|(m_id, m_binding)| m_id == id && m_binding == binding);
-            if hit.is_none() && !queued {
+            if hit.is_none() && queued.insert(Self::cache_key(id, *binding)) {
                 misses.push((id.clone(), *binding));
             }
         }
@@ -109,7 +110,17 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for CachingKeyProv
             return Ok(hits.into_iter().flatten().collect());
         }
 
-        let fetched = self.inner.retrieve_keys(&misses).await?;
+        let fetched = self
+            .inner
+            .retrieve_keys(&misses)
+            .await
+            .map_err(DelegatedError::Inner)?;
+        if fetched.len() != misses.len() {
+            return Err(DelegatedError::BatchLength {
+                expected: misses.len(),
+                received: fetched.len(),
+            });
+        }
         let mut by_key: HashMap<CacheKey, Protected<[u8; N]>> =
             HashMap::with_capacity(misses.len());
         for ((id, binding), key) in misses.iter().zip(fetched) {
@@ -119,17 +130,21 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for CachingKeyProv
         }
 
         // Reassemble in the caller's order and length, hits and fetches alike.
-        Ok(requests
+        // Every miss was fetched (the length check above), so the lookup
+        // cannot fail; it is still an error, not a panic, if it ever does.
+        requests
             .iter()
             .zip(hits)
             .map(|((id, binding), hit)| match hit {
-                Some(key) => key,
-                None => by_key
-                    .get(&Self::cache_key(id, *binding))
-                    .expect("retrieve_keys returns one key per request, in order")
-                    .clone(),
+                Some(key) => Ok(key),
+                None => by_key.get(&Self::cache_key(id, *binding)).cloned().ok_or(
+                    DelegatedError::BatchLength {
+                        expected: misses.len(),
+                        received: by_key.len(),
+                    },
+                ),
             })
-            .collect())
+            .collect()
     }
 }
 
@@ -139,10 +154,13 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for CachingKeyProv
 impl<const N: usize, T: IndexKeyProvider<N> + Sync> IndexKeyProvider<N>
     for CachingKeyProvider<T, N>
 {
-    type Error = T::Error;
+    type Error = DelegatedError<T::Error>;
 
     async fn load_index_key(&self) -> Result<IndexKeyMaterial<N>, Self::Error> {
-        self.inner.load_index_key().await
+        self.inner
+            .load_index_key()
+            .await
+            .map_err(DelegatedError::Inner)
     }
 }
 
