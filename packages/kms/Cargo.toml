@@ -18,8 +18,9 @@ vitaminc-protected = { version = "0.5.0", path = "../protected" }
 futures = "0.3.31"
 # Generic RetrieveDataKey cache (CIP-4031/CIP-4033) — correct concurrent
 # LRU+TTL eviction is easy to get subtly wrong to hand-roll, and this
-# crate is meant for reuse.
-moka = { version = "0.12.16", features = ["future"] }
+# crate is meant for reuse. Optional so that the traits-only build (no
+# features) stays free of threads and timers for wasm32 consumers.
+moka = { version = "0.12.16", features = ["future"], optional = true }
 
 thiserror = { workspace = true }
 zeroize = { workspace = true }
@@ -103,8 +104,12 @@ serde_json = "1"
 httpmock = "0.8"
 
 [features]
-default = ["aws"]
+default = ["aws", "caching"]
+# With every feature off the crate is traits and shims only, and builds for
+# wasm32-wasip1 with no HTTP stack, threads or timers in its tree; downstream
+# crates that target wasm depend on it with `default-features = false`.
 aws = ["dep:aws-sdk-kms"]
+caching = ["dep:moka"]
 azure = ["dep:azure_core", "dep:azure_security_keyvault_keys", "dep:vitaminc-random", "canonical-encoding"]
 gcp = [
     "dep:google-cloud-kms-v1",
