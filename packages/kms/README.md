@@ -50,10 +50,12 @@ the same consumer runs on any of them. The pieces built on top:
 - [`FixedIndexKeySource<T>`](provider::FixedIndexKeySource) pairs any
   provider with the one `KeyId` a deployment provisioned for index-key
   derivation, giving it an [`IndexKeyProvider`] as well.
-- [`CachingKeyProvider<T>`](provider::CachingKeyProvider) memoizes
-  retrieved keys, keyed on the key id *and* the binding, so a hit is never
-  a key the backend would have answered differently for. Minting is never
-  cached. Opt in deliberately: against a backend that audits each
+- [`CachingKeyProvider<T>`](provider::CachingKeyProvider) (feature
+  `caching`, on by default) memoizes retrieved keys, keyed on the key id
+  *and* the binding, so a hit is never a key the backend would have answered
+  differently for. Minting is never cached: a cached mint would share one
+  key across values, which is the pooled trade-off by accident rather than
+  by choice. Opt in deliberately: against a backend that audits each
   retrieval, a hit skips that audit entry and policy check.
 - `FakeKeyProvider`, behind the `test-support` feature, is an in-memory
   provider whose generate/retrieve round-trips and whose bindings are
@@ -91,10 +93,6 @@ Design notes that apply across vendors:
   edition and generation natively on Vault Enterprise (on Community the
   adapter falls back to one call per key, see `docs/adr/0002`), always at
   per-value isolation, so it needs no pooled variant.
-- **Caching.** [`CachingKeyProvider`](provider::CachingKeyProvider) (feature
-  `caching`, on by default) memoizes retrieved keys in front of any provider.
-  Retrieval only: a cached mint would share one key across values, which is
-  the pooled trade-off by accident rather than by choice.
 - **Signature algorithms** are named once, by [`SignatureAlgorithm`], and
   mapped by each adapter. ECDSA signatures are DER, public keys are DER
   `SubjectPublicKeyInfo`, whatever the vendor returns natively
