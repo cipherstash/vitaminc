@@ -9,6 +9,7 @@ mod index_key;
 mod key_id;
 mod mac;
 mod pooled;
+pub mod provider;
 mod sign;
 
 #[cfg(feature = "canonical-encoding")]
@@ -36,6 +37,7 @@ pub use index_key::{load_index_key, IndexKeyMaterial};
 pub use key_id::KeyId;
 pub use mac::{GenerateMac, VerifyMac};
 pub use pooled::PooledDataKeySource;
+pub use provider::{Binding, BindingSupport, IndexKeyProvider, KeyProvider};
 pub use sign::{GetPublicKey, Sign, Verify};
 
 // The AWS names below predate the vendor modules and stay at the crate

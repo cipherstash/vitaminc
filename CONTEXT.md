@@ -23,7 +23,8 @@ _Avoid_: Master key, KEK, root key, keyset
 **Adapter**:
 A Rust type that implements one or more capability traits against one
 backend key. There is one adapter type per key purpose per backend.
-_Avoid_: Client, backend (for the Rust type), implementation
+_Avoid_: Client, backend (for the Rust type), implementation, Group 2
+(design-ticket jargon for the capability traits)
 
 **Key purpose**:
 The class of operations a backend key can perform, fixed when the key is
@@ -43,6 +44,20 @@ verifies HMAC tags.
 **Data key source**:
 An adapter that implements the data-key capability traits (generate and
 retrieve).
+
+**Key provider**:
+The consumer-facing shape built on top of a data key source or a service
+like ZeroKMS: batches of data keys, each under a binding, plus the index
+key, against one backend key or keyset bound at construction. It is what
+Stack Encrypt is generic over.
+_Avoid_: Group 1 (design-ticket jargon), backend
+
+**Binding**:
+Bytes a caller attaches to a data key when it is minted and must present
+again to retrieve it. A backend either binds it into the key server-side
+(`Bound`) or ignores it (`Unbound`), and says which. Stack Encrypt's
+descriptor is a binding.
+_Avoid_: context (overloaded), AAD (one vendor's mechanism)
 
 **Data key**:
 Key material that a data key source mints or retrieves for a caller to use
