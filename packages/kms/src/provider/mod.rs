@@ -41,12 +41,16 @@ pub use maybe_send::MaybeSend;
 /// (its descriptor).
 ///
 /// A newtype rather than a bare `&[u8]`, so a plaintext or a key id cannot
-/// be passed where a binding belongs. What a backend does with it is
+/// be passed where a binding belongs. What a provider does with it is
 /// declared by [`KeyProvider::BINDING`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Binding<'a>(pub &'a [u8]);
+pub struct Binding<'a>(&'a [u8]);
 
 impl<'a> Binding<'a> {
+    pub const fn new(bytes: &'a [u8]) -> Self {
+        Self(bytes)
+    }
+
     pub const fn as_bytes(self) -> &'a [u8] {
         self.0
     }
@@ -67,15 +71,16 @@ impl<'a> From<&'a str> for Binding<'a> {
     }
 }
 
-/// Whether a backend honours the [`Binding`] it is given.
+/// Whether a provider honours the [`Binding`] it is given.
 ///
-/// `Bound`: the backend binds the bytes into the data key server-side, so
-/// retrieving with a different binding fails (ZeroKMS binds the descriptor
-/// and logs it per retrieval). `Unbound`: the backend ignores the bytes; the
-/// caller's own authenticated data is the only thing tying a key to its
-/// context. The four vendor data key sources are `Unbound` today; binding
-/// them through AWS `EncryptionContext`, Google AAD and Azure AEAD `aad` is
-/// follow-up work, and a non-derived Vault key has nothing to bind with.
+/// `Bound`: the provider has its backend bind the bytes into the data key,
+/// so retrieving with a different binding fails (ZeroKMS binds the
+/// descriptor and logs it per retrieval). `Unbound`: the provider ignores
+/// the bytes; the caller's own authenticated data is the only thing tying
+/// a key to its context. The four vendor data key sources are `Unbound`
+/// today; binding them through AWS `EncryptionContext`, Google AAD and
+/// Azure AEAD `aad` is follow-up work, and a non-derived Vault key has
+/// nothing to bind with.
 ///
 /// An `Unbound` provider never errors on a non-empty binding. A caller that
 /// requires binding checks this constant up front.
@@ -112,6 +117,18 @@ pub trait KeyProvider<const N: usize> {
         &self,
         keys: &[(KeyId, Binding<'_>)],
     ) -> impl Future<Output = Result<Vec<Protected<[u8; N]>>, Self::Error>> + MaybeSend;
+}
+
+/// The error of a provider that wraps another: either the inner provider's
+/// own error, or the inner provider broke the one-result-per-input contract
+/// of [`KeyProvider::retrieve_keys`], which a wrapper reports rather than
+/// panics on.
+#[derive(Debug, thiserror::Error)]
+pub enum DelegatedError<E: std::error::Error + 'static> {
+    #[error(transparent)]
+    Inner(E),
+    #[error("the inner key provider returned {received} keys for a batch of {expected}")]
+    BatchLength { expected: usize, received: usize },
 }
 
 /// Load the one fixed index key for the keyset a provider is bound to.

@@ -1,4 +1,4 @@
-use super::{Binding, BindingSupport, IndexKeyProvider, KeyProvider};
+use super::{Binding, BindingSupport, DelegatedError, IndexKeyProvider, KeyProvider};
 use crate::{GeneratedDataKey, IndexKeyMaterial, KeyId, KeyIsolation, KeyReconstruction};
 use vitaminc_protected::Protected;
 
@@ -35,26 +35,29 @@ impl<T> FixedIndexKeySource<T> {
     pub fn inner(&self) -> &T {
         &self.inner
     }
-
-    pub fn index_key_id(&self) -> &KeyId {
-        &self.index_key_id
-    }
 }
 
 impl<const N: usize, T> IndexKeyProvider<N> for FixedIndexKeySource<T>
 where
     T: KeyProvider<N> + Sync,
 {
-    type Error = T::Error;
+    type Error = DelegatedError<T::Error>;
 
     async fn load_index_key(&self) -> Result<IndexKeyMaterial<N>, Self::Error> {
         // retrieve_keys returns exactly one entry per input, in order: a
-        // single-element slice in, take the one result out.
+        // single-element slice in, the one result out.
         let mut keys = self
             .inner
             .retrieve_keys(&[(self.index_key_id.clone(), Binding::EMPTY)])
-            .await?;
-        Ok(IndexKeyMaterial(keys.remove(0)))
+            .await
+            .map_err(DelegatedError::Inner)?;
+        match (keys.pop(), keys.len()) {
+            (Some(key), 0) => Ok(IndexKeyMaterial(key)),
+            (key, rest) => Err(DelegatedError::BatchLength {
+                expected: 1,
+                received: rest + usize::from(key.is_some()),
+            }),
+        }
     }
 }
 
@@ -77,5 +80,59 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for FixedIndexKeyS
         keys: &[(KeyId, Binding<'_>)],
     ) -> Result<Vec<Protected<[u8; N]>>, Self::Error> {
         self.inner.retrieve_keys(keys).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{KeyIsolation, KeyReconstruction};
+    use vitaminc_protected::Controlled;
+
+    /// Returns `count` keys per request instead of one.
+    struct Misbehaving(usize);
+
+    impl KeyProvider<4> for Misbehaving {
+        type Error = std::convert::Infallible;
+        const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
+        const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
+        const BINDING: BindingSupport = BindingSupport::Unbound;
+
+        async fn generate_keys(
+            &self,
+            _: &[Binding<'_>],
+        ) -> Result<Vec<GeneratedDataKey<4>>, Self::Error> {
+            Ok(Vec::new())
+        }
+
+        async fn retrieve_keys(
+            &self,
+            requests: &[(KeyId, Binding<'_>)],
+        ) -> Result<Vec<Protected<[u8; 4]>>, Self::Error> {
+            Ok((0..requests.len() * self.0)
+                .map(|i| Protected::new([i as u8; 4]))
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn the_index_key_is_the_one_key_retrieved_under_an_empty_binding() {
+        let source = FixedIndexKeySource::new(Misbehaving(1), KeyId::new(vec![1]));
+        let key = source.load_index_key().await.unwrap();
+        assert_eq!(key.0.risky_unwrap(), [0u8; 4]);
+    }
+
+    #[tokio::test]
+    async fn an_inner_provider_that_breaks_the_batch_contract_is_an_error_not_a_panic() {
+        for (count, received) in [(0, 0), (2, 2)] {
+            let source = FixedIndexKeySource::new(Misbehaving(count), KeyId::new(vec![1]));
+            let Err(err) = source.load_index_key().await else {
+                panic!("{count} keys per request must not load an index key");
+            };
+            assert!(
+                matches!(err, DelegatedError::BatchLength { expected: 1, received: r } if r == received),
+                "{err}"
+            );
+        }
     }
 }

@@ -11,8 +11,8 @@
 //!
 //! The capability traits ([`GenerateDataKey`](crate::GenerateDataKey) and
 //! friends) deliberately carry no such bound: they are plain `async fn`
-//! (CIP-3986), which is why every backend gets a concrete, non-generic
-//! provider impl rather than one blanket impl.
+//! (CIP-3986), which is why every data key source gets a concrete,
+//! non-generic provider impl rather than one blanket impl.
 
 /// Alias for `Send` on native targets; satisfied by every type on wasm32.
 ///
