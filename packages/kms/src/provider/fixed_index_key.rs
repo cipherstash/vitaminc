@@ -98,11 +98,20 @@ mod tests {
         const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
         const BINDING: BindingSupport = BindingSupport::Unbound;
 
+        /// One key per binding, with the binding's length as the material,
+        /// so a test can see that a call reached this provider.
         async fn generate_keys(
             &self,
-            _: &[Binding<'_>],
+            bindings: &[Binding<'_>],
         ) -> Result<Vec<GeneratedDataKey<4>>, Self::Error> {
-            Ok(Vec::new())
+            Ok(bindings
+                .iter()
+                .enumerate()
+                .map(|(i, b)| GeneratedDataKey {
+                    plaintext: Protected::new([b.as_bytes().len() as u8; 4]),
+                    key_id: KeyId::new(vec![i as u8]),
+                })
+                .collect())
         }
 
         async fn retrieve_keys(
@@ -125,11 +134,13 @@ mod tests {
     #[tokio::test]
     async fn data_key_calls_pass_straight_through_to_the_inner_provider() {
         let source = FixedIndexKeySource::new(Misbehaving(1), KeyId::new(vec![1]));
-        assert!(source
-            .generate_keys(&[Binding::EMPTY])
+        let generated = source
+            .generate_keys(&[Binding::from("ab"), Binding::from("cde")])
             .await
-            .unwrap()
-            .is_empty());
+            .unwrap();
+        assert_eq!(generated.len(), 2);
+        assert_eq!(generated[1].plaintext.clone().risky_unwrap(), [3u8; 4]);
+        assert_eq!(generated[1].key_id, KeyId::new(vec![1]));
 
         let retrieved = source
             .retrieve_keys(&[
