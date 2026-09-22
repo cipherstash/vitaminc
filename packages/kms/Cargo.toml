@@ -1,6 +1,6 @@
 [package]
 name = "vitaminc-kms"
-description = "AWS KMS implementation for Vitamin C traits"
+description = "KMS key-provider traits for Vitamin C, with adapters for AWS KMS, Azure Key Vault, Google Cloud KMS and HashiCorp Vault"
 documentation = "https://docs.rs/vitaminc-kms"
 version.workspace = true
 repository.workspace = true
@@ -15,11 +15,113 @@ categories.workspace = true
 vitaminc-async-traits = { version = "0.5.0", path = "../async-traits" }
 vitaminc-traits = { version = "0.5.0", path = "../traits" }
 vitaminc-protected = { version = "0.5.0", path = "../protected" }
-aws-sdk-kms = "1.109.0"
-aws-config = "1.8.18"
+futures = "0.3.31"
+# Generic RetrieveDataKey cache (CIP-4031/CIP-4033) — correct concurrent
+# LRU+TTL eviction is easy to get subtly wrong to hand-roll, and this
+# crate is meant for reuse. Optional so that the traits-only build (no
+# features) stays free of threads and timers for wasm32 consumers.
+moka = { version = "0.12.16", features = ["future"], optional = true }
 
 thiserror = { workspace = true }
 zeroize = { workspace = true }
 
+# --- `aws` feature -----------------------------------------------------------
+aws-sdk-kms = { version = "1.109.0", optional = true }
+
+# --- shared by `azure` and `gcp` ---------------------------------------------
+# Neither Azure Key Vault nor Google Cloud KMS has a "generate data key"
+# call, so those adapters mint the plaintext locally with this workspace's
+# own CSPRNG before wrapping it.
+vitaminc-random = { version = "0.5.0", path = "../random", optional = true }
+
+# --- `azure` feature ---------------------------------------------------------
+# Official Microsoft SDK (GA). The pre-1.0 `azure_security_keyvault` crate is
+# the abandoned unofficial predecessor; do not use it.
+azure_core = { version = "1", optional = true }
+azure_security_keyvault_keys = { version = "1", optional = true }
+# --- `gcp` feature -----------------------------------------------------------
+# `google-cloud-kms-v1` is Google's official crate (REST over reqwest). The
+# similarly named `google-cloud-kms` on crates.io is a stale community crate.
+# The crate leaves CRC32C request/response integrity entirely to the caller,
+# hence `crc32c`.
+google-cloud-kms-v1 = { version = "1", optional = true }
+crc32c = { version = "0.6", optional = true }
+# GCP has no server-side asymmetric verify (it is the one surveyed backend
+# without one), so the signing adapter verifies locally against the public
+# key it fetched at construction. `PrehashVerifier` consumes the caller's
+# digest as-is, matching what `Sign` sent to GCP.
+p256 = { version = "0.14", default-features = false, features = ["alloc", "ecdsa", "pkcs8"], optional = true }
+p384 = { version = "0.14", default-features = false, features = ["alloc", "ecdsa", "pkcs8"], optional = true }
+# `rsa` 0.10 is still a release candidate, and is the only line of the crate
+# that speaks the same traits (`sha2` 0.11/`digest` 0.11, `signature` 3,
+# `spki` 0.8) as the rest of this workspace; 0.9 would pull a second, older
+# copy of all four into the tree.
+rsa = { version = "0.10.0-rc.18", optional = true }
+sha2 = { version = "0.11.0", optional = true }
+
+# --- `vault` feature ---------------------------------------------------------
+# `vaultrs` covers every single-item Transit call but no batch endpoint; the
+# adapter defines `datakeys` and batch `decrypt` itself with `rustify`, the
+# same endpoint macro `vaultrs` uses (ADR 0002).
+vaultrs = { version = "0.8", optional = true }
+rustify = { version = "0.7", optional = true }
+# The `#[derive(Endpoint)]` macro lives in its own crate, exactly as
+# `vaultrs` pulls it in alongside `rustify`.
+rustify_derive = { version = "0.5.5", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+base64 = { version = "0.23", optional = true }
+
+# --- shared by `azure` and `vault`: canonical DER encodings (ADR 0001) -------
+pem-rfc7468 = { version = "1", features = ["alloc"], optional = true }
+der = { version = "0.8", features = ["derive", "alloc", "oid"], optional = true }
+spki = { version = "0.8", features = ["alloc"], optional = true }
+const-oid = { version = "0.10", features = ["db"], optional = true }
+
 [dev-dependencies]
 tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "macros"] }
+# Zero-network unit testing of aws-sdk-kms calls (CIP-4029's recommended
+# tier-1 approach). Requires aws-sdk-kms's `test-util` feature, enabled
+# here since Cargo unifies dev-dependency features into test builds.
+aws-smithy-mocks = "0.3.0"
+aws-sdk-kms = { version = "1.109.0", features = ["test-util"] }
+aws-config = "1.8.18"
+# GCP adapter unit tests mock the official crate's `stub` trait; its method
+# signatures name `google-cloud-gax`'s request-options and response types,
+# so the mock has to name them too.
+mockall = "0.15"
+google-cloud-gax = "1"
+# Azure integration tests build a transport that trusts Lowkey Vault's
+# self-signed certificate explicitly, without touching the OS trust store.
+reqwest = { version = "0.13", features = ["rustls"] }
+# The Azure unit tests stub `azure_core`'s `HttpClient` and `TokenCredential`,
+# both of which are `#[async_trait]` traits.
+async-trait = "0.1"
+# Reads back the JSON request bodies that the stub transport records.
+serde_json = "1"
+# `vaultrs` exposes no mock seam, so the Vault adapter's zero-network unit
+# tests point a real `VaultClient` at a local HTTP mock server instead.
+httpmock = "0.8"
+
+[features]
+default = ["aws", "caching"]
+# With every feature off the crate is traits and shims only, and builds for
+# wasm32-wasip1 with no HTTP stack, threads or timers in its tree; downstream
+# crates that target wasm depend on it with `default-features = false`.
+aws = ["dep:aws-sdk-kms"]
+caching = ["dep:moka"]
+azure = ["dep:azure_core", "dep:azure_security_keyvault_keys", "dep:vitaminc-random", "canonical-encoding"]
+gcp = [
+    "dep:google-cloud-kms-v1",
+    "dep:crc32c",
+    "dep:vitaminc-random",
+    "dep:p256",
+    "dep:p384",
+    "dep:rsa",
+    "dep:sha2",
+    "dep:spki",
+]
+vault = ["dep:vaultrs", "dep:rustify", "dep:rustify_derive", "dep:serde", "dep:serde_json", "dep:base64", "canonical-encoding"]
+# Internal: the DER/PEM helpers behind ADR 0001. Not meant to be enabled
+# directly.
+canonical-encoding = ["dep:der", "dep:spki", "dep:const-oid", "dep:pem-rfc7468"]

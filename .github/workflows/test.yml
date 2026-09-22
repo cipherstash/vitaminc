@@ -41,7 +41,7 @@ jobs:
         with:
           toolchain: 1.96.0
           components: clippy, rustfmt
-          targets: wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown, wasm32-wasip1
 
       - name: Start LocalStack
         uses: LocalStack/setup-localstack@v0.3.2
@@ -50,6 +50,15 @@ jobs:
           install-awslocal: 'true'
         env:
           LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
+
+      - name: Start Vault and Lowkey Vault
+        # vitaminc-kms' Vault and Azure adapter tests talk to a Vault dev
+        # server on localhost:8200 and Lowkey Vault (an Azure Key Vault
+        # emulator) on localhost:8443, the same way its AWS tests talk to
+        # LocalStack. Google Cloud KMS has no viable emulator; its adapter is
+        # tested against the SDK's stub trait only. LocalStack itself stays on
+        # the action above so LOCALSTACK_AUTH_TOKEN keeps working.
+        run: docker compose -f packages/kms/docker-compose.yml up -d --wait vault lowkey-vault
 
       - name: clippy (all features)
         # `--all-features` enables `_test-rust-crypto-backend`, which selects
@@ -87,6 +96,12 @@ jobs:
           echo "RLIMIT_MEMLOCK soft: $(ulimit -l) KiB"
           cargo test
 
+      - name: test (vitaminc-kms, every vendor adapter)
+        # The `azure`, `gcp` and `vault` features are off by default (each
+        # pulls in a whole vendor SDK), so plain `cargo test` above only
+        # exercises the AWS adapter. Needs the containers started above.
+        run: cargo test -p vitaminc-kms --all-features
+
       - name: test (vitaminc-encrypt, RustCrypto backend on native)
         # Forces the RustCrypto path that wasm32 uses, so the same property
         # tests run against both backends in CI.
@@ -111,6 +126,12 @@ jobs:
 
       - name: build check (vitaminc-encrypt, wasm32)
         run: cargo check --target wasm32-unknown-unknown -p vitaminc-encrypt
+
+      - name: build check (vitaminc-kms traits only, wasm32-wasip1)
+        # stack-kms and stack-encrypt in cipherstash-suite target wasm32-wasip1
+        # and depend on this crate with default features off for the traits
+        # alone. Every vendor SDK, and moka, must stay behind a feature.
+        run: cargo check --target wasm32-wasip1 -p vitaminc-kms --no-default-features
 
       - name: install wasm-pack
         # Inline via the official install script — avoids depending on a

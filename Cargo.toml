@@ -29,6 +29,10 @@ authors = [
   "Dan Draper <dan@cipherstash.com>",
 ]
 edition = "2021"
+# The floor for the workspace's own code. Crates that inherit this must build
+# on it with their default features; a feature that pulls in a vendor SDK
+# (vitaminc-kms's `aws`, `azure`, `gcp`, `vault`) may need a newer toolchain,
+# and cargo reports which crate raised the bar when it does.
 rust-version = "1.85.0"
 homepage = "https://cipherstash.com"
 license = "MIT"
