@@ -144,6 +144,21 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn retrieve_hands_back_the_inner_sources_material_for_the_id_it_was_given() {
+        let pooled = PooledDataKeySource::new(CountingSource::default());
+
+        // The counting source derives its material from the id, so the
+        // bytes here can only have come from the inner source.
+        let key = pooled
+            .retrieve_data_key(&KeyId::new(vec![9]))
+            .await
+            .unwrap();
+
+        assert_eq!(key.risky_unwrap(), [9u8; 4]);
+        assert_eq!(pooled.inner().retrieves.load(Ordering::SeqCst), 1);
+    }
+
     #[test]
     fn reconstruction_is_forwarded_from_the_inner_source() {
         assert_eq!(
