@@ -437,6 +437,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_public_key_reads_the_pinned_version_of_the_key() {
+        let response = format!(
+            r#"{{"key":{{"kid":"{VAULT}/keys/my-key/{VERSION}","kty":"RSA","n":"{}","e":"{}"}}}}"#,
+            base64::encode_url_safe([0xC3u8; 256]),
+            base64::encode_url_safe([0x01, 0x00, 0x01])
+        );
+
+        let (client, pinned_transport) = stub_client(&[&response]);
+        let pinned = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::RsaPssSha256)
+            .with_key_version("v7");
+        pinned.get_public_key().await.unwrap();
+
+        let (client, current_transport) = stub_client(&[&response]);
+        let current = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::RsaPssSha256);
+        current.get_public_key().await.unwrap();
+
+        // Pinned, the version the caller named is in the path; unpinned,
+        // the empty segment asks the vault for its current version.
+        assert_eq!(pinned_transport.requests()[0].path(), "/keys/my-key/v7");
+        assert_eq!(current_transport.requests()[0].path(), "/keys/my-key/");
+    }
+
+    #[tokio::test]
     async fn get_public_key_refuses_a_symmetric_key() {
         let response =
             format!(r#"{{"key":{{"kid":"{VAULT}/keys/my-key/{VERSION}","kty":"oct-HSM"}}}}"#);

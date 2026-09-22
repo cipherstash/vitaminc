@@ -347,6 +347,48 @@ mod tests {
         assert!(matches!(error, Error::MissingPlaintext));
     }
 
+    #[tokio::test]
+    async fn batch_retrieve_returns_each_key_ids_own_material_and_dedupes() {
+        let one = mock!(Client::decrypt)
+            .match_requests(|input| {
+                input.ciphertext_blob().unwrap().as_ref() == b"blob-one".as_slice()
+            })
+            .then_output(|| {
+                DecryptOutput::builder()
+                    .plaintext(Blob::new(vec![1u8; 32]))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+        let two = mock!(Client::decrypt)
+            .match_requests(|input| {
+                input.ciphertext_blob().unwrap().as_ref() == b"blob-two".as_slice()
+            })
+            .then_output(|| {
+                DecryptOutput::builder()
+                    .plaintext(Blob::new(vec![2u8; 32]))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+        let client = mock_client!(aws_sdk_kms, RuleMode::MatchAny, &[&one, &two]);
+        let source = AwsDataKeySource::<32>::new(client, TEST_KEY_ID);
+
+        let ids = [
+            KeyId::new(b"blob-one".to_vec()),
+            KeyId::new(b"blob-two".to_vec()),
+            KeyId::new(b"blob-one".to_vec()),
+        ];
+        let keys = source.retrieve_data_keys(&ids).await.unwrap();
+
+        // One slot per id, each holding the material that id decrypts to.
+        assert_eq!(keys.len(), 3);
+        assert_eq!(keys[0].clone().risky_unwrap(), [1u8; 32]);
+        assert_eq!(keys[1].clone().risky_unwrap(), [2u8; 32]);
+        assert_eq!(keys[2].clone().risky_unwrap(), [1u8; 32]);
+        // The repeated id costs no second round trip.
+        assert_eq!(one.num_calls(), 1);
+        assert_eq!(two.num_calls(), 1);
+    }
+
     /// Against LocalStack on `localhost:4566` — see the crate README for
     /// how to bring it up.
     mod localstack {

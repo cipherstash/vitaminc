@@ -182,8 +182,8 @@ mod tests {
         types::{KeySpec, KeyUsageType},
         Client, Config,
     };
-    use vitaminc_async_traits::AsyncFixedOutput;
-    use vitaminc_protected::{Controlled, Protected};
+    use vitaminc_async_traits::{AsyncFixedOutput, AsyncFixedOutputReset};
+    use vitaminc_protected::{AsProtectedRef, Controlled, Protected, ProtectedRef};
     use vitaminc_traits::Update;
 
     fn get_config() -> Config {
@@ -231,6 +231,25 @@ mod tests {
         Ok(())
     }
 
+    /// The other two `Update` impls — by value, and over a bare
+    /// `ProtectedRef` — append to the same buffer `test_update` checks.
+    #[tokio::test]
+    async fn test_update_by_value_and_by_protected_ref() -> Result<(), Box<dyn std::error::Error>> {
+        let mut hmac: AwsKmsHmac<32> =
+            AwsKmsHmac::new(get_config(), "0cce5331-13a6-437f-a477-1c8988667281");
+        hmac.update(Protected::new(vec![0, 1]));
+        let pref: ProtectedRef<[u8]> = "test".as_protected_ref();
+        hmac.update(pref);
+        hmac.update(Protected::new(vec![2, 3]));
+
+        assert_eq!(
+            hmac.input.risky_unwrap(),
+            vec![0, 1, 116, 101, 115, 116, 2, 3]
+        );
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn test_chain() -> Result<(), Box<dyn std::error::Error>> {
         // TODO: Test all the variants
@@ -258,6 +277,67 @@ mod tests {
             .chain(&Protected::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 0]))
             .try_finalize_fixed()
             .await?;
+
+        Ok(())
+    }
+
+    /// The finalized MAC is the MAC of everything `update` appended: the
+    /// same bytes fed through the by-value and `ProtectedRef` impls give
+    /// the MAC of one by-reference update of the whole message, and that
+    /// MAC is not the zeroed output buffer.
+    #[tokio::test]
+    async fn test_finalize_covers_every_updated_byte() -> Result<(), Box<dyn std::error::Error>> {
+        let client = Client::from_conf(get_config());
+        let key_id = get_key_id(&client, KeySpec::Hmac512).await?;
+
+        let mut piecewise: AwsKmsHmac<64> = AwsKmsHmac::new(get_config(), key_id.clone());
+        piecewise.update(Protected::new(vec![1, 2, 3]));
+        let pref: ProtectedRef<[u8]> = "test".as_protected_ref();
+        piecewise.update(pref);
+        let mac = piecewise.try_finalize_fixed().await?.risky_unwrap();
+
+        let whole: AwsKmsHmac<64> = AwsKmsHmac::new(get_config(), key_id.clone())
+            .chain(&Protected::new(vec![1, 2, 3, 116, 101, 115, 116]));
+        let expected = whole.try_finalize_fixed().await?.risky_unwrap();
+
+        assert_eq!(mac, expected);
+        assert_ne!(mac, [0u8; 64], "the output buffer was never written to");
+
+        // A different message is a different MAC, so the equality above is
+        // not the trivial one.
+        let other: AwsKmsHmac<64> =
+            AwsKmsHmac::new(get_config(), key_id).chain(&Protected::new(vec![9, 9, 9]));
+        assert_ne!(other.try_finalize_fixed().await?.risky_unwrap(), mac);
+
+        Ok(())
+    }
+
+    /// Finalizing with a reset writes the MAC out *and* empties the input,
+    /// so the next MAC covers only what was appended after it.
+    #[tokio::test]
+    async fn test_finalize_reset_writes_the_mac_and_clears_the_input(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let client = Client::from_conf(get_config());
+        let key_id = get_key_id(&client, KeySpec::Hmac512).await?;
+
+        let mut hmac: AwsKmsHmac<64> = AwsKmsHmac::new(get_config(), key_id.clone());
+        hmac.update(&Protected::new(vec![1, 2, 3]));
+        let first: Protected<[u8; 64]> = hmac.try_finalize_fixed_reset().await?;
+        let first = first.risky_unwrap();
+
+        hmac.update(&Protected::new(vec![4, 5, 6]));
+        let second: Protected<[u8; 64]> = hmac.try_finalize_fixed_reset().await?;
+        let second = second.risky_unwrap();
+
+        let fresh: AwsKmsHmac<64> =
+            AwsKmsHmac::new(get_config(), key_id).chain(&Protected::new(vec![4, 5, 6]));
+        let only_the_second = fresh.try_finalize_fixed().await?.risky_unwrap();
+
+        assert_ne!(first, [0u8; 64], "the output buffer was never written to");
+        assert_ne!(second, first);
+        // Equal to the MAC of the second message alone, so the reset threw
+        // the first message away rather than keeping it as a prefix.
+        assert_eq!(second, only_the_second);
 
         Ok(())
     }

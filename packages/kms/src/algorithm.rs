@@ -88,3 +88,72 @@ impl SignatureAlgorithm {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every member of [`SignatureAlgorithm`], with the digest length it
+    /// signs, whether it is an ECDSA scheme, and the coordinate length its
+    /// `r` and `s` take. One row per member, so a wrong answer for any one
+    /// of them fails here rather than at an adapter.
+    const CASES: &[(SignatureAlgorithm, usize, bool, Option<usize>)] = &[
+        (SignatureAlgorithm::EcdsaP256Sha256, 32, true, Some(32)),
+        (SignatureAlgorithm::EcdsaP384Sha384, 48, true, Some(48)),
+        // P-521 is 521 bits, so a coordinate takes 66 bytes, not 64.
+        (SignatureAlgorithm::EcdsaP521Sha512, 64, true, Some(66)),
+        (SignatureAlgorithm::RsaPssSha256, 32, false, None),
+        (SignatureAlgorithm::RsaPssSha384, 48, false, None),
+        (SignatureAlgorithm::RsaPssSha512, 64, false, None),
+        (SignatureAlgorithm::RsaPkcs1Sha256, 32, false, None),
+        (SignatureAlgorithm::RsaPkcs1Sha384, 48, false, None),
+        (SignatureAlgorithm::RsaPkcs1Sha512, 64, false, None),
+    ];
+
+    #[test]
+    fn every_member_reports_its_digest_length_kind_and_field_length() {
+        for &(algorithm, digest_len, is_ecdsa, field_len) in CASES {
+            assert_eq!(algorithm.digest_len(), digest_len, "{algorithm:?}");
+            assert_eq!(algorithm.is_ecdsa(), is_ecdsa, "{algorithm:?}");
+            assert_eq!(algorithm.ecdsa_field_len(), field_len, "{algorithm:?}");
+        }
+    }
+
+    #[test]
+    fn the_table_holds_one_row_per_member() {
+        for &(algorithm, ..) in CASES {
+            // Exhaustive on purpose: a new member stops this compiling,
+            // and the row it needs has to be added above.
+            match algorithm {
+                SignatureAlgorithm::EcdsaP256Sha256
+                | SignatureAlgorithm::EcdsaP384Sha384
+                | SignatureAlgorithm::EcdsaP521Sha512
+                | SignatureAlgorithm::RsaPssSha256
+                | SignatureAlgorithm::RsaPssSha384
+                | SignatureAlgorithm::RsaPssSha512
+                | SignatureAlgorithm::RsaPkcs1Sha256
+                | SignatureAlgorithm::RsaPkcs1Sha384
+                | SignatureAlgorithm::RsaPkcs1Sha512 => {}
+            }
+        }
+
+        let mut seen: Vec<SignatureAlgorithm> = CASES.iter().map(|&(a, ..)| a).collect();
+        seen.dedup();
+        assert_eq!(seen.len(), 9);
+    }
+
+    #[test]
+    fn a_digest_of_the_wrong_length_is_refused_and_names_both_lengths() {
+        let algorithm = SignatureAlgorithm::EcdsaP384Sha384;
+
+        assert_eq!(algorithm.check_digest_len(48), Ok(()));
+        assert_eq!(
+            algorithm.check_digest_len(32),
+            Err(DigestLengthError {
+                algorithm,
+                expected: 48,
+                received: 32,
+            })
+        );
+    }
+}
