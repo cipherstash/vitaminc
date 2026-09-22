@@ -629,6 +629,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_batch_slot_with_an_empty_error_and_no_plaintext_is_reported_as_empty() {
+        let server = MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(POST);
+                // Vault writes `"error": ""` into the slots that did not
+                // fail, so an empty `error` is not a failure: a slot with
+                // one and no plaintext is a slot with nothing in it, and
+                // saying "item 1 failed: " would name no reason at all.
+                then.status(200).json_body(data(json!({
+                    "batch_results": [
+                        { "plaintext": b64_encode(&[1u8; 32]), "error": "" },
+                        { "error": "" },
+                    ],
+                })));
+            })
+            .await;
+
+        let source = VaultDataKeySource::<32>::new(test_client(&server), "transit", KEY_NAME);
+        let ids = [
+            KeyId::new(b"vault:v1:one".to_vec()),
+            KeyId::new(b"vault:v1:two".to_vec()),
+        ];
+
+        let err = source.retrieve_data_keys(&ids).await.unwrap_err();
+
+        assert!(matches!(err, Error::BatchItemEmpty { index: 1 }), "{err}");
+        assert_eq!(
+            err.to_string(),
+            "Vault returned neither plaintext nor an error for batch item 1"
+        );
+    }
+
+    #[tokio::test]
     async fn a_short_batch_response_is_an_error_not_a_short_vec() {
         let server = MockServer::start_async().await;
         server
