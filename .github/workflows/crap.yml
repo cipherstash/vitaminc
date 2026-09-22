@@ -77,6 +77,14 @@ jobs:
         env:
           LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
 
+      - name: Start Vault and Lowkey Vault
+        # The Azure and Vault adapter tests in vitaminc-kms need these two
+        # emulators, the same way its AWS tests need LocalStack (see
+        # test.yml). Without them the coverage run below cannot exercise
+        # those adapters, and cargo-crap would score every function in them
+        # as uncovered.
+        run: docker compose -f packages/kms/docker-compose.yml up -d --wait vault lowkey-vault
+
       - name: install cargo-binstall, cargo-llvm-cov and cargo-crap
         # Install via cargo-binstall (prebuilt binaries — far faster than
         # `cargo install` from source). cargo-binstall itself is pulled in with
@@ -94,14 +102,21 @@ jobs:
 
       - name: Generate coverage and build CRAP report
         # Coverage uses default features to match the primary `cargo test` gate
-        # (the aws-lc-rs backend). `cargo crap` then renders the sticky-comment
+        # (the aws-lc-rs backend), plus vitaminc-kms's vendor features: they are
+        # off by default (each pulls in a vendor SDK), so without them the
+        # Azure, GCP and Vault adapters would not be compiled into the
+        # coverage build at all and cargo-crap would report every function
+        # in them as uncovered (CIP-4075). Named per crate rather than
+        # `--all-features`, which would also switch vitaminc-encrypt to the
+        # RustCrypto backend. `cargo crap` then renders the sticky-comment
         # report. Threshold, exclude and allow rules all live in
         # .cargo-crap.toml, so this step, the gate below, and `mise run crap`
         # stay in sync. No `--fail-above` here: this run must always write the
         # comment, even on a PR that the gate below will fail (a `--fail-above`
         # run writes an empty output file when it trips).
         run: |
-          cargo llvm-cov --workspace --lcov --output-path target/vitaminc-lcov.info
+          cargo llvm-cov --workspace --lcov --output-path target/vitaminc-lcov.info \
+            --features vitaminc-kms/azure,vitaminc-kms/gcp,vitaminc-kms/vault
           cargo crap \
             --workspace \
             --lcov target/vitaminc-lcov.info \
