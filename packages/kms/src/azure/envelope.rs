@@ -112,6 +112,16 @@ impl Envelope {
         }
     }
 
+    /// Whether this envelope carries AEAD material: an IV, a tag, or both.
+    ///
+    /// Both is the only well-formed case on the wire, but the question is
+    /// asked of decoded *and* hand-built envelopes, so either one alone
+    /// counts. A wrapped data key carries neither, so this is what tells a
+    /// `KeyId` apart from a ciphertext.
+    pub(super) fn carries_aead_material(&self) -> bool {
+        self.iv.is_some() || self.tag.is_some()
+    }
+
     pub(super) fn encode(&self) -> Result<Vec<u8>, EnvelopeError> {
         let (flags, iv, tag) = match (&self.iv, &self.tag) {
             (None, None) => (0u8, &[][..], &[][..]),
@@ -296,6 +306,45 @@ mod tests {
             tag: None,
         };
         assert_eq!(envelope.encode(), Err(EnvelopeError::InconsistentAead));
+    }
+
+    #[test]
+    fn aead_material_is_any_of_an_iv_a_tag_or_both() {
+        let envelope = |iv: Option<Vec<u8>>, tag: Option<Vec<u8>>| Envelope {
+            kid: KID.to_owned(),
+            value: vec![0u8; 8],
+            iv,
+            tag,
+        };
+        let iv = || Some(vec![0u8; 12]);
+        let tag = || Some(vec![1u8; 16]);
+
+        assert!(!envelope(None, None).carries_aead_material());
+        assert!(envelope(iv(), tag()).carries_aead_material());
+        // Neither half alone is a plain envelope: a KeyId carrying one of
+        // them is a mangled ciphertext, not a wrapped key.
+        assert!(envelope(iv(), None).carries_aead_material());
+        assert!(envelope(None, tag()).carries_aead_material());
+    }
+
+    #[test]
+    fn every_error_says_what_is_wrong_with_the_bytes() {
+        let cases = [
+            (EnvelopeError::Truncated, "ends before"),
+            (EnvelopeError::TrailingBytes, "bytes after"),
+            (EnvelopeError::UnknownFormat(7), "format byte is 7"),
+            (EnvelopeError::KidNotUtf8, "not UTF-8"),
+            (EnvelopeError::FieldTooLong("IV"), "its IV is too long"),
+            (EnvelopeError::InconsistentAead, "AEAD flag"),
+        ];
+
+        for (error, expected) in cases {
+            let message = error.to_string();
+            assert!(
+                message.contains(expected),
+                "{error:?} reads {message:?}, which does not mention {expected:?}"
+            );
+        }
     }
 
     #[test]

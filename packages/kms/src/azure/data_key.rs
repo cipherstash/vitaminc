@@ -274,7 +274,7 @@ impl<const N: usize> RetrieveDataKey<N> for AzureDataKeySource<N> {
         let envelope = Envelope::decode(key_id.as_bytes())
             .map_err(|e| Error::MalformedKeyId(e.to_string()))?;
         let version = self.version_of(&envelope.kid, Reference::KeyId)?;
-        if envelope.iv.is_some() || envelope.tag.is_some() {
+        if envelope.carries_aead_material() {
             return Err(Error::MalformedKeyId(
                 "carries an IV and tag, so it is a ciphertext, not a KeyId".to_owned(),
             ));
@@ -506,6 +506,54 @@ mod tests {
             Error::ForeignKey { ref expected, ref found, .. }
                 if expected == "my-key" && found == "someone-elses-key"
         ));
+        // The message names which of the two blobs the caller handed over.
+        assert_eq!(
+            error.to_string(),
+            r#"the KeyId names key "someone-elses-key", but this source is bound to key "my-key""#
+        );
+        assert_eq!(transport.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn decrypt_refuses_a_ciphertext_belonging_to_another_key_and_says_so() {
+        let ciphertext = Envelope::plain(kid("someone-elses-key"), b"ciphertext".to_vec())
+            .encode()
+            .unwrap();
+        let (client, transport) = stub_client(&[]);
+        let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::Rsa);
+
+        let error = source.decrypt(&ciphertext).await.unwrap_err();
+
+        // The same guard, reported against the other blob.
+        assert_eq!(
+            error.to_string(),
+            r#"the ciphertext names key "someone-elses-key", but this source is bound to key "my-key""#
+        );
+        assert_eq!(transport.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn retrieve_refuses_a_key_id_that_carries_ciphertext_material() {
+        // An IV and a tag mean this came from `encrypt`, not `wrapKey`;
+        // unwrapping it would ask the vault the wrong question.
+        let key_id = KeyId::new(
+            Envelope::aead(
+                kid("my-key"),
+                vec![1u8; 16],
+                vec![7u8; GCM_IV_LEN],
+                vec![8u8; 16],
+            )
+            .encode()
+            .unwrap(),
+        );
+        let (client, transport) = stub_client(&[]);
+        let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::OctHsm);
+
+        let error = source.retrieve_data_key(&key_id).await.unwrap_err();
+
+        assert!(
+            matches!(error, Error::MalformedKeyId(ref reason) if reason.contains("ciphertext"))
+        );
         assert_eq!(transport.call_count(), 0);
     }
 
@@ -665,6 +713,35 @@ mod tests {
         let error = source.decrypt(&rsa_ciphertext).await.unwrap_err();
 
         assert!(matches!(error, Error::CiphertextKindMismatch { .. }));
+        assert_eq!(
+            error.to_string(),
+            "the ciphertext carries no an IV and a tag, so it was not produced by this key kind"
+        );
+        assert_eq!(transport.call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn decrypt_under_an_rsa_key_refuses_a_ciphertext_that_carries_an_iv() {
+        // The mirror of the test above: AES-GCM material handed to an
+        // RSA-OAEP key, which has no IV to replay.
+        let gcm_ciphertext = Envelope::aead(
+            kid("my-key"),
+            b"ciphertext".to_vec(),
+            vec![7u8; GCM_IV_LEN],
+            vec![8u8; 16],
+        )
+        .encode()
+        .unwrap();
+        let (client, transport) = stub_client(&[]);
+        let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::Rsa);
+
+        let error = source.decrypt(&gcm_ciphertext).await.unwrap_err();
+
+        assert!(matches!(error, Error::CiphertextKindMismatch { .. }));
+        assert_eq!(
+            error.to_string(),
+            "the ciphertext carries an IV and a tag, so it was not produced by this key kind"
+        );
         assert_eq!(transport.call_count(), 0);
     }
 
