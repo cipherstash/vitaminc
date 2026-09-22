@@ -123,6 +123,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn data_key_calls_pass_straight_through_to_the_inner_provider() {
+        let source = FixedIndexKeySource::new(Misbehaving(1), KeyId::new(vec![1]));
+        assert!(source
+            .generate_keys(&[Binding::EMPTY])
+            .await
+            .unwrap()
+            .is_empty());
+
+        let retrieved = source
+            .retrieve_keys(&[
+                (KeyId::new(vec![7]), Binding::EMPTY),
+                (KeyId::new(vec![8]), Binding::EMPTY),
+            ])
+            .await
+            .unwrap();
+        assert_eq!(retrieved.len(), 2);
+        assert_eq!(retrieved[0].clone().risky_unwrap(), [0u8; 4]);
+        assert_eq!(retrieved[1].clone().risky_unwrap(), [1u8; 4]);
+        assert_eq!(
+            <FixedIndexKeySource<Misbehaving> as KeyProvider<4>>::BINDING,
+            BindingSupport::Unbound
+        );
+    }
+
+    #[tokio::test]
     async fn an_inner_provider_that_breaks_the_batch_contract_is_an_error_not_a_panic() {
         for (count, received) in [(0, 0), (2, 2)] {
             let source = FixedIndexKeySource::new(Misbehaving(count), KeyId::new(vec![1]));
