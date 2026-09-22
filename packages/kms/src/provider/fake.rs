@@ -190,6 +190,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_counters_and_len_follow_every_batch_call() {
+        let fake = FakeKeyProvider::<32>::new();
+        assert!(fake.is_empty());
+        assert_eq!(
+            (fake.len(), fake.generate_calls(), fake.retrieve_calls()),
+            (0, 0, 0)
+        );
+
+        let keys = fake
+            .generate_keys(&[Binding::from("a"), Binding::from("b"), Binding::from("c")])
+            .await
+            .unwrap();
+        assert!(!fake.is_empty());
+        assert_eq!(
+            (fake.len(), fake.generate_calls(), fake.retrieve_calls()),
+            (3, 1, 0)
+        );
+
+        fake.generate_keys(&[Binding::from("d")]).await.unwrap();
+        fake.retrieve_keys(&[(keys[0].key_id.clone(), Binding::from("a"))])
+            .await
+            .unwrap();
+        fake.retrieve_keys(&[(keys[1].key_id.clone(), Binding::from("b"))])
+            .await
+            .unwrap();
+        assert_eq!(
+            (fake.len(), fake.generate_calls(), fake.retrieve_calls()),
+            (4, 2, 2)
+        );
+    }
+
+    #[tokio::test]
     async fn a_different_binding_is_refused() {
         let fake = FakeKeyProvider::<32>::new();
         let keys = fake.generate_keys(&[Binding::from("a")]).await.unwrap();
