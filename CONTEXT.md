@@ -15,15 +15,18 @@ Google Cloud KMS).
 _Avoid_: Vendor, provider, KMS (as a noun for one service)
 
 **Backend key**:
-The single key a backend holds and that an adapter is bound to at
-construction (a key ARN, a Key Vault key name, a Transit key name, a
-`CryptoKey`).
-_Avoid_: Master key, KEK, root key, keyset
+The one key, or the one set of keys a backend manages as a unit, that an
+adapter is bound to at construction (a key ARN, a Key Vault key name, a
+Transit key name, a `CryptoKey`, a ZeroKMS keyset). Whether the backend
+implements it as a single key or as a set is the backend's business, and
+not something an adapter or a caller can see.
+_Avoid_: Master key, KEK, root key
 
 **Adapter**:
 A Rust type that implements one or more capability traits against one
 backend key. There is one adapter type per key purpose per backend.
-_Avoid_: Client, backend (for the Rust type), implementation
+_Avoid_: Client, backend (for the Rust type), implementation, Group 2
+(design-ticket jargon for the capability traits)
 
 **Key purpose**:
 The class of operations a backend key can perform, fixed when the key is
@@ -44,6 +47,20 @@ verifies HMAC tags.
 An adapter that implements the data-key capability traits (generate and
 retrieve).
 
+**Key provider**:
+The consumer-facing shape built on top of a data key source or a service
+like ZeroKMS: batches of data keys, each under a binding, plus the index
+key, against one backend key bound at construction. It is what Stack
+Encrypt is generic over.
+_Avoid_: Group 1 (design-ticket jargon), backend
+
+**Binding**:
+Bytes a caller attaches to a data key when it is minted and must present
+again to retrieve it. A backend either binds it into the key server-side
+(`Bound`) or ignores it (`Unbound`), and says which. Stack Encrypt's
+descriptor is a binding.
+_Avoid_: context (overloaded), AAD (one vendor's mechanism)
+
 **Data key**:
 Key material that a data key source mints or retrieves for a caller to use
 locally.
@@ -63,5 +80,5 @@ Whether a backend can rebuild a data key from server-side material alone,
 or needs material the client holds as well.
 
 **Index key**:
-A fixed, deterministic per-keyset key that a caller uses locally to derive
-search-index terms. Never used as a data key.
+A fixed, deterministic key, one per backend key, that a caller uses
+locally to derive search-index terms. Never used as a data key.

@@ -116,7 +116,7 @@ jobs:
         # run writes an empty output file when it trips).
         run: |
           cargo llvm-cov --workspace --lcov --output-path target/vitaminc-lcov.info \
-            --features vitaminc-kms/azure,vitaminc-kms/gcp,vitaminc-kms/vault
+            --features vitaminc-kms/azure,vitaminc-kms/gcp,vitaminc-kms/vault,vitaminc-kms/test-support
           cargo crap \
             --workspace \
             --lcov target/vitaminc-lcov.info \
