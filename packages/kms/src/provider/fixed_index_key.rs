@@ -15,7 +15,7 @@ use vitaminc_protected::Protected;
 /// every previously written index term unfindable.
 ///
 /// The index key is retrieved with [`Binding::EMPTY`]: it belongs to the
-/// keyset, not to any value's context.
+/// backend key, not to any value's context.
 ///
 /// Implements both provider traits, delegating [`KeyProvider`] to the inner
 /// source, so one value satisfies a consumer that needs both.

@@ -29,8 +29,8 @@ impl<const N: usize> Clone for GeneratedDataKey<N> {
 }
 
 /// Capability: mint a fresh data key. One implementor instance is bound to
-/// one backend key/keyset at construction time (an AWS key ARN, a Vault
-/// transit key name, a ZeroKMS keyset, ...) — no per-call selector.
+/// one backend key at construction time (an AWS key ARN, a Vault transit
+/// key name, a ZeroKMS keyset, ...) — no per-call selector.
 #[allow(async_fn_in_trait)]
 pub trait GenerateDataKey<const N: usize> {
     type Error: std::error::Error + Send + Sync + 'static;
