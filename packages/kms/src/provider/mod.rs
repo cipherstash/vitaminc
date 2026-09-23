@@ -2,9 +2,9 @@
 //! Encrypt is generic over (see `CONTEXT.md`).
 //!
 //! A [`KeyProvider`] mints and retrieves *batches* of data keys, each under
-//! a caller-supplied [`Binding`], against one backend key or keyset bound at
+//! a caller-supplied [`Binding`], against one backend key bound at
 //! construction. An [`IndexKeyProvider`] loads the one fixed index key for
-//! that keyset. The two are separate traits because a vendor data key
+//! that backend key. The two are separate traits because a vendor data key
 //! source supplies the first natively and the second only through
 //! [`FixedIndexKeySource`], while a service like ZeroKMS supplies both.
 //!
@@ -90,8 +90,8 @@ pub enum BindingSupport {
     Unbound,
 }
 
-/// Mint and retrieve batches of data keys against one backend key or
-/// keyset bound at construction.
+/// Mint and retrieve batches of data keys against one backend key bound at
+/// construction.
 ///
 /// `generate_keys` returns exactly one key per binding, in order.
 /// `retrieve_keys` returns exactly one key per `(KeyId, Binding)` pair, in
@@ -131,7 +131,7 @@ pub enum DelegatedError<E: std::error::Error + 'static> {
     BatchLength { expected: usize, received: usize },
 }
 
-/// Load the one fixed index key for the keyset a provider is bound to.
+/// Load the one fixed index key for the backend key a provider is bound to.
 /// Deterministic: every call returns the same material.
 pub trait IndexKeyProvider<const N: usize> {
     type Error: std::error::Error + Send + Sync + 'static;

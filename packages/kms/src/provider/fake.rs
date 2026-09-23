@@ -24,7 +24,7 @@ type Keys<const N: usize> = HashMap<(KeyId, Vec<u8>), Protected<[u8; N]>>;
 /// The index key is fixed at construction and identical across instances
 /// built with [`new`](Self::new), so terms derived by one cipher match terms
 /// derived by another, and known-answer tests can pin bytes. Use
-/// [`with_index_key`](Self::with_index_key) to model a second keyset.
+/// [`with_index_key`](Self::with_index_key) to model a second backend key.
 ///
 /// It models no backend's authorization, auditing or reconstruction
 /// semantics. Counters record how many batch calls were made, for tests
@@ -66,7 +66,7 @@ impl<const N: usize> FakeKeyProvider<N> {
     }
 
     /// A provider with its own index key, to stand in for a different
-    /// keyset than [`new`](Self::new) does.
+    /// backend key than [`new`](Self::new) does.
     pub fn with_index_key(index_key: Protected<[u8; N]>) -> Self {
         Self {
             keys: Mutex::new(HashMap::new()),
@@ -246,7 +246,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn two_default_fakes_share_an_index_key_and_two_keysets_do_not() {
+    async fn two_default_fakes_share_an_index_key_and_two_backend_keys_do_not() {
         let a = FakeKeyProvider::<32>::new();
         let b = FakeKeyProvider::<32>::new();
         let c = FakeKeyProvider::<32>::with_index_key(Protected::new([1u8; 32]));

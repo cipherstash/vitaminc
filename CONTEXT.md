@@ -15,10 +15,12 @@ Google Cloud KMS).
 _Avoid_: Vendor, provider, KMS (as a noun for one service)
 
 **Backend key**:
-The single key a backend holds and that an adapter is bound to at
-construction (a key ARN, a Key Vault key name, a Transit key name, a
-`CryptoKey`).
-_Avoid_: Master key, KEK, root key, keyset
+The one key, or the one set of keys a backend manages as a unit, that an
+adapter is bound to at construction (a key ARN, a Key Vault key name, a
+Transit key name, a `CryptoKey`, a ZeroKMS keyset). Whether the backend
+implements it as a single key or as a set is the backend's business, and
+not something an adapter or a caller can see.
+_Avoid_: Master key, KEK, root key
 
 **Adapter**:
 A Rust type that implements one or more capability traits against one
@@ -48,8 +50,8 @@ retrieve).
 **Key provider**:
 The consumer-facing shape built on top of a data key source or a service
 like ZeroKMS: batches of data keys, each under a binding, plus the index
-key, against one backend key or keyset bound at construction. It is what
-Stack Encrypt is generic over.
+key, against one backend key bound at construction. It is what Stack
+Encrypt is generic over.
 _Avoid_: Group 1 (design-ticket jargon), backend
 
 **Binding**:
@@ -78,5 +80,5 @@ Whether a backend can rebuild a data key from server-side material alone,
 or needs material the client holds as well.
 
 **Index key**:
-A fixed, deterministic per-keyset key that a caller uses locally to derive
-search-index terms. Never used as a data key.
+A fixed, deterministic key, one per backend key, that a caller uses
+locally to derive search-index terms. Never used as a data key.
