@@ -2,15 +2,16 @@ use crate::data_key::RetrieveDataKey;
 use crate::key_id::KeyId;
 use vitaminc_protected::Protected;
 
-/// A deterministic per-keyset key used only to derive local search-index
-/// terms (e.g. an HMAC-SHA256 PRF) — never used as a per-value data key.
+/// A deterministic key, one per backend key, used only to derive local
+/// search-index terms (e.g. an HMAC-SHA256 PRF) — never used as a
+/// per-value data key.
 /// Distinguished from `Protected<[u8; N]>` purely for misuse-resistance:
 /// nothing about the underlying bytes differs from a normal retrieved data
 /// key, only how the caller is allowed to use them.
 pub struct IndexKeyMaterial<const N: usize>(pub Protected<[u8; N]>);
 
 /// Retrieve the fixed, persisted index key for this backend. `key_id` MUST
-/// be the same KeyId every time this is called for a given keyset —
+/// be the same KeyId every time this is called for a given backend key —
 /// determinism comes entirely from the caller always presenting the same
 /// stored identifier, not from anything the backend does. That KeyId is
 /// provisioned once, out-of-band, typically via a single
