@@ -23,8 +23,13 @@ pub async fn load_index_key<const N: usize, T: RetrieveDataKey<N>>(
     backend: &T,
     key_id: &KeyId,
 ) -> Result<IndexKeyMaterial<N>, T::Error> {
+    // `Binding::EMPTY`: an index key is one per *backend key*, not one per
+    // value, so there is no context to bind it to — and the provisioning
+    // `generate_data_key` call this loads the result of has none either.
+    // Both sides must agree, and empty is the only value both can name
+    // without the deployment carrying a shared secret string.
     backend
-        .retrieve_data_key(key_id)
+        .retrieve_data_key(key_id, crate::data_key::Binding::EMPTY)
         .await
         .map(IndexKeyMaterial)
 }
