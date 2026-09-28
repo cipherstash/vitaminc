@@ -5,8 +5,8 @@ use super::batch::{
 use super::{b64_decode, b64_encode};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
-    fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, GenerateDataKey,
-    GeneratedDataKey, KeyIsolation, KeyReconstruction, RetrieveDataKey,
+    fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding, BindingSupport,
+    GenerateDataKey, GeneratedDataKey, KeyIsolation, KeyReconstruction, RetrieveDataKey,
 };
 use crate::key_id::KeyId;
 use private::ValidDataKeySize;
@@ -171,7 +171,11 @@ where
 {
     type Error = Error;
 
-    async fn generate_data_key(&self) -> Result<GeneratedDataKey<N>, Self::Error> {
+    /// `binding` is ignored — see [`RetrieveDataKey::BINDING`].
+    async fn generate_data_key(
+        &self,
+        _binding: Binding<'_>,
+    ) -> Result<GeneratedDataKey<N>, Self::Error> {
         let mut opts = GenerateDataKeyRequest::builder();
         opts.bits(Self::BITS);
 
@@ -205,7 +209,25 @@ where
     /// material; the caller holds nothing the backend needs.
     const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
 
-    async fn retrieve_data_key(&self, key_id: &KeyId) -> Result<Protected<[u8; N]>, Self::Error> {
+    /// Transit's only binding-shaped input is the derivation `context`, and
+    /// that exists **only on a key created with `derived=true`**. A
+    /// non-derived key — the default, and what most Transit mounts hold —
+    /// has nowhere to put a binding, and sending a context to one is an
+    /// error rather than a no-op.
+    ///
+    /// Honouring the binding would therefore mean *requiring* a derived
+    /// key, which rejects deployments whose Transit key is not one, and
+    /// support could not be declared in this constant anyway because
+    /// derivation is a property of the backend key, discovered at runtime.
+    /// Left `Unbound` deliberately; a caller that needs binding here binds
+    /// in its own AEAD layer above.
+    const BINDING: BindingSupport = BindingSupport::Unbound;
+
+    async fn retrieve_data_key(
+        &self,
+        key_id: &KeyId,
+        _binding: Binding<'_>,
+    ) -> Result<Protected<[u8; N]>, Self::Error> {
         let response = vaultrs::transit::data::decrypt(
             &self.client,
             &self.mount,
@@ -246,14 +268,14 @@ where
     /// unaffected: `batch_input` on `decrypt` is in both editions.
     async fn generate_data_keys(
         &self,
-        count: usize,
+        bindings: &[Binding<'_>],
     ) -> Result<Vec<GeneratedDataKey<N>>, Self::Error> {
-        if count == 0 {
+        if bindings.is_empty() {
             return Ok(Vec::new());
         }
 
         if !self.native_batch_unsupported.load(Ordering::Relaxed) {
-            match self.generate_data_keys_natively(count).await {
+            match self.generate_data_keys_natively(bindings.len()).await {
                 Err(e) if Self::is_unsupported_path(&e) => {
                     self.native_batch_unsupported.store(true, Ordering::Relaxed);
                 }
@@ -261,7 +283,7 @@ where
             }
         }
 
-        fan_out_generate(self, count).await
+        fan_out_generate(self, bindings).await
     }
 }
 
@@ -271,15 +293,15 @@ where
 {
     async fn retrieve_data_keys(
         &self,
-        key_ids: &[KeyId],
+        keys: &[(KeyId, Binding<'_>)],
     ) -> Result<Vec<Protected<[u8; N]>>, Self::Error> {
-        if key_ids.is_empty() {
+        if keys.is_empty() {
             return Ok(Vec::new());
         }
 
-        let batch_input = key_ids
+        let batch_input = keys
             .iter()
-            .map(|key_id| {
+            .map(|(key_id, _binding)| {
                 Ok(BatchDecryptItem {
                     ciphertext: Self::ciphertext_of(key_id)?,
                 })
@@ -297,9 +319,9 @@ where
         let response: BatchDecryptResponse =
             vaultrs::api::exec_with_result(&self.client, endpoint).await?;
 
-        if response.batch_results.len() != key_ids.len() {
+        if response.batch_results.len() != keys.len() {
             return Err(Error::UnexpectedBatchLength {
-                expected: key_ids.len(),
+                expected: keys.len(),
                 received: response.batch_results.len(),
             });
         }
@@ -413,7 +435,7 @@ mod tests {
             .await;
 
         let source = VaultDataKeySource::<32>::new(test_client(&server), "transit", KEY_NAME);
-        let generated = source.generate_data_key().await.unwrap();
+        let generated = source.generate_data_key(Binding::EMPTY).await.unwrap();
 
         mock.assert_async().await;
         assert_eq!(generated.plaintext.risky_unwrap(), [7u8; 32]);
@@ -436,7 +458,7 @@ mod tests {
         let source = VaultDataKeySource::<32>::new(test_client(&server), "transit", KEY_NAME);
 
         assert!(matches!(
-            source.generate_data_key().await,
+            source.generate_data_key(Binding::EMPTY).await,
             Err(Error::UnexpectedKeyLength {
                 expected: 32,
                 received: 16
@@ -459,7 +481,7 @@ mod tests {
 
         let source = VaultDataKeySource::<32>::new(test_client(&server), "transit", KEY_NAME);
         let key = source
-            .retrieve_data_key(&KeyId::new(b"vault:v1:abc".to_vec()))
+            .retrieve_data_key(&KeyId::new(b"vault:v1:abc".to_vec()), Binding::EMPTY)
             .await
             .unwrap();
 
@@ -487,7 +509,10 @@ mod tests {
             .await;
 
         let source = VaultDataKeySource::<32>::new(test_client(&server), "transit", KEY_NAME);
-        let keys = source.generate_data_keys(3).await.unwrap();
+        let keys = source
+            .generate_data_keys(&[Binding::EMPTY; 3])
+            .await
+            .unwrap();
 
         // One round trip for the whole batch is the point of ADR 0002.
         mock.assert_calls_async(1).await;
@@ -523,14 +548,20 @@ mod tests {
 
         let source = VaultDataKeySource::<32>::new(test_client(&server), "transit", KEY_NAME);
 
-        let first = source.generate_data_keys(3).await.unwrap();
+        let first = source
+            .generate_data_keys(&[Binding::EMPTY; 3])
+            .await
+            .unwrap();
         assert_eq!(first.len(), 3);
         plural.assert_calls_async(1).await;
         singular.assert_calls_async(3).await;
 
         // The 404 is remembered: the second batch never probes the plural
         // path again.
-        let second = source.generate_data_keys(2).await.unwrap();
+        let second = source
+            .generate_data_keys(&[Binding::EMPTY; 2])
+            .await
+            .unwrap();
         assert_eq!(second.len(), 2);
         plural.assert_calls_async(1).await;
         singular.assert_calls_async(5).await;
@@ -550,7 +581,7 @@ mod tests {
 
         let source = VaultDataKeySource::<32>::new(test_client(&server), "transit", KEY_NAME);
 
-        let Err(err) = source.generate_data_keys(2).await else {
+        let Err(err) = source.generate_data_keys(&[Binding::EMPTY; 2]).await else {
             panic!("a 404 that is not `unsupported path` must not be swallowed");
         };
         assert!(matches!(err, Error::Vault(_)), "{err}");
@@ -589,7 +620,10 @@ mod tests {
             KeyId::new(b"vault:v1:two".to_vec()),
             KeyId::new(b"vault:v1:one".to_vec()),
         ];
-        let keys = source.retrieve_data_keys(&ids).await.unwrap();
+        let keys = source
+            .retrieve_data_keys(&crate::data_key::unbound(&ids))
+            .await
+            .unwrap();
 
         mock.assert_calls_async(1).await;
         assert_eq!(keys.len(), 3);
@@ -622,7 +656,10 @@ mod tests {
             KeyId::new(b"vault:v1:bad".to_vec()),
         ];
 
-        let err = source.retrieve_data_keys(&ids).await.unwrap_err();
+        let err = source
+            .retrieve_data_keys(&crate::data_key::unbound(&ids))
+            .await
+            .unwrap_err();
 
         assert!(matches!(err, Error::BatchItem { index: 1, .. }));
         assert!(err.to_string().contains("batch item 1"));
@@ -653,7 +690,10 @@ mod tests {
             KeyId::new(b"vault:v1:two".to_vec()),
         ];
 
-        let err = source.retrieve_data_keys(&ids).await.unwrap_err();
+        let err = source
+            .retrieve_data_keys(&crate::data_key::unbound(&ids))
+            .await
+            .unwrap_err();
 
         assert!(matches!(err, Error::BatchItemEmpty { index: 1 }), "{err}");
         assert_eq!(
@@ -680,7 +720,7 @@ mod tests {
         let source = VaultDataKeySource::<32>::new(test_client(&server), "transit", KEY_NAME);
 
         assert!(matches!(
-            source.generate_data_keys(2).await,
+            source.generate_data_keys(&[Binding::EMPTY; 2]).await,
             Err(Error::UnexpectedBatchLength {
                 expected: 2,
                 received: 1
@@ -752,8 +792,11 @@ mod integration_tests {
     async fn a_generated_data_key_comes_back_from_its_key_id() {
         let source = source().await;
 
-        let generated = source.generate_data_key().await.unwrap();
-        let retrieved = source.retrieve_data_key(&generated.key_id).await.unwrap();
+        let generated = source.generate_data_key(Binding::EMPTY).await.unwrap();
+        let retrieved = source
+            .retrieve_data_key(&generated.key_id, Binding::EMPTY)
+            .await
+            .unwrap();
 
         assert!(generated.key_id.as_bytes().starts_with(b"vault:v1:"));
         assert_eq!(
@@ -771,7 +814,10 @@ mod integration_tests {
 
         assert_eq!(VaultDataKeySource::<32>::ISOLATION, KeyIsolation::PerValue);
 
-        let keys = source.generate_data_keys(5).await.unwrap();
+        let keys = source
+            .generate_data_keys(&[Binding::EMPTY; 5])
+            .await
+            .unwrap();
 
         assert_eq!(keys.len(), 5);
 
@@ -787,7 +833,10 @@ mod integration_tests {
         }
 
         let ids: Vec<KeyId> = keys.iter().map(|k| k.key_id.clone()).collect();
-        let retrieved = source.retrieve_data_keys(&ids).await.unwrap();
+        let retrieved = source
+            .retrieve_data_keys(&crate::data_key::unbound(&ids))
+            .await
+            .unwrap();
         assert_eq!(retrieved[4].clone().risky_unwrap(), material[4]);
     }
 
@@ -799,7 +848,7 @@ mod integration_tests {
 
         let mut keys = Vec::new();
         for _ in 0..3 {
-            keys.push(source.generate_data_key().await.unwrap());
+            keys.push(source.generate_data_key(Binding::EMPTY).await.unwrap());
         }
         let material: Vec<[u8; 32]> = keys
             .iter()
@@ -812,7 +861,10 @@ mod integration_tests {
             keys[0].key_id.clone(),
             keys[2].key_id.clone(),
         ];
-        let retrieved = source.retrieve_data_keys(&ids).await.unwrap();
+        let retrieved = source
+            .retrieve_data_keys(&crate::data_key::unbound(&ids))
+            .await
+            .unwrap();
 
         assert_eq!(retrieved.len(), 3);
         assert_eq!(retrieved[0].clone().risky_unwrap(), material[2]);
@@ -823,13 +875,16 @@ mod integration_tests {
     #[tokio::test]
     async fn a_bad_key_id_in_a_batch_fails_the_whole_call_with_its_index() {
         let source = source().await;
-        let good = source.generate_data_key().await.unwrap();
+        let good = source.generate_data_key(Binding::EMPTY).await.unwrap();
         let ids = [
             good.key_id.clone(),
             KeyId::new(b"vault:v1:bm90LWEtcmVhbC1jaXBoZXJ0ZXh0".to_vec()),
         ];
 
-        let err = source.retrieve_data_keys(&ids).await.unwrap_err();
+        let err = source
+            .retrieve_data_keys(&crate::data_key::unbound(&ids))
+            .await
+            .unwrap_err();
 
         assert!(
             matches!(err, Error::BatchItem { index: 1, .. }),
