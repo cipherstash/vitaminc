@@ -1,8 +1,9 @@
 use super::envelope::{Envelope, EnvelopeError};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
-    dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, GenerateDataKey,
-    GeneratedDataKey, KeyIsolation, KeyReconstruction, RetrieveDataKey,
+    dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
+    BindingSupport, GenerateDataKey, GeneratedDataKey, KeyIsolation, KeyReconstruction,
+    RetrieveDataKey,
 };
 use crate::key_id::KeyId;
 use azure_security_keyvault_keys::models::{
@@ -236,7 +237,12 @@ fn envelope_to_bytes(envelope: &Envelope) -> Result<Vec<u8>, Error> {
 impl<const N: usize> GenerateDataKey<N> for AzureDataKeySource<N> {
     type Error = Error;
 
-    async fn generate_data_key(&self) -> Result<GeneratedDataKey<N>, Self::Error> {
+    /// `binding` is ignored — see [`RetrieveDataKey::BINDING`] for why a
+    /// wrapped data key cannot carry one.
+    async fn generate_data_key(
+        &self,
+        _binding: Binding<'_>,
+    ) -> Result<GeneratedDataKey<N>, Self::Error> {
         let mut rng = SafeRand::from_entropy()?;
         let plaintext: Protected<[u8; N]> = Generatable::random(&mut rng)?;
 
@@ -270,7 +276,25 @@ impl<const N: usize> RetrieveDataKey<N> for AzureDataKeySource<N> {
     /// `KeyId` plus the caller's Entra ID authorization is enough.
     const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
 
-    async fn retrieve_data_key(&self, key_id: &KeyId) -> Result<Protected<[u8; N]>, Self::Error> {
+    /// A data key here is **wrapped**, not AEAD-encrypted: `wrapKey` and
+    /// `unwrapKey` take `RSA-OAEP-256` or `A256KW`, and neither algorithm
+    /// has a place to put additional authenticated data. Key Vault only
+    /// accepts `aad` on the AES-GCM `encrypt`/`decrypt` operations.
+    ///
+    /// Binding would therefore mean moving the data-key path onto
+    /// `encrypt`/`decrypt`, which changes the [`KeyId`] envelope (it would
+    /// gain an IV and tag) and works only for
+    /// [`AzureKeyKind::OctHsm`] — so support would depend on a *runtime*
+    /// key kind, and this constant cannot. An RSA vault could never bind.
+    /// Left `Unbound` deliberately; a caller that needs binding here binds
+    /// in its own AEAD layer above.
+    const BINDING: BindingSupport = BindingSupport::Unbound;
+
+    async fn retrieve_data_key(
+        &self,
+        key_id: &KeyId,
+        _binding: Binding<'_>,
+    ) -> Result<Protected<[u8; N]>, Self::Error> {
         let envelope = Envelope::decode(key_id.as_bytes())
             .map_err(|e| Error::MalformedKeyId(e.to_string()))?;
         let version = self.version_of(&envelope.kid, Reference::KeyId)?;
@@ -301,18 +325,18 @@ impl<const N: usize> BatchGenerateDataKey<N> for AzureDataKeySource<N> {
 
     async fn generate_data_keys(
         &self,
-        count: usize,
+        bindings: &[Binding<'_>],
     ) -> Result<Vec<GeneratedDataKey<N>>, Self::Error> {
-        fan_out_generate(self, count).await
+        fan_out_generate(self, bindings).await
     }
 }
 
 impl<const N: usize> BatchRetrieveDataKey<N> for AzureDataKeySource<N> {
     async fn retrieve_data_keys(
         &self,
-        key_ids: &[KeyId],
+        keys: &[(KeyId, Binding<'_>)],
     ) -> Result<Vec<Protected<[u8; N]>>, Self::Error> {
-        dedup_retrieve(self, key_ids).await
+        dedup_retrieve(self, keys).await
     }
 }
 
@@ -439,7 +463,7 @@ mod tests {
         let (client, transport) = stub_client(&[&operation_response("my-key", &[9u8; 256])]);
         let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::Rsa);
 
-        let generated = source.generate_data_key().await.unwrap();
+        let generated = source.generate_data_key(Binding::EMPTY).await.unwrap();
 
         let request = &transport.requests()[0];
         assert_eq!(request.path(), "/keys/my-key//wrapkey");
@@ -462,7 +486,7 @@ mod tests {
         let (client, transport) = stub_client(&[&operation_response("my-key", &[3u8; 40])]);
         let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::OctHsm);
 
-        source.generate_data_key().await.unwrap();
+        source.generate_data_key(Binding::EMPTY).await.unwrap();
 
         assert_eq!(transport.requests()[0].json()["alg"], "A256KW");
     }
@@ -478,7 +502,10 @@ mod tests {
         let (client, transport) = stub_client(&[&operation_response("my-key", &[4u8; 32])]);
         let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::Rsa);
 
-        let retrieved = source.retrieve_data_key(&key_id).await.unwrap();
+        let retrieved = source
+            .retrieve_data_key(&key_id, Binding::EMPTY)
+            .await
+            .unwrap();
 
         assert_eq!(retrieved.risky_unwrap(), [4u8; 32]);
         let request = &transport.requests()[0];
@@ -499,7 +526,10 @@ mod tests {
         let (client, transport) = stub_client(&[]);
         let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::Rsa);
 
-        let error = source.retrieve_data_key(&key_id).await.unwrap_err();
+        let error = source
+            .retrieve_data_key(&key_id, Binding::EMPTY)
+            .await
+            .unwrap_err();
 
         assert!(matches!(
             error,
@@ -549,7 +579,10 @@ mod tests {
         let (client, transport) = stub_client(&[]);
         let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::OctHsm);
 
-        let error = source.retrieve_data_key(&key_id).await.unwrap_err();
+        let error = source
+            .retrieve_data_key(&key_id, Binding::EMPTY)
+            .await
+            .unwrap_err();
 
         assert!(
             matches!(error, Error::MalformedKeyId(ref reason) if reason.contains("ciphertext"))
@@ -563,7 +596,7 @@ mod tests {
         let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::Rsa);
 
         let error = source
-            .retrieve_data_key(&KeyId::new(vec![0xff, 0xff, 0xff]))
+            .retrieve_data_key(&KeyId::new(vec![0xff, 0xff, 0xff]), Binding::EMPTY)
             .await
             .unwrap_err();
 
@@ -581,7 +614,10 @@ mod tests {
         let (client, _) = stub_client(&[&operation_response("my-key", &[4u8; 16])]);
         let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::Rsa);
 
-        let error = source.retrieve_data_key(&key_id).await.unwrap_err();
+        let error = source
+            .retrieve_data_key(&key_id, Binding::EMPTY)
+            .await
+            .unwrap_err();
 
         assert!(matches!(
             error,
@@ -601,7 +637,10 @@ mod tests {
         let (client, transport) = stub_client(&borrowed);
         let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::Rsa);
 
-        let keys = source.generate_data_keys(3).await.unwrap();
+        let keys = source
+            .generate_data_keys(&[Binding::EMPTY; 3])
+            .await
+            .unwrap();
 
         assert_eq!(keys.len(), 3);
         assert_eq!(transport.call_count(), 3);
@@ -619,7 +658,11 @@ mod tests {
         let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::Rsa);
 
         let retrieved = source
-            .retrieve_data_keys(&[key_id.clone(), key_id.clone(), key_id])
+            .retrieve_data_keys(&crate::data_key::unbound(&[
+                key_id.clone(),
+                key_id.clone(),
+                key_id,
+            ]))
             .await
             .unwrap();
 
@@ -751,7 +794,7 @@ mod tests {
         let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::Rsa)
             .with_key_version("v7");
 
-        source.generate_data_key().await.unwrap();
+        source.generate_data_key(Binding::EMPTY).await.unwrap();
 
         assert_eq!(transport.requests()[0].path(), "/keys/my-key/v7/wrapkey");
     }
@@ -791,8 +834,11 @@ mod tests {
     async fn lowkey_generate_then_retrieve_round_trips() {
         let source = lowkey_rsa_source().await;
 
-        let generated = source.generate_data_key().await.unwrap();
-        let retrieved = source.retrieve_data_key(&generated.key_id).await.unwrap();
+        let generated = source.generate_data_key(Binding::EMPTY).await.unwrap();
+        let retrieved = source
+            .retrieve_data_key(&generated.key_id, Binding::EMPTY)
+            .await
+            .unwrap();
 
         assert_eq!(retrieved.risky_unwrap(), generated.plaintext.risky_unwrap());
     }
@@ -801,9 +847,15 @@ mod tests {
     async fn lowkey_batch_generate_then_batch_retrieve_round_trips() {
         let source = lowkey_rsa_source().await;
 
-        let generated = source.generate_data_keys(3).await.unwrap();
+        let generated = source
+            .generate_data_keys(&[Binding::EMPTY; 3])
+            .await
+            .unwrap();
         let ids: Vec<KeyId> = generated.iter().map(|k| k.key_id.clone()).collect();
-        let retrieved = source.retrieve_data_keys(&ids).await.unwrap();
+        let retrieved = source
+            .retrieve_data_keys(&crate::data_key::unbound(&ids))
+            .await
+            .unwrap();
 
         assert_eq!(retrieved.len(), 3);
         for (got, want) in retrieved.into_iter().zip(generated) {
@@ -831,9 +883,9 @@ mod tests {
         let source = lowkey_rsa_source().await;
         let other = lowkey_rsa_source().await;
 
-        let generated = other.generate_data_key().await.unwrap();
+        let generated = other.generate_data_key(Binding::EMPTY).await.unwrap();
         let error = source
-            .retrieve_data_key(&generated.key_id)
+            .retrieve_data_key(&generated.key_id, Binding::EMPTY)
             .await
             .unwrap_err();
 

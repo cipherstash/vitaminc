@@ -1,7 +1,8 @@
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
-    dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, GenerateDataKey,
-    GeneratedDataKey, KeyIsolation, KeyReconstruction, RetrieveDataKey,
+    dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
+    BindingSupport, GenerateDataKey, GeneratedDataKey, KeyIsolation, KeyReconstruction,
+    RetrieveDataKey,
 };
 use crate::key_id::KeyId;
 use crate::pooled::PooledDataKeySource;
@@ -64,18 +65,48 @@ impl<const N: usize> AwsDataKeySource<N> {
     }
 }
 
+/// The `EncryptionContext` entry a [`Binding`] becomes.
+///
+/// AWS requires printable string keys and values, and a binding is
+/// arbitrary bytes, so the bytes are base64 (standard, padded). One fixed
+/// key holds them: AWS matches the context as a whole map, so a single
+/// entry under a name nothing else uses cannot collide with a context the
+/// caller sets elsewhere on the same key.
+///
+/// An **empty** binding is no entry at all, not an entry with an empty
+/// value. `Binding::EMPTY` means "nothing to bind", and the faithful
+/// encoding of that is an absent context — which is also what a caller that
+/// never passes a binding already sends.
+const BINDING_CONTEXT_KEY: &str = "vitaminc:binding";
+
+fn binding_context(binding: Binding<'_>) -> Option<(String, String)> {
+    use base64::Engine as _;
+    let bytes = binding.as_bytes();
+    if bytes.is_empty() {
+        return None;
+    }
+    Some((
+        BINDING_CONTEXT_KEY.to_owned(),
+        base64::engine::general_purpose::STANDARD.encode(bytes),
+    ))
+}
+
 impl<const N: usize> GenerateDataKey<N> for AwsDataKeySource<N> {
     type Error = Error;
 
-    async fn generate_data_key(&self) -> Result<GeneratedDataKey<N>, Self::Error> {
-        let response = self
+    async fn generate_data_key(
+        &self,
+        binding: Binding<'_>,
+    ) -> Result<GeneratedDataKey<N>, Self::Error> {
+        let mut request = self
             .client
             .generate_data_key()
             .key_id(&self.key_id)
-            .number_of_bytes(N as i32)
-            .send()
-            .await
-            .map_err(aws_sdk_kms::Error::from)?;
+            .number_of_bytes(N as i32);
+        if let Some((key, value)) = binding_context(binding) {
+            request = request.encryption_context(key, value);
+        }
+        let response = request.send().await.map_err(aws_sdk_kms::Error::from)?;
 
         let plaintext = response.plaintext.ok_or(Error::MissingPlaintext)?;
         let ciphertext_blob = response
@@ -97,15 +128,24 @@ impl<const N: usize> RetrieveDataKey<N> for AwsDataKeySource<N> {
     /// sufficient, unlike ZeroKMS's client+server scheme.
     const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
 
-    async fn retrieve_data_key(&self, key_id: &KeyId) -> Result<Protected<[u8; N]>, Self::Error> {
-        let response = self
+    /// AWS KMS binds the `EncryptionContext` into the data key and refuses a
+    /// `Decrypt` that presents a different one.
+    const BINDING: BindingSupport = BindingSupport::Bound;
+
+    async fn retrieve_data_key(
+        &self,
+        key_id: &KeyId,
+        binding: Binding<'_>,
+    ) -> Result<Protected<[u8; N]>, Self::Error> {
+        let mut request = self
             .client
             .decrypt()
             .ciphertext_blob(Blob::new(key_id.as_bytes().to_vec()))
-            .key_id(&self.key_id)
-            .send()
-            .await
-            .map_err(aws_sdk_kms::Error::from)?;
+            .key_id(&self.key_id);
+        if let Some((key, value)) = binding_context(binding) {
+            request = request.encryption_context(key, value);
+        }
+        let response = request.send().await.map_err(aws_sdk_kms::Error::from)?;
 
         let plaintext = response.plaintext.ok_or(Error::MissingPlaintext)?;
         Ok(Protected::new(into_sized(plaintext.into_inner())?))
@@ -169,18 +209,18 @@ impl<const N: usize> BatchGenerateDataKey<N> for AwsDataKeySource<N> {
 
     async fn generate_data_keys(
         &self,
-        count: usize,
+        bindings: &[Binding<'_>],
     ) -> Result<Vec<GeneratedDataKey<N>>, Self::Error> {
-        fan_out_generate(self, count).await
+        fan_out_generate(self, bindings).await
     }
 }
 
 impl<const N: usize> BatchRetrieveDataKey<N> for AwsDataKeySource<N> {
     async fn retrieve_data_keys(
         &self,
-        key_ids: &[KeyId],
+        keys: &[(KeyId, Binding<'_>)],
     ) -> Result<Vec<Protected<[u8; N]>>, Self::Error> {
-        dedup_retrieve(self, key_ids).await
+        dedup_retrieve(self, keys).await
     }
 }
 
@@ -233,10 +273,13 @@ mod tests {
 
         let source = AwsDataKeySource::<32>::new(client, TEST_KEY_ID);
 
-        let generated = source.generate_data_key().await.unwrap();
+        let generated = source.generate_data_key(Binding::EMPTY).await.unwrap();
         assert_eq!(generated.key_id.as_bytes(), fixed_ciphertext_blob());
 
-        let retrieved = source.retrieve_data_key(&generated.key_id).await.unwrap();
+        let retrieved = source
+            .retrieve_data_key(&generated.key_id, Binding::EMPTY)
+            .await
+            .unwrap();
         assert_eq!(retrieved.risky_unwrap(), fixed_plaintext());
 
         assert_eq!(generate_rule.num_calls(), 1);
@@ -255,7 +298,10 @@ mod tests {
         let client = mock_client!(aws_sdk_kms, RuleMode::MatchAny, &[&generate_rule]);
         let source = AwsDataKeySource::<32>::new(client, TEST_KEY_ID);
 
-        let keys = source.generate_data_keys(3).await.unwrap();
+        let keys = source
+            .generate_data_keys(&[Binding::EMPTY; 3])
+            .await
+            .unwrap();
 
         assert_eq!(keys.len(), 3);
         assert_eq!(generate_rule.num_calls(), 3);
@@ -275,7 +321,10 @@ mod tests {
         let source: AwsPooledDataKeySource<32> =
             PooledDataKeySource::new(AwsDataKeySource::new(client, TEST_KEY_ID));
 
-        let keys = source.generate_data_keys(5).await.unwrap();
+        let keys = source
+            .generate_data_keys(&[Binding::EMPTY; 5])
+            .await
+            .unwrap();
 
         assert_eq!(keys.len(), 5);
         assert_eq!(generate_rule.num_calls(), 1);
@@ -377,7 +426,10 @@ mod tests {
             KeyId::new(b"blob-two".to_vec()),
             KeyId::new(b"blob-one".to_vec()),
         ];
-        let keys = source.retrieve_data_keys(&ids).await.unwrap();
+        let keys = source
+            .retrieve_data_keys(&crate::data_key::unbound(&ids))
+            .await
+            .unwrap();
 
         // One slot per id, each holding the material that id decrypts to.
         assert_eq!(keys.len(), 3);
@@ -414,8 +466,11 @@ mod tests {
             let key_id = encrypt_decrypt_key(&client).await;
             let source = AwsDataKeySource::<32>::new(client, key_id);
 
-            let generated = source.generate_data_key().await.unwrap();
-            let retrieved = source.retrieve_data_key(&generated.key_id).await.unwrap();
+            let generated = source.generate_data_key(Binding::EMPTY).await.unwrap();
+            let retrieved = source
+                .retrieve_data_key(&generated.key_id, Binding::EMPTY)
+                .await
+                .unwrap();
 
             assert_eq!(retrieved.risky_unwrap(), generated.plaintext.risky_unwrap());
         }
@@ -437,5 +492,86 @@ mod tests {
 
             assert_eq!(recovered.risky_unwrap(), plaintext);
         }
+    }
+
+    /// The binding has to reach AWS, or `BINDING = Bound` is a claim with
+    /// nothing behind it. Asserts the `EncryptionContext` on **both** calls,
+    /// because a context sent on generate and dropped on decrypt would make
+    /// every key unretrievable, and a test that only checked generate would
+    /// not notice.
+    #[tokio::test]
+    async fn the_binding_reaches_aws_as_an_encryption_context_on_both_calls() {
+        use base64::Engine as _;
+        let expected = base64::engine::general_purpose::STANDARD.encode(b"users/email");
+
+        let sent = expected.clone();
+        let generate_rule = mock!(Client::generate_data_key)
+            .match_requests(move |req| {
+                req.encryption_context()
+                    .and_then(|c| c.get(BINDING_CONTEXT_KEY))
+                    == Some(&sent)
+            })
+            .then_output(|| {
+                GenerateDataKeyOutput::builder()
+                    .plaintext(Blob::new(fixed_plaintext().to_vec()))
+                    .ciphertext_blob(Blob::new(fixed_ciphertext_blob()))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+
+        let sent = expected.clone();
+        let decrypt_rule = mock!(Client::decrypt)
+            .match_requests(move |req| {
+                req.encryption_context()
+                    .and_then(|c| c.get(BINDING_CONTEXT_KEY))
+                    == Some(&sent)
+            })
+            .then_output(|| {
+                DecryptOutput::builder()
+                    .plaintext(Blob::new(fixed_plaintext().to_vec()))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+
+        let client = mock_client!(
+            aws_sdk_kms,
+            RuleMode::MatchAny,
+            &[&generate_rule, &decrypt_rule]
+        );
+        let source = AwsDataKeySource::<32>::new(client, TEST_KEY_ID);
+        let binding = Binding::from("users/email");
+
+        let generated = source.generate_data_key(binding).await.unwrap();
+        let _ = source
+            .retrieve_data_key(&generated.key_id, binding)
+            .await
+            .unwrap();
+
+        // The rules only match when the context is exactly right, so a call
+        // count of one each is the assertion.
+        assert_eq!(generate_rule.num_calls(), 1);
+        assert_eq!(decrypt_rule.num_calls(), 1);
+    }
+
+    /// An empty binding sends **no** context rather than an empty one: that
+    /// is what makes `Binding::EMPTY` mean "nothing to bind", and what keeps
+    /// a caller who never passes a binding sending exactly what it always
+    /// sent.
+    #[tokio::test]
+    async fn an_empty_binding_sends_no_encryption_context() {
+        let generate_rule = mock!(Client::generate_data_key)
+            .match_requests(|req| req.encryption_context().is_none())
+            .then_output(|| {
+                GenerateDataKeyOutput::builder()
+                    .plaintext(Blob::new(fixed_plaintext().to_vec()))
+                    .ciphertext_blob(Blob::new(fixed_ciphertext_blob()))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+        let client = mock_client!(aws_sdk_kms, RuleMode::MatchAny, &[&generate_rule]);
+        let source = AwsDataKeySource::<32>::new(client, TEST_KEY_ID);
+
+        let _ = source.generate_data_key(Binding::EMPTY).await.unwrap();
+        assert_eq!(generate_rule.num_calls(), 1);
     }
 }
