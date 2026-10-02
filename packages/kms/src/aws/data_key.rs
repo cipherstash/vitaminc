@@ -9,7 +9,7 @@ use aws_sdk_kms::{primitives::Blob, Client};
 use thiserror::Error;
 use vitaminc_protected::{Controlled, Protected};
 
-/// Errors from an AWS KMS-backed Group 2 adapter.
+/// Errors from the AWS KMS data key source.
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]

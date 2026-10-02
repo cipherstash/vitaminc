@@ -16,7 +16,7 @@ vitaminc-async-traits = { version = "0.5.0", path = "../async-traits" }
 vitaminc-traits = { version = "0.5.0", path = "../traits" }
 vitaminc-protected = { version = "0.5.0", path = "../protected" }
 futures = "0.3.31"
-# Generic RetrieveDataKey cache (CIP-4031/CIP-4033) — correct concurrent
+# Backs `provider::CachingKeyProvider` (CIP-4031/CIP-4033) — correct concurrent
 # LRU+TTL eviction is easy to get subtly wrong to hand-roll, and this
 # crate is meant for reuse. Optional so that the traits-only build (no
 # features) stays free of threads and timers for wasm32 consumers.
@@ -79,7 +79,8 @@ spki = { version = "0.8", features = ["alloc"], optional = true }
 const-oid = { version = "0.10", features = ["db"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "macros"] }
+# `time` is for the cache's TTL test, which has to wait out a real expiry.
+tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "macros", "time"] }
 # Zero-network unit testing of aws-sdk-kms calls (CIP-4029's recommended
 # tier-1 approach). Requires aws-sdk-kms's `test-util` feature, enabled
 # here since Cargo unifies dev-dependency features into test builds.
@@ -110,6 +111,9 @@ default = ["aws", "caching"]
 # crates that target wasm depend on it with `default-features = false`.
 aws = ["dep:aws-sdk-kms"]
 caching = ["dep:moka"]
+# `provider::FakeKeyProvider`, an in-memory key provider for consumers'
+# tests (Stack Encrypt, its WASI guest). Not a default: it needs a CSPRNG.
+test-support = ["dep:vitaminc-random"]
 azure = ["dep:azure_core", "dep:azure_security_keyvault_keys", "dep:vitaminc-random", "canonical-encoding"]
 gcp = [
     "dep:google-cloud-kms-v1",
