@@ -69,8 +69,13 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-mutants-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust stable
+      - name: setup rust
+        # Pinned to the same release as test.yml, not `@stable`: the unmutated
+        # baseline runs the trybuild UI tests, and their blessed `.stderr`
+        # output matches that release only.
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
 
       - name: Start LocalStack
         # The unmutated baseline runs the whole test suite, and vitaminc-kms'
@@ -82,6 +87,15 @@ jobs:
           install-awslocal: 'true'
         env:
           LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
+
+      - name: Start Vault and Lowkey Vault
+        # vitaminc-kms' Vault and Azure adapter tests talk to a Vault dev
+        # server on localhost:8200 and Lowkey Vault (an Azure Key Vault
+        # emulator) on localhost:8443, the same way its AWS tests talk to
+        # LocalStack; cargo-mutants runs with --all-features (.cargo/mutants.toml). Google Cloud KMS has no viable emulator; its adapter is
+        # tested against the SDK's stub trait only. LocalStack itself stays on
+        # the action above so LOCALSTACK_AUTH_TOKEN keeps working.
+        run: docker compose -f packages/kms/docker-compose.yml up -d --wait vault lowkey-vault
 
       - name: install cargo-binstall and cargo-mutants
         # Install via cargo-binstall (prebuilt binaries — far faster than
