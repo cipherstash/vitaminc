@@ -69,8 +69,13 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-mutants-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust stable
+      - name: setup rust
+        # Pinned to the same release as test.yml, not `@stable`: the unmutated
+        # baseline runs the trybuild UI tests, and their blessed `.stderr`
+        # output matches that release only.
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
 
       - name: Start LocalStack
         # The unmutated baseline runs the whole test suite, and vitaminc-kms'
