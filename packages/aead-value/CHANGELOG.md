@@ -1,4 +1,10 @@
 
+## [0.5.1] - 2026-10-05
+
+### Features
+
+- name an FfiValue's kind without a value
+
 ## [0.5.0] - 2026-09-20
 
 ### Breaking
