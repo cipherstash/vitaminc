@@ -109,7 +109,9 @@ default = ["aws", "caching"]
 # With every feature off the crate is traits and shims only, and builds for
 # wasm32-wasip1 with no HTTP stack, threads or timers in its tree; downstream
 # crates that target wasm depend on it with `default-features = false`.
-aws = ["dep:aws-sdk-kms"]
+# `base64`: the binding reaches AWS as an `EncryptionContext` value, which
+# must be a string.
+aws = ["dep:aws-sdk-kms", "dep:base64"]
 caching = ["dep:moka"]
 # `provider::FakeKeyProvider`, an in-memory key provider for consumers'
 # tests (Stack Encrypt, its WASI guest). Not a default: it needs a CSPRNG.
