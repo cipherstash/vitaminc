@@ -625,6 +625,33 @@ mod tests {
         assert_eq!(leaf_bytes(FfiValue::Bool(true)), [0x03]);
     }
 
+    /// `ValueKind::tags()` is a second map from variant to tag; the first is
+    /// the `match` in `encrypt_with_aad`. Each `kat_*` test pins one side
+    /// against literal bytes. This pins the two sides against each other, so a
+    /// tag moved in one and not the other fails here.
+    #[test]
+    fn every_kinded_leaf_seals_under_a_tag_its_kind_names() {
+        for value in [
+            FfiValue::Bool(false),
+            FfiValue::Bool(true),
+            FfiValue::Int32(-3),
+            FfiValue::Int64(-4),
+            FfiValue::UInt32(34),
+            FfiValue::UInt64(35),
+            FfiValue::Float32(1.5),
+            FfiValue::Float64(2.5),
+            s("alice"),
+            FfiValue::Bytes(Protected::new(b"ab".to_vec())),
+        ] {
+            let kind = value.kind().expect("a scalar leaf has a kind");
+            let tag = leaf_bytes(value)[0];
+            assert!(
+                kind.tags().contains(&tag),
+                "{kind} does not name tag {tag:#04x}"
+            );
+        }
+    }
+
     #[test]
     fn kat_int32() {
         assert_eq!(

@@ -61,9 +61,15 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-crap-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust stable
+      - name: setup rust
+        # Pinned to the same release as test.yml, not `@stable`: this job runs
+        # the whole workspace's tests under coverage, including the trybuild
+        # cases whose .stderr snapshots record one compiler's wording. On an
+        # unpinned stable a release that rewords a diagnostic fails unrelated
+        # PRs here while test.yml stays green. Bump both files together.
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.96.0
           # llvm-tools-preview is required by cargo-llvm-cov to produce coverage.
           components: llvm-tools-preview
 

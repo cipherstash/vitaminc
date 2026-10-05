@@ -109,6 +109,17 @@ decode: `INT32`↔`int32`, `UINT32`↔`uint32`, `FLOAT32`↔`float32`, and the
 the matching width (e.g. `int16`→`INT32`), and `uint`/`uintptr` map to
 `UINT64`.
 
+## Declaring a kind without a value
+
+A binding often has to say what a field's values are before it has one.
+[`ValueKind`] is the `FfiValue` model without the payload: `bool`, `int32`,
+`int64`, `uint32`, `uint64`, `float32`, `float64`, `string`, `bytes`,
+`array` and `object`. Those names are frozen wire format, like the tag
+table. `Null`, `Undefined` and `Passthrough` have no kind: the first two
+are single-valued, and passthrough is a transport choice, not a type.
+`FfiValue::kind` reports a value's kind, `ValueKind::holds` checks one,
+and `ValueKind::tags` maps a kind to the tags above.
+
 ## Security notes
 
 - String and byte leaves are held in `Protected`, so the Rust-side copies
@@ -121,6 +132,7 @@ the matching width (e.g. `int16`→`INT32`), and `uint`/`uintptr` map to
   everywhere in Vitamin-C.
 
 [`FfiValue`]: crate::FfiValue
+[`ValueKind`]: crate::ValueKind
 [`Cipher`]: vitaminc_aead::Cipher
 [`Decipher`]: vitaminc_aead::Decipher
 [`Context::for_map_entry`]: vitaminc_aead::Context::for_map_entry
