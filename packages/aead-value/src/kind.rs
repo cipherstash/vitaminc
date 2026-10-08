@@ -56,7 +56,8 @@ use crate::{tags, Value};
 /// kind, and why [`name`](Self::name) is frozen.
 ///
 /// Non-exhaustive so future kinds can be added; downstream matches must
-/// handle unsupported kinds.
+/// handle unsupported kinds. Names and tags for optional chrono/decimal
+/// payloads remain available even when their cargo features are disabled.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[non_exhaustive]
 pub enum ValueKind {
@@ -79,6 +80,24 @@ pub enum ValueKind {
     String,
     /// `"bytes"`: [`Value::Bytes`], tag [`BYTES`](tags::BYTES).
     Bytes,
+    /// `"int8"`, tag [`INT8`](tags::INT8).
+    Int8,
+    /// `"uint8"`, tag [`UINT8`](tags::UINT8).
+    UInt8,
+    /// `"int16"`, tag [`INT16`](tags::INT16).
+    Int16,
+    /// `"uint16"`, tag [`UINT16`](tags::UINT16).
+    UInt16,
+    /// `"int128"`, tag [`INT128`](tags::INT128).
+    Int128,
+    /// `"uint128"`, tag [`UINT128`](tags::UINT128).
+    UInt128,
+    /// `"date"`, tag [`DATE`](tags::DATE).
+    Date,
+    /// `"timestamp"`, tag [`TIMESTAMP`](tags::TIMESTAMP).
+    Timestamp,
+    /// `"decimal"`, tag [`DECIMAL`](tags::DECIMAL).
+    Decimal,
     /// `"array"`: [`Value::Array`], sealed in the cipher's sequence mode
     /// with no tag of its own. Says nothing about the elements' kinds.
     Array,
@@ -89,7 +108,7 @@ pub enum ValueKind {
 
 impl ValueKind {
     /// Every kind, in declaration order.
-    pub const ALL: [ValueKind; 11] = [
+    pub const ALL: [ValueKind; 20] = [
         ValueKind::Bool,
         ValueKind::Int32,
         ValueKind::Int64,
@@ -99,13 +118,21 @@ impl ValueKind {
         ValueKind::Float64,
         ValueKind::String,
         ValueKind::Bytes,
+        ValueKind::Int8,
+        ValueKind::UInt8,
+        ValueKind::Int16,
+        ValueKind::UInt16,
+        ValueKind::Int128,
+        ValueKind::UInt128,
+        ValueKind::Date,
+        ValueKind::Timestamp,
+        ValueKind::Decimal,
         ValueKind::Array,
         ValueKind::Object,
     ];
 
-    /// How a declaration spells this kind: `"bool"`, `"int32"`, `"int64"`,
-    /// `"uint32"`, `"uint64"`, `"float32"`, `"float64"`, `"string"`,
-    /// `"bytes"`, `"array"` or `"object"`. Frozen wire format.
+    /// The exact lowercase name used in declarations, e.g. `"int16"`,
+    /// `"timestamp"` or `"decimal"`. Frozen wire format.
     pub const fn name(self) -> &'static str {
         match self {
             ValueKind::Bool => "bool",
@@ -117,6 +144,15 @@ impl ValueKind {
             ValueKind::Float64 => "float64",
             ValueKind::String => "string",
             ValueKind::Bytes => "bytes",
+            ValueKind::Int8 => "int8",
+            ValueKind::UInt8 => "uint8",
+            ValueKind::Int16 => "int16",
+            ValueKind::UInt16 => "uint16",
+            ValueKind::Int128 => "int128",
+            ValueKind::UInt128 => "uint128",
+            ValueKind::Date => "date",
+            ValueKind::Timestamp => "timestamp",
+            ValueKind::Decimal => "decimal",
             ValueKind::Array => "array",
             ValueKind::Object => "object",
         }
@@ -137,6 +173,15 @@ impl ValueKind {
             ValueKind::Float64 => &[tags::FLOAT64],
             ValueKind::String => &[tags::STRING],
             ValueKind::Bytes => &[tags::BYTES],
+            ValueKind::Int8 => &[tags::INT8],
+            ValueKind::UInt8 => &[tags::UINT8],
+            ValueKind::Int16 => &[tags::INT16],
+            ValueKind::UInt16 => &[tags::UINT16],
+            ValueKind::Int128 => &[tags::INT128],
+            ValueKind::UInt128 => &[tags::UINT128],
+            ValueKind::Date => &[tags::DATE],
+            ValueKind::Timestamp => &[tags::TIMESTAMP],
+            ValueKind::Decimal => &[tags::DECIMAL],
             ValueKind::Array | ValueKind::Object => &[],
         }
     }
@@ -201,6 +246,18 @@ impl Value {
             Value::Float64(_) => Some(ValueKind::Float64),
             Value::String(_) => Some(ValueKind::String),
             Value::Bytes(_) => Some(ValueKind::Bytes),
+            Value::Int8(_) => Some(ValueKind::Int8),
+            Value::UInt8(_) => Some(ValueKind::UInt8),
+            Value::Int16(_) => Some(ValueKind::Int16),
+            Value::UInt16(_) => Some(ValueKind::UInt16),
+            Value::Int128(_) => Some(ValueKind::Int128),
+            Value::UInt128(_) => Some(ValueKind::UInt128),
+            #[cfg(feature = "chrono")]
+            Value::Date(_) => Some(ValueKind::Date),
+            #[cfg(feature = "chrono")]
+            Value::Timestamp(_) => Some(ValueKind::Timestamp),
+            #[cfg(feature = "rust_decimal")]
+            Value::Decimal(_) => Some(ValueKind::Decimal),
             Value::Array(_) => Some(ValueKind::Array),
             Value::Object(_) => Some(ValueKind::Object),
             Value::Null | Value::Undefined | Value::Passthrough(_) => None,
@@ -232,6 +289,18 @@ mod tests {
             Value::Float64(2.5),
             Value::String("alice".into()),
             Value::Bytes(Protected::new(b"ab".to_vec())),
+            Value::Int8(1),
+            Value::UInt8(1),
+            Value::Int16(1),
+            Value::UInt16(1),
+            Value::Int128(1),
+            Value::UInt128(1),
+            #[cfg(feature = "chrono")]
+            Value::Date(chrono::NaiveDate::default()),
+            #[cfg(feature = "chrono")]
+            Value::Timestamp(chrono::DateTime::UNIX_EPOCH),
+            #[cfg(feature = "rust_decimal")]
+            Value::Decimal(rust_decimal::Decimal::ZERO),
             Value::Array(vec![Value::UInt32(1)]),
             Value::Object(vec![("k".to_string(), Value::UInt32(1))]),
             Value::Passthrough(Box::new(Value::UInt32(1))),
@@ -249,6 +318,18 @@ mod tests {
                     Value::Float64(_) => Some(ValueKind::Float64),
                     Value::String(_) => Some(ValueKind::String),
                     Value::Bytes(_) => Some(ValueKind::Bytes),
+                    Value::Int8(_) => Some(ValueKind::Int8),
+                    Value::UInt8(_) => Some(ValueKind::UInt8),
+                    Value::Int16(_) => Some(ValueKind::Int16),
+                    Value::UInt16(_) => Some(ValueKind::UInt16),
+                    Value::Int128(_) => Some(ValueKind::Int128),
+                    Value::UInt128(_) => Some(ValueKind::UInt128),
+                    #[cfg(feature = "chrono")]
+                    Value::Date(_) => Some(ValueKind::Date),
+                    #[cfg(feature = "chrono")]
+                    Value::Timestamp(_) => Some(ValueKind::Timestamp),
+                    #[cfg(feature = "rust_decimal")]
+                    Value::Decimal(_) => Some(ValueKind::Decimal),
                     Value::Array(_) => Some(ValueKind::Array),
                     Value::Object(_) => Some(ValueKind::Object),
                 };
@@ -268,7 +349,18 @@ mod tests {
                 }
             }
         }
-        assert_eq!(reported, ValueKind::ALL, "ALL is every kind, in order");
+        let available: Vec<_> = ValueKind::ALL
+            .into_iter()
+            .filter(|kind| match kind {
+                ValueKind::Date | ValueKind::Timestamp => cfg!(feature = "chrono"),
+                ValueKind::Decimal => cfg!(feature = "rust_decimal"),
+                _ => true,
+            })
+            .collect();
+        assert_eq!(
+            reported, available,
+            "ALL covers every enabled kind, in order"
+        );
     }
 
     #[test]
@@ -290,8 +382,26 @@ mod tests {
         assert_eq!(
             names,
             [
-                "bool", "int32", "int64", "uint32", "uint64", "float32", "float64", "string",
-                "bytes", "array", "object"
+                "bool",
+                "int32",
+                "int64",
+                "uint32",
+                "uint64",
+                "float32",
+                "float64",
+                "string",
+                "bytes",
+                "int8",
+                "uint8",
+                "int16",
+                "uint16",
+                "int128",
+                "uint128",
+                "date",
+                "timestamp",
+                "decimal",
+                "array",
+                "object"
             ],
             "the names are wire format"
         );
@@ -331,22 +441,30 @@ mod tests {
             .flat_map(|kind| kind.tags().iter().copied())
             .collect();
         claimed.sort_unstable();
-        assert_eq!(
-            claimed,
-            [
-                tags::BOOL_FALSE,
-                tags::BOOL_TRUE,
-                tags::INT32,
-                tags::INT64,
-                tags::UINT32,
-                tags::UINT64,
-                tags::FLOAT32,
-                tags::FLOAT64,
-                tags::STRING,
-                tags::BYTES,
-            ]
-        );
-        let expected: [(ValueKind, &[u8]); 11] = [
+        let mut expected_tags = [
+            tags::BOOL_FALSE,
+            tags::BOOL_TRUE,
+            tags::INT32,
+            tags::INT64,
+            tags::UINT32,
+            tags::UINT64,
+            tags::FLOAT32,
+            tags::FLOAT64,
+            tags::STRING,
+            tags::BYTES,
+            tags::INT8,
+            tags::UINT8,
+            tags::INT16,
+            tags::UINT16,
+            tags::INT128,
+            tags::UINT128,
+            tags::DATE,
+            tags::TIMESTAMP,
+            tags::DECIMAL,
+        ];
+        expected_tags.sort_unstable();
+        assert_eq!(claimed, expected_tags);
+        let expected: [(ValueKind, &[u8]); 20] = [
             (ValueKind::Bool, &[tags::BOOL_FALSE, tags::BOOL_TRUE]),
             (ValueKind::Int32, &[tags::INT32]),
             (ValueKind::Int64, &[tags::INT64]),
@@ -356,6 +474,15 @@ mod tests {
             (ValueKind::Float64, &[tags::FLOAT64]),
             (ValueKind::String, &[tags::STRING]),
             (ValueKind::Bytes, &[tags::BYTES]),
+            (ValueKind::Int8, &[tags::INT8]),
+            (ValueKind::UInt8, &[tags::UINT8]),
+            (ValueKind::Int16, &[tags::INT16]),
+            (ValueKind::UInt16, &[tags::UINT16]),
+            (ValueKind::Int128, &[tags::INT128]),
+            (ValueKind::UInt128, &[tags::UINT128]),
+            (ValueKind::Date, &[tags::DATE]),
+            (ValueKind::Timestamp, &[tags::TIMESTAMP]),
+            (ValueKind::Decimal, &[tags::DECIMAL]),
             (ValueKind::Array, &[]),
             (ValueKind::Object, &[]),
         ];

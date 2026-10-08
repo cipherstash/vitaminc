@@ -17,5 +17,22 @@ vitaminc-protected = { version = "0.5.1", path = "../protected" }
 
 zeroize = { workspace = true }
 
+[features]
+default = []
+chrono = ["dep:chrono"]
+rust_decimal = ["dep:rust_decimal"]
+
+[dependencies.chrono]
+version = "0.4.44"
+default-features = false
+features = ["std"]
+optional = true
+
+[dependencies.rust_decimal]
+version = "1.41"
+default-features = false
+features = ["std"]
+optional = true
+
 [dev-dependencies]
 vitaminc-encrypt = { path = "../encrypt" }

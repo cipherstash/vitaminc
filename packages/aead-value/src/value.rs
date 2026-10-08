@@ -1,10 +1,15 @@
 use std::any::Any;
 use std::borrow::Cow;
 
+#[cfg(feature = "rust_decimal")]
+use crate::tagged::TaggedDecimal;
 use crate::tagged::{
-    TaggedBoolFalse, TaggedBoolTrue, TaggedBytes, TaggedFloat32, TaggedFloat64, TaggedInt32,
-    TaggedInt64, TaggedNull, TaggedString, TaggedUInt32, TaggedUInt64, TaggedUndefined,
+    TaggedBoolFalse, TaggedBoolTrue, TaggedBytes, TaggedFloat32, TaggedFloat64, TaggedInt128,
+    TaggedInt16, TaggedInt32, TaggedInt64, TaggedInt8, TaggedNull, TaggedString, TaggedUInt128,
+    TaggedUInt16, TaggedUInt32, TaggedUInt64, TaggedUInt8, TaggedUndefined,
 };
+#[cfg(feature = "chrono")]
+use crate::tagged::{TaggedDate, TaggedTimestamp};
 use crate::tags;
 use vitaminc_aead::{
     Cipher, Decipher, DecipherVisitor, Decrypt, Encrypt, IntoAad, MapAccess, MapCipher, SeqAccess,
@@ -34,9 +39,8 @@ use zeroize::Zeroize;
 /// `Null` and `Undefined` are distinct tagged leaves rather than uses of
 /// [`Cipher::encrypt_none`] — `Option` semantics can't distinguish them,
 /// and JavaScript callers can. The numeric family divides the number space
-/// by both signedness and width: [`Int32`](Value::Int32) /
-/// [`Int64`](Value::Int64) / [`UInt32`](Value::UInt32) /
-/// [`UInt64`](Value::UInt64) for exact integers and
+/// by both signedness and width: 8-, 16-, 32-, 64- and 128-bit exact
+/// integers, and
 /// [`Float32`](Value::Float32) / [`Float64`](Value::Float64) for
 /// IEEE-754 values. The 32-bit widths exist for schema fidelity with the
 /// EQL layer (Postgres `int4`/`float4`), not byte savings. See the crate
@@ -54,6 +58,10 @@ use zeroize::Zeroize;
 ///
 /// This enum is non-exhaustive so new kinds can be added. Downstream matches
 /// must handle unsupported variants.
+///
+/// Optional chrono/decimal scalars are inline values, without protected
+/// custody; their external types do not implement [`Zeroize`], so explicit
+/// zeroization skips them. Strings and bytes remain inside [`Protected`].
 #[derive(Clone, Zeroize)]
 #[non_exhaustive]
 pub enum Value {
@@ -75,8 +83,7 @@ pub enum Value {
     UInt32(u32),
     /// 64-bit unsigned integer. Kept distinct from [`Int64`](Value::Int64)
     /// so unsigned values above `i64::MAX` — previously unrepresentable —
-    /// round trip losslessly. This closes the model's only representational
-    /// hole in the integer space.
+    /// round trip losslessly without widening to a 128-bit kind.
     UInt64(u64),
     /// 32-bit floating-point number. Round-trips by IEEE-754 bit pattern
     /// (`NaN` payloads and `-0.0` survive). For schema fidelity with
@@ -85,6 +92,30 @@ pub enum Value {
     /// 64-bit floating-point number. Round-trips by IEEE-754 bit pattern.
     /// This is the tag a JavaScript `number` maps to.
     Float64(f64),
+    /// 8-bit signed integer.
+    Int8(i8),
+    /// 8-bit unsigned integer.
+    UInt8(u8),
+    /// 16-bit signed integer.
+    Int16(i16),
+    /// 16-bit unsigned integer.
+    UInt16(u16),
+    /// 128-bit signed integer.
+    Int128(i128),
+    /// 128-bit unsigned integer.
+    UInt128(u128),
+    /// Calendar date; CE day count preserves the exact date. Requires `chrono`.
+    #[cfg(feature = "chrono")]
+    #[zeroize(skip)]
+    Date(chrono::NaiveDate),
+    /// UTC timestamp, preserving nanoseconds and chrono leap seconds. Requires `chrono`.
+    #[cfg(feature = "chrono")]
+    #[zeroize(skip)]
+    Timestamp(chrono::DateTime<chrono::Utc>),
+    /// Finite decimal, preserving the original scale (e.g. `1.50`). Requires `rust_decimal`.
+    #[cfg(feature = "rust_decimal")]
+    #[zeroize(skip)]
+    Decimal(rust_decimal::Decimal),
     /// String as UTF-8 bytes. The [`Utf8String`] payload validates UTF-8 at
     /// construction — a `String` leaf can never seal bytes the decrypt side
     /// would refuse — and holds them inside [`Protected`] so the copy is
@@ -131,7 +162,9 @@ pub enum Value {
 // cannot be destructured — the `Encrypt` impl moves leaves out of `self`.
 // The secret-bearing leaves are inside `Protected`, which wipes on drop on
 // its own; container metadata (numbers, booleans, keys) can be wiped
-// explicitly via `Zeroize` where callers need it.
+// explicitly via `Zeroize` where callers need it. The optional chrono and
+// rust_decimal scalars do not implement `Zeroize` and are skipped, as is
+// passthrough. Like the other inline scalars, they are not protected storage.
 
 /// UTF-8 string payload for [`Value::String`], validated at construction.
 ///
@@ -207,6 +240,18 @@ impl Encrypt for Value {
             Value::UInt64(u) => TaggedUInt64::from(u).encrypt_with_aad(cipher, aad),
             Value::Float32(f) => TaggedFloat32::from(f).encrypt_with_aad(cipher, aad),
             Value::Float64(f) => TaggedFloat64::from(f).encrypt_with_aad(cipher, aad),
+            Value::Int8(v) => TaggedInt8::from(v).encrypt_with_aad(cipher, aad),
+            Value::UInt8(v) => TaggedUInt8::from(v).encrypt_with_aad(cipher, aad),
+            Value::Int16(v) => TaggedInt16::from(v).encrypt_with_aad(cipher, aad),
+            Value::UInt16(v) => TaggedUInt16::from(v).encrypt_with_aad(cipher, aad),
+            Value::Int128(v) => TaggedInt128::from(v).encrypt_with_aad(cipher, aad),
+            Value::UInt128(v) => TaggedUInt128::from(v).encrypt_with_aad(cipher, aad),
+            #[cfg(feature = "chrono")]
+            Value::Date(v) => TaggedDate::from(v).encrypt_with_aad(cipher, aad),
+            #[cfg(feature = "chrono")]
+            Value::Timestamp(v) => TaggedTimestamp::from(v).encrypt_with_aad(cipher, aad),
+            #[cfg(feature = "rust_decimal")]
+            Value::Decimal(v) => TaggedDecimal::from(v).encrypt_with_aad(cipher, aad),
             Value::String(s) => TaggedString::new(s.into_inner()).encrypt_with_aad(cipher, aad),
             Value::Bytes(b) => TaggedBytes::new(b).encrypt_with_aad(cipher, aad),
             // Delegate to the built-in `Vec<T>` impl (`Value: Encrypt`)
@@ -287,6 +332,38 @@ impl<'c> DecipherVisitor<'c> for ValueVisitor {
                 let bits: [u8; 8] = bits.try_into().map_err(|_| Unspecified)?;
                 Ok(Value::Float64(f64::from_bits(u64::from_le_bytes(bits))))
             }
+            (tags::INT8, bytes) => {
+                let bytes: [u8; 1] = bytes.try_into().map_err(|_| Unspecified)?;
+                Ok(Value::Int8(i8::from_le_bytes(bytes)))
+            }
+            (tags::UINT8, bytes) => {
+                let bytes: [u8; 1] = bytes.try_into().map_err(|_| Unspecified)?;
+                Ok(Value::UInt8(u8::from_le_bytes(bytes)))
+            }
+            (tags::INT16, bytes) => {
+                let bytes: [u8; 2] = bytes.try_into().map_err(|_| Unspecified)?;
+                Ok(Value::Int16(i16::from_le_bytes(bytes)))
+            }
+            (tags::UINT16, bytes) => {
+                let bytes: [u8; 2] = bytes.try_into().map_err(|_| Unspecified)?;
+                Ok(Value::UInt16(u16::from_le_bytes(bytes)))
+            }
+            (tags::INT128, bytes) => {
+                let bytes: [u8; 16] = bytes.try_into().map_err(|_| Unspecified)?;
+                Ok(Value::Int128(i128::from_le_bytes(bytes)))
+            }
+            (tags::UINT128, bytes) => {
+                let bytes: [u8; 16] = bytes.try_into().map_err(|_| Unspecified)?;
+                Ok(Value::UInt128(u128::from_le_bytes(bytes)))
+            }
+            #[cfg(feature = "chrono")]
+            (tags::DATE, bytes) => crate::scalar::decode_date(bytes).map(Value::Date),
+            #[cfg(feature = "chrono")]
+            (tags::TIMESTAMP, bytes) => {
+                crate::scalar::decode_timestamp(bytes).map(Value::Timestamp)
+            }
+            #[cfg(feature = "rust_decimal")]
+            (tags::DECIMAL, bytes) => crate::scalar::decode_decimal(bytes).map(Value::Decimal),
             (tags::STRING, utf8) => {
                 // Validate now so host conversions later are infallible.
                 std::str::from_utf8(utf8).map_err(|_| Unspecified)?;
@@ -369,6 +446,18 @@ impl PartialEq for Value {
             (Value::UInt64(a), Value::UInt64(b)) => a == b,
             (Value::Float32(a), Value::Float32(b)) => a.to_bits() == b.to_bits(),
             (Value::Float64(a), Value::Float64(b)) => a.to_bits() == b.to_bits(),
+            (Value::Int8(a), Value::Int8(b)) => a == b,
+            (Value::UInt8(a), Value::UInt8(b)) => a == b,
+            (Value::Int16(a), Value::Int16(b)) => a == b,
+            (Value::UInt16(a), Value::UInt16(b)) => a == b,
+            (Value::Int128(a), Value::Int128(b)) => a == b,
+            (Value::UInt128(a), Value::UInt128(b)) => a == b,
+            #[cfg(feature = "chrono")]
+            (Value::Date(a), Value::Date(b)) => a == b,
+            #[cfg(feature = "chrono")]
+            (Value::Timestamp(a), Value::Timestamp(b)) => a == b,
+            #[cfg(feature = "rust_decimal")]
+            (Value::Decimal(a), Value::Decimal(b)) => a.serialize() == b.serialize(),
             (Value::String(a), Value::String(b)) => a.risky_ref() == b.risky_ref(),
             (Value::Bytes(a), Value::Bytes(b)) => a.risky_ref() == b.risky_ref(),
             (Value::Array(a), Value::Array(b)) => a == b,
@@ -392,6 +481,18 @@ impl std::fmt::Debug for Value {
             Value::UInt64(u) => write!(f, "UInt64({u})"),
             Value::Float32(n) => write!(f, "Float32({n})"),
             Value::Float64(n) => write!(f, "Float64({n})"),
+            Value::Int8(v) => write!(f, "Int8({v})"),
+            Value::UInt8(v) => write!(f, "UInt8({v})"),
+            Value::Int16(v) => write!(f, "Int16({v})"),
+            Value::UInt16(v) => write!(f, "UInt16({v})"),
+            Value::Int128(v) => write!(f, "Int128({v})"),
+            Value::UInt128(v) => write!(f, "UInt128({v})"),
+            #[cfg(feature = "chrono")]
+            Value::Date(v) => write!(f, "Date({v})"),
+            #[cfg(feature = "chrono")]
+            Value::Timestamp(v) => write!(f, "Timestamp({v})"),
+            #[cfg(feature = "rust_decimal")]
+            Value::Decimal(v) => write!(f, "Decimal({v})"),
             Value::String(_) => f.write_str("String(<redacted>)"),
             Value::Bytes(_) => f.write_str("Bytes(<redacted>)"),
             Value::Array(items) => f.debug_tuple("Array").field(items).finish(),
@@ -690,6 +791,231 @@ mod tests {
         value.encrypt(&capture).expect("leaf encrypt");
         let bytes = capture.plaintext.borrow().clone();
         bytes
+    }
+
+    // Pin encryption and transport independently to the same wire bytes,
+    // and check that clone/decrypt preserve the exact value and decimal scale.
+    fn assert_scalar(value: Value, expected: &[u8]) {
+        let kind = value.kind().expect("scalar kind");
+        assert_eq!(kind.tags(), &expected[..1]);
+        assert_eq!(leaf_bytes(value.clone()), expected);
+        assert_eq!(roundtrip(value.clone()), value);
+        let mut wire = Vec::new();
+        crate::transport::encode_value(value.clone(), &mut wire).expect("encode");
+        assert_eq!(wire, expected);
+        let decoded = crate::transport::decode_value(&mut crate::transport::Reader::new(&wire))
+            .expect("decode");
+        assert_eq!(decoded, value);
+    }
+
+    fn assert_invalid_scalar(bytes: Vec<u8>) {
+        assert!(
+            crate::transport::decode_value(&mut crate::transport::Reader::new(&bytes)).is_err()
+        );
+        let cipher = cipher();
+        let ct = (&cipher)
+            .encrypt_bytes_vec(Protected::new(bytes), vitaminc_aead::Context::empty())
+            .expect("seal raw bytes");
+        assert!(cipher.decrypt::<Value>(ct).is_err());
+    }
+
+    #[test]
+    fn kat_new_integer_widths() {
+        assert_scalar(Value::Int8(-1), &[0x0C, 0xFF]);
+        assert_scalar(Value::Int8(i8::MIN), &[0x0C, 0x80]);
+        assert_scalar(Value::Int8(i8::MAX), &[0x0C, 0x7F]);
+        assert_scalar(Value::UInt8(u8::MAX), &[0x0D, 0xFF]);
+        assert_scalar(Value::UInt8(0), &[0x0D, 0]);
+        assert_scalar(Value::Int16(-1), &[0x0E, 0xFF, 0xFF]);
+        assert_scalar(Value::Int16(i16::MIN), &[0x0E, 0, 0x80]);
+        assert_scalar(Value::Int16(i16::MAX), &[0x0E, 0xFF, 0x7F]);
+        assert_scalar(Value::UInt16(u16::MAX), &[0x0F, 0xFF, 0xFF]);
+        assert_scalar(Value::UInt16(0x1234), &[0x0F, 0x34, 0x12]);
+        assert_scalar(
+            Value::Int128(-1),
+            &[
+                0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                0xFF, 0xFF, 0xFF,
+            ],
+        );
+        assert_scalar(
+            Value::Int128(i128::MIN),
+            &[0x10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x80],
+        );
+        assert_scalar(
+            Value::Int128(i128::MAX),
+            &[
+                0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                0xFF, 0xFF, 0x7F,
+            ],
+        );
+        assert_scalar(
+            Value::UInt128(u128::MAX),
+            &[
+                0x11, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                0xFF, 0xFF, 0xFF,
+            ],
+        );
+        assert_scalar(
+            Value::UInt128(0x0F0E0D0C0B0A09080706050403020100),
+            &[0x11, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        );
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn kat_dates_and_nanosecond_timestamps() {
+        assert_scalar(
+            Value::Date(chrono::NaiveDate::from_ymd_opt(1, 1, 1).expect("date")),
+            &[0x12, 1, 0, 0, 0],
+        );
+        assert_scalar(
+            Value::Date(chrono::NaiveDate::from_ymd_opt(1970, 1, 1).expect("date")),
+            &[0x12, 0x3B, 0xF9, 0x0A, 0],
+        );
+        assert_scalar(
+            Value::Date(chrono::NaiveDate::from_num_days_from_ce_opt(-1).expect("date")),
+            &[0x12, 0xFF, 0xFF, 0xFF, 0xFF],
+        );
+        assert_scalar(
+            Value::Timestamp(chrono::DateTime::UNIX_EPOCH),
+            &[0x13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        );
+        assert_scalar(
+            Value::Timestamp(chrono::DateTime::from_timestamp(-1, 123_456_789).expect("timestamp")),
+            &[
+                0x13, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x15, 0xCD, 0x5B, 0x07,
+            ],
+        );
+        // Chrono's leap-second representation is preserved, not normalized.
+        assert_scalar(
+            Value::Timestamp(
+                chrono::DateTime::from_timestamp(59, 1_500_000_000).expect("leap second"),
+            ),
+            &[0x13, 59, 0, 0, 0, 0, 0, 0, 0, 0, 0x2F, 0x68, 0x59],
+        );
+        for date in [chrono::NaiveDate::MIN, chrono::NaiveDate::MAX] {
+            assert_eq!(roundtrip(Value::Date(date)), Value::Date(date));
+        }
+        for timestamp in [
+            chrono::DateTime::<chrono::Utc>::MIN_UTC,
+            chrono::DateTime::<chrono::Utc>::MAX_UTC,
+        ] {
+            assert_eq!(
+                roundtrip(Value::Timestamp(timestamp)),
+                Value::Timestamp(timestamp)
+            );
+        }
+    }
+
+    #[cfg(feature = "rust_decimal")]
+    #[test]
+    fn kat_decimal_keeps_scale_sign_and_all_mantissa_words() {
+        use rust_decimal::Decimal;
+        assert_scalar(
+            Value::Decimal(Decimal::new(150, 2)),
+            &[0x14, 0, 0, 2, 0, 150, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        );
+        assert_scalar(
+            Value::Decimal(Decimal::new(15, 1)),
+            &[0x14, 0, 0, 1, 0, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        );
+        assert_scalar(
+            Value::Decimal(Decimal::new(-150, 2)),
+            &[0x14, 0, 0, 2, 0x80, 150, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        );
+        assert_scalar(
+            Value::Decimal(Decimal::from_parts(
+                0x03020100, 0x07060504, 0x0B0A0908, false, 28,
+            )),
+            &[0x14, 0, 0, 28, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        );
+        for decimal in [
+            Decimal::MIN,
+            Decimal::MAX,
+            Decimal::new(0, 28),
+            Decimal::from_parts(0, 0, 0, true, 2),
+        ] {
+            let expected = decimal.serialize();
+            let Value::Decimal(decoded) = roundtrip(Value::Decimal(decimal)) else {
+                panic!("decimal")
+            };
+            assert_eq!(decoded.serialize(), expected);
+            assert_eq!(decoded.scale(), decimal.scale());
+        }
+        let Value::Decimal(decoded) = roundtrip(Value::Decimal(Decimal::new(150, 2))) else {
+            panic!("decimal")
+        };
+        assert_eq!(decoded.to_string(), "1.50");
+    }
+
+    #[test]
+    fn new_fixed_width_payloads_reject_wrong_lengths() {
+        for (tag, width) in [
+            (0x0C, 1),
+            (0x0D, 1),
+            (0x0E, 2),
+            (0x0F, 2),
+            (0x10, 16),
+            (0x11, 16),
+            (0x12, 4),
+            (0x13, 12),
+            (0x14, 16),
+        ] {
+            for len in [width - 1, width + 1] {
+                let mut bytes = vec![tag];
+                bytes.resize(1 + len, 0);
+                assert_invalid_scalar(bytes);
+            }
+        }
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    fn invalid_dates_and_timestamps_are_rejected() {
+        for days in [i32::MIN, i32::MAX] {
+            let mut bytes = vec![0x12];
+            bytes.extend_from_slice(&days.to_le_bytes());
+            assert_invalid_scalar(bytes);
+        }
+        for (seconds, nanos) in [
+            (i64::MIN, 0u32),
+            (i64::MAX, 0),
+            (0, 1_000_000_000),
+            (59, 2_000_000_000),
+            (0, u32::MAX),
+        ] {
+            let mut bytes = vec![0x13];
+            bytes.extend_from_slice(&seconds.to_le_bytes());
+            bytes.extend_from_slice(&nanos.to_le_bytes());
+            assert_invalid_scalar(bytes);
+        }
+    }
+
+    #[cfg(feature = "rust_decimal")]
+    #[test]
+    fn invalid_decimal_flags_are_rejected_without_rounding() {
+        for flags in [1u32, 1 << 24, 29 << 16, 30 << 16, 31 << 16, 255 << 16] {
+            let mut bytes = vec![0x14];
+            bytes.extend_from_slice(&flags.to_le_bytes());
+            bytes.extend_from_slice(&[150, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+            assert_invalid_scalar(bytes);
+        }
+    }
+
+    #[test]
+    fn disabled_optional_scalar_features_reject_their_tags() {
+        for (tag, width, enabled) in [
+            (0x12, 4, cfg!(feature = "chrono")),
+            (0x13, 12, cfg!(feature = "chrono")),
+            (0x14, 16, cfg!(feature = "rust_decimal")),
+        ] {
+            if !enabled {
+                let mut bytes = vec![tag];
+                bytes.resize(width + 1, 0);
+                assert_invalid_scalar(bytes);
+            }
+        }
     }
 
     #[test]

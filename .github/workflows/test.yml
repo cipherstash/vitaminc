@@ -87,6 +87,15 @@ jobs:
           echo "RLIMIT_MEMLOCK soft: $(ulimit -l) KiB"
           cargo test
 
+      - name: test (aead-value optional scalar features)
+        # Exercise each feature separately as well as together: default tests
+        # reject these tags, while enabled tests pin exact date/time/decimal
+        # payloads and reject malformed encodings without normalization.
+        run: |
+          cargo test -p vitaminc-aead-value --features chrono &&
+          cargo test -p vitaminc-aead-value --features rust_decimal &&
+          cargo test -p vitaminc-aead-value --all-features
+
       - name: test (vitaminc-encrypt, RustCrypto backend on native)
         # Forces the RustCrypto path that wasm32 uses, so the same property
         # tests run against both backends in CI.

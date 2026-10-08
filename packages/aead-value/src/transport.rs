@@ -215,6 +215,45 @@ fn encode_value_ref(value: &Value, out: &mut Vec<u8>) -> Result<(), CodecError> 
             out.push(tags::FLOAT64);
             out.extend_from_slice(&f.to_bits().to_le_bytes());
         }
+        Value::Int8(v) => {
+            out.push(tags::INT8);
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        Value::UInt8(v) => {
+            out.push(tags::UINT8);
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        Value::Int16(v) => {
+            out.push(tags::INT16);
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        Value::UInt16(v) => {
+            out.push(tags::UINT16);
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        Value::Int128(v) => {
+            out.push(tags::INT128);
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        Value::UInt128(v) => {
+            out.push(tags::UINT128);
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        #[cfg(feature = "chrono")]
+        Value::Date(v) => {
+            out.push(tags::DATE);
+            out.extend_from_slice(&chrono::Datelike::num_days_from_ce(v).to_le_bytes());
+        }
+        #[cfg(feature = "chrono")]
+        Value::Timestamp(v) => {
+            out.push(tags::TIMESTAMP);
+            out.extend_from_slice(&crate::scalar::timestamp_bytes(*v));
+        }
+        #[cfg(feature = "rust_decimal")]
+        Value::Decimal(v) => {
+            out.push(tags::DECIMAL);
+            out.extend_from_slice(&v.serialize());
+        }
         Value::String(s) => {
             out.push(tags::STRING);
             write_bytes(out, s.risky_ref())?;
@@ -330,6 +369,24 @@ fn decode_leaf(tag: u8, reader: &mut Reader<'_>) -> Result<Value, CodecError> {
         tags::FLOAT64 => Ok(Value::Float64(f64::from_bits(u64::from_le_bytes(fixed(
             reader,
         )?)))),
+        tags::INT8 => Ok(Value::Int8(i8::from_le_bytes(fixed(reader)?))),
+        tags::UINT8 => Ok(Value::UInt8(u8::from_le_bytes(fixed(reader)?))),
+        tags::INT16 => Ok(Value::Int16(i16::from_le_bytes(fixed(reader)?))),
+        tags::UINT16 => Ok(Value::UInt16(u16::from_le_bytes(fixed(reader)?))),
+        tags::INT128 => Ok(Value::Int128(i128::from_le_bytes(fixed(reader)?))),
+        tags::UINT128 => Ok(Value::UInt128(u128::from_le_bytes(fixed(reader)?))),
+        #[cfg(feature = "chrono")]
+        tags::DATE => crate::scalar::decode_date(reader.take(4)?)
+            .map(Value::Date)
+            .map_err(|_| CodecError),
+        #[cfg(feature = "chrono")]
+        tags::TIMESTAMP => crate::scalar::decode_timestamp(reader.take(12)?)
+            .map(Value::Timestamp)
+            .map_err(|_| CodecError),
+        #[cfg(feature = "rust_decimal")]
+        tags::DECIMAL => crate::scalar::decode_decimal(reader.take(16)?)
+            .map(Value::Decimal)
+            .map_err(|_| CodecError),
         tags::STRING => {
             let len = reader.count()?;
             let bytes = reader.take(len)?;
@@ -595,16 +652,13 @@ mod tests {
     }
 
     #[test]
-    fn framing_tags_are_pinned_and_old_framing_is_rejected() {
+    fn framing_tags_are_pinned() {
         assert_eq!(encoded(Value::Array(vec![])), [0xF0, 0, 0, 0, 0]);
         assert_eq!(encoded(Value::Object(vec![])), [0xF1, 0, 0, 0, 0]);
         assert_eq!(
             encoded(Value::Passthrough(Box::new(Value::Null))),
             [0xF2, 0]
         );
-        for old_tag in [0x10, 0x11, 0x12] {
-            assert!(decode_value(&mut Reader::new(&[old_tag, 0, 0, 0, 0])).is_err());
-        }
     }
 
     #[test]

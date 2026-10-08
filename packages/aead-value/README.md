@@ -39,13 +39,16 @@ carries a small, fixed set of value classes, and governs its own growth:
 > language before it ships.
 
 The numeric family is the worked example. It divides the number space by
-both **signedness** and **width**: `INT32`/`INT64`/`UINT32`/`UINT64` for
-exact integers and `FLOAT32`/`FLOAT64` for IEEE-754 values. The unsigned
+both **signedness** and **width**: 8-, 16-, 32-, 64- and 128-bit signed
+and unsigned integers, plus `FLOAT32`/`FLOAT64` for IEEE-754 values. The unsigned
 tags close a genuine representational hole (values above `i64::MAX` had no
 home); the 32-bit widths exist for **schema fidelity with the EQL layer**
 (Postgres `int4`/`float4`), not byte savings, so an `int4` column
 round-trips as a 32-bit value rather than silently widening. Every tag has
-a defined Go/Python/JavaScript decode mapping (below).
+an explicit payload encoding. The existing binding mappings are below;
+the new kinds' host conversions are tracked in
+[issue #375](https://github.com/cipherstash/vitaminc/issues/375) and must
+be implemented before these kinds ship across languages.
 
 ## Leaf encoding (cross-language wire commitment)
 
@@ -69,6 +72,15 @@ onto the cipher's sequence and map modes and carry no tag of their own.
 | `0x09` | `FLOAT64` | 8 bytes, IEEE-754 binary64 bit pattern, little-endian |
 | `0x0A` | `STRING` | UTF-8 bytes |
 | `0x0B` | `BYTES` | raw bytes |
+| `0x0C` | `INT8` | 1 byte, two's complement |
+| `0x0D` | `UINT8` | 1 byte |
+| `0x0E` | `INT16` | 2 bytes, two's complement, little-endian |
+| `0x0F` | `UINT16` | 2 bytes, little-endian |
+| `0x10` | `INT128` | 16 bytes, two's complement, little-endian |
+| `0x11` | `UINT128` | 16 bytes, little-endian |
+| `0x12` | `DATE` | `i32` CE day count, little-endian (0001-01-01 is day 1) |
+| `0x13` | `TIMESTAMP` | `i64` Unix seconds then `u32` nanoseconds, little-endian, UTC |
+| `0x14` | `DECIMAL` | rust_decimal's 16-byte `serialize()`, preserving scale |
 
 The float tags carry the **raw IEEE-754 bit pattern** (not a numeric
 encoding), so `NaN` payloads and `-0.0` survive a round trip.
@@ -77,6 +89,35 @@ This table is a **frozen wire format**: changing a tag or payload encoding
 breaks decryption of existing ciphertexts in every language. New types must
 take new tags. The known-answer tests in this crate pin each encoding
 byte-for-byte.
+
+## Optional scalar payloads
+
+Enable `chrono` for `Value::Date(chrono::NaiveDate)` and
+`Value::Timestamp(chrono::DateTime<chrono::Utc>)`, or `rust_decimal` for
+`Value::Decimal(rust_decimal::Decimal)`. Neither feature is enabled by
+default. `ValueKind` names and tag constants remain available with all
+feature configurations; decoding a disabled payload kind returns an error.
+
+Dates use chrono's `num_days_from_ce`, including its supported BCE dates.
+Timestamps preserve nanoseconds and chrono's leap-second representation:
+nanoseconds may be at least one billion only when Unix seconds modulo 60 is
+59, and must be below two billion. Out-of-range dates/times are rejected.
+
+Decimals retain scale: `1.50` decrypts as `1.50`, with different bytes from
+`1.5`. The payload has four little-endian `u32` words: flags, then the low,
+middle and high words of the 96-bit mantissa. Flags have the sign in bit 31
+and scale (0–28) in bits 16–23; all other bits must be zero. Invalid flags
+or scale are rejected rather than masked or rounded. This finite type has
+no NaN or infinity. No search-term normalization happens during encryption.
+
+These optional scalars are inline values, like numbers; they do not use
+`Protected` storage. Their external types do not implement `Zeroize`, so
+`Value::zeroize` skips them. Strings and bytes retain protected custody.
+
+Rust's primitive `i128` and `u128` also implement `Encrypt`/`Decrypt` in
+`vitaminc-aead`: these statically typed values seal as 16 untagged
+little-endian bytes. Use `Value::Int128`/`Value::UInt128` for tagged,
+self-describing values. Both primitive types support `Protected` custody.
 
 ## Cross-language type mapping
 
@@ -121,7 +162,8 @@ the matching width (e.g. `int16`→`INT32`), and `uint`/`uintptr` map to
 A binding often has to say what a field's values are before it has one.
 [`ValueKind`] is the `Value` model without the payload: `bool`, `int32`,
 `int64`, `uint32`, `uint64`, `float32`, `float64`, `string`, `bytes`,
-`array` and `object`. Those names are frozen wire format, like the tag
+`int8`, `uint8`, `int16`, `uint16`, `int128`, `uint128`, `date`,
+`timestamp`, `decimal`, `array` and `object`. Those names are frozen wire format, like the tag
 table. `Null`, `Undefined` and `Passthrough` have no kind: the first two
 are single-valued, and passthrough is a transport choice, not a type.
 `Value::kind` reports a value's kind, `ValueKind::holds` checks one,
