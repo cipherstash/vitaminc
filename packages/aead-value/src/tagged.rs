@@ -8,7 +8,7 @@
 //! string, or a container. Untagged bytes cannot be safely re-interpreted:
 //! any 8 bytes parse equally as a valid `i64`, `u64`, or `f64`, so a bare
 //! payload gives the decrypt side no way to tell which. Each scalar
-//! [`FfiValue`](crate::FfiValue) therefore seals as a one-byte type tag
+//! [`Value`](crate::Value) therefore seals as a one-byte type tag
 //! followed by its payload (`[tag] ++ payload`, see [`crate::tags`]) —
 //! the tag rides *inside* the AEAD envelope, so it is authenticated and the
 //! value describes its own type on the way back out.
@@ -46,7 +46,7 @@
 //! that knows the expected type up front) can mix that tag into AAD via
 //! [`LeafTypeAad`](crate::LeafTypeAad) at both encrypt and decrypt so a wrong
 //! type hypothesis fails authentication. The self-describing
-//! [`FfiValue`](crate::FfiValue) path does **not** use that — it relies on the
+//! [`Value`](crate::Value) path does **not** use that — it relies on the
 //! inner authenticated tag, which is known only *after* decryption.
 
 use crate::tags;

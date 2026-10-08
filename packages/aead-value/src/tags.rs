@@ -1,6 +1,6 @@
 //! Leaf type tags — the cross-language wire commitment.
 //!
-//! Every scalar [`FfiValue`](crate::FfiValue) seals as `[tag] ++ payload`
+//! Every scalar [`Value`](crate::Value) seals as `[tag] ++ payload`
 //! **inside** the AEAD envelope, so the tag is authenticated: flipping a
 //! value's type requires forging the AEAD authentication tag. Containers
 //! (arrays, objects) are structural — they use the cipher's sequence and map

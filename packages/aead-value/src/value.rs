@@ -13,13 +13,12 @@ use vitaminc_aead::{
 use vitaminc_protected::{Controlled, Protected};
 use zeroize::Zeroize;
 
-/// An owned, `Send`, language-neutral representation of a dynamically typed
-/// host value — the bridge between FFI values (which are typically bound to
-/// a host thread or environment handle) and the [`Encrypt`]/[`Decrypt`]
-/// traits (whose [`Decrypt`] bound requires `Send` and provides no host
-/// context).
+/// An owned, `Send`, language-neutral value model for dynamically typed
+/// data, usable with any [`Encrypt`]/[`Decrypt`] cipher. Bindings also use
+/// it to bridge host values (typically bound to a host thread or environment
+/// handle) into the thread-independent encryption traits.
 ///
-/// Host values are converted into `FfiValue` on the host's thread by the
+/// Host values are converted into `Value` on the host's thread by the
 /// per-language binding crate, after which encryption and decryption can
 /// run on any thread; decrypted values convert back on the host's thread.
 /// Secret-bearing leaves (strings and bytes) are held in [`Protected`] so
@@ -35,10 +34,10 @@ use zeroize::Zeroize;
 /// `Null` and `Undefined` are distinct tagged leaves rather than uses of
 /// [`Cipher::encrypt_none`] — `Option` semantics can't distinguish them,
 /// and JavaScript callers can. The numeric family divides the number space
-/// by both signedness and width: [`Int32`](FfiValue::Int32) /
-/// [`Int64`](FfiValue::Int64) / [`UInt32`](FfiValue::UInt32) /
-/// [`UInt64`](FfiValue::UInt64) for exact integers and
-/// [`Float32`](FfiValue::Float32) / [`Float64`](FfiValue::Float64) for
+/// by both signedness and width: [`Int32`](Value::Int32) /
+/// [`Int64`](Value::Int64) / [`UInt32`](Value::UInt32) /
+/// [`UInt64`](Value::UInt64) for exact integers and
+/// [`Float32`](Value::Float32) / [`Float64`](Value::Float64) for
 /// IEEE-754 values. The 32-bit widths exist for schema fidelity with the
 /// EQL layer (Postgres `int4`/`float4`), not byte savings. See the crate
 /// docs for the cross-language type mapping.
@@ -47,8 +46,17 @@ use zeroize::Zeroize;
 /// encodings (see [`tags`]); this enum is merely Rust's materialization of
 /// that model. Bindings in other languages implement the model, not this
 /// enum.
-#[derive(Zeroize)]
-pub enum FfiValue {
+///
+/// Cloning makes a deep copy, including a fresh [`Protected`] allocation for
+/// every string and byte leaf, also inside passthrough subtrees. A clone stays
+/// under the same custody as its original: its protected leaves are wiped on
+/// drop, and callers must uphold the same rules when exposing plaintext.
+///
+/// This enum is non-exhaustive so new kinds can be added. Downstream matches
+/// must handle unsupported variants.
+#[derive(Clone, Zeroize)]
+#[non_exhaustive]
+pub enum Value {
     /// Null (JS `null`, Python `None`, Go `nil`).
     Null,
     /// JavaScript `undefined`. Languages without an analog decode this to
@@ -58,14 +66,14 @@ pub enum FfiValue {
     Bool(bool),
     /// 32-bit signed integer. For schema fidelity with `int4` at the EQL
     /// layer; integer-typed languages keep it distinct from
-    /// [`Int64`](FfiValue::Int64).
+    /// [`Int64`](Value::Int64).
     Int32(i32),
     /// 64-bit signed integer. Kept distinct from the float tags so
     /// integer-typed languages round-trip integers as integers.
     Int64(i64),
     /// 32-bit unsigned integer. For schema fidelity with the EQL layer.
     UInt32(u32),
-    /// 64-bit unsigned integer. Kept distinct from [`Int64`](FfiValue::Int64)
+    /// 64-bit unsigned integer. Kept distinct from [`Int64`](Value::Int64)
     /// so unsigned values above `i64::MAX` — previously unrepresentable —
     /// round trip losslessly. This closes the model's only representational
     /// hole in the integer space.
@@ -85,17 +93,17 @@ pub enum FfiValue {
     /// Binary data.
     Bytes(Protected<Vec<u8>>),
     /// Array. Encrypts via the cipher's sequence mode.
-    Array(Vec<FfiValue>),
+    Array(Vec<Value>),
     /// String-keyed object/map. Encrypts via the cipher's map mode: keys
     /// travel in the clear (bound into each value's AAD — see
     /// [`Context::for_map_entry`](vitaminc_aead::Context::for_map_entry)); values are
     /// sealed.
-    Object(Vec<(String, FfiValue)>),
+    Object(Vec<(String, Value)>),
     /// A subtree that travels alongside the ciphertext **unencrypted and
     /// unauthenticated**, via the cipher's passthrough channel (see
     /// [`Cipher::passthrough`]). The wrapped value — which may be any
-    /// `FfiValue`, including a whole [`Array`](FfiValue::Array) or
-    /// [`Object`](FfiValue::Object) subtree — is then entirely plaintext: it
+    /// `Value`, including a whole [`Array`](Value::Array) or
+    /// [`Object`](Value::Object) subtree — is then entirely plaintext: it
     /// is neither sealed nor covered by any AEAD tag, so it can be read and
     /// altered by anyone holding the ciphertext.
     ///
@@ -116,7 +124,7 @@ pub enum FfiValue {
     // secret here is a misuse the type documents against, not something the
     // zeroize path should paper over.
     #[zeroize(skip)]
-    Passthrough(Box<FfiValue>),
+    Passthrough(Box<Value>),
 }
 
 // No `ZeroizeOnDrop` derive: it would add a `Drop` impl, and `Drop` types
@@ -125,16 +133,18 @@ pub enum FfiValue {
 // its own; container metadata (numbers, booleans, keys) can be wiped
 // explicitly via `Zeroize` where callers need it.
 
-/// UTF-8 string payload for [`FfiValue::String`], validated at construction.
+/// UTF-8 string payload for [`Value::String`], validated at construction.
 ///
 /// Wraps `Protected<Vec<u8>>` with the invariant that the bytes are valid
 /// UTF-8. The decrypt visitor only ever rebuilds one from bytes it has just
 /// validated, and every constructor here validates (or starts from a
 /// `String`, which is valid by type) — so a `String` leaf can never seal
 /// bytes the decrypt side will refuse. Without this, a hand-built
-/// `FfiValue::String` of arbitrary bytes would encrypt Ok and then fail
+/// `Value::String` of arbitrary bytes would encrypt Ok and then fail
 /// every decrypt forever: silent data loss discovered only at read time.
-#[derive(Zeroize)]
+///
+/// Cloning copies the bytes into a fresh [`Protected`] under the same custody.
+#[derive(Clone, Zeroize)]
 pub struct Utf8String(Protected<Vec<u8>>);
 
 impl Utf8String {
@@ -176,7 +186,7 @@ impl TryFrom<Protected<Vec<u8>>> for Utf8String {
     }
 }
 
-impl Encrypt for FfiValue {
+impl Encrypt for Value {
     fn encrypt_with_aad<'a, C, A>(self, cipher: C, aad: A) -> Result<C::Ok, C::Error>
     where
         C: Cipher,
@@ -187,25 +197,25 @@ impl Encrypt for FfiValue {
         // fixed-width leaves seal from a stack array (no heap allocation),
         // the variable-width ones allocate once.
         match self {
-            FfiValue::Null => TaggedNull::tag_only().encrypt_with_aad(cipher, aad),
-            FfiValue::Undefined => TaggedUndefined::tag_only().encrypt_with_aad(cipher, aad),
-            FfiValue::Bool(false) => TaggedBoolFalse::tag_only().encrypt_with_aad(cipher, aad),
-            FfiValue::Bool(true) => TaggedBoolTrue::tag_only().encrypt_with_aad(cipher, aad),
-            FfiValue::Int32(i) => TaggedInt32::from(i).encrypt_with_aad(cipher, aad),
-            FfiValue::Int64(i) => TaggedInt64::from(i).encrypt_with_aad(cipher, aad),
-            FfiValue::UInt32(u) => TaggedUInt32::from(u).encrypt_with_aad(cipher, aad),
-            FfiValue::UInt64(u) => TaggedUInt64::from(u).encrypt_with_aad(cipher, aad),
-            FfiValue::Float32(f) => TaggedFloat32::from(f).encrypt_with_aad(cipher, aad),
-            FfiValue::Float64(f) => TaggedFloat64::from(f).encrypt_with_aad(cipher, aad),
-            FfiValue::String(s) => TaggedString::new(s.into_inner()).encrypt_with_aad(cipher, aad),
-            FfiValue::Bytes(b) => TaggedBytes::new(b).encrypt_with_aad(cipher, aad),
-            // Delegate to the built-in `Vec<T>` impl (`FfiValue: Encrypt`)
+            Value::Null => TaggedNull::tag_only().encrypt_with_aad(cipher, aad),
+            Value::Undefined => TaggedUndefined::tag_only().encrypt_with_aad(cipher, aad),
+            Value::Bool(false) => TaggedBoolFalse::tag_only().encrypt_with_aad(cipher, aad),
+            Value::Bool(true) => TaggedBoolTrue::tag_only().encrypt_with_aad(cipher, aad),
+            Value::Int32(i) => TaggedInt32::from(i).encrypt_with_aad(cipher, aad),
+            Value::Int64(i) => TaggedInt64::from(i).encrypt_with_aad(cipher, aad),
+            Value::UInt32(u) => TaggedUInt32::from(u).encrypt_with_aad(cipher, aad),
+            Value::UInt64(u) => TaggedUInt64::from(u).encrypt_with_aad(cipher, aad),
+            Value::Float32(f) => TaggedFloat32::from(f).encrypt_with_aad(cipher, aad),
+            Value::Float64(f) => TaggedFloat64::from(f).encrypt_with_aad(cipher, aad),
+            Value::String(s) => TaggedString::new(s.into_inner()).encrypt_with_aad(cipher, aad),
+            Value::Bytes(b) => TaggedBytes::new(b).encrypt_with_aad(cipher, aad),
+            // Delegate to the built-in `Vec<T>` impl (`Value: Encrypt`)
             // so the sequence wire protocol has exactly one definition —
             // element positions are carried structurally, not authenticated;
             // see `Context::for_sequence_element`. A nested `Passthrough`
             // element routes identically either way, via its own arm below.
-            FfiValue::Array(items) => items.encrypt_with_aad(cipher, aad),
-            FfiValue::Object(entries) => {
+            Value::Array(items) => items.encrypt_with_aad(cipher, aad),
+            Value::Object(entries) => {
                 // Mirror the built-in `HashMap` impls; the cipher binds each
                 // key into its value's AAD via `Context::for_map_entry`.
                 entries
@@ -215,7 +225,7 @@ impl Encrypt for FfiValue {
                     })?
                     .end()
             }
-            FfiValue::Passthrough(inner) => {
+            Value::Passthrough(inner) => {
                 // Route the (non-sensitive, unauthenticated) subtree through
                 // the cipher's type-erased passthrough channel. This impl is
                 // generic over every cipher, so it cannot name a specific
@@ -223,8 +233,8 @@ impl Encrypt for FfiValue {
                 // subtree as `Box<dyn Any + Send>` and each cipher absorbs it
                 // (for the Rust-native ciphers that type *is* the box).
                 // No AAD is consumed — passthrough values are not
-                // authenticated. `FfiValueVisitor::visit_passthrough` downcasts
-                // the box back to an `FfiValue` on decrypt.
+                // authenticated. `ValueVisitor::visit_passthrough` downcasts
+                // the box back to a `Value` on decrypt.
                 //
                 // Passthrough nested *inside* an `Array`/`Object` needs no
                 // special handling here: those arms recurse through
@@ -238,10 +248,10 @@ impl Encrypt for FfiValue {
     }
 }
 
-struct FfiValueVisitor;
+struct ValueVisitor;
 
-impl<'c> DecipherVisitor<'c> for FfiValueVisitor {
-    type Value = FfiValue;
+impl<'c> DecipherVisitor<'c> for ValueVisitor {
+    type Value = Value;
 
     fn visit_bytes_vec(self, data: Protected<Vec<u8>>) -> Result<Self::Value, Unspecified> {
         let bytes = data.risky_ref();
@@ -249,40 +259,40 @@ impl<'c> DecipherVisitor<'c> for FfiValueVisitor {
         // The `try_into` on each fixed-width arm rejects any payload that is
         // not exactly the tag's width — truncated or over-long leaves fail.
         match (t, payload) {
-            (tags::NULL, []) => Ok(FfiValue::Null),
-            (tags::UNDEFINED, []) => Ok(FfiValue::Undefined),
-            (tags::BOOL_FALSE, []) => Ok(FfiValue::Bool(false)),
-            (tags::BOOL_TRUE, []) => Ok(FfiValue::Bool(true)),
+            (tags::NULL, []) => Ok(Value::Null),
+            (tags::UNDEFINED, []) => Ok(Value::Undefined),
+            (tags::BOOL_FALSE, []) => Ok(Value::Bool(false)),
+            (tags::BOOL_TRUE, []) => Ok(Value::Bool(true)),
             (tags::INT32, bytes) => {
                 let bytes: [u8; 4] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(FfiValue::Int32(i32::from_le_bytes(bytes)))
+                Ok(Value::Int32(i32::from_le_bytes(bytes)))
             }
             (tags::INT64, bytes) => {
                 let bytes: [u8; 8] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(FfiValue::Int64(i64::from_le_bytes(bytes)))
+                Ok(Value::Int64(i64::from_le_bytes(bytes)))
             }
             (tags::UINT32, bytes) => {
                 let bytes: [u8; 4] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(FfiValue::UInt32(u32::from_le_bytes(bytes)))
+                Ok(Value::UInt32(u32::from_le_bytes(bytes)))
             }
             (tags::UINT64, bytes) => {
                 let bytes: [u8; 8] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(FfiValue::UInt64(u64::from_le_bytes(bytes)))
+                Ok(Value::UInt64(u64::from_le_bytes(bytes)))
             }
             (tags::FLOAT32, bits) => {
                 let bits: [u8; 4] = bits.try_into().map_err(|_| Unspecified)?;
-                Ok(FfiValue::Float32(f32::from_bits(u32::from_le_bytes(bits))))
+                Ok(Value::Float32(f32::from_bits(u32::from_le_bytes(bits))))
             }
             (tags::FLOAT64, bits) => {
                 let bits: [u8; 8] = bits.try_into().map_err(|_| Unspecified)?;
-                Ok(FfiValue::Float64(f64::from_bits(u64::from_le_bytes(bits))))
+                Ok(Value::Float64(f64::from_bits(u64::from_le_bytes(bits))))
             }
             (tags::STRING, utf8) => {
                 // Validate now so host conversions later are infallible.
                 std::str::from_utf8(utf8).map_err(|_| Unspecified)?;
-                Ok(FfiValue::String(Utf8String(Protected::new(utf8.to_vec()))))
+                Ok(Value::String(Utf8String(Protected::new(utf8.to_vec()))))
             }
-            (tags::BYTES, raw) => Ok(FfiValue::Bytes(Protected::new(raw.to_vec()))),
+            (tags::BYTES, raw) => Ok(Value::Bytes(Protected::new(raw.to_vec()))),
             _ => Err(Unspecified),
         }
         // `data` drops (and wipes) here; leaf payloads were copied into
@@ -291,31 +301,31 @@ impl<'c> DecipherVisitor<'c> for FfiValueVisitor {
 
     fn visit_seq<A: SeqAccess<'c>>(self, mut seq: A) -> Result<Self::Value, Unspecified> {
         let mut items = Vec::new();
-        while let Some(item) = seq.next_element::<FfiValue>().map_err(|_| Unspecified)? {
+        while let Some(item) = seq.next_element::<Value>().map_err(|_| Unspecified)? {
             items.push(item);
         }
-        Ok(FfiValue::Array(items))
+        Ok(Value::Array(items))
     }
 
     fn visit_map<A: MapAccess<'c>>(self, mut map: A) -> Result<Self::Value, Unspecified> {
         let mut entries = Vec::new();
-        while let Some(entry) = map.next_entry::<FfiValue>().map_err(|_| Unspecified)? {
+        while let Some(entry) = map.next_entry::<Value>().map_err(|_| Unspecified)? {
             entries.push(entry);
         }
-        Ok(FfiValue::Object(entries))
+        Ok(Value::Object(entries))
     }
 
     /// A Rust-side `Option::None` sealed with `encrypt_none` maps onto
-    /// [`FfiValue::Null`] — the closest host analog of an authenticated
+    /// [`Value::Null`] — the closest host analog of an authenticated
     /// absent value. (Host-originated values never produce this shape:
     /// `Null` and `Undefined` are tagged leaves.)
     fn visit_none(self) -> Result<Self::Value, Unspecified> {
-        Ok(FfiValue::Null)
+        Ok(Value::Null)
     }
 
     /// Recover a passthrough subtree, preserving its marking so a decrypted
     /// tree records which fields travelled in the clear. The payload was boxed
-    /// as an `FfiValue` by this crate's [`Encrypt`] impl; a box carrying any
+    /// as a `Value` by this crate's [`Encrypt`] impl; a box carrying any
     /// other concrete type (a foreign payload never produced here) is rejected
     /// with [`Unspecified`] rather than panicking on the downcast.
     fn visit_passthrough(
@@ -323,13 +333,13 @@ impl<'c> DecipherVisitor<'c> for FfiValueVisitor {
         value: Box<dyn Any + Send + 'static>,
     ) -> Result<Self::Value, Unspecified> {
         value
-            .downcast::<FfiValue>()
-            .map(FfiValue::Passthrough)
+            .downcast::<Value>()
+            .map(Value::Passthrough)
             .map_err(|_| Unspecified)
     }
 }
 
-impl<'c> Decrypt<'c> for FfiValue {
+impl<'c> Decrypt<'c> for Value {
     fn decrypt_with_aad<'a, D, A>(decipher: D, aad: A) -> D::Ok<Self>
     where
         D: Decipher<'c>,
@@ -337,12 +347,12 @@ impl<'c> Decrypt<'c> for FfiValue {
     {
         // The value's type is recovered from the ciphertext shape (and the
         // authenticated leaf tag), not fixed by the caller.
-        decipher.decrypt_any(FfiValueVisitor, aad)
+        decipher.decrypt_any(ValueVisitor, aad)
     }
 }
 
 #[cfg(test)]
-impl PartialEq for FfiValue {
+impl PartialEq for Value {
     /// Structural equality for tests only. Variable-time — leaf comparisons
     /// use ordinary byte equality — which is why this is `cfg(test)`: use
     /// `vitaminc_protected::Equatable` where constant-time equality of
@@ -350,43 +360,43 @@ impl PartialEq for FfiValue {
     /// `NaN` payloads compare as they seal.
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (FfiValue::Null, FfiValue::Null) => true,
-            (FfiValue::Undefined, FfiValue::Undefined) => true,
-            (FfiValue::Bool(a), FfiValue::Bool(b)) => a == b,
-            (FfiValue::Int32(a), FfiValue::Int32(b)) => a == b,
-            (FfiValue::Int64(a), FfiValue::Int64(b)) => a == b,
-            (FfiValue::UInt32(a), FfiValue::UInt32(b)) => a == b,
-            (FfiValue::UInt64(a), FfiValue::UInt64(b)) => a == b,
-            (FfiValue::Float32(a), FfiValue::Float32(b)) => a.to_bits() == b.to_bits(),
-            (FfiValue::Float64(a), FfiValue::Float64(b)) => a.to_bits() == b.to_bits(),
-            (FfiValue::String(a), FfiValue::String(b)) => a.risky_ref() == b.risky_ref(),
-            (FfiValue::Bytes(a), FfiValue::Bytes(b)) => a.risky_ref() == b.risky_ref(),
-            (FfiValue::Array(a), FfiValue::Array(b)) => a == b,
-            (FfiValue::Object(a), FfiValue::Object(b)) => a == b,
-            (FfiValue::Passthrough(a), FfiValue::Passthrough(b)) => a == b,
+            (Value::Null, Value::Null) => true,
+            (Value::Undefined, Value::Undefined) => true,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Int32(a), Value::Int32(b)) => a == b,
+            (Value::Int64(a), Value::Int64(b)) => a == b,
+            (Value::UInt32(a), Value::UInt32(b)) => a == b,
+            (Value::UInt64(a), Value::UInt64(b)) => a == b,
+            (Value::Float32(a), Value::Float32(b)) => a.to_bits() == b.to_bits(),
+            (Value::Float64(a), Value::Float64(b)) => a.to_bits() == b.to_bits(),
+            (Value::String(a), Value::String(b)) => a.risky_ref() == b.risky_ref(),
+            (Value::Bytes(a), Value::Bytes(b)) => a.risky_ref() == b.risky_ref(),
+            (Value::Array(a), Value::Array(b)) => a == b,
+            (Value::Object(a), Value::Object(b)) => a == b,
+            (Value::Passthrough(a), Value::Passthrough(b)) => a == b,
             _ => false,
         }
     }
 }
 
 #[cfg(test)]
-impl std::fmt::Debug for FfiValue {
+impl std::fmt::Debug for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FfiValue::Null => f.write_str("Null"),
-            FfiValue::Undefined => f.write_str("Undefined"),
-            FfiValue::Bool(b) => write!(f, "Bool({b})"),
-            FfiValue::Int32(i) => write!(f, "Int32({i})"),
-            FfiValue::Int64(i) => write!(f, "Int64({i})"),
-            FfiValue::UInt32(u) => write!(f, "UInt32({u})"),
-            FfiValue::UInt64(u) => write!(f, "UInt64({u})"),
-            FfiValue::Float32(n) => write!(f, "Float32({n})"),
-            FfiValue::Float64(n) => write!(f, "Float64({n})"),
-            FfiValue::String(_) => f.write_str("String(<redacted>)"),
-            FfiValue::Bytes(_) => f.write_str("Bytes(<redacted>)"),
-            FfiValue::Array(items) => f.debug_tuple("Array").field(items).finish(),
-            FfiValue::Object(entries) => f.debug_tuple("Object").field(entries).finish(),
-            FfiValue::Passthrough(inner) => f.debug_tuple("Passthrough").field(inner).finish(),
+            Value::Null => f.write_str("Null"),
+            Value::Undefined => f.write_str("Undefined"),
+            Value::Bool(b) => write!(f, "Bool({b})"),
+            Value::Int32(i) => write!(f, "Int32({i})"),
+            Value::Int64(i) => write!(f, "Int64({i})"),
+            Value::UInt32(u) => write!(f, "UInt32({u})"),
+            Value::UInt64(u) => write!(f, "UInt64({u})"),
+            Value::Float32(n) => write!(f, "Float32({n})"),
+            Value::Float64(n) => write!(f, "Float64({n})"),
+            Value::String(_) => f.write_str("String(<redacted>)"),
+            Value::Bytes(_) => f.write_str("Bytes(<redacted>)"),
+            Value::Array(items) => f.debug_tuple("Array").field(items).finish(),
+            Value::Object(entries) => f.debug_tuple("Object").field(entries).finish(),
+            Value::Passthrough(inner) => f.debug_tuple("Passthrough").field(inner).finish(),
         }
     }
 }
@@ -401,8 +411,81 @@ mod tests {
         Aes256Cipher::new(&Key::from([7u8; 32])).expect("cipher")
     }
 
-    fn s(v: &str) -> FfiValue {
-        FfiValue::String(v.into())
+    fn s(v: &str) -> Value {
+        Value::String(v.into())
+    }
+
+    #[test]
+    fn clone_preserves_every_variant_and_float_bits() {
+        let values = [
+            Value::Null,
+            Value::Undefined,
+            Value::Bool(false),
+            Value::Bool(true),
+            Value::Int32(i32::MIN),
+            Value::Int64(i64::MIN),
+            Value::UInt32(u32::MAX),
+            Value::UInt64(u64::MAX),
+            Value::Float32(f32::from_bits(0x7fc0_0001)),
+            Value::Float32(-0.0),
+            Value::Float64(f64::from_bits(0x7ff8_0000_0000_0001)),
+            Value::Float64(-0.0),
+            s("secret 🦀"),
+            s(""),
+            Value::Bytes(Protected::new(vec![0, 255])),
+            Value::Bytes(Protected::new(vec![])),
+            Value::Array(vec![s("nested")]),
+            Value::Object(vec![("key".into(), s("nested"))]),
+            Value::Passthrough(Box::new(s("clear"))),
+        ];
+        for value in values {
+            assert_eq!(value.clone(), value);
+        }
+    }
+
+    #[test]
+    fn clone_owns_fresh_protected_leaves_through_nested_containers() {
+        let original = Value::Object(vec![(
+            "key".into(),
+            Value::Array(vec![
+                s("secret"),
+                Value::Bytes(Protected::new(vec![1, 2, 3])),
+                Value::Passthrough(Box::new(s("clear"))),
+            ]),
+        )]);
+        let cloned = original.clone();
+
+        // Compare allocations while both trees are alive, including the
+        // protected string within a passthrough subtree.
+        fn leaves(value: &Value) -> Vec<&[u8]> {
+            match value {
+                Value::String(s) => vec![s.risky_ref()],
+                Value::Bytes(b) => vec![b.risky_ref()],
+                Value::Array(items) => items.iter().flat_map(leaves).collect(),
+                Value::Object(entries) => entries.iter().flat_map(|(_, v)| leaves(v)).collect(),
+                Value::Passthrough(inner) => leaves(inner),
+                _ => vec![],
+            }
+        }
+        let originals = leaves(&original);
+        let copies = leaves(&cloned);
+        assert_eq!(originals.len(), 3);
+        assert_eq!(copies.len(), originals.len());
+        for (a, b) in originals.iter().zip(&copies) {
+            assert_eq!(a, b);
+            assert_ne!(a.as_ptr(), b.as_ptr());
+        }
+
+        // Wiping/dropping the original must not alter the clone.
+        let expected = leaves(&cloned)
+            .iter()
+            .map(|b| b.to_vec())
+            .collect::<Vec<_>>();
+        let mut original = original;
+        original.zeroize();
+        drop(original);
+        assert_eq!(leaves(&cloned), expected);
+        assert_eq!(roundtrip(cloned.clone()), cloned);
     }
 
     /// The `Debug` impl exists for assertion failures, so a passing suite
@@ -413,44 +496,44 @@ mod tests {
     fn debug_redacts_secret_leaves_and_renders_the_rest() {
         // Scalars render their value — the numeric tags are distinguishable,
         // which is the point of the split numeric family.
-        assert_eq!(format!("{:?}", FfiValue::Null), "Null");
-        assert_eq!(format!("{:?}", FfiValue::Undefined), "Undefined");
-        assert_eq!(format!("{:?}", FfiValue::Bool(true)), "Bool(true)");
-        assert_eq!(format!("{:?}", FfiValue::Int32(-1)), "Int32(-1)");
-        assert_eq!(format!("{:?}", FfiValue::Int64(-1)), "Int64(-1)");
-        assert_eq!(format!("{:?}", FfiValue::UInt32(1)), "UInt32(1)");
-        assert_eq!(format!("{:?}", FfiValue::UInt64(1)), "UInt64(1)");
-        assert_eq!(format!("{:?}", FfiValue::Float32(1.5)), "Float32(1.5)");
-        assert_eq!(format!("{:?}", FfiValue::Float64(1.5)), "Float64(1.5)");
+        assert_eq!(format!("{:?}", Value::Null), "Null");
+        assert_eq!(format!("{:?}", Value::Undefined), "Undefined");
+        assert_eq!(format!("{:?}", Value::Bool(true)), "Bool(true)");
+        assert_eq!(format!("{:?}", Value::Int32(-1)), "Int32(-1)");
+        assert_eq!(format!("{:?}", Value::Int64(-1)), "Int64(-1)");
+        assert_eq!(format!("{:?}", Value::UInt32(1)), "UInt32(1)");
+        assert_eq!(format!("{:?}", Value::UInt64(1)), "UInt64(1)");
+        assert_eq!(format!("{:?}", Value::Float32(1.5)), "Float32(1.5)");
+        assert_eq!(format!("{:?}", Value::Float64(1.5)), "Float64(1.5)");
 
         // The two secret-bearing variants never show their contents.
         let secret = format!("{:?}", s("hunter2"));
         assert_eq!(secret, "String(<redacted>)");
         assert!(!secret.contains("hunter2"));
-        let bytes = FfiValue::Bytes(Protected::new(vec![0xDE, 0xAD]));
+        let bytes = Value::Bytes(Protected::new(vec![0xDE, 0xAD]));
         assert_eq!(format!("{bytes:?}"), "Bytes(<redacted>)");
 
         // Containers recurse, so nested secrets stay redacted too — including
         // through a passthrough wrapper.
         assert_eq!(
-            format!("{:?}", FfiValue::Array(vec![FfiValue::Null, s("secret")])),
+            format!("{:?}", Value::Array(vec![Value::Null, s("secret")])),
             "Array([Null, String(<redacted>)])"
         );
-        let obj = FfiValue::Object(vec![("k".to_string(), s("secret"))]);
+        let obj = Value::Object(vec![("k".to_string(), s("secret"))]);
         let rendered = format!("{obj:?}");
         assert!(rendered.contains("String(<redacted>)"), "{rendered}");
         assert!(!rendered.contains("secret"), "{rendered}");
         assert_eq!(
-            format!("{:?}", FfiValue::Passthrough(Box::new(s("secret")))),
+            format!("{:?}", Value::Passthrough(Box::new(s("secret")))),
             "Passthrough(String(<redacted>))"
         );
     }
 
-    fn roundtrip(value: FfiValue) -> FfiValue {
+    fn roundtrip(value: Value) -> Value {
         roundtrip_with_aad(value, ())
     }
 
-    fn roundtrip_with_aad<'a, A: IntoAad<'a> + Clone>(value: FfiValue, aad: A) -> FfiValue {
+    fn roundtrip_with_aad<'a, A: IntoAad<'a> + Clone>(value: Value, aad: A) -> Value {
         let cipher = cipher();
         let ct = value
             .encrypt_with_aad(&cipher, aad.clone())
@@ -600,7 +683,7 @@ mod tests {
     }
 
     /// The exact leaf plaintext a value seals — the conformance vector.
-    fn leaf_bytes(value: FfiValue) -> Vec<u8> {
+    fn leaf_bytes(value: Value) -> Vec<u8> {
         let capture = kat::CapturingCipher {
             plaintext: std::cell::RefCell::new(Vec::new()),
         };
@@ -611,18 +694,18 @@ mod tests {
 
     #[test]
     fn kat_null() {
-        assert_eq!(leaf_bytes(FfiValue::Null), [0x00]);
+        assert_eq!(leaf_bytes(Value::Null), [0x00]);
     }
 
     #[test]
     fn kat_undefined() {
-        assert_eq!(leaf_bytes(FfiValue::Undefined), [0x01]);
+        assert_eq!(leaf_bytes(Value::Undefined), [0x01]);
     }
 
     #[test]
     fn kat_bool() {
-        assert_eq!(leaf_bytes(FfiValue::Bool(false)), [0x02]);
-        assert_eq!(leaf_bytes(FfiValue::Bool(true)), [0x03]);
+        assert_eq!(leaf_bytes(Value::Bool(false)), [0x02]);
+        assert_eq!(leaf_bytes(Value::Bool(true)), [0x03]);
     }
 
     /// `ValueKind::tags()` is a second map from variant to tag; the first is
@@ -632,16 +715,16 @@ mod tests {
     #[test]
     fn every_kinded_leaf_seals_under_a_tag_its_kind_names() {
         for value in [
-            FfiValue::Bool(false),
-            FfiValue::Bool(true),
-            FfiValue::Int32(-3),
-            FfiValue::Int64(-4),
-            FfiValue::UInt32(34),
-            FfiValue::UInt64(35),
-            FfiValue::Float32(1.5),
-            FfiValue::Float64(2.5),
+            Value::Bool(false),
+            Value::Bool(true),
+            Value::Int32(-3),
+            Value::Int64(-4),
+            Value::UInt32(34),
+            Value::UInt64(35),
+            Value::Float32(1.5),
+            Value::Float64(2.5),
             s("alice"),
-            FfiValue::Bytes(Protected::new(b"ab".to_vec())),
+            Value::Bytes(Protected::new(b"ab".to_vec())),
         ] {
             let kind = value.kind().expect("a scalar leaf has a kind");
             let tag = leaf_bytes(value)[0];
@@ -654,18 +737,12 @@ mod tests {
 
     #[test]
     fn kat_int32() {
-        assert_eq!(
-            leaf_bytes(FfiValue::Int32(42)),
-            [0x04, 42, 0x00, 0x00, 0x00]
-        );
+        assert_eq!(leaf_bytes(Value::Int32(42)), [0x04, 42, 0x00, 0x00, 0x00]);
         // -1: all ones (two's complement).
-        assert_eq!(
-            leaf_bytes(FfiValue::Int32(-1)),
-            [0x04, 0xFF, 0xFF, 0xFF, 0xFF]
-        );
+        assert_eq!(leaf_bytes(Value::Int32(-1)), [0x04, 0xFF, 0xFF, 0xFF, 0xFF]);
         // i32::MIN: sign bit only in the top byte.
         assert_eq!(
-            leaf_bytes(FfiValue::Int32(i32::MIN)),
+            leaf_bytes(Value::Int32(i32::MIN)),
             [0x04, 0x00, 0x00, 0x00, 0x80]
         );
     }
@@ -673,29 +750,26 @@ mod tests {
     #[test]
     fn kat_int64() {
         assert_eq!(
-            leaf_bytes(FfiValue::Int64(42)),
+            leaf_bytes(Value::Int64(42)),
             [0x05, 42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
         );
         // -1: all ones (two's complement).
         assert_eq!(
-            leaf_bytes(FfiValue::Int64(-1)),
+            leaf_bytes(Value::Int64(-1)),
             [0x05, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
         );
         assert_eq!(
-            leaf_bytes(FfiValue::Int64(i64::MIN)),
+            leaf_bytes(Value::Int64(i64::MIN)),
             [0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]
         );
     }
 
     #[test]
     fn kat_uint32() {
-        assert_eq!(
-            leaf_bytes(FfiValue::UInt32(0)),
-            [0x06, 0x00, 0x00, 0x00, 0x00]
-        );
+        assert_eq!(leaf_bytes(Value::UInt32(0)), [0x06, 0x00, 0x00, 0x00, 0x00]);
         // u32::MAX: all ones.
         assert_eq!(
-            leaf_bytes(FfiValue::UInt32(u32::MAX)),
+            leaf_bytes(Value::UInt32(u32::MAX)),
             [0x06, 0xFF, 0xFF, 0xFF, 0xFF]
         );
     }
@@ -703,16 +777,16 @@ mod tests {
     #[test]
     fn kat_uint64() {
         assert_eq!(
-            leaf_bytes(FfiValue::UInt64(42)),
+            leaf_bytes(Value::UInt64(42)),
             [0x07, 42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
         );
         // u64::MAX: all ones — the value INT64 cannot represent.
         assert_eq!(
-            leaf_bytes(FfiValue::UInt64(u64::MAX)),
+            leaf_bytes(Value::UInt64(u64::MAX)),
             [0x07, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
         );
         assert_eq!(
-            leaf_bytes(FfiValue::UInt64(0)),
+            leaf_bytes(Value::UInt64(0)),
             [0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
         );
     }
@@ -721,18 +795,18 @@ mod tests {
     fn kat_float32() {
         // 1.5f32 = 0x3FC00000, little-endian.
         assert_eq!(
-            leaf_bytes(FfiValue::Float32(1.5)),
+            leaf_bytes(Value::Float32(1.5)),
             [0x08, 0x00, 0x00, 0xC0, 0x3F]
         );
         // -0.0f32: sign bit only — distinct from +0.0 on the wire.
         assert_eq!(
-            leaf_bytes(FfiValue::Float32(-0.0)),
+            leaf_bytes(Value::Float32(-0.0)),
             [0x08, 0x00, 0x00, 0x00, 0x80]
         );
         // A specific NaN bit pattern survives by raw bits.
         let nan = f32::from_bits(0x7fc0_0001);
         assert_eq!(
-            leaf_bytes(FfiValue::Float32(nan)),
+            leaf_bytes(Value::Float32(nan)),
             [0x08, 0x01, 0x00, 0xC0, 0x7F]
         );
     }
@@ -741,12 +815,12 @@ mod tests {
     fn kat_float64() {
         // 1.5 = 0x3FF8000000000000, little-endian.
         assert_eq!(
-            leaf_bytes(FfiValue::Float64(1.5)),
+            leaf_bytes(Value::Float64(1.5)),
             [0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8, 0x3F]
         );
         // -0.0: sign bit only — distinct from +0.0 on the wire.
         assert_eq!(
-            leaf_bytes(FfiValue::Float64(-0.0)),
+            leaf_bytes(Value::Float64(-0.0)),
             [0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]
         );
     }
@@ -760,7 +834,7 @@ mod tests {
     #[test]
     fn kat_bytes() {
         assert_eq!(
-            leaf_bytes(FfiValue::Bytes(Protected::new(vec![0xDE, 0xAD]))),
+            leaf_bytes(Value::Bytes(Protected::new(vec![0xDE, 0xAD]))),
             [0x0B, 0xDE, 0xAD]
         );
     }
@@ -770,8 +844,8 @@ mod tests {
         // Int64(-1) and UInt64(u64::MAX) share payload bytes but differ by
         // tag, so they never collide on the wire.
         assert_ne!(
-            leaf_bytes(FfiValue::Int64(-1)),
-            leaf_bytes(FfiValue::UInt64(u64::MAX))
+            leaf_bytes(Value::Int64(-1)),
+            leaf_bytes(Value::UInt64(u64::MAX))
         );
     }
 
@@ -779,28 +853,22 @@ mod tests {
     fn kat_int32_and_int64_never_collide() {
         // Same small value, different widths AND tags: 32- and 64-bit
         // integers never collide on the wire.
-        assert_ne!(
-            leaf_bytes(FfiValue::Int32(7)),
-            leaf_bytes(FfiValue::Int64(7))
-        );
+        assert_ne!(leaf_bytes(Value::Int32(7)), leaf_bytes(Value::Int64(7)));
     }
 
     #[test]
     fn kat_float32_and_float64_never_collide() {
         // 1.5 in binary32 and binary64 differ by tag, width, and bits.
         assert_ne!(
-            leaf_bytes(FfiValue::Float32(1.5)),
-            leaf_bytes(FfiValue::Float64(1.5))
+            leaf_bytes(Value::Float32(1.5)),
+            leaf_bytes(Value::Float64(1.5))
         );
     }
 
     #[test]
     fn kat_int64_and_float64_never_collide() {
         // Int64(1) and Float64(1.0) are different types AND different bytes.
-        assert_ne!(
-            leaf_bytes(FfiValue::Int64(1)),
-            leaf_bytes(FfiValue::Float64(1.0))
-        );
+        assert_ne!(leaf_bytes(Value::Int64(1)), leaf_bytes(Value::Float64(1.0)));
     }
 
     // ---------------------------------------------------------------
@@ -809,50 +877,32 @@ mod tests {
 
     #[test]
     fn roundtrip_leaves() {
-        assert_eq!(roundtrip(FfiValue::Null), FfiValue::Null);
-        assert_eq!(roundtrip(FfiValue::Undefined), FfiValue::Undefined);
-        assert_eq!(roundtrip(FfiValue::Bool(true)), FfiValue::Bool(true));
-        assert_eq!(roundtrip(FfiValue::Bool(false)), FfiValue::Bool(false));
+        assert_eq!(roundtrip(Value::Null), Value::Null);
+        assert_eq!(roundtrip(Value::Undefined), Value::Undefined);
+        assert_eq!(roundtrip(Value::Bool(true)), Value::Bool(true));
+        assert_eq!(roundtrip(Value::Bool(false)), Value::Bool(false));
         assert_eq!(
-            roundtrip(FfiValue::Float64(1234.5678)),
-            FfiValue::Float64(1234.5678)
+            roundtrip(Value::Float64(1234.5678)),
+            Value::Float64(1234.5678)
         );
         assert_eq!(
-            roundtrip(FfiValue::Float32(1234.5f32)),
-            FfiValue::Float32(1234.5f32)
+            roundtrip(Value::Float32(1234.5f32)),
+            Value::Float32(1234.5f32)
         );
-        assert_eq!(roundtrip(FfiValue::Int32(0)), FfiValue::Int32(0));
-        assert_eq!(
-            roundtrip(FfiValue::Int32(i32::MAX)),
-            FfiValue::Int32(i32::MAX)
-        );
-        assert_eq!(
-            roundtrip(FfiValue::Int32(i32::MIN)),
-            FfiValue::Int32(i32::MIN)
-        );
-        assert_eq!(roundtrip(FfiValue::Int64(0)), FfiValue::Int64(0));
-        assert_eq!(
-            roundtrip(FfiValue::Int64(i64::MAX)),
-            FfiValue::Int64(i64::MAX)
-        );
-        assert_eq!(
-            roundtrip(FfiValue::Int64(i64::MIN)),
-            FfiValue::Int64(i64::MIN)
-        );
-        assert_eq!(roundtrip(FfiValue::UInt32(0)), FfiValue::UInt32(0));
-        assert_eq!(
-            roundtrip(FfiValue::UInt32(u32::MAX)),
-            FfiValue::UInt32(u32::MAX)
-        );
-        assert_eq!(roundtrip(FfiValue::UInt64(0)), FfiValue::UInt64(0));
-        assert_eq!(
-            roundtrip(FfiValue::UInt64(u64::MAX)),
-            FfiValue::UInt64(u64::MAX)
-        );
+        assert_eq!(roundtrip(Value::Int32(0)), Value::Int32(0));
+        assert_eq!(roundtrip(Value::Int32(i32::MAX)), Value::Int32(i32::MAX));
+        assert_eq!(roundtrip(Value::Int32(i32::MIN)), Value::Int32(i32::MIN));
+        assert_eq!(roundtrip(Value::Int64(0)), Value::Int64(0));
+        assert_eq!(roundtrip(Value::Int64(i64::MAX)), Value::Int64(i64::MAX));
+        assert_eq!(roundtrip(Value::Int64(i64::MIN)), Value::Int64(i64::MIN));
+        assert_eq!(roundtrip(Value::UInt32(0)), Value::UInt32(0));
+        assert_eq!(roundtrip(Value::UInt32(u32::MAX)), Value::UInt32(u32::MAX));
+        assert_eq!(roundtrip(Value::UInt64(0)), Value::UInt64(0));
+        assert_eq!(roundtrip(Value::UInt64(u64::MAX)), Value::UInt64(u64::MAX));
         assert_eq!(roundtrip(s("hello world")), s("hello world"));
         assert_eq!(
-            roundtrip(FfiValue::Bytes(Protected::new(vec![0, 159, 146, 150]))),
-            FfiValue::Bytes(Protected::new(vec![0, 159, 146, 150]))
+            roundtrip(Value::Bytes(Protected::new(vec![0, 159, 146, 150]))),
+            Value::Bytes(Protected::new(vec![0, 159, 146, 150]))
         );
     }
 
@@ -860,67 +910,49 @@ mod tests {
     fn roundtrip_preserves_numeric_types() {
         // The decrypted variant matches the encrypted one — integers do not
         // collapse into floats, widths are preserved, and signedness holds.
-        assert!(matches!(roundtrip(FfiValue::Int32(1)), FfiValue::Int32(1)));
-        assert!(matches!(roundtrip(FfiValue::Int64(1)), FfiValue::Int64(1)));
-        assert!(matches!(
-            roundtrip(FfiValue::UInt32(1)),
-            FfiValue::UInt32(1)
-        ));
-        assert!(matches!(
-            roundtrip(FfiValue::UInt64(1)),
-            FfiValue::UInt64(1)
-        ));
-        assert!(matches!(
-            roundtrip(FfiValue::Float32(1.0)),
-            FfiValue::Float32(_)
-        ));
-        assert!(matches!(
-            roundtrip(FfiValue::Float64(1.0)),
-            FfiValue::Float64(_)
-        ));
+        assert!(matches!(roundtrip(Value::Int32(1)), Value::Int32(1)));
+        assert!(matches!(roundtrip(Value::Int64(1)), Value::Int64(1)));
+        assert!(matches!(roundtrip(Value::UInt32(1)), Value::UInt32(1)));
+        assert!(matches!(roundtrip(Value::UInt64(1)), Value::UInt64(1)));
+        assert!(matches!(roundtrip(Value::Float32(1.0)), Value::Float32(_)));
+        assert!(matches!(roundtrip(Value::Float64(1.0)), Value::Float64(_)));
     }
 
     #[test]
     fn roundtrip_float_edge_cases() {
         // Raw-bits round-trip: -0.0 and specific NaN payloads survive, in
         // both widths.
-        assert_eq!(roundtrip(FfiValue::Float64(-0.0)), FfiValue::Float64(-0.0));
-        assert_eq!(roundtrip(FfiValue::Float32(-0.0)), FfiValue::Float32(-0.0));
+        assert_eq!(roundtrip(Value::Float64(-0.0)), Value::Float64(-0.0));
+        assert_eq!(roundtrip(Value::Float32(-0.0)), Value::Float32(-0.0));
         assert_eq!(
-            roundtrip(FfiValue::Float64(f64::INFINITY)),
-            FfiValue::Float64(f64::INFINITY)
+            roundtrip(Value::Float64(f64::INFINITY)),
+            Value::Float64(f64::INFINITY)
         );
         let nan64 = f64::from_bits(0x7ff8_dead_beef_0001);
-        assert_eq!(
-            roundtrip(FfiValue::Float64(nan64)),
-            FfiValue::Float64(nan64)
-        );
+        assert_eq!(roundtrip(Value::Float64(nan64)), Value::Float64(nan64));
         let nan32 = f32::from_bits(0x7fc0_0001);
-        assert_eq!(
-            roundtrip(FfiValue::Float32(nan32)),
-            FfiValue::Float32(nan32)
-        );
+        assert_eq!(roundtrip(Value::Float32(nan32)), Value::Float32(nan32));
     }
 
     #[test]
     fn roundtrip_nested_structure() {
         let make = || {
-            FfiValue::Object(vec![
+            Value::Object(vec![
                 ("name".into(), s("alice")),
-                ("age".into(), FfiValue::Int64(30)),
-                ("score".into(), FfiValue::Float64(99.5)),
-                ("rank".into(), FfiValue::Int32(-3)),
-                ("active".into(), FfiValue::Bool(true)),
-                ("nickname".into(), FfiValue::Null),
+                ("age".into(), Value::Int64(30)),
+                ("score".into(), Value::Float64(99.5)),
+                ("rank".into(), Value::Int32(-3)),
+                ("active".into(), Value::Bool(true)),
+                ("nickname".into(), Value::Null),
                 (
                     "tags".into(),
-                    FfiValue::Array(vec![s("a"), s("b"), FfiValue::Int64(3)]),
+                    Value::Array(vec![s("a"), s("b"), Value::Int64(3)]),
                 ),
                 (
                     "nested".into(),
-                    FfiValue::Object(vec![(
+                    Value::Object(vec![(
                         "key".into(),
-                        FfiValue::Bytes(Protected::new(vec![1, 2, 3])),
+                        Value::Bytes(Protected::new(vec![1, 2, 3])),
                     )]),
                 ),
             ])
@@ -930,15 +962,12 @@ mod tests {
 
     #[test]
     fn roundtrip_empty_containers() {
-        assert_eq!(roundtrip(FfiValue::Array(vec![])), FfiValue::Array(vec![]));
-        assert_eq!(
-            roundtrip(FfiValue::Object(vec![])),
-            FfiValue::Object(vec![])
-        );
+        assert_eq!(roundtrip(Value::Array(vec![])), Value::Array(vec![]));
+        assert_eq!(roundtrip(Value::Object(vec![])), Value::Object(vec![]));
         assert_eq!(roundtrip(s("")), s(""));
         assert_eq!(
-            roundtrip(FfiValue::Bytes(Protected::new(vec![]))),
-            FfiValue::Bytes(Protected::new(vec![]))
+            roundtrip(Value::Bytes(Protected::new(vec![]))),
+            Value::Bytes(Protected::new(vec![]))
         );
     }
 
@@ -949,7 +978,7 @@ mod tests {
             .encrypt_with_aad(&cipher, "ctx")
             .expect("encrypt");
         // Wrong AAD must fail.
-        assert!(cipher.decrypt_with_aad::<FfiValue, _>(ct, "other").is_err());
+        assert!(cipher.decrypt_with_aad::<Value, _>(ct, "other").is_err());
     }
 
     // ---------------------------------------------------------------
@@ -962,13 +991,13 @@ mod tests {
         // bytes did — the authenticated tag separates them.
         let cipher = cipher();
         let as_string = s("abc").encrypt(&cipher).expect("encrypt string");
-        let as_bytes = FfiValue::Bytes(Protected::new(b"abc".to_vec()))
+        let as_bytes = Value::Bytes(Protected::new(b"abc".to_vec()))
             .encrypt(&cipher)
             .expect("encrypt bytes");
-        let rs: FfiValue = cipher.decrypt(as_string).expect("decrypt");
-        let rb: FfiValue = cipher.decrypt(as_bytes).expect("decrypt");
-        assert!(matches!(rs, FfiValue::String(_)));
-        assert!(matches!(rb, FfiValue::Bytes(_)));
+        let rs: Value = cipher.decrypt(as_string).expect("decrypt");
+        let rb: Value = cipher.decrypt(as_bytes).expect("decrypt");
+        assert!(matches!(rs, Value::String(_)));
+        assert!(matches!(rb, Value::Bytes(_)));
     }
 
     #[test]
@@ -985,7 +1014,7 @@ mod tests {
                 vitaminc_aead::Context::empty(),
             )
             .expect("encrypt raw");
-        assert!(cipher.decrypt::<FfiValue>(bad).is_err());
+        assert!(cipher.decrypt::<Value>(bad).is_err());
     }
 
     #[test]
@@ -1011,7 +1040,7 @@ mod tests {
                 .encrypt_bytes_vec(Protected::new(short), vitaminc_aead::Context::empty())
                 .expect("encrypt raw");
             assert!(
-                cipher.decrypt::<FfiValue>(bad).is_err(),
+                cipher.decrypt::<Value>(bad).is_err(),
                 "tag {tag:#x} width-1 must fail"
             );
             // One byte long.
@@ -1021,7 +1050,7 @@ mod tests {
                 .encrypt_bytes_vec(Protected::new(long), vitaminc_aead::Context::empty())
                 .expect("encrypt raw");
             assert!(
-                cipher.decrypt::<FfiValue>(bad).is_err(),
+                cipher.decrypt::<Value>(bad).is_err(),
                 "tag {tag:#x} width+1 must fail"
             );
         }
@@ -1045,7 +1074,7 @@ mod tests {
                     vitaminc_aead::Context::empty(),
                 )
                 .expect("encrypt raw");
-            assert!(cipher.decrypt::<FfiValue>(bad).is_err());
+            assert!(cipher.decrypt::<Value>(bad).is_err());
         }
     }
 
@@ -1056,12 +1085,12 @@ mod tests {
         let bad = (&cipher)
             .encrypt_bytes_vec(Protected::new(vec![0x7f]), vitaminc_aead::Context::empty())
             .expect("encrypt raw");
-        assert!(cipher.decrypt::<FfiValue>(bad).is_err());
+        assert!(cipher.decrypt::<Value>(bad).is_err());
         // Empty plaintext (no tag at all) also fails.
         let empty = (&cipher)
             .encrypt_bytes_vec(Protected::new(vec![]), vitaminc_aead::Context::empty())
             .expect("encrypt raw");
-        assert!(cipher.decrypt::<FfiValue>(empty).is_err());
+        assert!(cipher.decrypt::<Value>(empty).is_err());
     }
 
     #[test]
@@ -1070,8 +1099,8 @@ mod tests {
         // `Null` through the self-describing path.
         let cipher = cipher();
         let ct = Option::<String>::None.encrypt(&cipher).expect("encrypt");
-        let v: FfiValue = cipher.decrypt(ct).expect("decrypt");
-        assert_eq!(v, FfiValue::Null);
+        let v: Value = cipher.decrypt(ct).expect("decrypt");
+        assert_eq!(v, Value::Null);
     }
 
     #[test]
@@ -1079,9 +1108,9 @@ mod tests {
         // End-to-end check that the map key binding protects objects.
         use vitaminc_encrypt::AesCipherText;
         let cipher = cipher();
-        let value = FfiValue::Object(vec![
-            ("a".into(), FfiValue::Int64(1)),
-            ("b".into(), FfiValue::Int64(2)),
+        let value = Value::Object(vec![
+            ("a".into(), Value::Int64(1)),
+            ("b".into(), Value::Int64(2)),
         ]);
         let ct = value.encrypt(&cipher).expect("encrypt");
         let tampered = match ct {
@@ -1093,15 +1122,15 @@ mod tests {
             }
             _ => panic!("expected Map"),
         };
-        assert!(cipher.decrypt::<FfiValue>(tampered).is_err());
+        assert!(cipher.decrypt::<Value>(tampered).is_err());
     }
 
     // ---------------------------------------------------------------
     // Passthrough: unencrypted, unauthenticated fields alongside sealed ones
     // ---------------------------------------------------------------
 
-    fn pt(v: FfiValue) -> FfiValue {
-        FfiValue::Passthrough(Box::new(v))
+    fn pt(v: Value) -> Value {
+        Value::Passthrough(Box::new(v))
     }
 
     #[test]
@@ -1111,18 +1140,15 @@ mod tests {
         // The scalar leaf bytes are still the frozen KATs, and a nested
         // passthrough-free structure still round-trips unchanged.
         assert_eq!(
-            leaf_bytes(FfiValue::Int64(42)),
+            leaf_bytes(Value::Int64(42)),
             [0x05, 42, 0, 0, 0, 0, 0, 0, 0]
         );
         assert_eq!(leaf_bytes(s("abc")), [0x0A, b'a', b'b', b'c']);
         let make = || {
-            FfiValue::Object(vec![
+            Value::Object(vec![
                 ("name".into(), s("alice")),
-                ("age".into(), FfiValue::Int64(30)),
-                (
-                    "tags".into(),
-                    FfiValue::Array(vec![s("a"), FfiValue::Int64(3)]),
-                ),
+                ("age".into(), Value::Int64(30)),
+                ("tags".into(), Value::Array(vec![s("a"), Value::Int64(3)])),
             ])
         };
         assert_eq!(roundtrip(make()), make());
@@ -1131,7 +1157,7 @@ mod tests {
     #[test]
     fn roundtrip_passthrough_leaf() {
         // A scalar wrapped in passthrough round-trips, keeping its marking.
-        assert_eq!(roundtrip(pt(FfiValue::Int64(42))), pt(FfiValue::Int64(42)));
+        assert_eq!(roundtrip(pt(Value::Int64(42))), pt(Value::Int64(42)));
         assert_eq!(roundtrip(pt(s("in-the-clear"))), pt(s("in-the-clear")));
     }
 
@@ -1140,8 +1166,8 @@ mod tests {
         // The motivating shape: id/created_at pass through in the clear while
         // email/name are sealed. Everything round-trips, marking preserved.
         let make = || {
-            FfiValue::Object(vec![
-                ("id".into(), pt(FfiValue::Int64(42))),
+            Value::Object(vec![
+                ("id".into(), pt(Value::Int64(42))),
                 ("created_at".into(), pt(s("2026-07-25T00:00:00Z"))),
                 ("email".into(), s("ada@example.com")),
                 ("name".into(), s("Ada Lovelace")),
@@ -1155,16 +1181,16 @@ mod tests {
         // Passthrough may wrap a whole Object/Array subtree — the entire
         // subtree is then plaintext and round-trips as one passthrough node.
         let subtree = || {
-            FfiValue::Object(vec![
+            Value::Object(vec![
                 ("kind".into(), s("public")),
                 (
                     "labels".into(),
-                    FfiValue::Array(vec![s("a"), s("b"), FfiValue::Int32(3)]),
+                    Value::Array(vec![s("a"), s("b"), Value::Int32(3)]),
                 ),
             ])
         };
         let make = || {
-            FfiValue::Object(vec![
+            Value::Object(vec![
                 ("meta".into(), pt(subtree())),
                 ("secret".into(), s("classified")),
             ])
@@ -1180,8 +1206,8 @@ mod tests {
         // the forged value.
         use vitaminc_encrypt::AesCipherText;
         let cipher = cipher();
-        let value = FfiValue::Object(vec![
-            ("id".into(), pt(FfiValue::Int64(42))),
+        let value = Value::Object(vec![
+            ("id".into(), pt(Value::Int64(42))),
             ("email".into(), s("ada@example.com")),
         ]);
         let ct = value.encrypt(&cipher).expect("encrypt");
@@ -1189,19 +1215,19 @@ mod tests {
             AesCipherText::Map(mut entries) => {
                 for (key, node) in entries.iter_mut() {
                     if key == "id" {
-                        *node = AesCipherText::Passthrough(Box::new(FfiValue::Int64(999)));
+                        *node = AesCipherText::Passthrough(Box::new(Value::Int64(999)));
                     }
                 }
                 AesCipherText::Map(entries)
             }
             _ => panic!("expected Map"),
         };
-        let decrypted: FfiValue = cipher.decrypt(tampered).expect("decrypt");
+        let decrypted: Value = cipher.decrypt(tampered).expect("decrypt");
         match decrypted {
-            FfiValue::Object(entries) => {
+            Value::Object(entries) => {
                 let id = entries.iter().find(|(k, _)| k == "id").expect("id");
                 // The forged value is accepted — passthrough is unauthenticated.
-                assert_eq!(id.1, pt(FfiValue::Int64(999)));
+                assert_eq!(id.1, pt(Value::Int64(999)));
             }
             _ => panic!("expected Object"),
         }
@@ -1215,8 +1241,8 @@ mod tests {
         use vitaminc_aead::LocalCipherText;
         use vitaminc_encrypt::AesCipherText;
         let cipher = cipher();
-        let value = FfiValue::Object(vec![
-            ("id".into(), pt(FfiValue::Int64(42))),
+        let value = Value::Object(vec![
+            ("id".into(), pt(Value::Int64(42))),
             ("email".into(), s("ada@example.com")),
         ]);
         let ct = value.encrypt(&cipher).expect("encrypt");
@@ -1236,31 +1262,25 @@ mod tests {
             }
             _ => panic!("expected Map"),
         };
-        assert!(cipher.decrypt::<FfiValue>(tampered).is_err());
+        assert!(cipher.decrypt::<Value>(tampered).is_err());
     }
 
     #[test]
     fn foreign_passthrough_payload_is_rejected() {
-        // A passthrough whose boxed payload is not an `FfiValue` (a raw u32,
+        // A passthrough whose boxed payload is not a `Value` (a raw u32,
         // as a Rust-native cipher user might store) must be rejected cleanly
         // on the self-describing decode path — an error, never a panic.
         use vitaminc_encrypt::AesCipherText;
         let cipher = cipher();
         let ct: AesCipherText = AesCipherText::Passthrough(Box::new(42u32));
-        assert!(cipher.decrypt::<FfiValue>(ct).is_err());
+        assert!(cipher.decrypt::<Value>(ct).is_err());
     }
 
     #[test]
     fn passthrough_in_array_round_trips() {
         // Passthrough nested as an array element (not a map value) exercises
         // the seq recursion path into the passthrough arm.
-        let make = || {
-            FfiValue::Array(vec![
-                s("sealed"),
-                pt(FfiValue::Int64(7)),
-                FfiValue::Int32(-1),
-            ])
-        };
+        let make = || Value::Array(vec![s("sealed"), pt(Value::Int64(7)), Value::Int32(-1)]);
         assert_eq!(roundtrip(make()), make());
     }
 
@@ -1272,15 +1292,15 @@ mod tests {
         // means the caller learns immediately, instead of storing a
         // ciphertext that can never be read back.
         let cipher = cipher();
-        let arr = FfiValue::Array(vec![pt(FfiValue::Int64(1)), pt(FfiValue::Int64(2))]);
+        let arr = Value::Array(vec![pt(Value::Int64(1)), pt(Value::Int64(2))]);
         assert!(arr.encrypt(&cipher).is_err());
-        let obj = FfiValue::Object(vec![
-            ("a".into(), pt(FfiValue::Int64(1))),
-            ("b".into(), pt(FfiValue::Int64(2))),
+        let obj = Value::Object(vec![
+            ("a".into(), pt(Value::Int64(1))),
+            ("b".into(), pt(Value::Int64(2))),
         ]);
         assert!(obj.encrypt(&cipher).is_err());
         // One sealed sibling makes the container authenticated again.
-        let mixed = FfiValue::Array(vec![pt(FfiValue::Int64(1)), FfiValue::Int64(2)]);
+        let mixed = Value::Array(vec![pt(Value::Int64(1)), Value::Int64(2)]);
         assert!(mixed.encrypt(&cipher).is_ok());
     }
 
@@ -1290,20 +1310,20 @@ mod tests {
         // seal time would produce a permanently unreadable ciphertext. The
         // encrypt path now fails symmetrically.
         let cipher = cipher();
-        let dup = FfiValue::Object(vec![
-            ("a".into(), FfiValue::Int64(1)),
-            ("a".into(), FfiValue::Int64(2)),
+        let dup = Value::Object(vec![
+            ("a".into(), Value::Int64(1)),
+            ("a".into(), Value::Int64(2)),
         ]);
         assert!(dup.encrypt(&cipher).is_err());
-        let distinct = FfiValue::Object(vec![
-            ("a".into(), FfiValue::Int64(1)),
-            ("b".into(), FfiValue::Int64(2)),
+        let distinct = Value::Object(vec![
+            ("a".into(), Value::Int64(1)),
+            ("b".into(), Value::Int64(2)),
         ]);
         assert!(distinct.encrypt(&cipher).is_ok());
         // The passthrough entry path enforces the same rejection.
-        let dup_mixed = FfiValue::Object(vec![
-            ("a".into(), FfiValue::Int64(1)),
-            ("a".into(), pt(FfiValue::Int64(2))),
+        let dup_mixed = Value::Object(vec![
+            ("a".into(), Value::Int64(1)),
+            ("a".into(), pt(Value::Int64(2))),
         ]);
         assert!(dup_mixed.encrypt(&cipher).is_err());
     }

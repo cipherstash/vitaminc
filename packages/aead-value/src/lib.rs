@@ -9,4 +9,8 @@ mod value;
 
 pub use aad::LeafTypeAad;
 pub use kind::{ParseValueKindError, ValueKind};
-pub use value::{FfiValue, Utf8String};
+pub use value::{Utf8String, Value};
+
+/// Deprecated name for [`Value`], retained for one release.
+#[deprecated(note = "renamed to `Value`; use `Value` instead")]
+pub type FfiValue = Value;

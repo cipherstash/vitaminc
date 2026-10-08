@@ -67,7 +67,7 @@ use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use vitaminc_aead::{Context, Element, Encrypt};
-use vitaminc_aead_value::{transport as codec, FfiValue};
+use vitaminc_aead_value::{transport as codec, Value};
 use vitaminc_encrypt::{Aes256Cipher, AesCipherText};
 use zeroize::Zeroize;
 
@@ -239,7 +239,7 @@ fn with_cipher<R>(handle: u32, f: impl FnOnce(&Aes256Cipher) -> Result<R, u32>) 
     })
 }
 
-/// Encrypt a transport-encoded [`FfiValue`] tree under the session `handle`.
+/// Encrypt a transport-encoded [`Value`] tree under the session `handle`.
 ///
 /// Output: packed pointer to a transport-encoded ciphertext tree, or a status.
 ///
@@ -311,7 +311,7 @@ fn encrypt(handle: u32, aad: &[u8], val: &[u8], as_element: bool) -> Result<Vec<
         }
         .map_err(|_| STATUS_INTERNAL)?;
         let mut out = Vec::new();
-        // Re-home the Box<dyn Any + Send> passthrough payload type to FfiValue
+        // Re-home the Box<dyn Any + Send> passthrough payload type to Value
         // value-nodes before encoding.
         codec::encode_ciphertext_boxed(ct, &mut out).map_err(|_| STATUS_ENCODING)?;
         Ok(out)
@@ -319,7 +319,7 @@ fn encrypt(handle: u32, aad: &[u8], val: &[u8], as_element: bool) -> Result<Vec<
 }
 
 /// Decrypt a transport-encoded ciphertext tree back into a transport-encoded
-/// [`FfiValue`] tree under the session `handle`. The output buffer contains
+/// [`Value`] tree under the session `handle`. The output buffer contains
 /// plaintext — the host must copy it out and immediately release it with
 /// [`vc_dealloc`] (which wipes it).
 ///
@@ -381,9 +381,9 @@ fn decrypt(handle: u32, aad: &[u8], ct: &[u8], as_element: bool) -> Result<Vec<u
         codec::decode_ciphertext_boxed(&mut codec::Reader::new(ct)).map_err(|_| STATUS_ENCODING)?;
     with_cipher(handle, |cipher| {
         let aad = Context::from_encoded(aad);
-        let value: FfiValue = if as_element {
+        let value: Value = if as_element {
             cipher
-                .decrypt_with_aad::<Element<FfiValue>, _>(ct, aad)
+                .decrypt_with_aad::<Element<Value>, _>(ct, aad)
                 .map(Element::into_inner)
         } else {
             cipher.decrypt_with_aad(ct, aad)

@@ -16,11 +16,11 @@ func FuzzUnmarshal(f *testing.F) {
 	f.Add([]byte{0x00})                                    // Null
 	f.Add([]byte{0x04, 7, 0, 0, 0})                        // Int32
 	f.Add([]byte{0x0A, 2, 0, 0, 0, 'h', 'i'})              // String
-	f.Add([]byte{0x10, 1, 0, 0, 0, 0x03})                  // Array[true]
-	f.Add([]byte{0x11, 1, 0, 0, 0, 1, 0, 0, 0, 'a', 0x00}) // Object{a: null}
-	f.Add([]byte{0x12, 0x05})                              // Passthrough(Int64) truncated
-	f.Add([]byte{0x10, 0xFF, 0xFF, 0xFF, 0xFF})            // hostile count
-	f.Add([]byte{0x11, 2, 0, 0, 0, 1, 0, 0, 0, 'a', 0x00}) // short object
+	f.Add([]byte{0xF0, 1, 0, 0, 0, 0x03})                  // Array[true]
+	f.Add([]byte{0xF1, 1, 0, 0, 0, 1, 0, 0, 0, 'a', 0x00}) // Object{a: null}
+	f.Add([]byte{0xF2, 0x05})                              // Passthrough(Int64) truncated
+	f.Add([]byte{0xF0, 0xFF, 0xFF, 0xFF, 0xFF})            // hostile count
+	f.Add([]byte{0xF1, 2, 0, 0, 0, 1, 0, 0, 0, 'a', 0x00}) // short object
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		v, err := Unmarshal(data)

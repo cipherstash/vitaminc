@@ -1,26 +1,33 @@
 # vitaminc-aead-value
 
-A language-neutral, self-describing value tree — [`FfiValue`] — for
+A language-neutral, self-describing value tree — [`Value`] — for
 encrypting dynamically typed values from host languages (JavaScript,
 Python, Go, …) with the Vitamin-C AEAD traits.
 
-Host-language bindings convert native values into `FfiValue` at the FFI
+Host-language bindings convert native values into `Value` at the FFI
 boundary; encryption and decryption then run against any
-[`Cipher`]/[`Decipher`] implementation, on any thread (`FfiValue` is owned
+[`Cipher`]/[`Decipher`] implementation, on any thread (`Value` is owned
 and `Send`). Because every language converts through the same tree and the
 same leaf encoding, a value encrypted from one language decrypts from any
 other.
 
-This crate is consumed by the per-language binding crates (e.g.
-`vitaminc-aead-napi` for Node.js); applications normally use those rather
-than this crate directly.
+`Value` is the value model for any Vitamin-C cipher, including Rust
+applications and per-language bindings such as `vitaminc-aead-napi`.
+`FfiValue` remains as a deprecated type alias for one release.
+
+`Value::clone` makes a deep copy with fresh `Protected` storage for every
+string and byte leaf, including those inside passthrough subtrees. The clone
+is under the same custody as the original: protected leaves are wiped on
+drop, and callers retain responsibility for any exposed plaintext.
+`Value` and `ValueKind` are non-exhaustive; downstream matches must include
+an arm for unsupported variants.
 
 ## The contract is the tag table, not this enum
 
 The cross-language contract is the **frozen tag table plus the sealed leaf
 encodings** (`[tag] ++ payload`, sealed inside the AEAD envelope). That
 model — and only that model — is what every language binding agrees on.
-`FfiValue` is simply Rust's materialization of it; a Go, Python, or
+`Value` is simply Rust's materialization of it; a Go, Python, or
 JavaScript binding implements the same model in whatever local shape fits
 its language, not this enum.
 
@@ -76,7 +83,7 @@ byte-for-byte.
 Each binding encodes its host language's semantics and documents its decode
 mapping. The defining rules:
 
-| `FfiValue` | JavaScript | Python | Go |
+| `Value` | JavaScript | Python | Go |
 |---|---|---|---|
 | `Null` | `null` | `None` | `nil` |
 | `Undefined` | `undefined` | decodes as `None` | decodes as `nil` |
@@ -112,12 +119,12 @@ the matching width (e.g. `int16`→`INT32`), and `uint`/`uintptr` map to
 ## Declaring a kind without a value
 
 A binding often has to say what a field's values are before it has one.
-[`ValueKind`] is the `FfiValue` model without the payload: `bool`, `int32`,
+[`ValueKind`] is the `Value` model without the payload: `bool`, `int32`,
 `int64`, `uint32`, `uint64`, `float32`, `float64`, `string`, `bytes`,
 `array` and `object`. Those names are frozen wire format, like the tag
 table. `Null`, `Undefined` and `Passthrough` have no kind: the first two
 are single-valued, and passthrough is a transport choice, not a type.
-`FfiValue::kind` reports a value's kind, `ValueKind::holds` checks one,
+`Value::kind` reports a value's kind, `ValueKind::holds` checks one,
 and `ValueKind::tags` maps a kind to the tags above.
 
 ## Security notes
@@ -131,9 +138,14 @@ and `ValueKind::tags` maps a kind to the tags above.
 - Decryption failures are reported as [`Unspecified`] with no detail, as
   everywhere in Vitamin-C.
 
-[`FfiValue`]: crate::FfiValue
+[`Value`]: crate::Value
 [`ValueKind`]: crate::ValueKind
 [`Cipher`]: vitaminc_aead::Cipher
 [`Decipher`]: vitaminc_aead::Decipher
 [`Context::for_map_entry`]: vitaminc_aead::Context::for_map_entry
 [`Unspecified`]: vitaminc_aead::Unspecified
+
+Transport framing uses `0xF0` (array), `0xF1` (object), and `0xF2`
+(passthrough), leaving the lower tags available for future scalar kinds.
+This changes the transport encoding; hosts and guests must ship together.
+The frozen sealed leaf tags and stored ciphertext payloads are unchanged.

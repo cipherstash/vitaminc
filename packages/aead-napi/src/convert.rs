@@ -1,25 +1,25 @@
-//! Conversions between live JS values and [`FfiValue`].
+//! Conversions between live JS values and [`Value`].
 //!
 //! Both directions run on the JS thread (they need the `Env`); everything
 //! between — encryption, decryption, transport — operates on the owned,
-//! `Send` [`FfiValue`] tree from `vitaminc-aead-value`.
+//! `Send` [`Value`] tree from `vitaminc-aead-value`.
 //!
 //! # Numeric mapping
 //!
-//! JS `number` always converts to [`FfiValue::Float64`] — integral JS
+//! JS `number` always converts to [`Value::Float64`] — integral JS
 //! numbers do **not** become an integer variant, preserving JS semantics
 //! (`42` and `42.0` are the same value in JS). JS `BigInt` carries integer
-//! typing: one that fits `i64` converts to [`FfiValue::Int64`]; one above
-//! `i64::MAX` that still fits `u64` converts to [`FfiValue::UInt64`];
+//! typing: one that fits `i64` converts to [`Value::Int64`]; one above
+//! `i64::MAX` that still fits `u64` converts to [`Value::UInt64`];
 //! anything larger is rejected. JS has no 32-bit numeric types, so it
-//! **never** encodes [`FfiValue::Int32`], [`FfiValue::UInt32`], or
-//! [`FfiValue::Float32`].
+//! **never** encodes [`Value::Int32`], [`Value::UInt32`], or
+//! [`Value::Float32`].
 //!
 //! On the way out, values written by other languages (Python, Go) surface
-//! losslessly: [`FfiValue::Float32`] widens exactly to a JS `number`
-//! (`f64::from(f32)`); [`FfiValue::Float64`] is a `number`;
-//! [`FfiValue::Int32`] / [`FfiValue::UInt32`] are always a `number` (their
-//! magnitude never exceeds 2⁵³); [`FfiValue::Int64`] / [`FfiValue::UInt64`]
+//! losslessly: [`Value::Float32`] widens exactly to a JS `number`
+//! (`f64::from(f32)`); [`Value::Float64`] is a `number`;
+//! [`Value::Int32`] / [`Value::UInt32`] are always a `number` (their
+//! magnitude never exceeds 2⁵³); [`Value::Int64`] / [`Value::UInt64`]
 //! become a `number` when within `Number.MAX_SAFE_INTEGER` (2⁵³ − 1 in
 //! magnitude) and a `BigInt` otherwise.
 
@@ -28,7 +28,7 @@ use napi::bindgen_prelude::{
     Unknown, Utf16String,
 };
 use napi::{sys, Env, Error, Result, Status, ValueType};
-use vitaminc_aead_value::FfiValue;
+use vitaminc_aead_value::Value;
 use vitaminc_protected::{Controlled, Protected};
 
 use crate::value::NapiValue;
@@ -177,7 +177,7 @@ fn ensure_plain_object(obj: &Object<'_>) -> Result<()> {
 }
 
 // NOTE: there is intentionally no path here that constructs
-// [`FfiValue::Passthrough`]. Marking a field non-sensitive so it travels in
+// [`Value::Passthrough`]. Marking a field non-sensitive so it travels in
 // the clear needs a deliberate JS-side opt-in (a wrapper the caller applies),
 // which is not yet designed — building it would be silent, dangerous default
 // behaviour otherwise. Until then JS input is always fully sealed; the decode
@@ -235,28 +235,28 @@ pub(crate) fn define_own_property(
     Ok(())
 }
 
-fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<FfiValue> {
+fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<Value> {
     if depth > MAX_DEPTH {
         return Err(depth_error());
     }
     match unknown.get_type()? {
-        ValueType::Null => Ok(FfiValue::Null),
-        ValueType::Undefined => Ok(FfiValue::Undefined),
-        ValueType::Boolean => Ok(FfiValue::Bool(bool::from_unknown(unknown)?)),
-        ValueType::Number => Ok(FfiValue::Float64(f64::from_unknown(unknown)?)),
+        ValueType::Null => Ok(Value::Null),
+        ValueType::Undefined => Ok(Value::Undefined),
+        ValueType::Boolean => Ok(Value::Bool(bool::from_unknown(unknown)?)),
+        ValueType::Number => Ok(Value::Float64(f64::from_unknown(unknown)?)),
         ValueType::BigInt => {
             let big = BigInt::from_unknown(unknown)?;
             // Signed first: a BigInt that fits `i64` is an `Int64`.
             let (signed, i64_lossless) = big.get_i64();
             if i64_lossless {
-                return Ok(FfiValue::Int64(signed));
+                return Ok(Value::Int64(signed));
             }
             // Otherwise try unsigned: `get_u64` reports lossless only when the
             // value is non-negative and fits in a single 64-bit word, so a
             // positive BigInt in (i64::MAX, u64::MAX] lands here as `UInt64`.
             let (_sign, unsigned, u64_lossless) = big.get_u64();
             if u64_lossless {
-                return Ok(FfiValue::UInt64(unsigned));
+                return Ok(Value::UInt64(unsigned));
             }
             Err(Error::new(
                 Status::InvalidArg,
@@ -278,17 +278,17 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<FfiValue> {
                     "string contains an unpaired surrogate and cannot be encrypted losslessly",
                 )
             })?;
-            Ok(FfiValue::String(s.into()))
+            Ok(Value::String(s.into()))
         }
         ValueType::Object => {
             if unknown.is_buffer()? {
                 let buf = Buffer::from_unknown(unknown)?;
-                Ok(FfiValue::Bytes(Protected::new(buf.to_vec())))
+                Ok(Value::Bytes(Protected::new(buf.to_vec())))
             } else if unknown.is_typedarray()? {
                 // Only byte views are meaningful plaintext; other typed
                 // arrays (Float64Array, …) are rejected by the cast.
                 let arr = Uint8Array::from_unknown(unknown)?;
-                Ok(FfiValue::Bytes(Protected::new(arr.to_vec())))
+                Ok(Value::Bytes(Protected::new(arr.to_vec())))
             } else if unknown.is_array()? {
                 let arr = Array::from_unknown(unknown)?;
                 // The same JS value seen as an object, for per-index
@@ -314,7 +314,7 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<FfiValue> {
                     })?;
                     items.push(js_to_value(element, depth + 1)?);
                 }
-                Ok(FfiValue::Array(items))
+                Ok(Value::Array(items))
             } else if unknown.is_date()? {
                 Err(Error::new(
                     Status::InvalidArg,
@@ -330,11 +330,11 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<FfiValue> {
                         return Err(forbidden_key_error(&key));
                     }
                     // Raw fetch so an explicit `undefined` value survives as
-                    // `FfiValue::Undefined` instead of erroring.
+                    // `Value::Undefined` instead of erroring.
                     let value = get_property_unknown(&obj, &key)?;
                     entries.push((key, js_to_value(value, depth + 1)?));
                 }
-                Ok(FfiValue::Object(entries))
+                Ok(Value::Object(entries))
             }
         }
         other => Err(Error::new(
@@ -351,21 +351,21 @@ impl FromNapiValue for NapiValue {
     }
 }
 
-fn value_to_js(env: sys::napi_env, value: FfiValue) -> Result<sys::napi_value> {
+fn value_to_js(env: sys::napi_env, value: Value) -> Result<sys::napi_value> {
     match value {
-        FfiValue::Null => unsafe {
+        Value::Null => unsafe {
             napi::bindgen_prelude::Null::to_napi_value(env, napi::bindgen_prelude::Null)
         },
-        FfiValue::Undefined => unsafe { <()>::to_napi_value(env, ()) },
-        FfiValue::Bool(b) => unsafe { bool::to_napi_value(env, b) },
+        Value::Undefined => unsafe { <()>::to_napi_value(env, ()) },
+        Value::Bool(b) => unsafe { bool::to_napi_value(env, b) },
         // Both float widths surface as a JS `number`; `f32` widens exactly.
-        FfiValue::Float64(n) => unsafe { f64::to_napi_value(env, n) },
-        FfiValue::Float32(f) => unsafe { f64::to_napi_value(env, f64::from(f)) },
+        Value::Float64(n) => unsafe { f64::to_napi_value(env, n) },
+        Value::Float32(f) => unsafe { f64::to_napi_value(env, f64::from(f)) },
         // 32-bit integers always fit `Number.MAX_SAFE_INTEGER`, so they are
         // always a plain JS `number`.
-        FfiValue::Int32(i) => unsafe { f64::to_napi_value(env, i as f64) },
-        FfiValue::UInt32(u) => unsafe { f64::to_napi_value(env, u as f64) },
-        FfiValue::Int64(i) => {
+        Value::Int32(i) => unsafe { f64::to_napi_value(env, i as f64) },
+        Value::UInt32(u) => unsafe { f64::to_napi_value(env, u as f64) },
+        Value::Int64(i) => {
             // Exactly representable → plain number (the common case, and
             // what JS callers expect for e.g. a Python-written `30`).
             // Beyond ±MAX_SAFE_INTEGER → BigInt, losslessly. `unsigned_abs`
@@ -378,7 +378,7 @@ fn value_to_js(env: sys::napi_env, value: FfiValue) -> Result<sys::napi_value> {
                 unsafe { BigInt::to_napi_value(env, BigInt::from(i)) }
             }
         }
-        FfiValue::UInt64(u) => {
+        Value::UInt64(u) => {
             // Same rule as `Int64`: exactly representable → plain number, else
             // BigInt. `MAX_SAFE_INTEGER` is non-negative so the cast is safe.
             if u <= MAX_SAFE_INTEGER as u64 {
@@ -387,7 +387,7 @@ fn value_to_js(env: sys::napi_env, value: FfiValue) -> Result<sys::napi_value> {
                 unsafe { BigInt::to_napi_value(env, BigInt::from(u)) }
             }
         }
-        FfiValue::String(s) => {
+        Value::String(s) => {
             // Validated as UTF-8 on construction (both the decrypt visitor
             // and the JS-side conversion produce valid UTF-8).
             let utf8 = std::str::from_utf8(s.risky_ref())
@@ -396,11 +396,11 @@ fn value_to_js(env: sys::napi_env, value: FfiValue) -> Result<sys::napi_value> {
             // `s` drops (and wipes the Rust copy) here; the JS copy is owned
             // by the engine.
         }
-        FfiValue::Bytes(b) => {
+        Value::Bytes(b) => {
             let buf = Buffer::from(b.risky_ref().to_vec());
             unsafe { Buffer::to_napi_value(env, buf) }
         }
-        FfiValue::Array(items) => {
+        Value::Array(items) => {
             let raw_env = Env::from_raw(env);
             let mut arr = raw_env.create_array(items.len() as u32)?;
             for (i, item) in items.into_iter().enumerate() {
@@ -409,7 +409,7 @@ fn value_to_js(env: sys::napi_env, value: FfiValue) -> Result<sys::napi_value> {
             }
             unsafe { Array::to_napi_value(env, arr) }
         }
-        FfiValue::Object(entries) => {
+        Value::Object(entries) => {
             let raw_env = Env::from_raw(env);
             let obj = Object::new(&raw_env)?;
             for (key, value) in entries {
@@ -428,14 +428,15 @@ fn value_to_js(env: sys::napi_env, value: FfiValue) -> Result<sys::napi_value> {
         // ordinary value to the application. (Round-tripping the *marking*
         // back into a re-encryptable JS value is future work — see
         // `js_to_value`, which has no passthrough constructor yet.)
-        FfiValue::Passthrough(inner) => value_to_js(env, *inner),
+        Value::Passthrough(inner) => value_to_js(env, *inner),
+        _ => Err(Error::new(Status::GenericFailure, "unsupported value kind")),
     }
 }
 
 /// Internal newtype so recursive positions (array elements, object values)
 /// can go through `ToNapiValue` without exposing a blanket recursive impl
 /// signature difference.
-struct ValueHandle(FfiValue);
+struct ValueHandle(Value);
 
 impl ToNapiValue for ValueHandle {
     unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
