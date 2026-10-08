@@ -7,7 +7,7 @@
 //! into an ordinary AEAD failure.
 //!
 //! This is the expectation side of the value model's type story. It is **not**
-//! wired into [`FfiValue`](crate::FfiValue)'s own self-describing sealing:
+//! wired into [`Value`](crate::Value)'s own self-describing sealing:
 //! that path recovers the type from the inner, authenticated
 //! `[tag] ++ payload` leaf, which is knowable only *after* decryption. AAD, by
 //! contrast, must be known *before* decryption, so it can only carry an
@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn leaf_type_binds_the_expected_leaf_tag() {
         use crate::tagged::TaggedInt64;
-        use crate::{tags, FfiValue};
+        use crate::{tags, Value};
         use vitaminc_aead::Encrypt;
         use vitaminc_encrypt::{Aes256Cipher, Key};
 
@@ -131,14 +131,14 @@ mod tests {
         let ct_ok = TaggedInt64::from(42i64)
             .encrypt_with_aad(&cipher, LeafTypeAad::new(base, TaggedInt64::TAG))
             .expect("encrypt");
-        let value: FfiValue = cipher
+        let value: Value = cipher
             .decrypt_with_aad(ct_ok, LeafTypeAad::new(base, TaggedInt64::TAG))
             .expect("decrypt with matching leaf-type AAD");
-        assert_eq!(value, FfiValue::Int64(42));
+        assert_eq!(value, Value::Int64(42));
 
         // Wrong type hypothesis (FLOAT64) → authentication fails.
         assert!(cipher
-            .decrypt_with_aad::<FfiValue, _>(ct, LeafTypeAad::new(base, tags::FLOAT64))
+            .decrypt_with_aad::<Value, _>(ct, LeafTypeAad::new(base, tags::FLOAT64))
             .is_err());
     }
 }

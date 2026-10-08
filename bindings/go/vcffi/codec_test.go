@@ -242,8 +242,8 @@ func TestEncoderPassthroughChannel(t *testing.T) {
 }
 
 func TestUnmarshalRejectsTruncatedPassthrough(t *testing.T) {
-	// A passthrough marker (0x12) with no value node behind it.
-	if _, err := Unmarshal([]byte{0x12}); err == nil {
+	// A passthrough marker (0xF2) with no value node behind it.
+	if _, err := Unmarshal([]byte{0xF2}); err == nil {
 		t.Fatal("truncated passthrough node must be rejected")
 	}
 }
@@ -252,7 +252,7 @@ func TestUnmarshalRejectsPassthroughDepthBomb(t *testing.T) {
 	// Nesting exclusively through passthrough markers must hit the depth bound.
 	bytes := make([]byte, 0, 200)
 	for range 130 { // > maxDepth (128)
-		bytes = append(bytes, 0x12)
+		bytes = append(bytes, 0xF2)
 	}
 	bytes = append(bytes, 0x00) // NULL
 	if _, err := Unmarshal(bytes); err == nil {
@@ -494,7 +494,7 @@ func TestUnmarshalRejectsArrayAndObjectBombs(t *testing.T) {
 	// Depth bomb: 130 nested single-element arrays (> maxDepth 128).
 	var deep []byte
 	for range 130 {
-		deep = append(deep, 0x10) // tagArray
+		deep = append(deep, 0xF0) // tagArray
 		deep = append(deep, u32le(1)...)
 	}
 	deep = append(deep, 0x00) // tagNull
@@ -505,7 +505,7 @@ func TestUnmarshalRejectsArrayAndObjectBombs(t *testing.T) {
 	// Object nesting: 130 nested one-entry objects.
 	var deepObj []byte
 	for range 130 {
-		deepObj = append(deepObj, 0x11) // tagObject
+		deepObj = append(deepObj, 0xF1) // tagObject
 		deepObj = append(deepObj, u32le(1)...)
 		deepObj = append(deepObj, u32le(1)...)
 		deepObj = append(deepObj, 'k')
@@ -516,7 +516,7 @@ func TestUnmarshalRejectsArrayAndObjectBombs(t *testing.T) {
 	}
 
 	// Hostile count: an array claiming max-u32 items with no bytes behind it.
-	if _, err := Unmarshal([]byte{0x10, 0xFF, 0xFF, 0xFF, 0xFF}); err == nil {
+	if _, err := Unmarshal([]byte{0xF0, 0xFF, 0xFF, 0xFF, 0xFF}); err == nil {
 		t.Fatal("hostile array count must be rejected")
 	}
 }
@@ -597,7 +597,7 @@ func TestMarshalRejectsDepthBomb(t *testing.T) {
 func TestUnmarshalRejectsDuplicateObjectKey(t *testing.T) {
 	key := []byte{1, 0, 0, 0, 'a'}
 	var buf []byte
-	buf = append(buf, 0x11, 2, 0, 0, 0) // tagObject, count 2
+	buf = append(buf, 0xF1, 2, 0, 0, 0) // tagObject, count 2
 	buf = append(buf, key...)
 	buf = append(buf, 0x00) // Null value
 	buf = append(buf, key...)
@@ -608,7 +608,7 @@ func TestUnmarshalRejectsDuplicateObjectKey(t *testing.T) {
 
 	// Positive control: the same shape with distinct keys decodes.
 	var ok []byte
-	ok = append(ok, 0x11, 2, 0, 0, 0)
+	ok = append(ok, 0xF1, 2, 0, 0, 0)
 	ok = append(ok, 1, 0, 0, 0, 'a', 0x00)
 	ok = append(ok, 1, 0, 0, 0, 'b', 0x00)
 	if _, err := Unmarshal(ok); err != nil {
@@ -983,5 +983,30 @@ func TestLeafTagsHasNoUnwiredKinds(t *testing.T) {
 	}
 	if _, err := UnmarshalCipherText(VCValueLeaves(), []byte{0x00, 0, 0, 0, 0}); err == nil {
 		t.Fatal("a 0x00 tag must be rejected on the wire")
+	}
+}
+
+func TestFramingTags(t *testing.T) {
+	cases := []struct {
+		value any
+		wire  []byte
+	}{
+		{[]any{}, []byte{0xF0, 0, 0, 0, 0}},
+		{vcvalue.Object{}, []byte{0xF1, 0, 0, 0, 0}},
+		{vcvalue.Plain{V: nil}, []byte{0xF2, 0}},
+	}
+	for _, tc := range cases {
+		got, err := Marshal(tc.value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, tc.wire) {
+			t.Fatalf("framing: got %x, want %x", got, tc.wire)
+		}
+	}
+	for _, old := range []byte{0x10, 0x11, 0x12} {
+		if _, err := Unmarshal([]byte{old, 0, 0, 0, 0}); err == nil {
+			t.Fatalf("old framing tag %x accepted", old)
+		}
 	}
 }

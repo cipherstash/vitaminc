@@ -65,7 +65,7 @@ Settled choices for this spike, and things deliberately left out of scope:
 1. **The data model is the tag table + leaf encodings.** The cross-language
    contract is the frozen sealed-leaf tags (`[tag] ++ payload` inside the AEAD
    envelope, defined in `vitaminc-aead-value`), not any particular language's
-   types. Rust's `FfiValue` and Go's `vcvalue` channels / decode natives are
+   types. Rust's `Value` and Go's `vcvalue` channels / decode natives are
    materializations of that model. It is deliberately narrow (JSON/CBOR-class,
    not serde-class): a new tag is added only when a value class *cannot be
    represented* in the existing model, and requires a defined decode mapping

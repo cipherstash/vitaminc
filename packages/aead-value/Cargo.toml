@@ -1,6 +1,6 @@
 [package]
 name = "vitaminc-aead-value"
-description = "Language-neutral, self-describing value tree for encrypting dynamically typed FFI values with the Vitamin-C AEAD traits. Part of the Vitamin-C cryptographic suite."
+description = "Language-neutral, self-describing value tree for encrypting dynamically typed values with the Vitamin-C AEAD traits. Part of the Vitamin-C cryptographic suite."
 documentation = "https://docs.rs/vitaminc-aead-value"
 version.workspace = true
 repository.workspace = true

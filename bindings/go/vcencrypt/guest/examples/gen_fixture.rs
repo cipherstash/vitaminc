@@ -22,53 +22,49 @@ use std::fs;
 
 use vitaminc_aead::{Context, Encrypt};
 use vitaminc_aead_value::transport as codec;
-use vitaminc_aead_value::FfiValue;
+use vitaminc_aead_value::Value;
 use vitaminc_encrypt::{Aes256Cipher, Key};
 use vitaminc_protected::Protected;
 
 const AAD: &[u8] = b"vitaminc/go-spike/fixture";
 
-fn string(s: &str) -> FfiValue {
-    FfiValue::String(s.into())
+fn string(s: &str) -> Value {
+    Value::String(s.into())
 }
 
-fn passthrough(v: FfiValue) -> FfiValue {
-    FfiValue::Passthrough(Box::new(v))
+fn passthrough(v: Value) -> Value {
+    Value::Passthrough(Box::new(v))
 }
 
-fn fixture_value() -> FfiValue {
-    FfiValue::Object(vec![
+fn fixture_value() -> Value {
+    Value::Object(vec![
         // Passthrough fields: non-secret, travel in the clear. Go must read
         // these back WITHOUT the key path proving decryption.
-        ("id".into(), passthrough(FfiValue::Int64(42))),
+        ("id".into(), passthrough(Value::Int64(42))),
         (
             "created_at".into(),
             passthrough(string("2026-07-25T00:00:00Z")),
         ),
         ("name".into(), string("Ada Lovelace")),
-        ("age".into(), FfiValue::Int64(36)),
-        ("score".into(), FfiValue::Float64(1.5)),
-        ("active".into(), FfiValue::Bool(true)),
-        ("nickname".into(), FfiValue::Null),
-        ("big".into(), FfiValue::Int64(i64::MIN)),
+        ("age".into(), Value::Int64(36)),
+        ("score".into(), Value::Float64(1.5)),
+        ("active".into(), Value::Bool(true)),
+        ("nickname".into(), Value::Null),
+        ("big".into(), Value::Int64(i64::MIN)),
         // Above i64::MAX: exercises the UINT64 tag cross-language.
-        ("huge".into(), FfiValue::UInt64(u64::MAX)),
+        ("huge".into(), Value::UInt64(u64::MAX)),
         // The 32-bit numeric family, at edge values: exercises the INT32 /
         // UINT32 / FLOAT32 tags (and Go's exact-width decode) cross-language.
-        ("rank".into(), FfiValue::Int32(i32::MIN)),
-        ("port".into(), FfiValue::UInt32(u32::MAX)),
-        ("ratio".into(), FfiValue::Float32(0.5)),
+        ("rank".into(), Value::Int32(i32::MIN)),
+        ("port".into(), Value::UInt32(u32::MAX)),
+        ("ratio".into(), Value::Float32(0.5)),
         (
             "tags".into(),
-            FfiValue::Array(vec![
-                string("math"),
-                string("engines"),
-                FfiValue::Bool(false),
-            ]),
+            Value::Array(vec![string("math"), string("engines"), Value::Bool(false)]),
         ),
         (
             "blob".into(),
-            FfiValue::Bytes(Protected::new(vec![0xDE, 0xAD, 0xBE, 0xEF])),
+            Value::Bytes(Protected::new(vec![0xDE, 0xAD, 0xBE, 0xEF])),
         ),
     ])
 }
@@ -87,7 +83,7 @@ fn main() {
         .encrypt_with_aad(&cipher, Context::from_encoded(AAD))
         .unwrap();
     let mut ct_bytes = Vec::new();
-    // Re-home the Box passthrough payload type to FfiValue value-nodes for the wire.
+    // Re-home the Box passthrough payload type to Value value-nodes for the wire.
     codec::encode_ciphertext_boxed(ct, &mut ct_bytes).unwrap();
 
     let mut val_bytes = Vec::new();

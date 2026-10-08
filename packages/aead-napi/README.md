@@ -4,18 +4,18 @@ NAPI (Node-API) bindings layer for the Vitamin-C AEAD encryption traits —
 the JS-specific piece of exposing `vitaminc` encryption to Node.js.
 
 The value tree itself lives in the language-neutral `vitaminc-aead-value`
-crate ([`FfiValue`]): an owned, `Send`, self-describing representation of a
+crate ([`Value`]): an owned, `Send`, self-describing representation of a
 dynamically typed value, with `Encrypt`/`Decrypt` impls and a frozen,
 cross-language leaf wire format. This crate adds only what is JS-specific:
 
-- **`NapiValue`** — a newtype over [`FfiValue`] carrying the
+- **`NapiValue`** — a newtype over [`Value`] carrying the
   `FromNapiValue`/`ToNapiValue` conversions (the orphan rule prevents
   implementing napi's traits on the foreign type directly). Conversions run
   on the JS thread; everything past the `#[napi]` boundary works with the
-  bare `FfiValue`, on any thread.
-  - JS `number` ↔ `FfiValue::Float64` (always — integral JS numbers stay
+  bare `Value`, on any thread.
+  - JS `number` ↔ `Value::Float64` (always — integral JS numbers stay
     numbers). JS `BigInt` carries integer typing: fits `i64` →
-    `FfiValue::Int64`, above `i64::MAX` but fits `u64` → `FfiValue::UInt64`,
+    `Value::Int64`, above `i64::MAX` but fits `u64` → `Value::UInt64`,
     larger → rejected. JS has no 32-bit numeric types, so it never encodes
     `Int32`/`UInt32`/`Float32`. On decode: `Float32` widens exactly to a JS
     `number` (`f64::from(f32)`); `Float64` is a `number`; `Int32`/`UInt32`
@@ -81,4 +81,4 @@ changes to those two modules as unguarded by CI and review them by hand.
   decrypted plaintext or swallow a property.
 - Errors carry no cryptographic detail (`Unspecified` at the trait layer).
 
-[`FfiValue`]: vitaminc_aead_value::FfiValue
+[`Value`]: vitaminc_aead_value::Value

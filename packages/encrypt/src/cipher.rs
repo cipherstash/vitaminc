@@ -256,7 +256,7 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
             Context::from_encoded(self.element_aad.as_bytes()),
         )?;
         // A nested `Encrypt` impl may route through the passthrough channel
-        // (e.g. `FfiValue::Passthrough`), producing an unauthenticated node
+        // (e.g. `Value::Passthrough`), producing an unauthenticated node
         // despite arriving via this method. Only a genuinely sealed node may
         // satisfy `end`'s all-passthrough rejection, otherwise a container of
         // only passthrough elements would encrypt Ok yet carry no AEAD tag
@@ -302,7 +302,7 @@ impl<'c> SeqCipher for AesSeqCipher<'c> {
 /// would otherwise let an attacker splice a stale value for one field into
 /// a current ciphertext). Failing at seal time keeps the contract symmetric
 /// for every encoder — a duplicate-keyed source (e.g. a hand-built
-/// `FfiValue::Object`) errors immediately instead of producing a ciphertext
+/// `Value::Object`) errors immediately instead of producing a ciphertext
 /// that can never be read back.
 pub struct AesMapCipher<'c> {
     cipher: &'c Aes256Cipher,
