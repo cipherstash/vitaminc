@@ -53,9 +53,9 @@ pub const STRING: u8 = 0x0A;
 /// Binary data: raw bytes.
 pub const BYTES: u8 = 0x0B;
 
-/// 8-bit signed integer: 1 bytes, little-endian (two's complement).
+/// 8-bit signed integer: 1 byte, little-endian (two's complement).
 pub const INT8: u8 = 0x0C;
-/// 8-bit unsigned integer: 1 bytes, little-endian.
+/// 8-bit unsigned integer: 1 byte, little-endian.
 pub const UINT8: u8 = 0x0D;
 /// 16-bit signed integer: 2 bytes, little-endian (two's complement).
 pub const INT16: u8 = 0x0E;
