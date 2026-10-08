@@ -95,7 +95,7 @@ fn canonical_f32(value: f32) -> f32 {
     let magnitude = bits & 0x7fff_ffff;
     let nan = 0u32.wrapping_sub((magnitude > 0x7f80_0000) as u32);
     let nonzero = 0u32.wrapping_sub((magnitude != 0) as u32);
-    f32::from_bits(((bits & !nan) | (0x7fc0_0000 & nan)) & nonzero)
+    f32::from_bits((bits & !nan).wrapping_add(0x7fc0_0000 & nan) & nonzero)
 }
 
 fn canonical_f64(value: f64) -> f64 {
@@ -103,7 +103,7 @@ fn canonical_f64(value: f64) -> f64 {
     let magnitude = bits & 0x7fff_ffff_ffff_ffff;
     let nan = 0u64.wrapping_sub((magnitude > 0x7ff0_0000_0000_0000) as u64);
     let nonzero = 0u64.wrapping_sub((magnitude != 0) as u64);
-    f64::from_bits(((bits & !nan) | (0x7ff8_0000_0000_0000 & nan)) & nonzero)
+    f64::from_bits((bits & !nan).wrapping_add(0x7ff8_0000_0000_0000 & nan) & nonzero)
 }
 
 #[cfg(feature = "chrono")]

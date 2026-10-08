@@ -86,6 +86,13 @@ fn floats_have_postgres_zero_and_nan_ordering() {
             [0xff, 0xf8, 0, 0, 0, 0, 0, 0]
         );
     }
+    assert_eq!(bytes(Value::Float32(1.5)), [0xbf, 0xc0, 0, 0]);
+    assert_eq!(bytes(Value::Float32(-1.5)), [0x40, 0x3f, 0xff, 0xff]);
+    assert_eq!(bytes(Value::Float32(f32::INFINITY)), [0xff, 0x80, 0, 0]);
+    assert_eq!(
+        bytes(Value::Float32(f32::NEG_INFINITY)),
+        [0, 0x7f, 0xff, 0xff]
+    );
     let ascending = [f64::NEG_INFINITY, -1.0, 0.0, 1.0, f64::INFINITY, f64::NAN];
     for pair in ascending.windows(2) {
         assert!(bytes(Value::Float64(pair[0])) < bytes(Value::Float64(pair[1])));
