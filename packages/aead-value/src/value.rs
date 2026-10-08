@@ -10,6 +10,7 @@ use crate::tagged::{
 };
 #[cfg(feature = "chrono")]
 use crate::tagged::{TaggedDate, TaggedTimestamp};
+#[cfg(test)]
 use crate::tags;
 use vitaminc_aead::{
     Cipher, Decipher, DecipherVisitor, Decrypt, Encrypt, IntoAad, MapAccess, MapCipher, SeqAccess,
@@ -31,7 +32,7 @@ use zeroize::Zeroize;
 /// runtime's heap cannot be wiped from here.
 ///
 /// Structurally this is `serde_json::Value`'s role in serde: a
-/// self-describing tree. Leaves seal as `[tag] ++ payload` (see [`tags`]),
+/// self-describing tree. Leaves seal as `[tag] ++ payload` (see [`tags`](crate::tags)),
 /// arrays drive the cipher's sequence mode, objects its map mode, so the
 /// ciphertext shape mirrors the value and [`Decrypt`] can rebuild it via
 /// [`Decipher::decrypt_any`] without knowing the type in advance.
@@ -47,7 +48,7 @@ use zeroize::Zeroize;
 /// docs for the cross-language type mapping.
 ///
 /// The cross-language contract is the frozen tag table plus the leaf
-/// encodings (see [`tags`]); this enum is merely Rust's materialization of
+/// encodings (see [`tags`](crate::tags)); this enum is merely Rust's materialization of
 /// that model. Bindings in other languages implement the model, not this
 /// enum.
 ///
@@ -301,79 +302,9 @@ impl<'c> DecipherVisitor<'c> for ValueVisitor {
     fn visit_bytes_vec(self, data: Protected<Vec<u8>>) -> Result<Self::Value, Unspecified> {
         let bytes = data.risky_ref();
         let (&t, payload) = bytes.split_first().ok_or(Unspecified)?;
-        // The `try_into` on each fixed-width arm rejects any payload that is
-        // not exactly the tag's width — truncated or over-long leaves fail.
-        match (t, payload) {
-            (tags::NULL, []) => Ok(Value::Null),
-            (tags::UNDEFINED, []) => Ok(Value::Undefined),
-            (tags::BOOL_FALSE, []) => Ok(Value::Bool(false)),
-            (tags::BOOL_TRUE, []) => Ok(Value::Bool(true)),
-            (tags::INT32, bytes) => {
-                let bytes: [u8; 4] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(Value::Int32(i32::from_le_bytes(bytes)))
-            }
-            (tags::INT64, bytes) => {
-                let bytes: [u8; 8] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(Value::Int64(i64::from_le_bytes(bytes)))
-            }
-            (tags::UINT32, bytes) => {
-                let bytes: [u8; 4] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(Value::UInt32(u32::from_le_bytes(bytes)))
-            }
-            (tags::UINT64, bytes) => {
-                let bytes: [u8; 8] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(Value::UInt64(u64::from_le_bytes(bytes)))
-            }
-            (tags::FLOAT32, bits) => {
-                let bits: [u8; 4] = bits.try_into().map_err(|_| Unspecified)?;
-                Ok(Value::Float32(f32::from_bits(u32::from_le_bytes(bits))))
-            }
-            (tags::FLOAT64, bits) => {
-                let bits: [u8; 8] = bits.try_into().map_err(|_| Unspecified)?;
-                Ok(Value::Float64(f64::from_bits(u64::from_le_bytes(bits))))
-            }
-            (tags::INT8, bytes) => {
-                let bytes: [u8; 1] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(Value::Int8(i8::from_le_bytes(bytes)))
-            }
-            (tags::UINT8, bytes) => {
-                let bytes: [u8; 1] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(Value::UInt8(u8::from_le_bytes(bytes)))
-            }
-            (tags::INT16, bytes) => {
-                let bytes: [u8; 2] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(Value::Int16(i16::from_le_bytes(bytes)))
-            }
-            (tags::UINT16, bytes) => {
-                let bytes: [u8; 2] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(Value::UInt16(u16::from_le_bytes(bytes)))
-            }
-            (tags::INT128, bytes) => {
-                let bytes: [u8; 16] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(Value::Int128(i128::from_le_bytes(bytes)))
-            }
-            (tags::UINT128, bytes) => {
-                let bytes: [u8; 16] = bytes.try_into().map_err(|_| Unspecified)?;
-                Ok(Value::UInt128(u128::from_le_bytes(bytes)))
-            }
-            #[cfg(feature = "chrono")]
-            (tags::DATE, bytes) => crate::scalar::decode_date(bytes).map(Value::Date),
-            #[cfg(feature = "chrono")]
-            (tags::TIMESTAMP, bytes) => {
-                crate::scalar::decode_timestamp(bytes).map(Value::Timestamp)
-            }
-            #[cfg(feature = "rust_decimal")]
-            (tags::DECIMAL, bytes) => crate::scalar::decode_decimal(bytes).map(Value::Decimal),
-            (tags::STRING, utf8) => {
-                // Validate now so host conversions later are infallible.
-                std::str::from_utf8(utf8).map_err(|_| Unspecified)?;
-                Ok(Value::String(Utf8String(Protected::new(utf8.to_vec()))))
-            }
-            (tags::BYTES, raw) => Ok(Value::Bytes(Protected::new(raw.to_vec()))),
-            _ => Err(Unspecified),
-        }
-        // `data` drops (and wipes) here; leaf payloads were copied into
-        // fresh `Protected` values.
+        crate::scalar::decode_leaf(t, payload)
+        // `data` drops (and wipes) here; string/byte payloads were copied
+        // into fresh `Protected` values by the shared scalar decoder.
     }
 
     fn visit_seq<A: SeqAccess<'c>>(self, mut seq: A) -> Result<Self::Value, Unspecified> {
@@ -606,6 +537,27 @@ mod tests {
         assert_eq!(format!("{:?}", Value::UInt64(1)), "UInt64(1)");
         assert_eq!(format!("{:?}", Value::Float32(1.5)), "Float32(1.5)");
         assert_eq!(format!("{:?}", Value::Float64(1.5)), "Float64(1.5)");
+
+        assert_eq!(format!("{:?}", Value::Int8(1)), "Int8(1)");
+        assert_eq!(format!("{:?}", Value::UInt8(1)), "UInt8(1)");
+        assert_eq!(format!("{:?}", Value::Int16(1)), "Int16(1)");
+        assert_eq!(format!("{:?}", Value::UInt16(1)), "UInt16(1)");
+        assert_eq!(format!("{:?}", Value::Int128(1)), "Int128(1)");
+        assert_eq!(format!("{:?}", Value::UInt128(1)), "UInt128(1)");
+        #[cfg(feature = "chrono")]
+        {
+            let date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("date");
+            assert_eq!(format!("{:?}", Value::Date(date)), "Date(2026-01-01)");
+            assert_eq!(
+                format!("{:?}", Value::Timestamp(chrono::DateTime::UNIX_EPOCH)),
+                "Timestamp(1970-01-01 00:00:00 UTC)"
+            );
+        }
+        #[cfg(feature = "rust_decimal")]
+        assert_eq!(
+            format!("{:?}", Value::Decimal(rust_decimal::Decimal::new(150, 2))),
+            "Decimal(1.50)"
+        );
 
         // The two secret-bearing variants never show their contents.
         let secret = format!("{:?}", s("hunter2"));

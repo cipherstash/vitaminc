@@ -2,7 +2,6 @@
 #![doc = include_str!("../README.md")]
 pub mod aad;
 pub mod kind;
-#[cfg(any(feature = "chrono", feature = "rust_decimal"))]
 mod scalar;
 pub mod tagged;
 pub mod tags;

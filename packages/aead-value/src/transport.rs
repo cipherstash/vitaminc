@@ -20,9 +20,9 @@
 use std::any::Any;
 use std::collections::HashSet;
 
-use crate::{tags, Utf8String, Value};
+use crate::{tags, Value};
 use vitaminc_aead::CipherText;
-use vitaminc_protected::{Controlled, Protected};
+use vitaminc_protected::Controlled;
 
 /// Transport-local framing tag for [`Value::Array`].
 pub const ARRAY: u8 = 0xF0;
@@ -187,6 +187,34 @@ pub fn encode_value(value: Value, out: &mut Vec<u8>) -> Result<(), CodecError> {
 /// a passthrough payload node (see [`TransportPassthrough`]).
 fn encode_value_ref(value: &Value, out: &mut Vec<u8>) -> Result<(), CodecError> {
     match value {
+        Value::Array(items) => {
+            out.push(ARRAY);
+            write_len(out, items.len())?;
+            for item in items {
+                encode_value_ref(item, out)?;
+            }
+        }
+        Value::Object(entries) => {
+            out.push(OBJECT);
+            write_len(out, entries.len())?;
+            for (key, value) in entries {
+                write_bytes(out, key.as_bytes())?;
+                encode_value_ref(value, out)?;
+            }
+        }
+        Value::Passthrough(inner) => {
+            out.push(PASSTHROUGH);
+            encode_value_ref(inner, out)?;
+        }
+        _ => encode_leaf_ref(value, out)?,
+    }
+    Ok(())
+}
+
+/// Encode only the scalar payload table; container framing and recursion
+/// remain in `encode_value_ref`.
+fn encode_leaf_ref(value: &Value, out: &mut Vec<u8>) -> Result<(), CodecError> {
+    match value {
         Value::Null => out.push(tags::NULL),
         Value::Undefined => out.push(tags::UNDEFINED),
         Value::Bool(false) => out.push(tags::BOOL_FALSE),
@@ -262,25 +290,7 @@ fn encode_value_ref(value: &Value, out: &mut Vec<u8>) -> Result<(), CodecError> 
             out.push(tags::BYTES);
             write_bytes(out, b.risky_ref())?;
         }
-        Value::Array(items) => {
-            out.push(ARRAY);
-            write_len(out, items.len())?;
-            for item in items {
-                encode_value_ref(item, out)?;
-            }
-        }
-        Value::Object(entries) => {
-            out.push(OBJECT);
-            write_len(out, entries.len())?;
-            for (key, value) in entries {
-                write_bytes(out, key.as_bytes())?;
-                encode_value_ref(value, out)?;
-            }
-        }
-        Value::Passthrough(inner) => {
-            out.push(PASSTHROUGH);
-            encode_value_ref(inner, out)?;
-        }
+        Value::Array(_) | Value::Object(_) | Value::Passthrough(_) => return Err(CodecError),
     }
     Ok(())
 }
@@ -349,58 +359,11 @@ fn decode_key(reader: &mut Reader<'_>) -> Result<String, CodecError> {
 /// of [`decode_value_inner`] so neither function carries the branch count of
 /// the whole tag space.
 fn decode_leaf(tag: u8, reader: &mut Reader<'_>) -> Result<Value, CodecError> {
-    /// Read exactly `N` bytes as a fixed-width little-endian payload.
-    fn fixed<const N: usize>(reader: &mut Reader<'_>) -> Result<[u8; N], CodecError> {
-        reader.take(N)?.try_into().map_err(|_| CodecError)
-    }
-
-    match tag {
-        tags::NULL => Ok(Value::Null),
-        tags::UNDEFINED => Ok(Value::Undefined),
-        tags::BOOL_FALSE => Ok(Value::Bool(false)),
-        tags::BOOL_TRUE => Ok(Value::Bool(true)),
-        tags::INT32 => Ok(Value::Int32(i32::from_le_bytes(fixed(reader)?))),
-        tags::INT64 => Ok(Value::Int64(i64::from_le_bytes(fixed(reader)?))),
-        tags::UINT32 => Ok(Value::UInt32(u32::from_le_bytes(fixed(reader)?))),
-        tags::UINT64 => Ok(Value::UInt64(u64::from_le_bytes(fixed(reader)?))),
-        tags::FLOAT32 => Ok(Value::Float32(f32::from_bits(u32::from_le_bytes(fixed(
-            reader,
-        )?)))),
-        tags::FLOAT64 => Ok(Value::Float64(f64::from_bits(u64::from_le_bytes(fixed(
-            reader,
-        )?)))),
-        tags::INT8 => Ok(Value::Int8(i8::from_le_bytes(fixed(reader)?))),
-        tags::UINT8 => Ok(Value::UInt8(u8::from_le_bytes(fixed(reader)?))),
-        tags::INT16 => Ok(Value::Int16(i16::from_le_bytes(fixed(reader)?))),
-        tags::UINT16 => Ok(Value::UInt16(u16::from_le_bytes(fixed(reader)?))),
-        tags::INT128 => Ok(Value::Int128(i128::from_le_bytes(fixed(reader)?))),
-        tags::UINT128 => Ok(Value::UInt128(u128::from_le_bytes(fixed(reader)?))),
-        #[cfg(feature = "chrono")]
-        tags::DATE => crate::scalar::decode_date(reader.take(4)?)
-            .map(Value::Date)
-            .map_err(|_| CodecError),
-        #[cfg(feature = "chrono")]
-        tags::TIMESTAMP => crate::scalar::decode_timestamp(reader.take(12)?)
-            .map(Value::Timestamp)
-            .map_err(|_| CodecError),
-        #[cfg(feature = "rust_decimal")]
-        tags::DECIMAL => crate::scalar::decode_decimal(reader.take(16)?)
-            .map(Value::Decimal)
-            .map_err(|_| CodecError),
-        tags::STRING => {
-            let len = reader.count()?;
-            let bytes = reader.take(len)?;
-            // `Utf8String::try_from` validates — a malformed transport frame
-            // is a codec error, mirroring the decrypt visitor's rejection.
-            let s = Utf8String::try_from(Protected::new(bytes.to_vec())).map_err(|_| CodecError)?;
-            Ok(Value::String(s))
-        }
-        tags::BYTES => {
-            let len = reader.count()?;
-            Ok(Value::Bytes(Protected::new(reader.take(len)?.to_vec())))
-        }
-        _ => Err(CodecError),
-    }
+    let len = match tag {
+        tags::STRING | tags::BYTES => reader.count()?,
+        _ => crate::scalar::fixed_payload_len(tag).ok_or(CodecError)?,
+    };
+    crate::scalar::decode_leaf(tag, reader.take(len)?).map_err(|_| CodecError)
 }
 
 /// Encode a ciphertext tree. A `Passthrough` node carries its payload as one
@@ -577,6 +540,7 @@ where
 mod tests {
     use super::*;
     use vitaminc_encrypt::AesCipherText;
+    use vitaminc_protected::Protected;
 
     fn string(s: &str) -> Value {
         Value::String(s.into())
