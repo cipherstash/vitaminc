@@ -17,3 +17,16 @@ fn deprecated_alias_uses_the_same_value_model() {
     assert_eq!(value.kind(), Some(ValueKind::String));
     assert!(matches!(FfiValue::Null, Value::Null));
 }
+
+#[test]
+fn kind_inventory_does_not_expose_its_length_in_the_type() {
+    // A downstream caller can name the inventory's type independently of
+    // the number of kinds this release provides.
+    fn inventory() -> &'static [ValueKind] {
+        ValueKind::ALL
+    }
+
+    for &kind in inventory() {
+        assert_eq!(kind.name().parse::<ValueKind>(), Ok(kind));
+    }
+}
