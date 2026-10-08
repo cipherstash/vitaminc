@@ -19,7 +19,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 vitaminc-aead = { path = "../../../../packages/aead" }
-vitaminc-aead-value = { path = "../../../../packages/aead-value" }
+vitaminc-aead-value = { path = "../../../../packages/aead-value", features = ["chrono", "rust_decimal"] }
 vitaminc-encrypt = { path = "../../../../packages/encrypt" }
 vitaminc-protected = { path = "../../../../packages/protected" }
 zeroize = "1"

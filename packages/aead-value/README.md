@@ -129,10 +129,14 @@ mapping. The defining rules:
 | `Null` | `null` | `None` | `nil` |
 | `Undefined` | `undefined` | decodes as `None` | decodes as `nil` |
 | `Bool` | `boolean` | `bool` | `bool` |
-| `Int32` | decodes as `number` (never encoded — JS has no `int32`) | `int` | `int8`/`int16`/`int32` → encode; decodes as `int32` |
-| `Int64` | encodes from `BigInt` that fits `i64`; decodes as `number` when within ±2⁵³, else `BigInt` | `int` | `int`/`int64` → encode; decodes as `int64` |
-| `UInt32` | decodes as `number` (never encoded) | `int` | `uint8`/`uint16`/`uint32` → encode; decodes as `uint32` |
-| `UInt64` | encodes from `BigInt` above `i64::MAX` that fits `u64`; decodes as `number` when ≤ 2⁵³−1, else `BigInt` | `int` | `uint`/`uint64`/`uintptr` → encode; decodes as `uint64` |
+| `Int8` / `UInt8` | smallest fitting `BigInt`; decode as `BigInt` | `int` | `int8` / `uint8` |
+| `Int16` / `UInt16` | smallest fitting `BigInt`; decode as `BigInt` | `int` | `int16` / `uint16` |
+| `Int32` / `UInt32` | smallest fitting `BigInt`; decode as `BigInt` | `int` | `int32` / `uint32` |
+| `Int64` / `UInt64` | smallest fitting `BigInt`; decode as `BigInt` | `int` | `int64` / `uint64`; `int` / `uint` / `uintptr` use 64 bits |
+| `Int128` / `UInt128` | fitting `BigInt`; decode as `BigInt` | planned | `vcvalue.Int128` / `vcvalue.Uint128` |
+| `Date` | `{ date: "YYYY-MM-DD" }` | planned | `vcvalue.Date` |
+| `Timestamp` | `Date`; exact RFC3339 wrapper when Date would lose precision | planned | `time.Time`; `vcvalue.Timestamp` for leap seconds |
+| `Decimal` | `{ decimal: "1.50" }` | planned | `vcvalue.Decimal` |
 | `Float32` | decodes as `number` (exact widening; never encoded) | `float` | `float32` |
 | `Float64` | `number` (always — integral JS numbers do **not** become an integer tag) | `float` | `float64` |
 | `String` | `string` | `str` | `string` |
@@ -143,19 +147,20 @@ mapping. The defining rules:
 `Undefined` exists for JavaScript round-trip fidelity; languages without an
 analog decode it to their null value and never encode it.
 
-**JavaScript.** A JS `number` always encodes as `Float64`, never an integer
-tag — `42` and `42.0` are the same value in JS. Integer typing comes from
-`BigInt`: one that fits `i64` encodes as `Int64`, one above `i64::MAX` that
-fits `u64` encodes as `UInt64`, and anything larger is rejected. JS has no
-32-bit numeric types, so it never *encodes* `Int32`/`UInt32`/`Float32`; on
-decode it widens all of them to a JS `number` (a `Float32` widens exactly
-via `f64::from(f32)`; 32-bit integers always fit `Number.MAX_SAFE_INTEGER`).
+**JavaScript.** A JS number always encodes as Float64. BigInt chooses the
+smallest fitting integer width, preferring signed at the same width: `127n`
+is Int8, `128n` is UInt8, `256n` is Int16. All integer kinds decode as BigInt,
+including small integers received from Go. Values outside [-2^127, 2^128-1]
+are refused. Float32 decodes as a number and therefore re-encodes as Float64.
 
-**Go.** Go maps **exactly in both directions**, unlike JS which widens on
-decode: `INT32`↔`int32`, `UINT32`↔`uint32`, `FLOAT32`↔`float32`, and the
-64-bit tags to their 64-bit Go types. Narrower Go integer kinds encode up to
-the matching width (e.g. `int16`→`INT32`), and `uint`/`uintptr` map to
-`UINT64`.
+**Go.** Every fixed integer width maps to its matching kind; `int`, `uint`
+and `uintptr` retain their existing 64-bit mapping. `time.Time` preserves its
+instant and nanoseconds, while location and monotonic-clock metadata are not
+part of the value model. Chrono leap seconds use an explicit Timestamp type.
+
+`testdata/value-conformance.json` is read directly by Rust, Node and Go tests,
+including Go encryption/decryption through the embedded guest. It covers every
+scalar tag; the broader guest-object/ciphertext corpus remains issue #332.
 
 ## Declaring a kind without a value
 

@@ -6,22 +6,11 @@
 //!
 //! # Numeric mapping
 //!
-//! JS `number` always converts to [`Value::Float64`] — integral JS
-//! numbers do **not** become an integer variant, preserving JS semantics
-//! (`42` and `42.0` are the same value in JS). JS `BigInt` carries integer
-//! typing: one that fits `i64` converts to [`Value::Int64`]; one above
-//! `i64::MAX` that still fits `u64` converts to [`Value::UInt64`];
-//! anything larger is rejected. JS has no 32-bit numeric types, so it
-//! **never** encodes [`Value::Int32`], [`Value::UInt32`], or
-//! [`Value::Float32`].
-//!
-//! On the way out, values written by other languages (Python, Go) surface
-//! losslessly: [`Value::Float32`] widens exactly to a JS `number`
-//! (`f64::from(f32)`); [`Value::Float64`] is a `number`;
-//! [`Value::Int32`] / [`Value::UInt32`] are always a `number` (their
-//! magnitude never exceeds 2⁵³); [`Value::Int64`] / [`Value::UInt64`]
-//! become a `number` when within `Number.MAX_SAFE_INTEGER` (2⁵³ − 1 in
-//! magnitude) and a `BigInt` otherwise.
+//! JS `number` converts to `Float64`. BigInt uses the smallest fitting
+//! integer width, preferring signed at a given width, through 128 bits.
+//! Every integer kind decodes as BigInt. Date maps to Timestamp; calendar
+//! dates use `{ date: "YYYY-MM-DD" }` and decimals `{ decimal: "1.50" }`.
+//! Timestamp values beyond Date's precision/range use an RFC3339 wrapper.
 
 use napi::bindgen_prelude::{
     Array, BigInt, Buffer, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue, Uint8Array,
@@ -31,16 +20,13 @@ use napi::{sys, Env, Error, Result, Status, ValueType};
 use vitaminc_aead_value::Value;
 use vitaminc_protected::{Controlled, Protected};
 
+use crate::scalar;
 use crate::value::NapiValue;
 
 /// Maximum nesting depth accepted when converting a JS value tree (and when
 /// rebuilding one). Bounds recursion so a hostile deeply-nested input cannot
 /// overflow the stack.
 pub(crate) const MAX_DEPTH: usize = 128;
-
-/// The largest integer JS numbers represent exactly: 2⁵³ − 1
-/// (`Number.MAX_SAFE_INTEGER`).
-const MAX_SAFE_INTEGER: i64 = (1 << 53) - 1;
 
 /// Property names that must never be read from or written onto a plain JS
 /// object: assigning them via `napi_set_property` triggers prototype-chain
@@ -245,23 +231,9 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<Value> {
         ValueType::Boolean => Ok(Value::Bool(bool::from_unknown(unknown)?)),
         ValueType::Number => Ok(Value::Float64(f64::from_unknown(unknown)?)),
         ValueType::BigInt => {
+            let env = Env::from_raw(unknown.value().env);
             let big = BigInt::from_unknown(unknown)?;
-            // Signed first: a BigInt that fits `i64` is an `Int64`.
-            let (signed, i64_lossless) = big.get_i64();
-            if i64_lossless {
-                return Ok(Value::Int64(signed));
-            }
-            // Otherwise try unsigned: `get_u64` reports lossless only when the
-            // value is non-negative and fits in a single 64-bit word, so a
-            // positive BigInt in (i64::MAX, u64::MAX] lands here as `UInt64`.
-            let (_sign, unsigned, u64_lossless) = big.get_u64();
-            if u64_lossless {
-                return Ok(Value::UInt64(unsigned));
-            }
-            Err(Error::new(
-                Status::InvalidArg,
-                "BigInt value does not fit in a 64-bit integer",
-            ))
+            scalar::bigint(big.sign_bit, &big.words).map_err(|e| conversion_error(env, e))
         }
         ValueType::String => {
             // Fetch as UTF-16 (JS's native representation) and convert with
@@ -316,14 +288,45 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<Value> {
                 }
                 Ok(Value::Array(items))
             } else if unknown.is_date()? {
-                Err(Error::new(
-                    Status::InvalidArg,
-                    "Date values are not supported yet; pass a number or ISO string",
-                ))
+                let env = Env::from_raw(unknown.value().env);
+                let date = napi::JsDate::from_unknown(unknown)?;
+                scalar::date_millis(date.value_of()?).map_err(|e| conversion_error(env, e))
             } else {
                 let obj = Object::from_unknown(unknown)?;
                 ensure_plain_object(&obj)?;
                 let keys = own_enumerable_keys(&obj)?;
+                if keys.len() == 1 {
+                    let parser = match keys[0].as_str() {
+                        "date" => Some(
+                            scalar::date
+                                as fn(&str) -> std::result::Result<Value, scalar::ConversionError>,
+                        ),
+                        "timestamp" => Some(
+                            scalar::timestamp
+                                as fn(&str) -> std::result::Result<Value, scalar::ConversionError>,
+                        ),
+                        "decimal" => Some(
+                            scalar::decimal
+                                as fn(&str) -> std::result::Result<Value, scalar::ConversionError>,
+                        ),
+                        _ => None,
+                    };
+                    if let Some(parse) = parser {
+                        let input = get_property_unknown(&obj, &keys[0])?;
+                        if keys[0] == "decimal" && input.get_type()? == ValueType::Number {
+                            let number = f64::from_unknown(input)?;
+                            let error = if number.is_finite() {
+                                scalar::ConversionError::InvalidDecimal
+                            } else {
+                                scalar::ConversionError::NonFiniteDecimal
+                            };
+                            return Err(conversion_error(Env::from_raw(obj.value().env), error));
+                        }
+                        let text = String::from_unknown(input)?;
+                        return parse(&text)
+                            .map_err(|e| conversion_error(Env::from_raw(obj.value().env), e));
+                    }
+                }
                 let mut entries = Vec::with_capacity(keys.len());
                 for key in keys {
                     if forbidden_key(&key) {
@@ -361,30 +364,33 @@ fn value_to_js(env: sys::napi_env, value: Value) -> Result<sys::napi_value> {
         // Both float widths surface as a JS `number`; `f32` widens exactly.
         Value::Float64(n) => unsafe { f64::to_napi_value(env, n) },
         Value::Float32(f) => unsafe { f64::to_napi_value(env, f64::from(f)) },
-        // 32-bit integers always fit `Number.MAX_SAFE_INTEGER`, so they are
-        // always a plain JS `number`.
-        Value::Int32(i) => unsafe { f64::to_napi_value(env, i as f64) },
-        Value::UInt32(u) => unsafe { f64::to_napi_value(env, u as f64) },
-        Value::Int64(i) => {
-            // Exactly representable → plain number (the common case, and
-            // what JS callers expect for e.g. a Python-written `30`).
-            // Beyond ±MAX_SAFE_INTEGER → BigInt, losslessly. `unsigned_abs`
-            // (not `abs`) so `i64::MIN` — whose magnitude has no `i64`
-            // representation — takes the BigInt branch instead of panicking
-            // (debug) or wrapping negative and losing precision (release).
-            if i.unsigned_abs() <= MAX_SAFE_INTEGER as u64 {
-                unsafe { f64::to_napi_value(env, i as f64) }
+        Value::Int8(v) => unsafe { BigInt::to_napi_value(env, BigInt::from(i128::from(v))) },
+        Value::UInt8(v) => unsafe { BigInt::to_napi_value(env, BigInt::from(u128::from(v))) },
+        Value::Int16(v) => unsafe { BigInt::to_napi_value(env, BigInt::from(i128::from(v))) },
+        Value::UInt16(v) => unsafe { BigInt::to_napi_value(env, BigInt::from(u128::from(v))) },
+        Value::Int32(v) => unsafe { BigInt::to_napi_value(env, BigInt::from(i128::from(v))) },
+        Value::UInt32(v) => unsafe { BigInt::to_napi_value(env, BigInt::from(u128::from(v))) },
+        Value::Int64(v) => unsafe { BigInt::to_napi_value(env, BigInt::from(v)) },
+        Value::UInt64(v) => unsafe { BigInt::to_napi_value(env, BigInt::from(v)) },
+        Value::Int128(v) => unsafe { BigInt::to_napi_value(env, BigInt::from(v)) },
+        Value::UInt128(v) => unsafe { BigInt::to_napi_value(env, BigInt::from(v)) },
+        Value::Date(v) => wrapper_to_js(env, "date", v.to_string()),
+        Value::Decimal(v) => wrapper_to_js(env, "decimal", v.to_string()),
+        Value::Timestamp(v) => {
+            if v.timestamp_subsec_nanos() < 1_000_000_000
+                && v.timestamp_subsec_nanos() % 1_000_000 == 0
+                && v.timestamp_millis().unsigned_abs() <= 8_640_000_000_000_000
+            {
+                Ok(Env::from_raw(env)
+                    .create_date(v.timestamp_millis() as f64)?
+                    .value()
+                    .value)
             } else {
-                unsafe { BigInt::to_napi_value(env, BigInt::from(i)) }
-            }
-        }
-        Value::UInt64(u) => {
-            // Same rule as `Int64`: exactly representable → plain number, else
-            // BigInt. `MAX_SAFE_INTEGER` is non-negative so the cast is safe.
-            if u <= MAX_SAFE_INTEGER as u64 {
-                unsafe { f64::to_napi_value(env, u as f64) }
-            } else {
-                unsafe { BigInt::to_napi_value(env, BigInt::from(u)) }
+                wrapper_to_js(
+                    env,
+                    "timestamp",
+                    v.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+                )
             }
         }
         Value::String(s) => {
@@ -433,6 +439,21 @@ fn value_to_js(env: sys::napi_env, value: Value) -> Result<sys::napi_value> {
     }
 }
 
+fn conversion_error(env: Env, error: scalar::ConversionError) -> Error {
+    match env.throw_type_error(&error.to_string(), Some(error.code())) {
+        Ok(()) => Error::new(Status::PendingException, error.to_string()),
+        Err(error) => error,
+    }
+}
+
+fn wrapper_to_js(env: sys::napi_env, key: &str, text: String) -> Result<sys::napi_value> {
+    let raw_env = Env::from_raw(env);
+    let obj = Object::new(&raw_env)?;
+    let value = unsafe { String::to_napi_value(env, text) }?;
+    define_own_property(&obj, key, value)?;
+    unsafe { Object::to_napi_value(env, obj) }
+}
+
 /// Internal newtype so recursive positions (array elements, object values)
 /// can go through `ToNapiValue` without exposing a blanket recursive impl
 /// signature difference.
@@ -452,7 +473,7 @@ impl ToNapiValue for NapiValue {
 
 #[cfg(test)]
 mod tests {
-    use super::{eager_capacity, forbidden_key, MAX_EAGER_CAPACITY, MAX_SAFE_INTEGER};
+    use super::{eager_capacity, forbidden_key, MAX_EAGER_CAPACITY};
 
     #[test]
     fn forbidden_keys_are_rejected() {
@@ -462,12 +483,6 @@ mod tests {
         assert!(!forbidden_key("proto"));
         assert!(!forbidden_key("name"));
         assert!(!forbidden_key(""));
-    }
-
-    #[test]
-    fn max_safe_integer_matches_js() {
-        // Number.MAX_SAFE_INTEGER
-        assert_eq!(MAX_SAFE_INTEGER, 9_007_199_254_740_991);
     }
 
     #[test]

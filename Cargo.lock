@@ -2657,7 +2657,10 @@ dependencies = [
 name = "vitaminc-aead-napi"
 version = "0.5.1"
 dependencies = [
+ "chrono",
  "napi",
+ "rust_decimal",
+ "thiserror",
  "vitaminc-aead",
  "vitaminc-aead-value",
  "vitaminc-protected",
@@ -2673,6 +2676,7 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "rust_decimal",
+ "serde_json",
  "unicode-general-category",
  "unicode-normalization",
  "vitaminc-aead",

@@ -13,14 +13,21 @@ cross-language leaf wire format. This crate adds only what is JS-specific:
   implementing napi's traits on the foreign type directly). Conversions run
   on the JS thread; everything past the `#[napi]` boundary works with the
   bare `Value`, on any thread.
-  - JS `number` ↔ `Value::Float64` (always — integral JS numbers stay
-    numbers). JS `BigInt` carries integer typing: fits `i64` →
-    `Value::Int64`, above `i64::MAX` but fits `u64` → `Value::UInt64`,
-    larger → rejected. JS has no 32-bit numeric types, so it never encodes
-    `Int32`/`UInt32`/`Float32`. On decode: `Float32` widens exactly to a JS
-    `number` (`f64::from(f32)`); `Float64` is a `number`; `Int32`/`UInt32`
-    are always a `number` (magnitude ≤ 2⁵³); `Int64`/`UInt64` yield a JS
-    `number` within `Number.MAX_SAFE_INTEGER` and a `BigInt` beyond it.
+  - JS `number` ↔ `Value::Float64`. `BigInt` selects the smallest fitting
+    integer width through 128 bits, preferring signed at each width. Every
+    integer kind decodes as `BigInt`; `Float32` widens exactly to `number`.
+  - JS `Date` ↔ `Timestamp` at millisecond precision within chrono's range.
+    Sub-millisecond timestamps, leap seconds and timestamps beyond JS Date's
+    range decode as `{ timestamp: "RFC3339-with-nanoseconds" }`, also accepted
+    on input, so no precision is discarded.
+  - Calendar dates use `{ date: "YYYY-MM-DD" }` (including ISO extended years);
+    finite decimals use `{ decimal: "1.50" }`, retaining scale and signed zero.
+    These wrappers reserve exactly one own enumerable property; an object with
+    additional properties remains an ordinary object. Decimal input is exact
+    fixed-point text, not a JS number or an arbitrary decimal-library instance.
+    NaN and infinities throw `TypeError` with code `ERR_NON_FINITE_DECIMAL`.
+    Other scalar failures have stable `ERR_INTEGER_RANGE`, `ERR_INVALID_DATE`,
+    `ERR_INVALID_TIMESTAMP` and `ERR_INVALID_DECIMAL` codes.
 - **`JsCipherText<Leaf, P>`** — projects the generic `CipherText` container
   onto plain JS values (`{ t, v }` nodes with `Buffer` leaves) and back, as
   an in-memory/application-side representation. Durable cross-language
@@ -31,23 +38,22 @@ it is not itself loadable from Node.
 
 ## Testing the conversion layer
 
-The `Encrypt`/`Decrypt` impls and the value tree are covered by ordinary Rust
-unit tests. The JS-boundary conversion functions — `js_to_value`,
-`value_to_js`, `node_to_js`, `node_from_js` — and their helpers —
-`own_enumerable_keys`, `get_property_unknown`, `ensure_plain_object`,
-`define_own_property` — are
-**not**, and cannot be: each takes a live `napi_env`, `Unknown`, or `Object`,
-which only exists inside a running V8 isolate. The `napi/noop` dev-dependency stubs those
-symbols so the crate links under `cargo test`; it does not make the calls
-work. They are therefore exempted in `.cargo-crap.toml` and
-`.cargo/mutants.toml`, by name rather than by file so the rest of those
-modules stays gated.
+`cargo test -p vitaminc-aead-napi` runs pure Rust boundary tests and builds a
+small standalone addon to run `tests/value-conformance.cjs` inside Node.
+Node.js must be available on PATH. The addon is a separate Cargo workspace so
+the library's `napi/noop` dev feature cannot stub the real Node symbols.
 
-That exemption is a deferral, not a dismissal — it is the difference between
-"cannot be reached by this harness" and "does not need testing". Covering
-them needs JS-level tests driving a built addon, which should land alongside
-the first `#[napi]` entry points that consume this crate. Until then, treat
-changes to those two modules as unguarded by CI and review them by hand.
+Rust, Node, Go's codec, and the embedded WASM guest consume the same
+`testdata/value-conformance.json` vectors. They pin all scalar tags, numeric
+boundaries, calendar/decimal payloads and hostile-input refusals. JS integer
+host values round-trip as BigInt; Float32 becomes a JS number and re-encodes
+as Float64. Go retains its established undefined-to-nil projection. These two
+host projections are explicit fields in the corpus; Rust codec vectors always
+round-trip byte-for-byte.
+
+The existing named metric exemptions for live N-API entry points remain;
+new pure scalar conversion helpers participate in coverage and mutation gates.
+The Node test runs in package-scoped mutation tests as well as CI.
 
 ## Safety notes
 

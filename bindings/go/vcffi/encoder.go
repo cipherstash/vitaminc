@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
@@ -164,8 +165,7 @@ func (e Encoder) UInt32(u uint32) {
 	e.complete()
 }
 
-// UInt64 records an unsigned 64-bit integer. Values above math.MaxInt64 are
-// representable here and nowhere else in the model.
+// UInt64 records an unsigned 64-bit integer without changing its width.
 func (e Encoder) UInt64(u uint64) {
 	if e.st.err != nil {
 		return
@@ -440,9 +440,9 @@ func Marshal(v any) ([]byte, error) {
 //   - a value implementing Encryptable uses its EncryptValue;
 //   - nil                        → Null;
 //   - bool                       → Bool;
-//   - int8/int16/int32           → Int32;
+//   - int8/int16/int32           → Int8/Int16/Int32;
 //   - int/int64                  → Int64;
-//   - uint8/uint16/uint32        → UInt32;
+//   - uint8/uint16/uint32        → UInt8/UInt16/UInt32;
 //   - uint/uint64/uintptr        → UInt64;
 //   - float32                    → Float32;
 //   - float64                    → Float64;
@@ -499,6 +499,24 @@ func encodeAny(enc Encoder, v any) {
 //     in typical implementations; it encodes as Null like every other nil.
 func interceptMarkers(enc Encoder, v any) bool {
 	switch x := v.(type) {
+	case vcvalue.Int128:
+		enc.Int128(x)
+		return true
+	case vcvalue.Uint128:
+		enc.UInt128(x)
+		return true
+	case vcvalue.Date:
+		enc.Date(x)
+		return true
+	case time.Time:
+		enc.Timestamp(x)
+		return true
+	case vcvalue.Timestamp:
+		enc.TimestampParts(x)
+		return true
+	case vcvalue.Decimal:
+		enc.Decimal(x)
+		return true
 	case vcvalue.Plain:
 		encodeAny(enc.Passthrough(), x.V)
 		return true
@@ -547,13 +565,19 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 	switch rv.Kind() {
 	case reflect.Bool:
 		enc.Bool(rv.Bool())
-	case reflect.Int8, reflect.Int16, reflect.Int32:
-		// Narrower signed kinds map to the 32-bit tag (schema fidelity with
-		// int4); int/int64 keep 64-bit width.
+	case reflect.Int8:
+		enc.Int8(int8(rv.Int()))
+	case reflect.Int16:
+		enc.Int16(int16(rv.Int()))
+	case reflect.Int32:
 		enc.Int32(int32(rv.Int()))
 	case reflect.Int, reflect.Int64:
 		enc.Int64(rv.Int())
-	case reflect.Uint8, reflect.Uint16, reflect.Uint32:
+	case reflect.Uint8:
+		enc.UInt8(uint8(rv.Uint()))
+	case reflect.Uint16:
+		enc.UInt16(uint16(rv.Uint()))
+	case reflect.Uint32:
 		enc.UInt32(uint32(rv.Uint()))
 	case reflect.Uint, reflect.Uint64, reflect.Uintptr:
 		// Every unsigned word-or-wider kind keeps its unsigned identity as

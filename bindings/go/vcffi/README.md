@@ -143,3 +143,17 @@ var stackLeaves = vcffi.LeafSet{
 (`LeafSingle`, `LeafNone`, `LeafEmptySeq`, `LeafEmptyMap`); returning nil for
 a kind the wire carries fails the decode attributably rather than injecting an
 untyped nil.
+
+## Scalar mappings and shared vectors
+
+Fixed integer widths remain exact (`int8`→Int8, `uint16`→UInt16, and so on).
+`vcvalue.Int128`, `Uint128`, `Date` and `Decimal` are intercepted before
+reflection, including inside structs, pointers and containers. `time.Time`
+encodes a nanosecond Timestamp; leap-second timestamps decode into
+`vcvalue.Timestamp` so they can be re-encoded without loss. Matching explicit
+Encoder channels are available for custom `Encryptable` implementations.
+
+The codec reads `testdata/value-conformance.json` from the repo root directly,
+as do Rust and Node. Invalid scalar widths, date ranges, nanoseconds, decimal
+flags and scales return `ErrMalformed`. Value construction errors retain the
+typed `vcvalue` errors. The broader #332 guest-object corpus remains separate.

@@ -24,8 +24,8 @@ import (
 //   - Passthrough        → vcvalue.Plain{V: <decoded value>} (the clear-field marker).
 //
 // Go maps exactly in both directions — the 32-bit tags decode to int32 /
-// uint32 / float32, not widened to 64-bit — unlike JavaScript, which widens
-// every numeric tag to a JS number on decode.
+// uint32 / float32, not widened to 64-bit. JavaScript decodes integer tags
+// as BigInt and widens Float32 to a number.
 //
 // This self-describing shape is deliberately spike-scoped. A reflection-based
 // unmarshal into caller structs (the mirror of Encode) is future work.
@@ -50,6 +50,8 @@ func decodeValue(r *reader, depth int) (any, error) {
 		return nil, err
 	}
 	switch tag {
+	case tagInt8, tagUint8, tagInt16, tagUint16, tagInt128, tagUint128, tagDate, tagTimestamp, tagDecimal:
+		return decodeScalar(r, tag)
 	case tagNull, tagUndefined:
 		return nil, nil
 	case tagFalse:

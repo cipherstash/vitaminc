@@ -2,7 +2,9 @@
 #![doc = include_str!("../README.md")]
 mod ciphertext;
 mod convert;
+mod scalar;
 mod value;
+pub use scalar::ConversionError;
 
 pub use ciphertext::JsCipherText;
 pub use value::NapiValue;
