@@ -107,8 +107,9 @@ pub enum ValueKind {
 }
 
 impl ValueKind {
-    /// Every kind, in declaration order.
-    pub const ALL: [ValueKind; 20] = [
+    /// Every kind, in declaration order. The slice can grow as new kinds
+    /// are added without changing this constant's type.
+    pub const ALL: &'static [ValueKind] = &[
         ValueKind::Bool,
         ValueKind::Int32,
         ValueKind::Int64,
@@ -208,7 +209,8 @@ impl FromStr for ValueKind {
     /// `"u64"` or `" uint64"`. `"null"` and `"undefined"` are not kinds.
     fn from_str(name: &str) -> Result<Self, Self::Err> {
         ValueKind::ALL
-            .into_iter()
+            .iter()
+            .copied()
             .find(|kind| kind.name() == name)
             .ok_or(ParseValueKindError)
     }
@@ -350,7 +352,8 @@ mod tests {
             }
         }
         let available: Vec<_> = ValueKind::ALL
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|kind| match kind {
                 ValueKind::Date | ValueKind::Timestamp => cfg!(feature = "chrono"),
                 ValueKind::Decimal => cfg!(feature = "rust_decimal"),
@@ -366,7 +369,7 @@ mod tests {
     #[test]
     fn a_kind_holds_exactly_the_values_of_that_kind() {
         for (value, expected) in samples() {
-            for kind in ValueKind::ALL {
+            for &kind in ValueKind::ALL {
                 assert_eq!(
                     kind.holds(&value),
                     Some(kind) == expected,
@@ -405,7 +408,7 @@ mod tests {
             ],
             "the names are wire format"
         );
-        for kind in ValueKind::ALL {
+        for &kind in ValueKind::ALL {
             assert_eq!(kind.name().parse::<ValueKind>(), Ok(kind));
             assert_eq!(kind.to_string(), kind.name());
         }
