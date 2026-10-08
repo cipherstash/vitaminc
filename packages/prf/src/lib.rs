@@ -7,7 +7,10 @@ mod error;
 mod impls;
 mod ready;
 mod traits;
+mod value;
 mod visitor;
+
+pub use vitaminc_aead_value::canonical::CanonicalError;
 
 #[cfg(test)]
 mod test_backend;

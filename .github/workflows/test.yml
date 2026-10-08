@@ -96,6 +96,13 @@ jobs:
           cargo test -p vitaminc-aead-value --features rust_decimal &&
           cargo test -p vitaminc-aead-value --all-features
 
+      - name: test (canonical equality features)
+        run: |
+          cargo test -p vitaminc-prf --features chrono &&
+          cargo test -p vitaminc-prf --features rust_decimal &&
+          cargo test -p vitaminc-prf -p vitaminc-aead-value --all-features &&
+          cargo test -p vitaminc-hmac --test value_equality
+
       - name: test (vitaminc-encrypt, RustCrypto backend on native)
         # Forces the RustCrypto path that wasm32 uses, so the same property
         # tests run against both backends in CI.

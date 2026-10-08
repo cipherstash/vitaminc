@@ -31,6 +31,8 @@ pub enum PrfVisitorError {
 /// remote batch request being rejected).
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum PrfError<E> {
+    #[error("cannot derive an equality term: {0}")]
+    Canonical(#[from] crate::CanonicalError),
     #[error("failed to build PRF operation: {0}")]
     Build(#[from] PrfBuildError),
     #[error("failed to interpret PRF result: {0}")]

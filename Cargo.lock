@@ -1616,6 +1616,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
+name = "orderable-bytes"
+version = "0.1.1"
+source = "git+https://github.com/cipherstash/ore.rs?rev=b3b7800b9c0cd8f7c53c5382f8e018a4e8bcbbd5#b3b7800b9c0cd8f7c53c5382f8e018a4e8bcbbd5"
+dependencies = [
+ "chrono",
+ "rust_decimal",
+]
+
+[[package]]
 name = "outref"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2321,6 +2330,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinyvec"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
+
+[[package]]
 name = "tokio"
 version = "1.53.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2512,10 +2527,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
+name = "unicode-general-category"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b993bddc193ae5bd0d623b49ec06ac3e9312875fdae725a975c51db1cc1677f"
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5033c97c4262335cded6d6fc3e5c18ab755e1a3dc96376350f3d8e9f009ad956"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "universal-hash"
@@ -2639,7 +2669,12 @@ name = "vitaminc-aead-value"
 version = "0.5.1"
 dependencies = [
  "chrono",
+ "orderable-bytes",
+ "quickcheck",
+ "quickcheck_macros",
  "rust_decimal",
+ "unicode-general-category",
+ "unicode-normalization",
  "vitaminc-aead",
  "vitaminc-encrypt",
  "vitaminc-protected",
@@ -2683,12 +2718,15 @@ dependencies = [
 name = "vitaminc-hmac"
 version = "0.5.1"
 dependencies = [
+ "chrono",
  "futures",
  "hmac",
  "quickcheck",
  "quickcheck_macros",
+ "rust_decimal",
  "sha2",
  "trybuild",
+ "vitaminc-aead-value",
  "vitaminc-prf",
  "vitaminc-protected",
  "zeroize",
@@ -2738,6 +2776,7 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "thiserror",
+ "vitaminc-aead-value",
  "vitaminc-context",
  "vitaminc-protected",
 ]

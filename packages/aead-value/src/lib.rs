@@ -1,6 +1,8 @@
 #![deny(clippy::unwrap_used, clippy::todo, unsafe_code, unused_imports)]
 #![doc = include_str!("../README.md")]
 pub mod aad;
+#[cfg(feature = "canonical")]
+pub mod canonical;
 pub mod kind;
 mod scalar;
 pub mod tagged;

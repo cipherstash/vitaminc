@@ -108,3 +108,30 @@ impl<P> PrfVisitor<[u8; 32], P> for UserTermsVisitor {
 Executing the derivation requires a backend; with `vitaminc-hmac` in
 scope the value above resolves through
 `user.prf_visit_with_context(&prf, "tenant/acme/users/v1", UserTermsVisitor).await`.
+
+### Equality terms from `Value`
+
+`PrfValue` is implemented for `&vitaminc_aead_value::Value`. It borrows the
+source and derives one scalar equality term. Booleans, containers, null,
+undefined and passthrough return `PrfError::Canonical`; text with code points
+unassigned in Unicode 16 is also refused. `chrono` and `rust_decimal` features
+enable the corresponding value variants.
+
+The shared `vitaminc_aead_value::canonical` module owns the exhaustive value
+dispatch. It uses `orderable-bytes` at each scalar's natural width: signed
+integers are biased big-endian, floats fold signed zero and every NaN to one
+positive quiet NaN, timestamps truncate fractional nanoseconds to microseconds
+while retaining the 12-byte seconds/nanoseconds layout, and decimal encodings
+normalize scale and signed zero. Text equality is Unicode 16 NFC without
+accent or case folding. Unicode normalization and assignment tables are pinned.
+Ciphertext retains the original value, including scale and sub-microsecond data.
+
+`PrfEncoding::for_value_kind` exposes the new, versioned domains. Existing
+primitive `PrfValue` implementations retain their established little-endian or
+raw UTF-8 domains. Applications must use the same input API and context for
+writes and queries. Every new domain has an independently calculated HMAC
+known-answer vector in `vitaminc-hmac/tests/value_equality.rs`.
+
+**Merge gate for #373:** Dan Draper's written sign-off on canonical order bytes
+as PRF inputs is required before merge. The temporary `orderable-bytes` Git pin
+tracks ore.rs #97 and must become its registry release before publication.

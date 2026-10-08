@@ -11,7 +11,13 @@ authors.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = []
+chrono = ["vitaminc-aead-value/chrono"]
+rust_decimal = ["vitaminc-aead-value/rust_decimal"]
+
 [dependencies]
+vitaminc-aead-value = { version = "0.5.1", path = "../aead-value", features = ["canonical"] }
 mutants = "0.0.4"
 thiserror = { workspace = true }
 vitaminc-context = { version = "0.5.1", path = "../context" }
