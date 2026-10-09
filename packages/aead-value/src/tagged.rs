@@ -8,7 +8,7 @@
 //! string, or a container. Untagged bytes cannot be safely re-interpreted:
 //! any 8 bytes parse equally as a valid `i64`, `u64`, or `f64`, so a bare
 //! payload gives the decrypt side no way to tell which. Each scalar
-//! [`FfiValue`](crate::FfiValue) therefore seals as a one-byte type tag
+//! [`Value`](crate::Value) therefore seals as a one-byte type tag
 //! followed by its payload (`[tag] ++ payload`, see [`crate::tags`]) —
 //! the tag rides *inside* the AEAD envelope, so it is authenticated and the
 //! value describes its own type on the way back out.
@@ -46,7 +46,7 @@
 //! that knows the expected type up front) can mix that tag into AAD via
 //! [`LeafTypeAad`](crate::LeafTypeAad) at both encrypt and decrypt so a wrong
 //! type hypothesis fails authentication. The self-describing
-//! [`FfiValue`](crate::FfiValue) path does **not** use that — it relies on the
+//! [`Value`](crate::Value) path does **not** use that — it relies on the
 //! inner authenticated tag, which is known only *after* decryption.
 
 use crate::tags;
@@ -146,6 +146,76 @@ impl From<f32> for TaggedFloat32 {
 impl From<f64> for TaggedFloat64 {
     fn from(v: f64) -> Self {
         Self::copy_from_slice(&v.to_bits().to_le_bytes())
+    }
+}
+
+/// `INT8`: header + 1 payload byte.
+pub type TaggedInt8 = TaggedFixed<{ tags::INT8 }, 2>;
+impl From<i8> for TaggedInt8 {
+    fn from(v: i8) -> Self {
+        Self::copy_from_slice(&v.to_le_bytes())
+    }
+}
+/// `UINT8`: header + 1 payload byte.
+pub type TaggedUInt8 = TaggedFixed<{ tags::UINT8 }, 2>;
+impl From<u8> for TaggedUInt8 {
+    fn from(v: u8) -> Self {
+        Self::copy_from_slice(&v.to_le_bytes())
+    }
+}
+/// `INT16`: header + 2 payload bytes.
+pub type TaggedInt16 = TaggedFixed<{ tags::INT16 }, 3>;
+impl From<i16> for TaggedInt16 {
+    fn from(v: i16) -> Self {
+        Self::copy_from_slice(&v.to_le_bytes())
+    }
+}
+/// `UINT16`: header + 2 payload bytes.
+pub type TaggedUInt16 = TaggedFixed<{ tags::UINT16 }, 3>;
+impl From<u16> for TaggedUInt16 {
+    fn from(v: u16) -> Self {
+        Self::copy_from_slice(&v.to_le_bytes())
+    }
+}
+/// `INT128`: header + 16 payload bytes.
+pub type TaggedInt128 = TaggedFixed<{ tags::INT128 }, 17>;
+impl From<i128> for TaggedInt128 {
+    fn from(v: i128) -> Self {
+        Self::copy_from_slice(&v.to_le_bytes())
+    }
+}
+/// `UINT128`: header + 16 payload bytes.
+pub type TaggedUInt128 = TaggedFixed<{ tags::UINT128 }, 17>;
+impl From<u128> for TaggedUInt128 {
+    fn from(v: u128) -> Self {
+        Self::copy_from_slice(&v.to_le_bytes())
+    }
+}
+/// `DATE`: header + 4 payload bytes (requires `chrono`).
+#[cfg(feature = "chrono")]
+pub type TaggedDate = TaggedFixed<{ tags::DATE }, 5>;
+#[cfg(feature = "chrono")]
+impl From<chrono::NaiveDate> for TaggedDate {
+    fn from(v: chrono::NaiveDate) -> Self {
+        Self::copy_from_slice(&chrono::Datelike::num_days_from_ce(&v).to_le_bytes())
+    }
+}
+/// `TIMESTAMP`: header + 12 payload bytes (requires `chrono`).
+#[cfg(feature = "chrono")]
+pub type TaggedTimestamp = TaggedFixed<{ tags::TIMESTAMP }, 13>;
+#[cfg(feature = "chrono")]
+impl From<chrono::DateTime<chrono::Utc>> for TaggedTimestamp {
+    fn from(v: chrono::DateTime<chrono::Utc>) -> Self {
+        Self::copy_from_slice(&crate::scalar::timestamp_bytes(v))
+    }
+}
+/// `DECIMAL`: header + 16 payload bytes (requires `rust_decimal`).
+#[cfg(feature = "rust_decimal")]
+pub type TaggedDecimal = TaggedFixed<{ tags::DECIMAL }, 17>;
+#[cfg(feature = "rust_decimal")]
+impl From<rust_decimal::Decimal> for TaggedDecimal {
+    fn from(v: rust_decimal::Decimal) -> Self {
+        Self::copy_from_slice(&v.serialize())
     }
 }
 

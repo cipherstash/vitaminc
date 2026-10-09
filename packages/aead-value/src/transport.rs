@@ -1,4 +1,4 @@
-//! Transport-only binary encoding for [`FfiValue`] trees and
+//! Transport-only binary encoding for [`Value`] trees and
 //! [`CipherText`] containers crossing an FFI boundary (e.g. the Go/WASI
 //! binding's wasm linear-memory copy).
 //!
@@ -12,27 +12,28 @@
 //! Value leaves reuse the frozen tag constants for the scalar kinds so the
 //! two tables can't drift apart on meaning; [`ARRAY`]/[`OBJECT`] framing
 //! tags are transport-local (the sealed format has no container tags —
-//! container shape is carried by the ciphertext tree itself).
+//! container shape is carried by the ciphertext tree itself). Framing uses
+//! `0xF0`–`0xF2`, leaving lower tag numbers available for new scalar kinds.
 //!
 //! All lengths and counts are `u32` little-endian. Object keys are UTF-8.
 
 use std::any::Any;
 use std::collections::HashSet;
 
-use crate::{tags, FfiValue, Utf8String};
+use crate::{tags, Value};
 use vitaminc_aead::CipherText;
-use vitaminc_protected::{Controlled, Protected};
+use vitaminc_protected::Controlled;
 
-/// Transport-local framing tag for [`FfiValue::Array`].
-pub const ARRAY: u8 = 0x10;
-/// Transport-local framing tag for [`FfiValue::Object`].
-pub const OBJECT: u8 = 0x11;
-/// Transport-local framing tag for [`FfiValue::Passthrough`]: the next value
+/// Transport-local framing tag for [`Value::Array`].
+pub const ARRAY: u8 = 0xF0;
+/// Transport-local framing tag for [`Value::Object`].
+pub const OBJECT: u8 = 0xF1;
+/// Transport-local framing tag for [`Value::Passthrough`]: the next value
 /// node is a passthrough (unencrypted, unauthenticated) subtree. Like
 /// [`ARRAY`]/[`OBJECT`] this is transport-local — the sealed leaf format has
 /// no passthrough tag; the ciphertext tree carries passthrough via
 /// [`CT_PASSTHROUGH`].
-pub const PASSTHROUGH: u8 = 0x12;
+pub const PASSTHROUGH: u8 = 0xF2;
 
 /// Ciphertext node kind: a single sealed leaf.
 pub const CT_SINGLE: u8 = 0x01;
@@ -55,7 +56,7 @@ pub const CT_EMPTY_MAP: u8 = 0x07;
 ///
 /// The generic [`CipherText<Leaf, P>`] passthrough payload type `P` is opaque,
 /// but to cross this transport a passthrough value must be serializable as a
-/// value node. This trait supplies that, implemented for [`FfiValue`] — the
+/// value node. This trait supplies that, implemented for [`Value`] — the
 /// type the guest re-homes the Rust-native `Box<dyn Any + Send>` into (via
 /// [`CipherText::map_passthrough`]) before encoding, and back into after
 /// decoding. See [`encode_ciphertext_boxed`] / [`decode_ciphertext_boxed`].
@@ -66,7 +67,7 @@ pub trait TransportPassthrough: Sized {
     fn decode_node(reader: &mut Reader<'_>, depth: usize) -> Result<Self, CodecError>;
 }
 
-impl TransportPassthrough for FfiValue {
+impl TransportPassthrough for Value {
     fn encode_node(&self, out: &mut Vec<u8>) -> Result<(), CodecError> {
         encode_value_ref(self, out)
     }
@@ -175,7 +176,7 @@ fn write_bytes(out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), CodecError> {
 /// own wiping it (the wasm ABI layer zeroizes transport buffers on dealloc).
 ///
 /// Consumes the value; `Protected` leaves are wiped as `value` drops here.
-pub fn encode_value(value: FfiValue, out: &mut Vec<u8>) -> Result<(), CodecError> {
+pub fn encode_value(value: Value, out: &mut Vec<u8>) -> Result<(), CodecError> {
     // Borrow-encode, then let `value` drop (wiping any `Protected` leaves).
     encode_value_ref(&value, out)
 }
@@ -184,52 +185,16 @@ pub fn encode_value(value: FfiValue, out: &mut Vec<u8>) -> Result<(), CodecError
 /// it. Reads secret leaves through `risky_ref` (they are not wiped here); the
 /// owning caller is responsible for the value's lifetime. Also the encoder for
 /// a passthrough payload node (see [`TransportPassthrough`]).
-fn encode_value_ref(value: &FfiValue, out: &mut Vec<u8>) -> Result<(), CodecError> {
+fn encode_value_ref(value: &Value, out: &mut Vec<u8>) -> Result<(), CodecError> {
     match value {
-        FfiValue::Null => out.push(tags::NULL),
-        FfiValue::Undefined => out.push(tags::UNDEFINED),
-        FfiValue::Bool(false) => out.push(tags::BOOL_FALSE),
-        FfiValue::Bool(true) => out.push(tags::BOOL_TRUE),
-        FfiValue::Int32(i) => {
-            out.push(tags::INT32);
-            out.extend_from_slice(&i.to_le_bytes());
-        }
-        FfiValue::Int64(i) => {
-            out.push(tags::INT64);
-            out.extend_from_slice(&i.to_le_bytes());
-        }
-        FfiValue::UInt32(u) => {
-            out.push(tags::UINT32);
-            out.extend_from_slice(&u.to_le_bytes());
-        }
-        FfiValue::UInt64(u) => {
-            out.push(tags::UINT64);
-            out.extend_from_slice(&u.to_le_bytes());
-        }
-        FfiValue::Float32(f) => {
-            out.push(tags::FLOAT32);
-            out.extend_from_slice(&f.to_bits().to_le_bytes());
-        }
-        FfiValue::Float64(f) => {
-            out.push(tags::FLOAT64);
-            out.extend_from_slice(&f.to_bits().to_le_bytes());
-        }
-        FfiValue::String(s) => {
-            out.push(tags::STRING);
-            write_bytes(out, s.risky_ref())?;
-        }
-        FfiValue::Bytes(b) => {
-            out.push(tags::BYTES);
-            write_bytes(out, b.risky_ref())?;
-        }
-        FfiValue::Array(items) => {
+        Value::Array(items) => {
             out.push(ARRAY);
             write_len(out, items.len())?;
             for item in items {
                 encode_value_ref(item, out)?;
             }
         }
-        FfiValue::Object(entries) => {
+        Value::Object(entries) => {
             out.push(OBJECT);
             write_len(out, entries.len())?;
             for (key, value) in entries {
@@ -237,16 +202,101 @@ fn encode_value_ref(value: &FfiValue, out: &mut Vec<u8>) -> Result<(), CodecErro
                 encode_value_ref(value, out)?;
             }
         }
-        FfiValue::Passthrough(inner) => {
+        Value::Passthrough(inner) => {
             out.push(PASSTHROUGH);
             encode_value_ref(inner, out)?;
         }
+        _ => encode_leaf_ref(value, out)?,
+    }
+    Ok(())
+}
+
+/// Encode only the scalar payload table; container framing and recursion
+/// remain in `encode_value_ref`.
+fn encode_leaf_ref(value: &Value, out: &mut Vec<u8>) -> Result<(), CodecError> {
+    match value {
+        Value::Null => out.push(tags::NULL),
+        Value::Undefined => out.push(tags::UNDEFINED),
+        Value::Bool(false) => out.push(tags::BOOL_FALSE),
+        Value::Bool(true) => out.push(tags::BOOL_TRUE),
+        Value::Int32(i) => {
+            out.push(tags::INT32);
+            out.extend_from_slice(&i.to_le_bytes());
+        }
+        Value::Int64(i) => {
+            out.push(tags::INT64);
+            out.extend_from_slice(&i.to_le_bytes());
+        }
+        Value::UInt32(u) => {
+            out.push(tags::UINT32);
+            out.extend_from_slice(&u.to_le_bytes());
+        }
+        Value::UInt64(u) => {
+            out.push(tags::UINT64);
+            out.extend_from_slice(&u.to_le_bytes());
+        }
+        Value::Float32(f) => {
+            out.push(tags::FLOAT32);
+            out.extend_from_slice(&f.to_bits().to_le_bytes());
+        }
+        Value::Float64(f) => {
+            out.push(tags::FLOAT64);
+            out.extend_from_slice(&f.to_bits().to_le_bytes());
+        }
+        Value::Int8(v) => {
+            out.push(tags::INT8);
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        Value::UInt8(v) => {
+            out.push(tags::UINT8);
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        Value::Int16(v) => {
+            out.push(tags::INT16);
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        Value::UInt16(v) => {
+            out.push(tags::UINT16);
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        Value::Int128(v) => {
+            out.push(tags::INT128);
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        Value::UInt128(v) => {
+            out.push(tags::UINT128);
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        #[cfg(feature = "chrono")]
+        Value::Date(v) => {
+            out.push(tags::DATE);
+            out.extend_from_slice(&chrono::Datelike::num_days_from_ce(v).to_le_bytes());
+        }
+        #[cfg(feature = "chrono")]
+        Value::Timestamp(v) => {
+            out.push(tags::TIMESTAMP);
+            out.extend_from_slice(&crate::scalar::timestamp_bytes(*v));
+        }
+        #[cfg(feature = "rust_decimal")]
+        Value::Decimal(v) => {
+            out.push(tags::DECIMAL);
+            out.extend_from_slice(&v.serialize());
+        }
+        Value::String(s) => {
+            out.push(tags::STRING);
+            write_bytes(out, s.risky_ref())?;
+        }
+        Value::Bytes(b) => {
+            out.push(tags::BYTES);
+            write_bytes(out, b.risky_ref())?;
+        }
+        Value::Array(_) | Value::Object(_) | Value::Passthrough(_) => return Err(CodecError),
     }
     Ok(())
 }
 
 /// Decode a value tree, requiring the reader to be fully consumed.
-pub fn decode_value(reader: &mut Reader<'_>) -> Result<FfiValue, CodecError> {
+pub fn decode_value(reader: &mut Reader<'_>) -> Result<Value, CodecError> {
     let value = decode_value_inner(reader, 0)?;
     if !reader.finished() {
         return Err(CodecError);
@@ -257,7 +307,7 @@ pub fn decode_value(reader: &mut Reader<'_>) -> Result<FfiValue, CodecError> {
 /// Decode the recursive part of a value node: the container framings, which
 /// need the depth budget. Anything else is a leaf and is delegated to
 /// [`decode_leaf`], keeping each function's branch count modest.
-fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue, CodecError> {
+fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<Value, CodecError> {
     if depth > MAX_DEPTH {
         return Err(CodecError);
     }
@@ -268,7 +318,7 @@ fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue,
             for _ in 0..count {
                 items.push(decode_value_inner(reader, depth + 1)?);
             }
-            Ok(FfiValue::Array(items))
+            Ok(Value::Array(items))
         }
         OBJECT => {
             let count = reader.count()?;
@@ -285,12 +335,12 @@ fn decode_value_inner(reader: &mut Reader<'_>, depth: usize) -> Result<FfiValue,
                 }
                 entries.push((key, decode_value_inner(reader, depth + 1)?));
             }
-            Ok(FfiValue::Object(entries))
+            Ok(Value::Object(entries))
         }
         PASSTHROUGH => {
             // One wrapped value node, one level deeper for the recursion bound.
             let inner = decode_value_inner(reader, depth + 1)?;
-            Ok(FfiValue::Passthrough(Box::new(inner)))
+            Ok(Value::Passthrough(Box::new(inner)))
         }
         tag => decode_leaf(tag, reader),
     }
@@ -308,47 +358,18 @@ fn decode_key(reader: &mut Reader<'_>) -> Result<String, CodecError> {
 /// Decode a non-container value node — the frozen scalar tag table. Split out
 /// of [`decode_value_inner`] so neither function carries the branch count of
 /// the whole tag space.
-fn decode_leaf(tag: u8, reader: &mut Reader<'_>) -> Result<FfiValue, CodecError> {
-    /// Read exactly `N` bytes as a fixed-width little-endian payload.
-    fn fixed<const N: usize>(reader: &mut Reader<'_>) -> Result<[u8; N], CodecError> {
-        reader.take(N)?.try_into().map_err(|_| CodecError)
-    }
-
-    match tag {
-        tags::NULL => Ok(FfiValue::Null),
-        tags::UNDEFINED => Ok(FfiValue::Undefined),
-        tags::BOOL_FALSE => Ok(FfiValue::Bool(false)),
-        tags::BOOL_TRUE => Ok(FfiValue::Bool(true)),
-        tags::INT32 => Ok(FfiValue::Int32(i32::from_le_bytes(fixed(reader)?))),
-        tags::INT64 => Ok(FfiValue::Int64(i64::from_le_bytes(fixed(reader)?))),
-        tags::UINT32 => Ok(FfiValue::UInt32(u32::from_le_bytes(fixed(reader)?))),
-        tags::UINT64 => Ok(FfiValue::UInt64(u64::from_le_bytes(fixed(reader)?))),
-        tags::FLOAT32 => Ok(FfiValue::Float32(f32::from_bits(u32::from_le_bytes(
-            fixed(reader)?,
-        )))),
-        tags::FLOAT64 => Ok(FfiValue::Float64(f64::from_bits(u64::from_le_bytes(
-            fixed(reader)?,
-        )))),
-        tags::STRING => {
-            let len = reader.count()?;
-            let bytes = reader.take(len)?;
-            // `Utf8String::try_from` validates — a malformed transport frame
-            // is a codec error, mirroring the decrypt visitor's rejection.
-            let s = Utf8String::try_from(Protected::new(bytes.to_vec())).map_err(|_| CodecError)?;
-            Ok(FfiValue::String(s))
-        }
-        tags::BYTES => {
-            let len = reader.count()?;
-            Ok(FfiValue::Bytes(Protected::new(reader.take(len)?.to_vec())))
-        }
-        _ => Err(CodecError),
-    }
+fn decode_leaf(tag: u8, reader: &mut Reader<'_>) -> Result<Value, CodecError> {
+    let len = match tag {
+        tags::STRING | tags::BYTES => reader.count()?,
+        _ => crate::scalar::fixed_payload_len(tag).ok_or(CodecError)?,
+    };
+    crate::scalar::decode_leaf(tag, reader.take(len)?).map_err(|_| CodecError)
 }
 
 /// Encode a ciphertext tree. A `Passthrough` node carries its payload as one
 /// embedded plaintext value node, so the payload type `P` must be
 /// serializable via [`TransportPassthrough`]. The Rust-native `Box<dyn Any +
-/// Send>` is not — re-home it to [`FfiValue`] first (see
+/// Send>` is not — re-home it to [`Value`] first (see
 /// [`encode_ciphertext_boxed`]).
 pub fn encode_ciphertext<Leaf, P>(
     ct: &CipherText<Leaf, P>,
@@ -400,8 +421,8 @@ where
 
 /// Encode an `AesCipherText`-shaped tree (Rust-native `Box<dyn Any + Send>`
 /// passthrough payload type) by first re-homing each passthrough payload to an
-/// [`FfiValue`] value node via [`CipherText::map_passthrough`]. A boxed
-/// payload whose concrete type is not `FfiValue` (a foreign passthrough that
+/// [`Value`] value node via [`CipherText::map_passthrough`]. A boxed
+/// payload whose concrete type is not `Value` (a foreign passthrough that
 /// cannot cross the transport) is rejected.
 pub fn encode_ciphertext_boxed<Leaf>(
     ct: CipherText<Leaf, Box<dyn Any + Send + 'static>>,
@@ -410,9 +431,9 @@ pub fn encode_ciphertext_boxed<Leaf>(
 where
     Leaf: AsRef<[u8]>,
 {
-    let rehomed: CipherText<Leaf, FfiValue> = ct.map_passthrough(&mut |boxed| {
+    let rehomed: CipherText<Leaf, Value> = ct.map_passthrough(&mut |boxed| {
         boxed
-            .downcast::<FfiValue>()
+            .downcast::<Value>()
             .map(|inner| *inner)
             .map_err(|_| CodecError)
     })?;
@@ -435,7 +456,7 @@ where
 }
 
 /// Decode a ciphertext tree into the `AesCipherText`-shaped `Box<dyn Any +
-/// Send>` passthrough payload type, re-homing each decoded [`FfiValue`] payload
+/// Send>` passthrough payload type, re-homing each decoded [`Value`] payload
 /// into a box via [`CipherText::map_passthrough`] so the tree can be handed to
 /// the Rust-native decipher.
 pub fn decode_ciphertext_boxed<Leaf>(
@@ -444,7 +465,7 @@ pub fn decode_ciphertext_boxed<Leaf>(
 where
     Leaf: From<Vec<u8>>,
 {
-    let ct: CipherText<Leaf, FfiValue> = decode_ciphertext(reader)?;
+    let ct: CipherText<Leaf, Value> = decode_ciphertext(reader)?;
     ct.map_passthrough(&mut |inner| {
         Ok::<Box<dyn Any + Send + 'static>, CodecError>(Box::new(inner))
     })
@@ -519,28 +540,29 @@ where
 mod tests {
     use super::*;
     use vitaminc_encrypt::AesCipherText;
+    use vitaminc_protected::Protected;
 
-    fn string(s: &str) -> FfiValue {
-        FfiValue::String(s.into())
+    fn string(s: &str) -> Value {
+        Value::String(s.into())
     }
 
-    fn sample() -> FfiValue {
-        FfiValue::Object(vec![
+    fn sample() -> Value {
+        Value::Object(vec![
             ("name".into(), string("Ada")),
-            ("age".into(), FfiValue::Int64(36)),
-            ("rank".into(), FfiValue::Int32(-7)),
-            ("port".into(), FfiValue::UInt32(65535)),
-            ("huge".into(), FfiValue::UInt64(u64::MAX)),
-            ("score".into(), FfiValue::Float64(1.5)),
-            ("ratio".into(), FfiValue::Float32(0.5)),
-            ("active".into(), FfiValue::Bool(true)),
-            ("nothing".into(), FfiValue::Null),
+            ("age".into(), Value::Int64(36)),
+            ("rank".into(), Value::Int32(-7)),
+            ("port".into(), Value::UInt32(65535)),
+            ("huge".into(), Value::UInt64(u64::MAX)),
+            ("score".into(), Value::Float64(1.5)),
+            ("ratio".into(), Value::Float32(0.5)),
+            ("active".into(), Value::Bool(true)),
+            ("nothing".into(), Value::Null),
             (
                 "tags".into(),
-                FfiValue::Array(vec![
+                Value::Array(vec![
                     string("a"),
-                    FfiValue::Bytes(Protected::new(vec![1, 2, 3])),
-                    FfiValue::Undefined,
+                    Value::Bytes(Protected::new(vec![1, 2, 3])),
+                    Value::Undefined,
                 ]),
             ),
         ])
@@ -548,7 +570,7 @@ mod tests {
 
     /// Structural equality via re-encoding: the codec is deterministic, so
     /// equal transport bytes ⇔ equal trees (Number compared by bit pattern).
-    fn encoded(value: FfiValue) -> Vec<u8> {
+    fn encoded(value: Value) -> Vec<u8> {
         let mut out = Vec::new();
         encode_value(value, &mut out).expect("codec");
         out
@@ -563,40 +585,50 @@ mod tests {
 
     #[test]
     fn scalar_encodings_are_pinned() {
-        assert_eq!(encoded(FfiValue::Null), [0x00]);
-        assert_eq!(encoded(FfiValue::Undefined), [0x01]);
-        assert_eq!(encoded(FfiValue::Bool(false)), [0x02]);
-        assert_eq!(encoded(FfiValue::Bool(true)), [0x03]);
-        assert_eq!(encoded(FfiValue::Int32(-1)), [0x04, 0xFF, 0xFF, 0xFF, 0xFF]);
+        assert_eq!(encoded(Value::Null), [0x00]);
+        assert_eq!(encoded(Value::Undefined), [0x01]);
+        assert_eq!(encoded(Value::Bool(false)), [0x02]);
+        assert_eq!(encoded(Value::Bool(true)), [0x03]);
+        assert_eq!(encoded(Value::Int32(-1)), [0x04, 0xFF, 0xFF, 0xFF, 0xFF]);
         assert_eq!(
-            encoded(FfiValue::Int64(-1)),
+            encoded(Value::Int64(-1)),
             [0x05, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
         );
         assert_eq!(
-            encoded(FfiValue::UInt32(u32::MAX)),
+            encoded(Value::UInt32(u32::MAX)),
             [0x06, 0xFF, 0xFF, 0xFF, 0xFF]
         );
         assert_eq!(
-            encoded(FfiValue::UInt64(u64::MAX)),
+            encoded(Value::UInt64(u64::MAX)),
             [0x07, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]
         );
         // 1.5f32 = 0x3FC00000; 1.5f64 = 0x3FF8000000000000, little-endian.
-        assert_eq!(encoded(FfiValue::Float32(1.5)), [0x08, 0, 0, 0xC0, 0x3F]);
+        assert_eq!(encoded(Value::Float32(1.5)), [0x08, 0, 0, 0xC0, 0x3F]);
         assert_eq!(
-            encoded(FfiValue::Float64(1.5)),
+            encoded(Value::Float64(1.5)),
             [0x09, 0, 0, 0, 0, 0, 0, 0xF8, 0x3F]
         );
         assert_eq!(encoded(string("hi")), [0x0A, 2, 0, 0, 0, b'h', b'i']);
         assert_eq!(
-            encoded(FfiValue::Array(vec![FfiValue::Null])),
-            [0x10, 1, 0, 0, 0, 0x00]
+            encoded(Value::Array(vec![Value::Null])),
+            [0xF0, 1, 0, 0, 0, 0x00]
+        );
+    }
+
+    #[test]
+    fn framing_tags_are_pinned() {
+        assert_eq!(encoded(Value::Array(vec![])), [0xF0, 0, 0, 0, 0]);
+        assert_eq!(encoded(Value::Object(vec![])), [0xF1, 0, 0, 0, 0]);
+        assert_eq!(
+            encoded(Value::Passthrough(Box::new(Value::Null))),
+            [0xF2, 0]
         );
     }
 
     #[test]
     fn uint_round_trips() {
         for u in [0u64, 1, i64::MAX as u64, i64::MAX as u64 + 1, u64::MAX] {
-            let bytes = encoded(FfiValue::UInt64(u));
+            let bytes = encoded(Value::UInt64(u));
             let decoded = decode_value(&mut Reader::new(&bytes)).expect("codec");
             assert_eq!(encoded(decoded), bytes);
         }
@@ -607,12 +639,12 @@ mod tests {
         // The 32-bit numeric tags preserve width and signedness through the
         // codec (edge values included).
         for v in [i32::MIN, -1, 0, i32::MAX] {
-            let bytes = encoded(FfiValue::Int32(v));
+            let bytes = encoded(Value::Int32(v));
             let decoded = decode_value(&mut Reader::new(&bytes)).expect("codec");
             assert_eq!(encoded(decoded), bytes);
         }
         for v in [0u32, 1, u32::MAX] {
-            let bytes = encoded(FfiValue::UInt32(v));
+            let bytes = encoded(Value::UInt32(v));
             let decoded = decode_value(&mut Reader::new(&bytes)).expect("codec");
             assert_eq!(encoded(decoded), bytes);
         }
@@ -622,7 +654,7 @@ mod tests {
             f32::from_bits(0x7fc0_0001),
             1.5,
         ] {
-            let bytes = encoded(FfiValue::Float32(v));
+            let bytes = encoded(Value::Float32(v));
             let decoded = decode_value(&mut Reader::new(&bytes)).expect("codec");
             assert_eq!(encoded(decoded), bytes);
         }
@@ -630,7 +662,7 @@ mod tests {
 
     #[test]
     fn trailing_bytes_are_rejected() {
-        let mut bytes = encoded(FfiValue::Null);
+        let mut bytes = encoded(Value::Null);
         bytes.push(0x00);
         assert!(decode_value(&mut Reader::new(&bytes)).is_err());
     }
@@ -672,7 +704,7 @@ mod tests {
         // The clamp bounds only the up-front reservation; a genuine container
         // larger than MAX_EAGER_CAPACITY must round-trip unchanged.
         let count = MAX_EAGER_CAPACITY as i64 + 10;
-        let make = || FfiValue::Array((0..count).map(FfiValue::Int64).collect());
+        let make = || Value::Array((0..count).map(Value::Int64).collect());
         let decoded = decode_value(&mut Reader::new(&encoded(make()))).expect("decode");
         assert_eq!(decoded, make());
     }
@@ -756,12 +788,12 @@ mod tests {
         let ok = decode_value(&mut Reader::new(&nested_value(3))).expect("codec");
         let mut d = 0;
         let mut cur = &ok;
-        while let FfiValue::Array(items) = cur {
+        while let Value::Array(items) = cur {
             d += 1;
             cur = &items[0];
         }
         assert_eq!(d, 3);
-        assert!(matches!(cur, FfiValue::Null));
+        assert!(matches!(cur, Value::Null));
     }
 
     #[test]
@@ -776,7 +808,7 @@ mod tests {
         }
         let decoded = decode_value(&mut Reader::new(&bytes)).expect("codec");
         match decoded {
-            FfiValue::Object(entries) => {
+            Value::Object(entries) => {
                 let keys: Vec<_> = entries.iter().map(|(k, _)| k.as_str()).collect();
                 assert_eq!(keys, vec!["a", "bcd"]);
             }
@@ -856,21 +888,21 @@ mod tests {
     fn every_scalar_tag_decodes_to_its_own_variant() {
         // One decode per frozen tag, so deleting any single leaf arm fails
         // here rather than silently falling through to the catch-all.
-        let cases: Vec<(Vec<u8>, FfiValue)> = vec![
-            (vec![tags::NULL], FfiValue::Null),
-            (vec![tags::UNDEFINED], FfiValue::Undefined),
-            (vec![tags::BOOL_FALSE], FfiValue::Bool(false)),
-            (vec![tags::BOOL_TRUE], FfiValue::Bool(true)),
-            (encoded(FfiValue::Int32(-7)), FfiValue::Int32(-7)),
-            (encoded(FfiValue::Int64(-8)), FfiValue::Int64(-8)),
-            (encoded(FfiValue::UInt32(9)), FfiValue::UInt32(9)),
-            (encoded(FfiValue::UInt64(10)), FfiValue::UInt64(10)),
-            (encoded(FfiValue::Float32(1.5)), FfiValue::Float32(1.5)),
-            (encoded(FfiValue::Float64(2.5)), FfiValue::Float64(2.5)),
+        let cases: Vec<(Vec<u8>, Value)> = vec![
+            (vec![tags::NULL], Value::Null),
+            (vec![tags::UNDEFINED], Value::Undefined),
+            (vec![tags::BOOL_FALSE], Value::Bool(false)),
+            (vec![tags::BOOL_TRUE], Value::Bool(true)),
+            (encoded(Value::Int32(-7)), Value::Int32(-7)),
+            (encoded(Value::Int64(-8)), Value::Int64(-8)),
+            (encoded(Value::UInt32(9)), Value::UInt32(9)),
+            (encoded(Value::UInt64(10)), Value::UInt64(10)),
+            (encoded(Value::Float32(1.5)), Value::Float32(1.5)),
+            (encoded(Value::Float64(2.5)), Value::Float64(2.5)),
             (encoded(string("hi")), string("hi")),
             (
-                encoded(FfiValue::Bytes(Protected::new(vec![1, 2]))),
-                FfiValue::Bytes(Protected::new(vec![1, 2])),
+                encoded(Value::Bytes(Protected::new(vec![1, 2]))),
+                Value::Bytes(Protected::new(vec![1, 2])),
             ),
         ];
         for (bytes, want) in cases {
@@ -1098,14 +1130,14 @@ mod tests {
 
     #[test]
     fn passthrough_marker_is_pinned() {
-        // PASSTHROUGH (0x12) then the wrapped value node.
+        // PASSTHROUGH (0xF2) then the wrapped value node.
         assert_eq!(
-            encoded(FfiValue::Passthrough(Box::new(FfiValue::Null))),
-            [0x12, 0x00]
+            encoded(Value::Passthrough(Box::new(Value::Null))),
+            [0xF2, 0x00]
         );
         assert_eq!(
-            encoded(FfiValue::Passthrough(Box::new(FfiValue::Int32(-1)))),
-            [0x12, 0x04, 0xFF, 0xFF, 0xFF, 0xFF]
+            encoded(Value::Passthrough(Box::new(Value::Int32(-1)))),
+            [0xF2, 0x04, 0xFF, 0xFF, 0xFF, 0xFF]
         );
     }
 
@@ -1113,16 +1145,13 @@ mod tests {
     fn passthrough_value_round_trips() {
         // Passthrough at array/object positions and wrapping a whole subtree.
         let make = || {
-            FfiValue::Object(vec![
-                (
-                    "id".into(),
-                    FfiValue::Passthrough(Box::new(FfiValue::Int64(42))),
-                ),
+            Value::Object(vec![
+                ("id".into(), Value::Passthrough(Box::new(Value::Int64(42)))),
                 (
                     "meta".into(),
-                    FfiValue::Passthrough(Box::new(FfiValue::Array(vec![
+                    Value::Passthrough(Box::new(Value::Array(vec![
                         string("a"),
-                        FfiValue::Bool(true),
+                        Value::Bool(true),
                     ]))),
                 ),
                 ("email".into(), string("sealed-elsewhere")),
@@ -1150,12 +1179,12 @@ mod tests {
 
     #[test]
     fn passthrough_crosses_the_ciphertext_transport() {
-        // A passthrough with an FfiValue payload round-trips through the
+        // A passthrough with a Value payload round-trips through the
         // ciphertext transport once the Box payload type is re-homed.
         let ct: AesCipherText = CipherText::Map(vec![
             (
                 "id".into(),
-                CipherText::Passthrough(Box::new(FfiValue::Int64(42))),
+                CipherText::Passthrough(Box::new(Value::Int64(42))),
             ),
             ("email".into(), CipherText::Single(vec![9u8; 40].into())),
         ]);
@@ -1170,10 +1199,14 @@ mod tests {
 
     #[test]
     fn foreign_passthrough_payload_cannot_cross() {
-        // A boxed payload that is not an FfiValue cannot be serialized as a
+        // A boxed payload that is not a Value cannot be serialized as a
         // value node; re-homing rejects it rather than emitting garbage.
         let ct: AesCipherText = CipherText::Passthrough(Box::new(42u32));
         let mut out = Vec::new();
         assert_eq!(encode_ciphertext_boxed(ct, &mut out), Err(CodecError));
     }
 }
+
+#[cfg(test)]
+#[path = "transport_properties.rs"]
+mod properties;

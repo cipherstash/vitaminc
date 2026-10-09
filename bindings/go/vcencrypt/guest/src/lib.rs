@@ -1,6 +1,6 @@
 //! # vitaminc-wasi-guest
 //!
-//! WASI guest module exposing `vitaminc` AEAD encryption of [`FfiValue`]
+//! WASI guest module exposing `vitaminc` AEAD encryption of [`Value`]
 //! trees to non-Rust hosts — the Go bindings spike. Built for
 //! `wasm32-wasip1` and embedded by the Go module in the parent directory
 //! (wazero host, `CGO_ENABLED=0`).
@@ -18,7 +18,7 @@
 //! (transport-only — the sealed leaf format inside the envelope is the only
 //! frozen byte format).
 //!
-//! [`FfiValue`]: vitaminc_aead_value::FfiValue
+//! [`Value`]: vitaminc_aead_value::Value
 
 // The ABI's packed u64 results embed 32-bit pointers and its bounds checks
 // read the wasm linear-memory size, so the module only exists on wasm32

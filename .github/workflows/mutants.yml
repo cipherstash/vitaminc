@@ -72,6 +72,10 @@ jobs:
       - name: setup rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
       - name: Start LocalStack
         # The unmutated baseline runs the whole test suite, and vitaminc-kms'
         # tests call a KMS endpoint on localhost:4566 — same as the test.yml and

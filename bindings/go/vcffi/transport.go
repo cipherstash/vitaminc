@@ -26,11 +26,20 @@ const (
 	tagFloat64   = 0x09
 	tagString    = 0x0A
 	tagBytes     = 0x0B
-	tagArray     = 0x10
-	tagObject    = 0x11
+	tagInt8      = 0x0C
+	tagUint8     = 0x0D
+	tagInt16     = 0x0E
+	tagUint16    = 0x0F
+	tagInt128    = 0x10
+	tagUint128   = 0x11
+	tagDate      = 0x12
+	tagTimestamp = 0x13
+	tagDecimal   = 0x14
+	tagArray     = 0xF0
+	tagObject    = 0xF1
 	// tagPassthrough wraps one value node that travels in the clear
 	// (unencrypted, unauthenticated). Transport-local, like array/object.
-	tagPassthrough = 0x12
+	tagPassthrough = 0xF2
 )
 
 // maxUint32 bounds every length/count written or read (all are u32 LE).

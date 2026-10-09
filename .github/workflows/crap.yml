@@ -73,6 +73,10 @@ jobs:
           # llvm-tools-preview is required by cargo-llvm-cov to produce coverage.
           components: llvm-tools-preview
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
       - name: Start LocalStack
         # Mirrors the test.yml gate: vitaminc-kms' tests call a KMS endpoint on
         # localhost:4566, so coverage of that crate needs LocalStack running too.

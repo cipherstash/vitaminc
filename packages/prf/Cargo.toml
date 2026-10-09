@@ -11,7 +11,15 @@ authors.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = []
+# `PrfValue` for `&vitaminc_aead_value::Value` (canonical equality terms).
+value = ["dep:vitaminc-aead-value"]
+chrono = ["value", "vitaminc-aead-value/chrono"]
+rust_decimal = ["value", "vitaminc-aead-value/rust_decimal"]
+
 [dependencies]
+vitaminc-aead-value = { version = "0.5.1", path = "../aead-value", features = ["canonical"], optional = true }
 mutants = "0.0.4"
 thiserror = { workspace = true }
 vitaminc-context = { version = "0.5.1", path = "../context" }

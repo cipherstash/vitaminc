@@ -91,7 +91,26 @@ bound into its own value's AAD.
 ## Decoding
 
 Decryption (in `vcencrypt`) returns Go natives at the exact numeric widths
-(`nil`, `bool`, `int32`, `int64`, `uint32`, `uint64`, `float32`, `float64`,
+(`nil`, `bool`, `int8`, `int16`, `int32`, `int64`, `uint8`, `uint16`, `uint32`, `uint64`, `float32`, `float64`,
 `string`, `[]byte`, `[]any`), this package's ordered `Object` for maps, and
 `Plain` for passthrough. A reflection-based decode into caller structs (the
 mirror of the reflection encode) is future work.
+
+
+## Extended scalars
+
+`Int128` and `Uint128` are 16-byte little-endian values, with exact decimal
+`ParseInt128` / `ParseUint128` constructors and `String` methods. Out-of-range
+inputs return `ErrIntegerRange`.
+
+`Date{Year, Month, Day}` is a Gregorian calendar date in chrono's range
+(-262143 through 262142). `time.Time` maps to Timestamp with nanoseconds and
+decodes in UTC; timezone/location and monotonic metadata are not retained.
+`Timestamp{Seconds, Nanoseconds}` retains chrono leap seconds that time.Time
+cannot represent. Invalid calendar/timestamp inputs return `ErrInvalidDate`
+or `ErrInvalidTimestamp`.
+
+`ParseDecimal("1.50")` constructs a finite 96-bit coefficient with scale 0–28,
+retaining trailing zeroes and signed zero. Exponents and rounding are not
+accepted. NaN and infinities return `ErrNonFiniteDecimal`; malformed or
+out-of-range text returns `ErrInvalidDecimal`. Match these with `errors.Is`.
