@@ -26,7 +26,7 @@
 //! have persisted it), but it is not a cross-language wire commitment;
 //! only the leaf byte format (see `vitaminc-aead-value`) is frozen.
 
-use napi::bindgen_prelude::{Array, Buffer, FromNapiValue, Object, ToNapiValue, Unknown};
+use napi::bindgen_prelude::{Array, Buffer, FromNapiValue, JsValue, Object, ToNapiValue, Unknown};
 use napi::{sys, Env, Error, Result, Status, ValueType};
 use vitaminc_aead::CipherText;
 
@@ -57,13 +57,12 @@ fn shape_error() -> Error {
     Error::new(Status::InvalidArg, "malformed ciphertext value")
 }
 
-fn node_to_js<Leaf, P>(env: sys::napi_env, node: CipherText<Leaf, P>) -> Result<sys::napi_value>
+fn node_to_js<Leaf, P>(env: &Env, node: CipherText<Leaf, P>) -> Result<Object<'_>>
 where
     Leaf: AsRef<[u8]>,
     P: ToNapiValue,
 {
-    let raw_env = Env::from_raw(env);
-    let mut obj = Object::new(&raw_env)?;
+    let mut obj = Object::new(env)?;
     match node {
         CipherText::Single(leaf) => {
             obj.set(T_KEY, T_CIPHERTEXT)?;
@@ -83,15 +82,15 @@ where
         }
         CipherText::Sequence(items) => {
             obj.set(T_KEY, T_SEQ)?;
-            let mut arr = raw_env.create_array(items.len() as u32)?;
+            let mut arr = env.create_array(items.len() as u32)?;
             for (i, item) in items.into_iter().enumerate() {
-                arr.set(i as u32, NodeHandle(item))?;
+                arr.set(i as u32, node_to_js(env, item)?)?;
             }
             obj.set(V_KEY, arr)?;
         }
         CipherText::Map(entries) => {
             obj.set(T_KEY, T_MAP)?;
-            let map = Object::new(&raw_env)?;
+            let mut map = Object::new(env)?;
             for (key, value) in entries {
                 // Map keys travel in the clear inside the stored ciphertext
                 // and are therefore attacker-writable; never assign
@@ -106,42 +105,20 @@ where
                 // attacker-writable, so a polluted inherited setter must
                 // never run — see `convert::define_own_property`.
                 let js_value = node_to_js(env, value)?;
-                define_own_property(&map, &key, js_value)?;
+                define_own_property(&mut map, &key, &js_value)?;
             }
             obj.set(V_KEY, map)?;
         }
         CipherText::Passthrough(p) => {
             obj.set(T_KEY, T_PASSTHROUGH)?;
-            obj.set(V_KEY, PassthroughHandle(p))?;
+            obj.set(V_KEY, p)?;
         }
     }
-    unsafe { Object::to_napi_value(env, obj) }
+    Ok(obj)
 }
 
 const T_KEY: &str = "t";
 const V_KEY: &str = "v";
-
-/// Recursion helper so nested nodes can be assigned through `ToNapiValue`.
-struct NodeHandle<Leaf, P>(CipherText<Leaf, P>);
-
-impl<Leaf, P> ToNapiValue for NodeHandle<Leaf, P>
-where
-    Leaf: AsRef<[u8]>,
-    P: ToNapiValue,
-{
-    unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
-        node_to_js(env, val.0)
-    }
-}
-
-/// Recursion helper for the passthrough payload.
-struct PassthroughHandle<P>(P);
-
-impl<P: ToNapiValue> ToNapiValue for PassthroughHandle<P> {
-    unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
-        unsafe { P::to_napi_value(env, val.0) }
-    }
-}
 
 impl<Leaf, P> ToNapiValue for JsCipherText<Leaf, P>
 where
@@ -149,7 +126,7 @@ where
     P: ToNapiValue,
 {
     unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
-        node_to_js(env, val.0)
+        Ok(node_to_js(&Env::from_raw(env), val.0)?.raw())
     }
 }
 
@@ -238,6 +215,10 @@ where
     P: FromNapiValue,
 {
     unsafe fn from_napi_value(env: sys::napi_env, napi_val: sys::napi_value) -> Result<Self> {
+        // SAFETY: napi-rs calls this with the `env` and `napi_val` of the
+        // current call, which is the contract `Object::from_napi_value` asks
+        // for; it checks the value is an object and errors otherwise. The
+        // handle does not outlive this call.
         let obj = unsafe { Object::from_napi_value(env, napi_val) }?;
         Ok(JsCipherText(node_from_js(&obj, 0)?))
     }

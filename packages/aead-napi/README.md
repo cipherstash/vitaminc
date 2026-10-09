@@ -53,7 +53,10 @@ it is not itself loadable from Node.
 ## Testing the conversion layer
 
 `cargo test -p vitaminc-aead-napi` runs pure Rust boundary tests and builds a
-small standalone addon to run `tests/value-conformance.cjs` inside Node.
+small standalone addon to run two suites inside Node:
+`tests/value-conformance.cjs` for scalar conversions, and
+`tests/object-safety.cjs` for which object keys are read, how output
+properties are written, and the ciphertext node projection.
 Node.js must be available on PATH. The addon is a separate Cargo workspace so
 the library's `napi/noop` dev feature cannot stub the real Node symbols.
 
@@ -87,6 +90,11 @@ Node conformance test runs in package-scoped mutation tests as well as CI.
 
 ## Safety notes
 
+- Unsafe code is limited to the conversion trait methods napi-rs requires
+  (`FromNapiValue`/`ToNapiValue` for `NapiValue` and `JsCipherText`).
+  Everything else uses napi-rs's safe API. The crate denies
+  `unsafe_op_in_unsafe_fn` and `clippy::undocumented_unsafe_blocks`, so each
+  unsafe block states why it is sound.
 - The original copies of encrypted values in the V8 heap are owned by the
   JS engine and cannot be wiped from Rust.
 - Property names that would touch the prototype chain (`__proto__`,
