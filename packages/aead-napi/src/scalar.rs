@@ -90,6 +90,19 @@ fn unsigned(value: u128) -> Value {
     }
 }
 
+/// The error for a scalar wrapper whose payload is not a string: the
+/// wrapper's own `invalid` error, except that a non-finite number in
+/// `{ decimal }` keeps its distinct code. `number` is the payload when it is a
+/// JS number.
+pub(crate) fn non_string_payload(invalid: ConversionError, number: Option<f64>) -> ConversionError {
+    match number {
+        Some(n) if invalid == ConversionError::InvalidDecimal && !n.is_finite() => {
+            ConversionError::NonFiniteDecimal
+        }
+        _ => invalid,
+    }
+}
+
 pub(crate) fn date(text: &str) -> Result<Value, ConversionError> {
     let value =
         NaiveDate::parse_from_str(text, "%Y-%m-%d").map_err(|_| ConversionError::InvalidDate)?;
@@ -285,6 +298,26 @@ mod tests {
             assert_eq!(
                 date_millis(invalid).err().expect("invalid timestamp"),
                 ConversionError::InvalidTimestamp
+            );
+        }
+    }
+
+    #[test]
+    fn non_string_wrapper_payloads_keep_the_wrappers_code() {
+        use ConversionError::*;
+        for invalid in [InvalidDate, InvalidTimestamp, InvalidDecimal] {
+            assert_eq!(non_string_payload(invalid, None), invalid);
+            assert_eq!(non_string_payload(invalid, Some(1.5)), invalid);
+        }
+        for number in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                non_string_payload(InvalidDecimal, Some(number)),
+                NonFiniteDecimal
+            );
+            assert_eq!(non_string_payload(InvalidDate, Some(number)), InvalidDate);
+            assert_eq!(
+                non_string_payload(InvalidTimestamp, Some(number)),
+                InvalidTimestamp
             );
         }
     }

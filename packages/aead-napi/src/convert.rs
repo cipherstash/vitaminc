@@ -437,9 +437,9 @@ fn value_to_js(env: sys::napi_env, value: Value) -> Result<sys::napi_value> {
 }
 
 /// The string payload of a one-key scalar wrapper. Any other payload
-/// (`{ date: new Date() }`, `{ decimal: 1n }`, ...) is refused with the
-/// wrapper's own typed error rather than a generic N-API one; a non-finite
-/// number in `{ decimal }` keeps its distinct code.
+/// (`{ date: new Date() }`, `{ decimal: 1n }`, ...) is refused with a typed
+/// error chosen by [`scalar::non_string_payload`] rather than a generic
+/// N-API one.
 fn wrapper_text(
     obj: &Object,
     key: &str,
@@ -448,13 +448,11 @@ fn wrapper_text(
     let input = get_property_unknown(obj, key)?;
     Ok(match input.get_type()? {
         ValueType::String => Ok(String::from_unknown(input)?),
-        ValueType::Number
-            if invalid == scalar::ConversionError::InvalidDecimal
-                && !f64::from_unknown(input)?.is_finite() =>
-        {
-            Err(scalar::ConversionError::NonFiniteDecimal)
-        }
-        _ => Err(invalid),
+        ValueType::Number => Err(scalar::non_string_payload(
+            invalid,
+            Some(f64::from_unknown(input)?),
+        )),
+        _ => Err(scalar::non_string_payload(invalid, None)),
     })
 }
 

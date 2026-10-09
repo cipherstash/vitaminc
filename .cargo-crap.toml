@@ -53,7 +53,7 @@ exclude = ["tests/**", "src/test_support.rs"]
 #
 #   * The `vitaminc-aead-napi` conversion functions and their JS-boundary
 #     helpers (`own_enumerable_keys`, `get_property_unknown`,
-#     `ensure_plain_object`): each takes a live `napi_env`/`Unknown`/`Object`,
+#     `ensure_plain_object`, `wrapper_text`): each takes a live `napi_env`/`Unknown`/`Object`,
 #     which only exists inside a running V8 isolate. `cargo test` has no Node
 #     host (the `napi/noop` dev-dependency stubs the symbols so the crate
 #     *links*, it does not make the calls work), so these cannot be reached
@@ -75,4 +75,5 @@ allow = [
     "define_own_property",
     "get_property_unknown",
     "ensure_plain_object",
+    "wrapper_text",
 ]
