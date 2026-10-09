@@ -1,0 +1,51 @@
+name: "Fuzz"
+on:
+  # PR CI runs the fuzz targets over their seed corpora only (go.yml). This
+  # job spends real time mutating inputs, off the PR path so a slow or
+  # unlucky run never blocks a merge.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: "Time per fuzz target (Go duration)"
+        default: "5m"
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    name: "🐹 Go codec fuzzing"
+    strategy:
+      fail-fast: false
+      matrix:
+        # `go test -fuzz` runs one target per invocation.
+        target: [FuzzUnmarshal, FuzzUnmarshalCipherText]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: bindings/go/vcencrypt/go.mod
+          cache-dependency-path: |
+            bindings/go/vcencrypt/go.sum
+            bindings/go/vcencrypt/examples/go.sum
+
+      - name: fuzz ${{ matrix.target }}
+        working-directory: bindings/go/vcffi
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '5m' }}
+        run: CGO_ENABLED=0 go test -run='^$' -fuzz="^${{ matrix.target }}\$" -fuzztime="$FUZZTIME" .
+
+      - name: upload failing input
+        # A failure writes the minimized input under testdata/fuzz. Commit it
+        # there to keep it as a regression seed for every PR run.
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: bindings/go/vcffi/testdata/fuzz

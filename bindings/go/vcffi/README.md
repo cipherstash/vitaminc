@@ -47,8 +47,13 @@ keep single.
 recursion depth, length prefixes and item counts are bounded, strings are
 UTF-8 validated, duplicate map keys are rejected, and every malformed input
 fails with `ErrMalformed` rather than panicking or over-allocating. The fuzz
-targets in this package pin that contract, and CI runs the whole suite on
-32-bit GOARCH, where the u32-bound guards are load-bearing.
+targets in this package pin that contract, and also require anything accepted
+to re-encode to the same bytes (Undefined becoming Null is the one allowed
+difference). PR CI runs them over their seeds, which include every shared
+corpus vector, and the whole suite on 32-bit GOARCH, where the u32-bound
+guards are load-bearing. `.github/workflows/fuzz.yml` fuzzes them nightly;
+commit any failing input it reports under `testdata/fuzz` as a regression
+seed.
 
 `ErrMalformed` covers hostile bytes, not caller mistakes: a `LeafSet` that is
 partially wired, or that does not materialize a kind the buffer carries,
