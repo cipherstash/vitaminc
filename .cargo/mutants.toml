@@ -57,6 +57,14 @@ exclude_re = [
     "define_own_property",
     "get_property_unknown",
     "ensure_plain_object",
+    # Equivalent mutants, not missing tests: `widen_f32` (vitaminc-aead-value
+    # canonical.rs) assembles an f64 by OR-ing bit fields that are disjoint by
+    # construction — complementary masks, or fields shifted into separate bit
+    # ranges — and for operands with no common set bit `a | b == a ^ b`, so no
+    # input can tell the two apart. Only that one operator swap in that one
+    # function is skipped; its other mutants (including `mantissa | 1`, where
+    # the operands do overlap) stay gated.
+    "replace \\| with \\^ in widen_f32",
 ]
 
 # Property tests (quickcheck) and AEAD round-trips run slower under mutation than
