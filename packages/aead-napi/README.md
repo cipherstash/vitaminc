@@ -17,7 +17,10 @@ cross-language leaf wire format. This crate adds only what is JS-specific:
     integer width through 128 bits, preferring signed at each width. Every
     integer kind decodes as `BigInt`; `Float32` widens exactly to `number`.
     Equality terms share one domain across integer widths, so a `BigInt`
-    written as `int8` matches the same number written as `int64` from Go.
+    written as `int8` matches the same number written as `int64` from Go;
+    both float widths likewise share one domain. Integers and floats stay
+    distinct, so a JS `number` 5 (`Float64`) does not match an `int64` 5:
+    use `BigInt` for integer data.
   - JS `Date` ↔ `Timestamp` at millisecond precision. Sub-millisecond
     timestamps and leap seconds decode as
     `{ timestamp: "RFC3339-with-nanoseconds" }`, also accepted on input, so no
