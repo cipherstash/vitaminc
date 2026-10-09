@@ -3,10 +3,12 @@ package vcencrypt
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/cipherstash/vitaminc/bindings/go/vcffi"
@@ -98,19 +100,82 @@ func corpusTransports(f *testing.F) [][]byte {
 	return out
 }
 
-// sameModuloUndefined fails unless goOut is rustOut with some Undefined tags
-// (0x01) turned into Null (0x00): Go projects Undefined to nil by design,
-// and both are one-byte tags, so the lengths must match.
-func sameModuloUndefined(t *testing.T, data, rustOut, goOut []byte) {
+// requireGoMatchesRust fails unless goOut is rustOut with exactly its
+// Undefined value-node tags (0x01) turned into Null (0x00): Go projects
+// Undefined to nil by design. Every other byte, including a 0x01 inside a
+// payload, must match.
+func requireGoMatchesRust(t *testing.T, data, rustOut, goOut []byte) {
 	t.Helper()
-	if len(goOut) != len(rustOut) {
-		t.Fatalf("input %x: Rust re-encodes as %x, Go as %x", data, rustOut, goOut)
+	want := bytes.Clone(rustOut)
+	for _, at := range undefinedTags(rustOut) {
+		want[at] = 0x00
 	}
-	for i := range rustOut {
-		if rustOut[i] != goOut[i] && (rustOut[i] != 0x01 || goOut[i] != 0x00) {
-			t.Fatalf("input %x: Rust re-encodes as %x, Go as %x (byte %d)", data, rustOut, goOut, i)
+	if !bytes.Equal(goOut, want) {
+		t.Fatalf("input %x: Rust re-encodes as %x, Go as %x, want %x", data, rustOut, goOut, want)
+	}
+}
+
+// undefinedTags returns the offset of every Undefined value-node tag in an
+// accepted value tree, nested ones included. vcffi's fuzz tests have the same
+// walker, but this is a separate Go module and cannot import test code. It
+// follows the transport format independently of either decoder, so a walk
+// that falls out of step reports the wrong offsets and fails the comparison
+// rather than passing it.
+func undefinedTags(data []byte) []int {
+	pos := 0
+	var at []int
+	take := func(n int) {
+		pos = min(pos+n, len(data))
+	}
+	count := func() int {
+		if len(data)-pos < 4 {
+			pos = len(data)
+			return 0
 		}
+		n := int(binary.LittleEndian.Uint32(data[pos:]))
+		pos += 4
+		return n
 	}
+	var walk func()
+	walk = func() {
+		if pos >= len(data) {
+			return
+		}
+		tag := data[pos]
+		pos++
+		switch tag {
+		case 0x01: // Undefined
+			at = append(at, pos-1)
+		case 0x0C, 0x0D: // Int8, UInt8
+			take(1)
+		case 0x0E, 0x0F: // Int16, UInt16
+			take(2)
+		case 0x04, 0x06, 0x08, 0x12: // Int32, UInt32, Float32, Date
+			take(4)
+		case 0x05, 0x07, 0x09: // Int64, UInt64, Float64
+			take(8)
+		case 0x13: // Timestamp
+			take(12)
+		case 0x10, 0x11, 0x14: // Int128, UInt128, Decimal
+			take(16)
+		case 0x0A, 0x0B: // String, Bytes
+			take(count())
+		case 0xF0: // Array
+			for range count() {
+				walk()
+			}
+		case 0xF1: // Object
+			for range count() {
+				take(count())
+				walk()
+			}
+		case 0xF2: // Passthrough
+			walk()
+		}
+		// Null, False and True have no payload.
+	}
+	walk()
+	return at
 }
 
 func FuzzDifferentialValue(f *testing.F) {
@@ -166,7 +231,7 @@ func FuzzDifferentialValue(f *testing.F) {
 		if err != nil {
 			t.Fatalf("input %x: Go decoded %#v but cannot re-encode it: %v", data, goValue, err)
 		}
-		sameModuloUndefined(t, data, rustOut, goOut)
+		requireGoMatchesRust(t, data, rustOut, goOut)
 	})
 }
 
@@ -260,4 +325,26 @@ func BenchmarkDifferential(b *testing.B) {
 			}
 		}
 	})
+}
+
+// The walker decides which bytes may differ, so pin that it finds nested
+// Undefined tags and nothing else.
+func TestUndefinedTags(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data []byte
+		want []int
+	}{
+		{"bare", []byte{0x01}, []int{0}},
+		{"int32 payload of 1", []byte{0x04, 1, 0, 0, 0}, nil},
+		{"bytes payload of 0x01", []byte{0x0B, 1, 0, 0, 0, 0x01}, nil},
+		{"array", []byte{0xF0, 2, 0, 0, 0, 0x0B, 1, 0, 0, 0, 0x01, 0x01}, []int{11}},
+		{"object key of 0x01", []byte{0xF1, 1, 0, 0, 0, 1, 0, 0, 0, 0x01, 0x01}, []int{10}},
+		{"passthrough", []byte{0xF2, 0x01}, []int{1}},
+		{"extended scalars", []byte{0xF0, 3, 0, 0, 0, 0x0D, 0x01, 0x13, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0x01}, []int{20}},
+	} {
+		if got := undefinedTags(tc.data); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
 }
