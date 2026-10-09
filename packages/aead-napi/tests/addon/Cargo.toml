@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "3", default-features = false, features = ["napi6"] }
 napi-derive = "3"
+vitaminc-aead = { path = "../../../aead" }
 vitaminc-aead-napi = { path = "../.." }
 vitaminc-aead-value = { path = "../../../aead-value", features = ["chrono", "rust_decimal"] }
 vitaminc-protected = { path = "../../../protected" }

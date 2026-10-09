@@ -45,7 +45,10 @@ cross-language leaf wire format. This crate adds only what is JS-specific:
 - **`JsCipherText<Leaf, P>`** — projects the generic `CipherText` container
   onto plain JS values (`{ t, v }` nodes with `Buffer` leaves) and back, as
   an in-memory/application-side representation. Durable cross-language
-  database storage is the EQL layer's job, not this projection's.
+  database storage is the EQL layer's job, not this projection's. The
+  passthrough payload `P` converts through `NapiPassthrough`, implemented
+  for `NapiValue` and `()`, which applies the tree's nesting limit to the
+  payload too.
 
 This crate is a library consumed by the Node addon (cdylib/npm package);
 it is not itself loadable from Node.
@@ -53,7 +56,10 @@ it is not itself loadable from Node.
 ## Testing the conversion layer
 
 `cargo test -p vitaminc-aead-napi` runs pure Rust boundary tests and builds a
-small standalone addon to run `tests/value-conformance.cjs` inside Node.
+small standalone addon to run two suites inside Node:
+`tests/value-conformance.cjs` for scalar conversions, and
+`tests/object-safety.cjs` for which object keys are read, how output
+properties are written, and the ciphertext node projection.
 Node.js must be available on PATH. The addon is a separate Cargo workspace so
 the library's `napi/noop` dev feature cannot stub the real Node symbols.
 
@@ -78,20 +84,35 @@ node packages/aead-napi/tests/kind_inventory.cjs target/debug/examples/libkind_i
 
 The JS-boundary conversion functions — `js_to_value`, `value_to_js`,
 `node_to_js`, `node_from_js` — and their helpers — `own_enumerable_keys`,
-`get_property_unknown`, `ensure_plain_object`, `define_own_property`,
-`wrapper_text` — take a live `napi_env`, `Unknown`, or `Object`, which only
-exists inside a running V8 isolate, so Rust unit tests cannot reach them. They
-remain exempted by name in `.cargo-crap.toml` and `.cargo/mutants.toml`; new
-pure scalar conversion helpers participate in coverage and mutation gates. The
-Node conformance test runs in package-scoped mutation tests as well as CI.
+`get_property_unknown`, `ensure_plain_object`, `wrapper_text`,
+`wrapper_to_js` — take a live
+`napi_env`, `Unknown`, or `Object`, which only exists inside a running V8
+isolate, so Rust unit tests cannot reach them. The Node suites do:
+`tests/node.rs` rebuilds the test addon from the crate's source, so the
+mutation gate tests these functions like any other code. Only the CRAP gate
+still exempts them, by name in `.cargo-crap.toml`, because they run inside
+the separately built addon, where `cargo llvm-cov` cannot measure their
+coverage. The smaller helpers in the same position (`define_own_properties`,
+`own_property`, `new_array`, `get_own`, `lossless_string`, `node_object`)
+are simple enough to stay under the CRAP threshold even at 0% coverage, so
+they are not exempted.
 
 ## Safety notes
 
+- Unsafe code is limited to the conversion trait methods napi-rs requires
+  (`FromNapiValue`/`ToNapiValue` for `NapiValue` and `JsCipherText`).
+  Everything else uses napi-rs's safe API. The crate denies
+  `unsafe_op_in_unsafe_fn` and `clippy::undocumented_unsafe_blocks`, so each
+  unsafe block states why it is sound.
 - The original copies of encrypted values in the V8 heap are owned by the
   JS engine and cannot be wiped from Rust.
 - Property names that would touch the prototype chain (`__proto__`,
-  `constructor`, `prototype`) are rejected in both directions, and
-  recursion depth is bounded.
+  `constructor`, `prototype`) are rejected in both directions. Nesting is
+  limited to 128 levels in both directions too, counted as the transport
+  decoder counts it, including inside a ciphertext's passthrough payload. A
+  tree built in Rust is measured before it is converted, and one that is too
+  deep is dropped without recursing, so even a tree far too deep for the
+  stack fails cleanly instead of aborting Node.
 - Only **plain objects** (prototype `Object.prototype` or `null`) are
   accepted for encryption. `Map`, `Set`, `RegExp`, `DataView`, class
   instances and other exotic objects keep their state in internal slots and
@@ -107,14 +128,20 @@ Node conformance test runs in package-scoped mutation tests as well as CI.
 - JS-reported array lengths are never trusted for up-front allocation
   (a `new Array(2**32 - 1)` costs the attacker one line and materialises
   nothing), in both the value converter and the ciphertext rebuilder.
-- Strings containing unpaired UTF-16 surrogates are **rejected** rather
-  than silently normalized: the UTF-8 fetch would replace a lone surrogate
-  with U+FFFD, sealing a plaintext that no longer equals what the caller
-  passed.
-- Decrypted objects (and rebuilt ciphertext maps) are written with
-  **own-property defines** (`napi_define_properties`), not `[[Set]]`
-  assignment, so a polluted `Object.prototype` setter can never observe
-  decrypted plaintext or swallow a property.
+- Strings and object keys containing unpaired UTF-16 surrogates are
+  **rejected** rather than silently normalized: the UTF-8 fetch would
+  replace a lone surrogate with U+FFFD, sealing a plaintext that no longer
+  equals what the caller passed, or a key that no longer names its
+  property. Each property is read back through its original JS key.
+- Everything this crate builds in JS is written with **own-property
+  defines** (`napi_define_properties`, one call per object), not `[[Set]]`
+  assignment: decrypted object properties and array elements, and every
+  ciphertext node's `t`, `v`, sequence elements and map entries. A polluted
+  setter on `Object.prototype` or `Array.prototype` can never observe
+  decrypted plaintext or ciphertext, or swallow a property.
+- A ciphertext node handed back for decryption must be an object. N-API
+  reads properties of a primitive through its wrapper, so a bare string
+  would otherwise take `t` and `v` from `String.prototype`.
 - Errors carry no cryptographic detail (`Unspecified` at the trait layer).
 
 [`Value`]: vitaminc_aead_value::Value

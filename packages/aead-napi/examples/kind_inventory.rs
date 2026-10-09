@@ -1,6 +1,6 @@
 //! Test addon loaded by `tests/kind_inventory.cjs` in a live Node environment.
 
-use napi::bindgen_prelude::{Object, ToNapiValue};
+use napi::bindgen_prelude::{JsValue, Object};
 use napi::{sys, Env, Error, JsError, Result, Status};
 use vitaminc_aead_napi::{NapiValue, Value};
 use vitaminc_aead_value::ValueKind;
@@ -61,7 +61,7 @@ fn convert_samples(env: sys::napi_env) -> Result<sys::napi_value> {
         "passthrough",
         NapiValue(Value::Passthrough(Box::new(Value::Bool(true)))),
     )?;
-    unsafe { Object::to_napi_value(env, exports) }
+    Ok(exports.raw())
 }
 
 /// Load the test samples through the same conversion used by consumer addons.

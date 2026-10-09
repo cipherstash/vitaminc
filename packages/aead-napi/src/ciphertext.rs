@@ -26,13 +26,15 @@
 //! have persisted it), but it is not a cross-language wire commitment;
 //! only the leaf byte format (see `vitaminc-aead-value`) is frozen.
 
-use napi::bindgen_prelude::{Array, Buffer, FromNapiValue, Object, ToNapiValue, Unknown};
+use napi::bindgen_prelude::{
+    Array, Buffer, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue, Unknown,
+};
 use napi::{sys, Env, Error, Result, Status, ValueType};
 use vitaminc_aead::CipherText;
 
 use crate::convert::{
-    define_own_property, eager_capacity, forbidden_key, get_property_unknown, own_enumerable_keys,
-    MAX_DEPTH,
+    define_own_properties, depth_error, eager_capacity, forbidden_key, get_own,
+    get_property_unknown, new_array, own_enumerable_keys, own_property, MAX_DEPTH,
 };
 
 const T_CIPHERTEXT: &str = "ct";
@@ -47,51 +49,130 @@ const T_PASSTHROUGH: &str = "pt";
 /// node projection documented at the module level.
 ///
 /// `Leaf` needs only byte-level accessors (`AsRef<[u8]>` out,
-/// `From<Vec<u8>>` in); the passthrough payload `P` uses its own NAPI
-/// conversions. For a cipher whose passthrough payload type is not itself
-/// NAPI-convertible (e.g. the Rust-native `Box<dyn Any + Send>`), re-home
-/// the tree first with [`CipherText::map_passthrough`].
+/// `From<Vec<u8>>` in); the passthrough payload `P` converts through
+/// [`NapiPassthrough`]. For a cipher whose passthrough payload type is not
+/// [`NapiValue`] or `()` (e.g. the Rust-native `Box<dyn Any + Send>`),
+/// re-home the tree first with [`CipherText::map_passthrough`].
+///
+/// [`NapiValue`]: crate::NapiValue
 pub struct JsCipherText<Leaf, P>(pub CipherText<Leaf, P>);
+
+/// A ciphertext passthrough payload's conversion to and from JS.
+///
+/// A payload shares the tree's 128-level nesting limit, as it does in the
+/// transport encoding, rather than starting a fresh count: it sits one level
+/// below its passthrough node.
+pub trait NapiPassthrough: Sized {
+    /// Build the payload's JS value. [`JsCipherText`] calls this only once
+    /// [`exceeds_depth`](Self::exceeds_depth) has passed for the payload's
+    /// position, which bounds any recursion here.
+    fn to_js(self, env: &Env) -> Result<Unknown<'_>>;
+    /// Read the payload from its JS value at `depth`, refusing anything that
+    /// nests past the limit.
+    fn from_js(value: Unknown<'_>, depth: usize) -> Result<Self>;
+    /// Whether the payload, placed at `depth`, nests past the limit.
+    fn exceeds_depth(&self, depth: usize) -> bool;
+    /// Drop the payload without recursing once per nesting level, for a tree
+    /// refused as too deep.
+    fn drop_flat(self);
+}
+
+/// No payload: projects to `undefined`, which is all it accepts back. It is
+/// a single node, so it is too deep only past the limit itself.
+impl NapiPassthrough for () {
+    fn to_js(self, env: &Env) -> Result<Unknown<'_>> {
+        ().into_unknown(env)
+    }
+
+    fn from_js(value: Unknown<'_>, depth: usize) -> Result<Self> {
+        if depth > MAX_DEPTH {
+            return Err(depth_error());
+        }
+        // napi-rs's own `()` conversion accepts any value; check instead.
+        if value.get_type()? == ValueType::Undefined {
+            Ok(())
+        } else {
+            Err(shape_error())
+        }
+    }
+
+    fn exceeds_depth(&self, depth: usize) -> bool {
+        depth > MAX_DEPTH
+    }
+
+    fn drop_flat(self) {}
+}
+
+/// Whether a ciphertext tree nests past [`MAX_DEPTH`], payloads included.
+/// Iterative, so a tree of any depth is measured without recursion.
+fn exceeds_depth<Leaf, P: NapiPassthrough>(node: &CipherText<Leaf, P>) -> bool {
+    let mut stack = vec![(node, 0)];
+    while let Some((node, depth)) = stack.pop() {
+        if depth > MAX_DEPTH {
+            return true;
+        }
+        match node {
+            CipherText::Sequence(items) => stack.extend(items.iter().map(|item| (item, depth + 1))),
+            CipherText::Map(entries) => {
+                stack.extend(entries.iter().map(|(_, value)| (value, depth + 1)))
+            }
+            CipherText::Passthrough(p) if p.exceeds_depth(depth + 1) => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Drop a ciphertext tree without recursing once per level (see
+/// [`NapiPassthrough::drop_flat`]).
+fn drop_flat<Leaf, P: NapiPassthrough>(node: CipherText<Leaf, P>) {
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        match node {
+            CipherText::Sequence(items) => stack.extend(items),
+            CipherText::Map(entries) => stack.extend(entries.into_iter().map(|(_, value)| value)),
+            CipherText::Passthrough(p) => p.drop_flat(),
+            _ => {}
+        }
+    }
+}
+
+fn ciphertext_depth_error() -> Error {
+    Error::new(Status::InvalidArg, "ciphertext is nested too deeply")
+}
 
 fn shape_error() -> Error {
     Error::new(Status::InvalidArg, "malformed ciphertext value")
 }
 
-fn node_to_js<Leaf, P>(env: sys::napi_env, node: CipherText<Leaf, P>) -> Result<sys::napi_value>
+/// Build `node` in JS. Callers check [`exceeds_depth`] first, which bounds
+/// this recursion.
+fn node_to_js<Leaf, P>(env: &Env, node: CipherText<Leaf, P>) -> Result<Object<'_>>
 where
     Leaf: AsRef<[u8]>,
-    P: ToNapiValue,
+    P: NapiPassthrough,
 {
-    let raw_env = Env::from_raw(env);
-    let mut obj = Object::new(&raw_env)?;
-    match node {
-        CipherText::Single(leaf) => {
-            obj.set(T_KEY, T_CIPHERTEXT)?;
-            obj.set(V_KEY, Buffer::from(leaf.as_ref().to_vec()))?;
-        }
-        CipherText::None(leaf) => {
-            obj.set(T_KEY, T_NONE)?;
-            obj.set(V_KEY, Buffer::from(leaf.as_ref().to_vec()))?;
-        }
-        CipherText::EmptySequence(leaf) => {
-            obj.set(T_KEY, T_EMPTY_SEQ)?;
-            obj.set(V_KEY, Buffer::from(leaf.as_ref().to_vec()))?;
-        }
-        CipherText::EmptyMap(leaf) => {
-            obj.set(T_KEY, T_EMPTY_MAP)?;
-            obj.set(V_KEY, Buffer::from(leaf.as_ref().to_vec()))?;
-        }
+    let leaf = |tag: &'static str, leaf: Leaf| -> Result<(&'static str, Unknown<'_>)> {
+        Ok((tag, Buffer::from(leaf.as_ref().to_vec()).into_unknown(env)?))
+    };
+    let (tag, value) = match node {
+        CipherText::Single(l) => leaf(T_CIPHERTEXT, l)?,
+        CipherText::None(l) => leaf(T_NONE, l)?,
+        CipherText::EmptySequence(l) => leaf(T_EMPTY_SEQ, l)?,
+        CipherText::EmptyMap(l) => leaf(T_EMPTY_MAP, l)?,
         CipherText::Sequence(items) => {
-            obj.set(T_KEY, T_SEQ)?;
-            let mut arr = raw_env.create_array(items.len() as u32)?;
+            let mut arr = new_array(env, items.len())?;
+            let mut elements = Vec::with_capacity(items.len());
             for (i, item) in items.into_iter().enumerate() {
-                arr.set(i as u32, NodeHandle(item))?;
+                let node = node_to_js(env, item)?;
+                elements.push(own_property(env, &i.to_string(), &node)?);
             }
-            obj.set(V_KEY, arr)?;
+            define_own_properties(&mut arr, &elements)?;
+            (T_SEQ, arr.into_unknown(env)?)
         }
         CipherText::Map(entries) => {
-            obj.set(T_KEY, T_MAP)?;
-            let map = Object::new(&raw_env)?;
+            let mut map = Object::new(env)?;
+            let mut properties = Vec::with_capacity(entries.len());
             for (key, value) in entries {
                 // Map keys travel in the clear inside the stored ciphertext
                 // and are therefore attacker-writable; never assign
@@ -102,72 +183,79 @@ where
                         format!("ciphertext map key is not allowed: {key}"),
                     ));
                 }
-                // Own-property define, not `[[Set]]`: these keys are
-                // attacker-writable, so a polluted inherited setter must
-                // never run — see `convert::define_own_property`.
-                let js_value = node_to_js(env, value)?;
-                define_own_property(&map, &key, js_value)?;
+                let node = node_to_js(env, value)?;
+                properties.push(own_property(env, &key, &node)?);
             }
-            obj.set(V_KEY, map)?;
+            define_own_properties(&mut map, &properties)?;
+            (T_MAP, map.into_unknown(env)?)
         }
-        CipherText::Passthrough(p) => {
-            obj.set(T_KEY, T_PASSTHROUGH)?;
-            obj.set(V_KEY, PassthroughHandle(p))?;
-        }
-    }
-    unsafe { Object::to_napi_value(env, obj) }
+        CipherText::Passthrough(p) => (T_PASSTHROUGH, p.to_js(env)?),
+    };
+    // Own properties throughout, so a polluted inherited `t`, `v` or index
+    // setter never sees the ciphertext (see `define_own_properties`).
+    let mut obj = Object::new(env)?;
+    let tag = tag.into_unknown(env)?;
+    define_own_properties(
+        &mut obj,
+        &[
+            own_property(env, T_KEY, &tag)?,
+            own_property(env, V_KEY, &value)?,
+        ],
+    )?;
+    Ok(obj)
 }
 
 const T_KEY: &str = "t";
 const V_KEY: &str = "v";
 
-/// Recursion helper so nested nodes can be assigned through `ToNapiValue`.
-struct NodeHandle<Leaf, P>(CipherText<Leaf, P>);
-
-impl<Leaf, P> ToNapiValue for NodeHandle<Leaf, P>
-where
-    Leaf: AsRef<[u8]>,
-    P: ToNapiValue,
-{
-    unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
-        node_to_js(env, val.0)
-    }
-}
-
-/// Recursion helper for the passthrough payload.
-struct PassthroughHandle<P>(P);
-
-impl<P: ToNapiValue> ToNapiValue for PassthroughHandle<P> {
-    unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
-        unsafe { P::to_napi_value(env, val.0) }
-    }
-}
-
 impl<Leaf, P> ToNapiValue for JsCipherText<Leaf, P>
 where
     Leaf: AsRef<[u8]>,
-    P: ToNapiValue,
+    P: NapiPassthrough,
 {
     unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
-        node_to_js(env, val.0)
+        if exceeds_depth(&val.0) {
+            drop_flat(val.0);
+            return Err(ciphertext_depth_error());
+        }
+        Ok(node_to_js(&Env::from_raw(env), val.0)?.raw())
     }
+}
+
+/// A node must be a JS object. napi-rs's `Object` conversion does not check
+/// the type, and N-API reads properties of a primitive through its wrapper
+/// object, so a bare string would otherwise read `t` and `v` from a
+/// (possibly polluted) `String.prototype`.
+fn node_object(value: Unknown<'_>) -> Result<Object<'_>> {
+    if value.get_type()? != ValueType::Object {
+        return Err(shape_error());
+    }
+    Object::from_unknown(value)
+}
+
+/// A node's own `t` or `v`. A node missing either would otherwise take it
+/// from a (possibly polluted) prototype. Ownership is checked immediately
+/// before the read, where no JS can run in between, so a getter on the
+/// other field cannot delete this one after the check.
+fn own_field<'e>(obj: &Object<'e>, key: &str) -> Result<Unknown<'e>> {
+    if !obj.has_own_property(key)? {
+        return Err(shape_error());
+    }
+    get_property_unknown(obj, key)
 }
 
 fn node_from_js<Leaf, P>(obj: &Object<'_>, depth: usize) -> Result<CipherText<Leaf, P>>
 where
     Leaf: From<Vec<u8>>,
-    P: FromNapiValue,
+    P: NapiPassthrough,
 {
     if depth > MAX_DEPTH {
-        return Err(Error::new(
-            Status::InvalidArg,
-            "ciphertext is nested too deeply",
-        ));
+        return Err(ciphertext_depth_error());
     }
-    let t: String = obj.get(T_KEY)?.ok_or_else(shape_error)?;
+    let t = String::from_unknown(own_field(obj, T_KEY)?)?;
     match t.as_str() {
         T_CIPHERTEXT | T_NONE | T_EMPTY_SEQ | T_EMPTY_MAP => {
-            let buf: Buffer = obj.get(V_KEY)?.ok_or_else(shape_error)?;
+            let buf = Buffer::from_unknown(own_field(obj, V_KEY)?)?;
             let leaf = Leaf::from(buf.to_vec());
             Ok(match t.as_str() {
                 T_CIPHERTEXT => CipherText::Single(leaf),
@@ -177,7 +265,9 @@ where
             })
         }
         T_SEQ => {
-            let arr: Array = obj.get(V_KEY)?.ok_or_else(shape_error)?;
+            let arr = Array::from_unknown(own_field(obj, V_KEY)?)?;
+            // The same array seen as an object, for per-index own checks.
+            let elements = Object::from_unknown(arr.to_unknown())?;
             let len = arr.len();
             // Capacity is granted lazily: the reported length is
             // attacker-cheap (`{t:"seq", v:new Array(2**32-1)}` materialises
@@ -185,20 +275,19 @@ where
             // allocation failure before any element is validated.
             let mut items = Vec::with_capacity(eager_capacity(len));
             for i in 0..len {
-                // `Array::get` maps only out-of-range indices to `None`; a
-                // hole comes back as `undefined`, which is not a node
-                // object — check the type before treating it as one.
-                let element = arr.get::<Unknown>(i)?.ok_or_else(shape_error)?;
-                if element.get_type()? != ValueType::Object {
+                // Own elements only: a hole would otherwise read an element
+                // from a (possibly polluted) `Array.prototype`, and as
+                // `undefined` it is not a node anyway.
+                if !elements.has_own_property(&i.to_string())? {
                     return Err(shape_error());
                 }
-                let element = Object::from_unknown(element)?;
-                items.push(node_from_js(&element, depth + 1)?);
+                let element = arr.get::<Unknown>(i)?.ok_or_else(shape_error)?;
+                items.push(node_from_js(&node_object(element)?, depth + 1)?);
             }
             Ok(CipherText::Sequence(items))
         }
         T_MAP => {
-            let map: Object = obj.get(V_KEY)?.ok_or_else(shape_error)?;
+            let map = node_object(own_field(obj, V_KEY)?)?;
             // Own keys only — `Object::keys` walks the prototype chain, so
             // a hostile node object with enumerable prototype members would
             // otherwise have its inherited keys become ciphertext map
@@ -206,27 +295,31 @@ where
             let keys = own_enumerable_keys(&map)?;
             let mut entries = Vec::with_capacity(keys.len());
             for key in keys {
-                if forbidden_key(&key) {
+                if forbidden_key(&key.name) {
                     return Err(Error::new(
                         Status::InvalidArg,
-                        format!("ciphertext map key is not allowed: {key}"),
+                        format!("ciphertext map key is not allowed: {}", key.name),
                     ));
                 }
-                let value: Object = map.get(&key)?.ok_or_else(shape_error)?;
-                entries.push((key, node_from_js(&value, depth + 1)?));
+                let value = node_object(get_own(&map, &key)?)?;
+                entries.push((key.name, node_from_js(&value, depth + 1)?));
             }
             Ok(CipherText::Map(entries))
         }
         T_PASSTHROUGH => {
-            // Raw fetch, not `obj.get` — `undefined` is a *faithful*
-            // projection here (`P = ()` and `NapiValue::Undefined` both
-            // project to it, and `JSON.stringify` drops the key outright),
-            // and `Object::get` would map it to `None` and reject the
-            // crate's own output as malformed. Whether `undefined`
-            // converts is `P`'s decision.
-            let value = get_property_unknown(obj, V_KEY)?;
-            let p = P::from_unknown(value)?;
-            Ok(CipherText::Passthrough(p))
+            // `undefined` is a *faithful* projection here (`P = ()` and
+            // `NapiValue::Undefined` both project to it), and
+            // `JSON.stringify` drops a `v: undefined` key outright, so a
+            // missing `v` reads as `undefined` rather than as malformed —
+            // never from the prototype. Whether `undefined` converts is
+            // `P`'s decision.
+            let env = Env::from_raw(obj.value().env);
+            let value = if obj.has_own_property(V_KEY)? {
+                own_field(obj, V_KEY)?
+            } else {
+                ().into_unknown(&env)?
+            };
+            Ok(CipherText::Passthrough(P::from_js(value, depth + 1)?))
         }
         _ => Err(shape_error()),
     }
@@ -235,10 +328,87 @@ where
 impl<Leaf, P> FromNapiValue for JsCipherText<Leaf, P>
 where
     Leaf: From<Vec<u8>>,
-    P: FromNapiValue,
+    P: NapiPassthrough,
 {
     unsafe fn from_napi_value(env: sys::napi_env, napi_val: sys::napi_value) -> Result<Self> {
-        let obj = unsafe { Object::from_napi_value(env, napi_val) }?;
+        // SAFETY: napi-rs calls this with the `env` and `napi_val` of the
+        // current call, which is all `Unknown::from_napi_value` needs: an
+        // `Unknown` may hold any value type, and `node_object` checks it is
+        // an object before anything reads it as one. The handle does not
+        // outlive this call.
+        let value = unsafe { Unknown::from_napi_value(env, napi_val) }?;
+        let obj = node_object(value)?;
         Ok(JsCipherText(node_from_js(&obj, 0)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{drop_flat, exceeds_depth, CipherText, NapiPassthrough, MAX_DEPTH};
+    use crate::NapiValue;
+    use vitaminc_aead_value::Value;
+
+    type Node<P> = CipherText<Vec<u8>, P>;
+
+    fn nested<P>(levels: usize, wrap: fn(Node<P>) -> Node<P>, leaf: Node<P>) -> Node<P> {
+        (0..levels).fold(leaf, |node, _| wrap(node))
+    }
+
+    fn seq<P>(node: Node<P>) -> Node<P> {
+        CipherText::Sequence(vec![CipherText::Single(vec![1]), node])
+    }
+
+    fn map<P>(node: Node<P>) -> Node<P> {
+        CipherText::Map(vec![
+            ("a".into(), CipherText::None(vec![1])),
+            ("k".into(), node),
+        ])
+    }
+
+    #[test]
+    fn depth_is_measured_to_the_limit_for_every_container() {
+        for wrap in [seq::<()>, map::<()>] {
+            let leaf = || CipherText::EmptySequence(vec![1]);
+            assert!(!exceeds_depth(&nested(MAX_DEPTH, wrap, leaf())));
+            assert!(exceeds_depth(&nested(MAX_DEPTH + 1, wrap, leaf())));
+        }
+    }
+
+    #[test]
+    fn a_payload_continues_the_count() {
+        // A `()` payload sits one level below its passthrough node.
+        assert!(!exceeds_depth(&nested(
+            MAX_DEPTH - 1,
+            seq,
+            CipherText::Passthrough(())
+        )));
+        assert!(exceeds_depth(&nested(
+            MAX_DEPTH,
+            seq,
+            CipherText::Passthrough(())
+        )));
+        assert!(!().exceeds_depth(MAX_DEPTH));
+        assert!(().exceeds_depth(MAX_DEPTH + 1));
+        // So does every level inside a value payload.
+        let payload = |levels| {
+            let value = (0..levels).fold(Value::Null, |v, _| Value::Array(vec![v]));
+            CipherText::Passthrough(NapiValue(value))
+        };
+        assert!(!exceeds_depth(&nested(60, seq, payload(67))));
+        assert!(exceeds_depth(&nested(60, seq, payload(68))));
+    }
+
+    #[test]
+    fn trees_too_deep_for_the_stack_are_measured_and_dropped_flat() {
+        for wrap in [seq::<NapiValue>, map::<NapiValue>] {
+            let deep = nested(1_000_000, wrap, CipherText::Single(vec![1]));
+            assert!(exceeds_depth(&deep));
+            drop_flat(deep);
+        }
+        let value = (0..1_000_000).fold(Value::Null, |v, _| Value::Array(vec![v]));
+        let deep: Node<NapiValue> = CipherText::Passthrough(NapiValue(value));
+        assert!(exceeds_depth(&deep));
+        drop_flat(deep);
+        drop_flat(nested(1_000_000, seq, CipherText::Passthrough(())));
     }
 }

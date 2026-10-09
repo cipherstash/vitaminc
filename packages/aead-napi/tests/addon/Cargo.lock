@@ -861,6 +861,7 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "vitaminc-aead",
  "vitaminc-aead-napi",
  "vitaminc-aead-value",
  "vitaminc-protected",
