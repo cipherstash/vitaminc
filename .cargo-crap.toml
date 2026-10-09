@@ -54,16 +54,14 @@ exclude = ["tests/**", "src/test_support.rs"]
 #   * The `vitaminc-aead-napi` conversion functions and their JS-boundary
 #     helpers (`own_enumerable_keys`, `get_property_unknown`,
 #     `ensure_plain_object`, `wrapper_text`): each takes a live `napi_env`/`Unknown`/`Object`,
-#     which only exists inside a running V8 isolate. `cargo test` has no Node
-#     host (the `napi/noop` dev-dependency stubs the symbols so the crate
-#     *links*, it does not make the calls work), so these cannot be reached
-#     from a Rust unit test at any coverage level. They are named individually
+#     which only exists inside a running V8 isolate. The Node suites run by
+#     `tests/node.rs` do exercise them, but inside a separately built test
+#     addon loaded by `node`, which llvm-cov does not instrument; the
+#     `napi/noop` dev-dependency only lets the crate itself *link* for unit
+#     tests. So llvm-cov always reads them as 0%. They are named individually
 #     rather than by file so the rest of those modules — `forbidden_key`,
-#     `eager_capacity` and friends — stays scored.
-#
-#     NOTE: this is a deferral, not a dismissal. The conversion layer still
-#     needs JS-level tests driving a built addon; see the tracking note in
-#     packages/aead-napi/README.md.
+#     `eager_capacity` and friends — stays scored. The mutation gate does not
+#     exempt them: it rebuilds that addon from the mutated source.
 allow = [
     "**/random-derives/**",
     "**/protected-derive/**",

@@ -154,6 +154,11 @@ fn ensure_plain_object(obj: &Object<'_>) -> Result<()> {
 /// property (drop). The intake side already treats prototype pollution as
 /// in-threat-model (`own_enumerable_keys`, `ensure_plain_object`); this
 /// closes the output side.
+/// The attributes `obj.key = value` gives a new property.
+const OWN_DATA_PROPERTY: PropertyAttributes = PropertyAttributes::Writable
+    .union(PropertyAttributes::Enumerable)
+    .union(PropertyAttributes::Configurable);
+
 pub(crate) fn define_own_property<'e, V: JsValue<'e>>(
     obj: &mut Object<'_>,
     key: &str,
@@ -164,11 +169,7 @@ pub(crate) fn define_own_property<'e, V: JsValue<'e>>(
         // A JS string name, not a UTF-8 C string, so a key holding NUL works.
         .with_name(&env, key)?
         .with_value(value)
-        .with_property_attributes(
-            PropertyAttributes::Writable
-                | PropertyAttributes::Enumerable
-                | PropertyAttributes::Configurable,
-        );
+        .with_property_attributes(OWN_DATA_PROPERTY);
     obj.define_properties(&[property])
 }
 

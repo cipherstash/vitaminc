@@ -83,10 +83,12 @@ The JS-boundary conversion functions — `js_to_value`, `value_to_js`,
 `node_to_js`, `node_from_js` — and their helpers — `own_enumerable_keys`,
 `get_property_unknown`, `ensure_plain_object`, `define_own_property`,
 `wrapper_text` — take a live `napi_env`, `Unknown`, or `Object`, which only
-exists inside a running V8 isolate, so Rust unit tests cannot reach them. They
-remain exempted by name in `.cargo-crap.toml` and `.cargo/mutants.toml`; new
-pure scalar conversion helpers participate in coverage and mutation gates. The
-Node conformance test runs in package-scoped mutation tests as well as CI.
+exists inside a running V8 isolate, so Rust unit tests cannot reach them. The
+Node suites do: `tests/node.rs` rebuilds the test addon from the crate's
+source, so the mutation gate tests these functions like any other code. Only
+the CRAP gate still exempts them, by name in `.cargo-crap.toml`, because they
+run inside the separately built addon, where `cargo llvm-cov` cannot measure
+their coverage.
 
 ## Safety notes
 

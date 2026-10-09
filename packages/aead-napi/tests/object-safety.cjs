@@ -50,6 +50,12 @@ try {
   delete Object.prototype.leak;
 }
 
+// Output properties are writable, enumerable and configurable, like ones
+// created by assignment.
+assert.deepEqual(Object.getOwnPropertyDescriptor(roundTrip({ k: 1 }), 'k'), {
+  value: 1, writable: true, enumerable: true, configurable: true,
+});
+
 // Prototype-touching keys are refused.
 assert.throws(() => addon.encode(JSON.parse('{"__proto__": 1}')));
 assert.throws(() => addon.encode({ constructor: 1 }));
@@ -87,3 +93,33 @@ try {
   delete Object.prototype.own;
 }
 assert.throws(() => addon.ciphertextRoundTrip({ t: 'map', v: JSON.parse('{"__proto__": {"t":"ct","v":"x"}}') }));
+
+// Nesting is limited to 128 levels below the root, in both directions of
+// the value conversion and when reading a ciphertext tree.
+const MAX_DEPTH = 128;
+const nest = (levels, wrap, leaf) => {
+  let v = leaf;
+  for (let i = 0; i < levels; i++) v = wrap(v);
+  return v;
+};
+for (const wrap of [(v) => [v], (v) => ({ k: v })]) {
+  addon.convert(nest(MAX_DEPTH, wrap, 1));
+  assert.throws(() => addon.convert(nest(MAX_DEPTH + 1, wrap, 1)), /nested too deeply/);
+}
+for (const wrap of [(v) => ({ t: 'seq', v: [v] }), (v) => ({ t: 'map', v: { k: v } })]) {
+  const deepest = nest(MAX_DEPTH, wrap, { t: 'ct', v: leaf });
+  assert.deepEqual(addon.ciphertextRoundTrip(deepest), deepest);
+  assert.throws(
+    () => addon.ciphertextRoundTrip(nest(MAX_DEPTH + 1, wrap, { t: 'ct', v: leaf })),
+    /nested too deeply/,
+  );
+}
+
+// A leap second cannot be a JS Date, even when it is millisecond-aligned.
+assert.deepEqual(roundTrip({ timestamp: '2016-12-31T23:59:60Z' }), {
+  timestamp: '2016-12-31T23:59:60.000000000Z',
+});
+
+// A passthrough value decodes to its plain JS value, at the root and nested.
+assert.equal(addon.decode(Buffer.from('f203', 'hex')), true);
+assert.deepEqual(addon.decode(Buffer.from('f0010000' + '00f20a0100000061', 'hex')), ['a']);

@@ -12,6 +12,13 @@ pub fn encode(value: NapiValue) -> napi::Result<Buffer> {
     Ok(Buffer::from(bytes.risky_ref().to_vec()))
 }
 
+/// Convert a JS value to a Rust value and drop it, to test the conversion
+/// alone, without the transport encoder's own limits.
+#[napi]
+pub fn convert(value: NapiValue) {
+    drop(value);
+}
+
 #[napi]
 pub fn decode(bytes: Buffer) -> napi::Result<NapiValue> {
     decode_value(&mut Reader::new(&bytes))
