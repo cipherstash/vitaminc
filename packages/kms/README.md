@@ -27,6 +27,40 @@ open-source cryptography crate, not a private integration layer for one
 downstream project. The traits reflect the real capabilities KMS vendors
 offer, not just the narrow slice one caller happens to exercise today.
 
+## Key providers
+
+The capability traits describe what one backend key can do. A *key
+provider* is the shape a client library is generic over:
+[`KeyProvider`] mints and retrieves batches of data keys against one
+backend key or keyset bound at construction, and [`IndexKeyProvider`]
+loads the one fixed index key for that keyset. They are separate traits
+because a vendor source supplies the first natively and the second only
+through a persisted identifier, while a service such as ZeroKMS supplies
+both.
+
+Every key in a batch carries a [`Binding`]: bytes the caller attaches when
+the key is minted and must present again to retrieve it. A backend either
+binds those bytes into the key server-side or ignores them, and says which
+through [`BindingSupport`], so a caller that needs binding can check
+before it depends on it. The four vendor sources are `Unbound` today.
+
+Every vendor data key source in this crate implements [`KeyProvider`], so
+the same consumer runs on any of them. The pieces built on top:
+
+- [`FixedIndexKeySource<T>`](provider::FixedIndexKeySource) pairs any
+  provider with the one `KeyId` a deployment provisioned for index-key
+  derivation, giving it an [`IndexKeyProvider`] as well.
+- [`CachingKeyProvider<T>`](provider::CachingKeyProvider) (feature
+  `caching`, on by default) memoizes retrieved keys, keyed on the key id
+  *and* the binding, so a hit is never a key the backend would have answered
+  differently for. Minting is never cached: a cached mint would share one
+  key across values, which is the pooled trade-off by accident rather than
+  by choice. Opt in deliberately: against a backend that audits each
+  retrieval, a hit skips that audit entry and policy check.
+- `FakeKeyProvider`, behind the `test-support` feature, is an in-memory
+  provider whose generate/retrieve round-trips and whose bindings are
+  enforced, for consumers' own tests.
+
 ## Adapters
 
 Each vendor lives behind a Cargo feature that pulls in only that vendor's
