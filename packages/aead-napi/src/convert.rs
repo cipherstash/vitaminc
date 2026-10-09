@@ -22,16 +22,17 @@ use napi::bindgen_prelude::{
     Array, BigInt, Buffer, FromNapiValue, JsObjectValue, JsValue, KeyCollectionMode, KeyConversion,
     KeyFilter, Null, Object, ToNapiValue, Uint8Array, Unknown, Utf16String,
 };
-use napi::{sys, Env, Error, Property, PropertyAttributes, Result, Status, ValueType};
+use napi::{sys, Env, Error, Property, Result, Status, ValueType};
 use vitaminc_aead_value::Value;
 use vitaminc_protected::{Controlled, Protected};
 
 use crate::scalar;
 use crate::value::NapiValue;
 
-/// Maximum nesting depth accepted when converting a JS value tree (and when
-/// rebuilding one). Bounds recursion so a hostile deeply-nested input cannot
-/// overflow the stack.
+/// Maximum nesting depth, in both directions: converting a JS value tree to
+/// Rust, and building one from a Rust tree. Bounds recursion so a deeply
+/// nested input cannot overflow the stack. The same limit, counted the same
+/// way, as the transport decoder's, so any decoded tree converts.
 pub(crate) const MAX_DEPTH: usize = 128;
 
 /// Property names that must never be read from or written onto a plain JS
@@ -66,7 +67,14 @@ pub(crate) fn eager_capacity(reported_len: u32) -> usize {
     (reported_len as usize).min(MAX_EAGER_CAPACITY)
 }
 
-/// Own, enumerable, string-keyed property names of `obj`.
+/// An own property key: the JS key itself, for reading the property back
+/// exactly, and its text.
+pub(crate) struct OwnKey<'e> {
+    handle: Unknown<'e>,
+    pub(crate) name: String,
+}
+
+/// Own, enumerable, string-keyed properties of `obj`.
 ///
 /// `Object::keys` (`napi_get_property_names`) walks the prototype chain —
 /// per the Node-API spec it equals `napi_get_all_property_names` with
@@ -74,7 +82,10 @@ pub(crate) fn eager_capacity(reported_len: u32) -> usize {
 /// (or an instance with enumerable prototype members) would inject its
 /// keys into the result, and inherited getters would run when the values
 /// are read. Own-only enumeration forecloses both.
-pub(crate) fn own_enumerable_keys(obj: &Object<'_>) -> Result<Vec<String>> {
+///
+/// A key holding an unpaired surrogate is refused, as string values are: it
+/// has no UTF-8 spelling, so it could not be sealed as written.
+pub(crate) fn own_enumerable_keys<'e>(obj: &Object<'e>) -> Result<Vec<OwnKey<'e>>> {
     // napi-rs takes a single key filter, so symbol keys are skipped below
     // rather than by an `enumerable | skip_symbols` filter.
     let names = obj.get_all_property_names(
@@ -85,13 +96,34 @@ pub(crate) fn own_enumerable_keys(obj: &Object<'_>) -> Result<Vec<String>> {
     let len = names.get_array_length()?;
     let mut keys = Vec::with_capacity(eager_capacity(len));
     for i in 0..len {
-        let name = names.get_element::<Unknown>(i)?;
-        if name.get_type()? == ValueType::Symbol {
+        let handle = names.get_element::<Unknown>(i)?;
+        if handle.get_type()? == ValueType::Symbol {
             continue;
         }
-        keys.push(String::from_unknown(name)?);
+        let name = lossless_string(handle, "property name")?;
+        keys.push(OwnKey { handle, name });
     }
     Ok(keys)
+}
+
+/// Read the property `key` names, by the key's own JS handle.
+pub(crate) fn get_own<'e>(obj: &Object<'e>, key: &OwnKey<'e>) -> Result<Unknown<'e>> {
+    obj.get_property_unchecked(key.handle)
+}
+
+/// A JS string as Rust text. Fetched as UTF-16 (JS's native representation)
+/// and converted with `String::from_utf16`, which errors on unpaired
+/// surrogates. The UTF-8 fetch (`napi_get_value_string_utf8`) would silently
+/// replace them with U+FFFD, so a value would seal *mutated* and a key would
+/// stop naming its property; refuse loudly instead.
+fn lossless_string(value: Unknown<'_>, what: &str) -> Result<String> {
+    let utf16 = Utf16String::from_unknown(value)?;
+    String::from_utf16(&utf16).map_err(|_| {
+        Error::new(
+            Status::InvalidArg,
+            format!("{what} contains an unpaired surrogate and cannot be encrypted losslessly"),
+        )
+    })
 }
 
 /// Fetch a property as the raw JS value, without [`Object::get`]'s
@@ -146,31 +178,37 @@ fn ensure_plain_object(obj: &Object<'_>) -> Result<()> {
 // direction still projects a passthrough produced elsewhere (e.g. a value
 // written by another binding) onto its plain JS value. Follow-up: add an
 // explicit passthrough marker type to the JS API.
-/// Write `value` onto `obj` as an **own data property** (`defineProperty`
-/// semantics: writable, enumerable, configurable) rather than through
-/// [`Object::set`] (`napi_set_property`, `[[Set]]` semantics), which walks
-/// the prototype chain: a polluted inherited setter on the key would receive
-/// the decrypted plaintext (leak) and leave the result without the own
-/// property (drop). The intake side already treats prototype pollution as
-/// in-threat-model (`own_enumerable_keys`, `ensure_plain_object`); this
-/// closes the output side.
-/// The attributes `obj.key = value` gives a new property.
-const OWN_DATA_PROPERTY: PropertyAttributes = PropertyAttributes::Writable
-    .union(PropertyAttributes::Enumerable)
-    .union(PropertyAttributes::Configurable);
 
-pub(crate) fn define_own_property<'e, V: JsValue<'e>>(
-    obj: &mut Object<'_>,
+/// One own data property, for [`define_own_properties`]. `Property::new()`
+/// defaults to writable, enumerable and configurable, the attributes
+/// `obj.key = value` would give.
+pub(crate) fn own_property<'e, V: JsValue<'e>>(
+    env: &Env,
     key: &str,
     value: &V,
-) -> Result<()> {
-    let env = Env::from_raw(obj.value().env);
-    let property = Property::new()
-        // A JS string name, not a UTF-8 C string, so a key holding NUL works.
-        .with_name(&env, key)?
-        .with_value(value)
-        .with_property_attributes(OWN_DATA_PROPERTY);
-    obj.define_properties(&[property])
+) -> Result<Property> {
+    // A JS string name, not a UTF-8 C string, so a key holding NUL works.
+    Ok(Property::new().with_name(env, key)?.with_value(value))
+}
+
+/// Write `properties` onto `obj` as **own data properties**
+/// (`defineProperty` semantics) rather than through [`Object::set`] or
+/// `Array::set` (`napi_set_property` / `napi_set_element`, `[[Set]]`
+/// semantics), which walk the prototype chain: a polluted inherited setter on
+/// a key or array index would receive the decrypted plaintext (leak) and
+/// leave the result without the own property (drop). The intake side already
+/// treats prototype pollution as in-threat-model (`own_enumerable_keys`,
+/// `ensure_plain_object`); this closes the output side. One call per object.
+pub(crate) fn define_own_properties(obj: &mut Object<'_>, properties: &[Property]) -> Result<()> {
+    obj.define_properties(properties)
+}
+
+/// A new JS array of `len` holes, seen as an object so its elements can be
+/// defined with [`define_own_properties`].
+pub(crate) fn new_array<'e>(env: &'e Env, len: usize) -> Result<Object<'e>> {
+    let len = u32::try_from(len)
+        .map_err(|_| Error::new(Status::InvalidArg, "array is too long for JS"))?;
+    Object::from_unknown(env.create_array(len)?.to_unknown())
 }
 
 fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<Value> {
@@ -188,21 +226,9 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<Value> {
             scalar::bigint(big.sign_bit, &big.words).map_err(|e| conversion_error(env, e))
         }
         ValueType::String => {
-            // Fetch as UTF-16 (JS's native representation) and convert with
-            // `String::from_utf16`, which errors on unpaired surrogates. The
-            // UTF-8 fetch (`napi_get_value_string_utf8`) would silently
-            // replace them with U+FFFD — sealing a *mutated* plaintext that
-            // no longer equals what the caller passed — so refuse loudly
-            // instead. The converted copy moves into `Protected`; the V8
-            // original is owned by the engine and cannot be wiped from here.
-            let utf16 = Utf16String::from_unknown(unknown)?;
-            let s = String::from_utf16(&utf16).map_err(|_| {
-                Error::new(
-                    Status::InvalidArg,
-                    "string contains an unpaired surrogate and cannot be encrypted losslessly",
-                )
-            })?;
-            Ok(Value::String(s.into()))
+            // The converted copy moves into `Protected`; the V8 original is
+            // owned by the engine and cannot be wiped from here.
+            Ok(Value::String(lossless_string(unknown, "string")?.into()))
         }
         ValueType::Object => {
             if unknown.is_buffer()? {
@@ -249,7 +275,7 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<Value> {
                 let keys = own_enumerable_keys(&obj)?;
                 if let [key] = keys.as_slice() {
                     use scalar::ConversionError::{InvalidDate, InvalidDecimal, InvalidTimestamp};
-                    let parsed = match key.as_str() {
+                    let parsed = match key.name.as_str() {
                         "date" => Some(
                             wrapper_text(&obj, key, InvalidDate)?
                                 .and_then(|text| scalar::date(&text)),
@@ -271,13 +297,13 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<Value> {
                 }
                 let mut entries = Vec::with_capacity(keys.len());
                 for key in keys {
-                    if forbidden_key(&key) {
-                        return Err(forbidden_key_error(&key));
+                    if forbidden_key(&key.name) {
+                        return Err(forbidden_key_error(&key.name));
                     }
                     // Raw fetch so an explicit `undefined` value survives as
                     // `Value::Undefined` instead of erroring.
-                    let value = get_property_unknown(&obj, &key)?;
-                    entries.push((key, js_to_value(value, depth + 1)?));
+                    let value = get_own(&obj, &key)?;
+                    entries.push((key.name, js_to_value(value, depth + 1)?));
                 }
                 Ok(Value::Object(entries))
             }
@@ -292,15 +318,19 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<Value> {
 impl FromNapiValue for NapiValue {
     unsafe fn from_napi_value(env: sys::napi_env, napi_val: sys::napi_value) -> Result<Self> {
         // SAFETY: napi-rs calls this with the `env` and `napi_val` of the
-        // current call, which is the contract `Unknown::from_napi_value`
-        // asks for. Wrapping as `Unknown` accepts any value type, and the
-        // result does not outlive this call.
+        // current call, which is all `Unknown::from_napi_value` needs: an
+        // `Unknown` may hold any value type, and `js_to_value` checks the
+        // type before every narrower conversion. The handle does not outlive
+        // this call.
         let unknown = unsafe { Unknown::from_napi_value(env, napi_val) }?;
         js_to_value(unknown, 0).map(NapiValue)
     }
 }
 
-fn value_to_js(env: &Env, value: Value) -> Result<Unknown<'_>> {
+fn value_to_js(env: &Env, value: Value, depth: usize) -> Result<Unknown<'_>> {
+    if depth > MAX_DEPTH {
+        return Err(depth_error());
+    }
     match value {
         Value::Null => Null.into_unknown(env),
         Value::Undefined => ().into_unknown(env),
@@ -346,23 +376,28 @@ fn value_to_js(env: &Env, value: Value) -> Result<Unknown<'_>> {
         }
         Value::Bytes(b) => Buffer::from(b.risky_ref().to_vec()).into_unknown(env),
         Value::Array(items) => {
-            let mut arr = env.create_array(items.len() as u32)?;
+            let mut arr = new_array(env, items.len())?;
+            let mut elements = Vec::with_capacity(items.len());
             for (i, item) in items.into_iter().enumerate() {
-                arr.set(i as u32, value_to_js(env, item)?)?;
+                let js_value = value_to_js(env, item, depth + 1)?;
+                elements.push(own_property(env, &i.to_string(), &js_value)?);
             }
+            define_own_properties(&mut arr, &elements)?;
             arr.into_unknown(env)
         }
         Value::Object(entries) => {
             let mut obj = Object::new(env)?;
+            let mut properties = Vec::with_capacity(entries.len());
             for (key, value) in entries {
                 // Keys decrypted from a ciphertext are attacker-influenced
                 // in principle; never assign prototype-polluting names.
                 if forbidden_key(&key) {
                     return Err(forbidden_key_error(&key));
                 }
-                let js_value = value_to_js(env, value)?;
-                define_own_property(&mut obj, &key, &js_value)?;
+                let js_value = value_to_js(env, value, depth + 1)?;
+                properties.push(own_property(env, &key, &js_value)?);
             }
+            define_own_properties(&mut obj, &properties)?;
             obj.into_unknown(env)
         }
         // A passthrough subtree projects onto its plain JS value: the marking
@@ -370,7 +405,8 @@ fn value_to_js(env: &Env, value: Value) -> Result<Unknown<'_>> {
         // ordinary value to the application. (Round-tripping the *marking*
         // back into a re-encryptable JS value is future work — see
         // `js_to_value`, which has no passthrough constructor yet.)
-        Value::Passthrough(inner) => value_to_js(env, *inner),
+        // One level deeper, as the transport decoder counts it.
+        Value::Passthrough(inner) => value_to_js(env, *inner, depth + 1),
         _ => Err(Error::new(Status::GenericFailure, "unsupported value kind")),
     }
 }
@@ -379,12 +415,12 @@ fn value_to_js(env: &Env, value: Value) -> Result<Unknown<'_>> {
 /// (`{ date: new Date() }`, `{ decimal: 1n }`, ...) is refused with a typed
 /// error chosen by [`scalar::non_string_payload`] rather than a generic
 /// N-API one.
-fn wrapper_text(
-    obj: &Object,
-    key: &str,
+fn wrapper_text<'e>(
+    obj: &Object<'e>,
+    key: &OwnKey<'e>,
     invalid: scalar::ConversionError,
 ) -> Result<std::result::Result<String, scalar::ConversionError>> {
-    let input = get_property_unknown(obj, key)?;
+    let input = get_own(obj, key)?;
     Ok(match input.get_type()? {
         ValueType::String => Ok(String::from_unknown(input)?),
         ValueType::Number => Err(scalar::non_string_payload(
@@ -405,13 +441,13 @@ fn conversion_error(env: Env, error: scalar::ConversionError) -> Error {
 fn wrapper_to_js<'e>(env: &'e Env, key: &str, text: String) -> Result<Unknown<'e>> {
     let mut obj = Object::new(env)?;
     let value = text.into_unknown(env)?;
-    define_own_property(&mut obj, key, &value)?;
+    define_own_properties(&mut obj, &[own_property(env, key, &value)?])?;
     obj.into_unknown(env)
 }
 
 impl ToNapiValue for NapiValue {
     unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
-        Ok(value_to_js(&Env::from_raw(env), val.0)?.raw())
+        Ok(value_to_js(&Env::from_raw(env), val.0, 0)?.raw())
     }
 }
 

@@ -100,8 +100,10 @@ their coverage.
 - The original copies of encrypted values in the V8 heap are owned by the
   JS engine and cannot be wiped from Rust.
 - Property names that would touch the prototype chain (`__proto__`,
-  `constructor`, `prototype`) are rejected in both directions, and
-  recursion depth is bounded.
+  `constructor`, `prototype`) are rejected in both directions. Nesting is
+  limited to 128 levels in both directions too, counted as the transport
+  decoder counts it, so a tree built in Rust fails cleanly instead of
+  overflowing the stack.
 - Only **plain objects** (prototype `Object.prototype` or `null`) are
   accepted for encryption. `Map`, `Set`, `RegExp`, `DataView`, class
   instances and other exotic objects keep their state in internal slots and
@@ -117,14 +119,20 @@ their coverage.
 - JS-reported array lengths are never trusted for up-front allocation
   (a `new Array(2**32 - 1)` costs the attacker one line and materialises
   nothing), in both the value converter and the ciphertext rebuilder.
-- Strings containing unpaired UTF-16 surrogates are **rejected** rather
-  than silently normalized: the UTF-8 fetch would replace a lone surrogate
-  with U+FFFD, sealing a plaintext that no longer equals what the caller
-  passed.
-- Decrypted objects (and rebuilt ciphertext maps) are written with
-  **own-property defines** (`napi_define_properties`), not `[[Set]]`
-  assignment, so a polluted `Object.prototype` setter can never observe
-  decrypted plaintext or swallow a property.
+- Strings and object keys containing unpaired UTF-16 surrogates are
+  **rejected** rather than silently normalized: the UTF-8 fetch would
+  replace a lone surrogate with U+FFFD, sealing a plaintext that no longer
+  equals what the caller passed, or a key that no longer names its
+  property. Each property is read back through its original JS key.
+- Everything this crate builds in JS is written with **own-property
+  defines** (`napi_define_properties`, one call per object), not `[[Set]]`
+  assignment: decrypted object properties and array elements, and every
+  ciphertext node's `t`, `v`, sequence elements and map entries. A polluted
+  setter on `Object.prototype` or `Array.prototype` can never observe
+  decrypted plaintext or ciphertext, or swallow a property.
+- A ciphertext node handed back for decryption must be an object. N-API
+  reads properties of a primitive through its wrapper, so a bare string
+  would otherwise take `t` and `v` from `String.prototype`.
 - Errors carry no cryptographic detail (`Unspecified` at the trait layer).
 
 [`Value`]: vitaminc_aead_value::Value

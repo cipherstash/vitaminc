@@ -31,8 +31,8 @@ use napi::{sys, Env, Error, Result, Status, ValueType};
 use vitaminc_aead::CipherText;
 
 use crate::convert::{
-    define_own_property, eager_capacity, forbidden_key, get_property_unknown, own_enumerable_keys,
-    MAX_DEPTH,
+    define_own_properties, eager_capacity, forbidden_key, get_own, get_property_unknown, new_array,
+    own_enumerable_keys, own_property, MAX_DEPTH,
 };
 
 const T_CIPHERTEXT: &str = "ct";
@@ -53,44 +53,43 @@ const T_PASSTHROUGH: &str = "pt";
 /// the tree first with [`CipherText::map_passthrough`].
 pub struct JsCipherText<Leaf, P>(pub CipherText<Leaf, P>);
 
+fn depth_error() -> Error {
+    Error::new(Status::InvalidArg, "ciphertext is nested too deeply")
+}
+
 fn shape_error() -> Error {
     Error::new(Status::InvalidArg, "malformed ciphertext value")
 }
 
-fn node_to_js<Leaf, P>(env: &Env, node: CipherText<Leaf, P>) -> Result<Object<'_>>
+fn node_to_js<Leaf, P>(env: &Env, node: CipherText<Leaf, P>, depth: usize) -> Result<Object<'_>>
 where
     Leaf: AsRef<[u8]>,
     P: ToNapiValue,
 {
-    let mut obj = Object::new(env)?;
-    match node {
-        CipherText::Single(leaf) => {
-            obj.set(T_KEY, T_CIPHERTEXT)?;
-            obj.set(V_KEY, Buffer::from(leaf.as_ref().to_vec()))?;
-        }
-        CipherText::None(leaf) => {
-            obj.set(T_KEY, T_NONE)?;
-            obj.set(V_KEY, Buffer::from(leaf.as_ref().to_vec()))?;
-        }
-        CipherText::EmptySequence(leaf) => {
-            obj.set(T_KEY, T_EMPTY_SEQ)?;
-            obj.set(V_KEY, Buffer::from(leaf.as_ref().to_vec()))?;
-        }
-        CipherText::EmptyMap(leaf) => {
-            obj.set(T_KEY, T_EMPTY_MAP)?;
-            obj.set(V_KEY, Buffer::from(leaf.as_ref().to_vec()))?;
-        }
+    if depth > MAX_DEPTH {
+        return Err(depth_error());
+    }
+    let leaf = |tag: &'static str, leaf: Leaf| -> Result<(&'static str, Unknown<'_>)> {
+        Ok((tag, Buffer::from(leaf.as_ref().to_vec()).into_unknown(env)?))
+    };
+    let (tag, value) = match node {
+        CipherText::Single(l) => leaf(T_CIPHERTEXT, l)?,
+        CipherText::None(l) => leaf(T_NONE, l)?,
+        CipherText::EmptySequence(l) => leaf(T_EMPTY_SEQ, l)?,
+        CipherText::EmptyMap(l) => leaf(T_EMPTY_MAP, l)?,
         CipherText::Sequence(items) => {
-            obj.set(T_KEY, T_SEQ)?;
-            let mut arr = env.create_array(items.len() as u32)?;
+            let mut arr = new_array(env, items.len())?;
+            let mut elements = Vec::with_capacity(items.len());
             for (i, item) in items.into_iter().enumerate() {
-                arr.set(i as u32, node_to_js(env, item)?)?;
+                let node = node_to_js(env, item, depth + 1)?;
+                elements.push(own_property(env, &i.to_string(), &node)?);
             }
-            obj.set(V_KEY, arr)?;
+            define_own_properties(&mut arr, &elements)?;
+            (T_SEQ, arr.into_unknown(env)?)
         }
         CipherText::Map(entries) => {
-            obj.set(T_KEY, T_MAP)?;
             let mut map = Object::new(env)?;
+            let mut properties = Vec::with_capacity(entries.len());
             for (key, value) in entries {
                 // Map keys travel in the clear inside the stored ciphertext
                 // and are therefore attacker-writable; never assign
@@ -101,19 +100,25 @@ where
                         format!("ciphertext map key is not allowed: {key}"),
                     ));
                 }
-                // Own-property define, not `[[Set]]`: these keys are
-                // attacker-writable, so a polluted inherited setter must
-                // never run — see `convert::define_own_property`.
-                let js_value = node_to_js(env, value)?;
-                define_own_property(&mut map, &key, &js_value)?;
+                let node = node_to_js(env, value, depth + 1)?;
+                properties.push(own_property(env, &key, &node)?);
             }
-            obj.set(V_KEY, map)?;
+            define_own_properties(&mut map, &properties)?;
+            (T_MAP, map.into_unknown(env)?)
         }
-        CipherText::Passthrough(p) => {
-            obj.set(T_KEY, T_PASSTHROUGH)?;
-            obj.set(V_KEY, p)?;
-        }
-    }
+        CipherText::Passthrough(p) => (T_PASSTHROUGH, p.into_unknown(env)?),
+    };
+    // Own properties throughout, so a polluted inherited `t`, `v` or index
+    // setter never sees the ciphertext (see `define_own_properties`).
+    let mut obj = Object::new(env)?;
+    let tag = tag.into_unknown(env)?;
+    define_own_properties(
+        &mut obj,
+        &[
+            own_property(env, T_KEY, &tag)?,
+            own_property(env, V_KEY, &value)?,
+        ],
+    )?;
     Ok(obj)
 }
 
@@ -126,8 +131,19 @@ where
     P: ToNapiValue,
 {
     unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
-        Ok(node_to_js(&Env::from_raw(env), val.0)?.raw())
+        Ok(node_to_js(&Env::from_raw(env), val.0, 0)?.raw())
     }
+}
+
+/// A node must be a JS object. napi-rs's `Object` conversion does not check
+/// the type, and N-API reads properties of a primitive through its wrapper
+/// object, so a bare string would otherwise read `t` and `v` from a
+/// (possibly polluted) `String.prototype`.
+fn node_object(value: Unknown<'_>) -> Result<Object<'_>> {
+    if value.get_type()? != ValueType::Object {
+        return Err(shape_error());
+    }
+    Object::from_unknown(value)
 }
 
 fn node_from_js<Leaf, P>(obj: &Object<'_>, depth: usize) -> Result<CipherText<Leaf, P>>
@@ -136,10 +152,7 @@ where
     P: FromNapiValue,
 {
     if depth > MAX_DEPTH {
-        return Err(Error::new(
-            Status::InvalidArg,
-            "ciphertext is nested too deeply",
-        ));
+        return Err(depth_error());
     }
     let t: String = obj.get(T_KEY)?.ok_or_else(shape_error)?;
     match t.as_str() {
@@ -166,16 +179,12 @@ where
                 // hole comes back as `undefined`, which is not a node
                 // object — check the type before treating it as one.
                 let element = arr.get::<Unknown>(i)?.ok_or_else(shape_error)?;
-                if element.get_type()? != ValueType::Object {
-                    return Err(shape_error());
-                }
-                let element = Object::from_unknown(element)?;
-                items.push(node_from_js(&element, depth + 1)?);
+                items.push(node_from_js(&node_object(element)?, depth + 1)?);
             }
             Ok(CipherText::Sequence(items))
         }
         T_MAP => {
-            let map: Object = obj.get(V_KEY)?.ok_or_else(shape_error)?;
+            let map = node_object(get_property_unknown(obj, V_KEY)?)?;
             // Own keys only — `Object::keys` walks the prototype chain, so
             // a hostile node object with enumerable prototype members would
             // otherwise have its inherited keys become ciphertext map
@@ -183,14 +192,14 @@ where
             let keys = own_enumerable_keys(&map)?;
             let mut entries = Vec::with_capacity(keys.len());
             for key in keys {
-                if forbidden_key(&key) {
+                if forbidden_key(&key.name) {
                     return Err(Error::new(
                         Status::InvalidArg,
-                        format!("ciphertext map key is not allowed: {key}"),
+                        format!("ciphertext map key is not allowed: {}", key.name),
                     ));
                 }
-                let value: Object = map.get(&key)?.ok_or_else(shape_error)?;
-                entries.push((key, node_from_js(&value, depth + 1)?));
+                let value = node_object(get_own(&map, &key)?)?;
+                entries.push((key.name, node_from_js(&value, depth + 1)?));
             }
             Ok(CipherText::Map(entries))
         }
@@ -216,10 +225,12 @@ where
 {
     unsafe fn from_napi_value(env: sys::napi_env, napi_val: sys::napi_value) -> Result<Self> {
         // SAFETY: napi-rs calls this with the `env` and `napi_val` of the
-        // current call, which is the contract `Object::from_napi_value` asks
-        // for; it checks the value is an object and errors otherwise. The
-        // handle does not outlive this call.
-        let obj = unsafe { Object::from_napi_value(env, napi_val) }?;
+        // current call, which is all `Unknown::from_napi_value` needs: an
+        // `Unknown` may hold any value type, and `node_object` checks it is
+        // an object before anything reads it as one. The handle does not
+        // outlive this call.
+        let value = unsafe { Unknown::from_napi_value(env, napi_val) }?;
+        let obj = node_object(value)?;
         Ok(JsCipherText(node_from_js(&obj, 0)?))
     }
 }
