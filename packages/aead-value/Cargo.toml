@@ -46,10 +46,14 @@ git = "https://github.com/cipherstash/ore.rs"
 rev = "b3b7800b9c0cd8f7c53c5382f8e018a4e8bcbbd5"
 optional = true
 
+# NFC is stable for assigned code points, and the Unicode 16 assignment check
+# below refuses everything else, so newer normalization releases are safe.
 [dependencies.unicode-normalization]
-version = "=0.1.24"
+version = "0.1.24"
 optional = true
 
+# Exact pin: this table defines which code points are assigned in Unicode 16,
+# and a newer table would widen the accepted input of a frozen domain.
 [dependencies.unicode-general-category]
 version = "=1.1.0"
 optional = true

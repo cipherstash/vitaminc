@@ -1,6 +1,8 @@
 //! Vectors independently calculated with Python hashlib/hmac and explicit
 //! big-endian canonical payloads; key = 0x0b * 32, empty context, PAE framing.
-use vitaminc_aead_value::{canonical::equality_bytes, Value, ValueKind};
+//! Every integer width shares one domain and payload, so each integer kind
+//! carries the same vector for the same number.
+use vitaminc_aead_value::{canonical::equality_input, Value, ValueKind};
 use vitaminc_hmac::HmacSha256Prf;
 use vitaminc_prf::{CanonicalError, PrfEncoding, PrfError, PrfKeyInit, PrfValue};
 use vitaminc_protected::{Controlled, Protected};
@@ -15,63 +17,63 @@ fn every_equality_domain_has_a_known_answer() {
     let vectors = [
         (
             Value::Int8(-7),
-            "vitaminc/prf/value/int8-orderable/v1",
-            "79",
-            "45b646e792baac429bc9b0909bfee1f5d830340c2689dce4a157f7cd3f5c52f3",
+            "vitaminc/prf/value/integer-orderable/v1",
+            "00fffffffffffffffffffffffffffffff9",
+            "e025b480a9b3b10b709056fd6fc5ec4ca44c04476d4ebed8360110fec3a0e511",
         ),
         (
             Value::Int16(-7),
-            "vitaminc/prf/value/int16-orderable/v1",
-            "7ff9",
-            "910b81e2c549234d1853e3d638b211586992e5ec46004f2d99d2287201dd6b64",
+            "vitaminc/prf/value/integer-orderable/v1",
+            "00fffffffffffffffffffffffffffffff9",
+            "e025b480a9b3b10b709056fd6fc5ec4ca44c04476d4ebed8360110fec3a0e511",
         ),
         (
             Value::Int32(-7),
-            "vitaminc/prf/value/int32-orderable/v1",
-            "7ffffff9",
-            "c8e0b6c9ea09379eebe54ca54775961eedba9a140a60d5e1cb2a2e74e6971152",
+            "vitaminc/prf/value/integer-orderable/v1",
+            "00fffffffffffffffffffffffffffffff9",
+            "e025b480a9b3b10b709056fd6fc5ec4ca44c04476d4ebed8360110fec3a0e511",
         ),
         (
             Value::Int64(-7),
-            "vitaminc/prf/value/int64-orderable/v1",
-            "7ffffffffffffff9",
-            "230a90e2b90dca97dcb96b6f8949fc481eac133c6009026a41b8d69c4df984a2",
+            "vitaminc/prf/value/integer-orderable/v1",
+            "00fffffffffffffffffffffffffffffff9",
+            "e025b480a9b3b10b709056fd6fc5ec4ca44c04476d4ebed8360110fec3a0e511",
         ),
         (
             Value::Int128(-7),
-            "vitaminc/prf/value/int128-orderable/v1",
-            "7ffffffffffffffffffffffffffffff9",
-            "86ea7b332d238ddeaba562eb280075e1345eb9835f25a2ec0d4e239a9a341951",
+            "vitaminc/prf/value/integer-orderable/v1",
+            "00fffffffffffffffffffffffffffffff9",
+            "e025b480a9b3b10b709056fd6fc5ec4ca44c04476d4ebed8360110fec3a0e511",
         ),
         (
             Value::UInt8(7),
-            "vitaminc/prf/value/uint8-orderable/v1",
-            "07",
-            "93bf0e77c1b9e2859c6307cea9a3c36a0eec73bc0930927bce0d147d627fab34",
+            "vitaminc/prf/value/integer-orderable/v1",
+            "0100000000000000000000000000000007",
+            "8e9c7310e99f566c03e43de34c13cd21fe0e3fc6fb03cf7a6c2f31b86e336a5a",
         ),
         (
             Value::UInt16(7),
-            "vitaminc/prf/value/uint16-orderable/v1",
-            "0007",
-            "75adfa1dd83181469e110035f65cc39710887aa9dbc674b5f9f938bd69934ddc",
+            "vitaminc/prf/value/integer-orderable/v1",
+            "0100000000000000000000000000000007",
+            "8e9c7310e99f566c03e43de34c13cd21fe0e3fc6fb03cf7a6c2f31b86e336a5a",
         ),
         (
             Value::UInt32(7),
-            "vitaminc/prf/value/uint32-orderable/v1",
-            "00000007",
-            "d1348bee44399b980d31a146f062a6398a4c12ac118d33a80fe4fede2c970e7c",
+            "vitaminc/prf/value/integer-orderable/v1",
+            "0100000000000000000000000000000007",
+            "8e9c7310e99f566c03e43de34c13cd21fe0e3fc6fb03cf7a6c2f31b86e336a5a",
         ),
         (
             Value::UInt64(7),
-            "vitaminc/prf/value/uint64-orderable/v1",
-            "0000000000000007",
-            "7fdc5f704d19e6a9dbcc43943379e4c7f6322146f2e78efd1799b130d772cda9",
+            "vitaminc/prf/value/integer-orderable/v1",
+            "0100000000000000000000000000000007",
+            "8e9c7310e99f566c03e43de34c13cd21fe0e3fc6fb03cf7a6c2f31b86e336a5a",
         ),
         (
             Value::UInt128(7),
-            "vitaminc/prf/value/uint128-orderable/v1",
-            "00000000000000000000000000000007",
-            "41d5f93103768546432733266bf168544b82cc329c97b91a96cf70a1db3e78d9",
+            "vitaminc/prf/value/integer-orderable/v1",
+            "0100000000000000000000000000000007",
+            "8e9c7310e99f566c03e43de34c13cd21fe0e3fc6fb03cf7a6c2f31b86e336a5a",
         ),
         (
             Value::Float32(1.5),
@@ -122,7 +124,7 @@ fn every_equality_domain_has_a_known_answer() {
         covered.push(kind);
         assert_eq!(PrfEncoding::for_value_kind(kind).unwrap().as_str(), domain);
         assert_eq!(
-            hex(equality_bytes(&value).unwrap().risky_ref()),
+            hex(equality_input(&value).unwrap().bytes.risky_ref()),
             payload,
             "{kind}"
         );

@@ -2,15 +2,132 @@ use super::*;
 use quickcheck_macros::quickcheck;
 
 fn bytes(value: Value) -> Vec<u8> {
-    equality_bytes(&value)
+    equality_input(&value)
         .expect("valid test value")
+        .bytes
         .risky_ref()
         .clone()
 }
 
+fn integer_bytes(sign: u8, word: u128) -> Vec<u8> {
+    let mut expected = vec![sign];
+    expected.extend_from_slice(&word.to_be_bytes());
+    expected
+}
+
+#[test]
+fn integers_share_one_domain_whatever_their_width() {
+    let five = [
+        Value::Int8(5),
+        Value::UInt8(5),
+        Value::Int16(5),
+        Value::UInt16(5),
+        Value::Int32(5),
+        Value::UInt32(5),
+        Value::Int64(5),
+        Value::UInt64(5),
+        Value::Int128(5),
+        Value::UInt128(5),
+    ];
+    for value in five {
+        assert_eq!(bytes(value), integer_bytes(1, 5));
+    }
+    let minus_seven = [
+        Value::Int8(-7),
+        Value::Int16(-7),
+        Value::Int32(-7),
+        Value::Int64(-7),
+        Value::Int128(-7),
+    ];
+    for value in minus_seven {
+        assert_eq!(bytes(value), integer_bytes(0, -7i128 as u128));
+    }
+    assert_eq!(bytes(Value::Int128(i128::MIN)), integer_bytes(0, 1 << 127));
+    assert_eq!(bytes(Value::Int128(-1)), integer_bytes(0, u128::MAX));
+    assert_eq!(bytes(Value::Int128(0)), integer_bytes(1, 0));
+    assert_eq!(
+        bytes(Value::UInt128(u128::MAX)),
+        integer_bytes(1, u128::MAX)
+    );
+    let ascending = [
+        Value::Int128(i128::MIN),
+        Value::Int64(i64::MIN),
+        Value::Int8(-1),
+        Value::UInt8(0),
+        Value::Int8(i8::MAX),
+        Value::UInt64(u64::MAX),
+        Value::Int128(i128::MAX),
+        Value::UInt128(u128::MAX),
+    ];
+    for pair in ascending.windows(2) {
+        assert!(bytes(pair[0].clone()) < bytes(pair[1].clone()));
+    }
+}
+
+#[quickcheck]
+fn signed_and_unsigned_integers_agree_when_equal(value: u64) -> bool {
+    bytes(Value::UInt64(value)) == bytes(Value::Int128(value.into()))
+        && bytes(Value::UInt128(value.into())) == bytes(Value::Int128(value.into()))
+}
+
+#[quickcheck]
+fn integer_order_agrees_with_numeric_order(a: i64, b: u64) -> bool {
+    let (wide_a, wide_b) = (i128::from(a), i128::from(b));
+    bytes(Value::Int64(a)).cmp(&bytes(Value::UInt64(b))) == wide_a.cmp(&wide_b)
+        && bytes(Value::Int128(wide_a * wide_b)).cmp(&bytes(Value::Int64(a)))
+            == (wide_a * wide_b).cmp(&wide_a)
+}
+
+#[test]
+fn every_value_reports_its_kinds_domain() {
+    #[allow(unused_mut)] // optional features extend the list
+    let mut values = vec![
+        Value::Int8(1),
+        Value::UInt8(1),
+        Value::Int16(1),
+        Value::UInt16(1),
+        Value::Int32(1),
+        Value::UInt32(1),
+        Value::Int64(1),
+        Value::UInt64(1),
+        Value::Int128(1),
+        Value::UInt128(1),
+        Value::Float32(1.0),
+        Value::Float64(1.0),
+        Value::String("a".into()),
+        Value::Bytes(Protected::new(vec![1])),
+    ];
+    #[cfg(feature = "chrono")]
+    values.extend([
+        Value::Date(chrono::NaiveDate::MIN),
+        Value::Timestamp(chrono::DateTime::UNIX_EPOCH),
+    ]);
+    #[cfg(feature = "rust_decimal")]
+    values.push(Value::Decimal(rust_decimal::Decimal::ONE));
+    for value in values {
+        let kind = value.kind().expect("scalar");
+        let input = equality_input(&value).expect("valid test value");
+        assert_eq!(Some(input.domain), equality_domain(kind), "{kind}");
+    }
+    for &kind in ValueKind::ALL {
+        let refused = matches!(kind, ValueKind::Bool | ValueKind::Array | ValueKind::Object);
+        assert_eq!(equality_domain(kind).is_none(), refused, "{kind}");
+    }
+}
+
+#[test]
+fn nfc_expansion_fills_an_exactly_sized_buffer() {
+    // U+0344 is two UTF-8 bytes; its NFC form U+0308 U+0301 is four.
+    let normalized = text_nfc("\u{344}".as_bytes()).expect("valid test value");
+    assert_eq!(normalized.risky_ref(), "\u{308}\u{301}".as_bytes());
+    assert_eq!(normalized.risky_ref().capacity(), 4);
+}
+
 #[test]
 fn unicode_version_and_equivalence_are_frozen() {
-    assert_eq!(unicode_normalization::UNICODE_VERSION, (16, 0, 0));
+    // Normalization stability makes newer NFC tables safe for text that is
+    // assigned in Unicode 16; the assignment table is the exact pin.
+    assert!(unicode_normalization::UNICODE_VERSION >= (16, 0, 0));
     assert_eq!(unicode_general_category::UNICODE_VERSION, (16, 0, 0));
     assert_eq!(bytes(Value::String("e\u{301}".into())), "é".as_bytes());
     assert_ne!(
@@ -61,7 +178,7 @@ fn every_non_scalar_is_explicitly_refused() {
     ];
     for (value, error) in cases {
         assert_eq!(
-            equality_bytes(&value).expect_err("unsupported input"),
+            equality_input(&value).expect_err("unsupported input"),
             error
         );
         assert!(!error.to_string().is_empty());

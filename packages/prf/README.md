@@ -111,20 +111,28 @@ scope the value above resolves through
 
 ### Equality terms from `Value`
 
-`PrfValue` is implemented for `&vitaminc_aead_value::Value`. It borrows the
-source and derives one scalar equality term. Booleans, containers, null,
-undefined and passthrough return `PrfError::Canonical`; text with code points
-unassigned in Unicode 16 is also refused. `chrono` and `rust_decimal` features
-enable the corresponding value variants.
+With the `value` feature, `PrfValue` is implemented for
+`&vitaminc_aead_value::Value`. It borrows the source and derives one scalar
+equality term. Booleans, containers, null, undefined and passthrough return
+`PrfError::Canonical`; text with code points unassigned in Unicode 16 is also
+refused. The `chrono` and `rust_decimal` features enable `value` and the
+corresponding value variants. Without `value`, this crate does not depend on
+`vitaminc-aead-value` or its Unicode tables.
 
 The shared `vitaminc_aead_value::canonical` module owns the exhaustive value
-dispatch. It uses `orderable-bytes` at each scalar's natural width: signed
-integers are biased big-endian, floats fold signed zero and every NaN to one
-positive quiet NaN, timestamps truncate fractional nanoseconds to microseconds
-while retaining the 12-byte seconds/nanoseconds layout, and decimal encodings
-normalize scale and signed zero. Text equality is Unicode 16 NFC without
-accent or case folding. Unicode normalization and assignment tables are pinned.
-Ciphertext retains the original value, including scale and sub-microsecond data.
+dispatch and returns each term's domain with its bytes. Every integer kind,
+`int8` through `uint128`, shares one domain and a 17-byte encoding (a sign
+byte, then a big-endian 128-bit two's-complement word), so equal numbers give
+equal terms whatever width wrote them: a JavaScript `BigInt` stored as `int8`
+matches the same number stored as `int64` from Go. Other scalars use
+`orderable-bytes` at their natural width: floats fold signed zero and every
+NaN to one positive quiet NaN, timestamps truncate fractional nanoseconds to
+microseconds while retaining the 12-byte seconds/nanoseconds layout, and
+decimal encodings normalize scale and signed zero. Text equality is Unicode 16
+NFC without accent or case folding; the Unicode assignment table is pinned
+exactly, and NFC stability keeps newer normalization tables compatible.
+Ciphertext retains the original value, including its integer width, scale and
+sub-microsecond data.
 
 `PrfEncoding::for_value_kind` exposes the new, versioned domains. Existing
 primitive `PrfValue` implementations retain their established little-endian or
