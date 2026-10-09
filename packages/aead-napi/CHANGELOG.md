@@ -1,4 +1,24 @@
 
+## [0.6.0] - 2026-10-09
+
+### Breaking
+
+- **Breaking:** make the value model reusable
+- **Breaking:** preserve extended scalar kinds
+- **Breaking:** expose ValueKind::ALL as a slice
+- **Breaking:** read ciphertext nodes from own fields and carry depth into payloads
+
+### Documentation
+
+- steer integer data to BigInt for equality terms
+
+### Fixes
+
+- keep scalar wrappers lossless and their errors typed
+- close prototype and lossy-key leaks at the N-API boundary
+- check ownership immediately before each property read
+- measure and drop deep Rust-built trees without recursing
+
 ## [0.5.1] - 2026-10-05
 
 ## [0.5.0] - 2026-09-20

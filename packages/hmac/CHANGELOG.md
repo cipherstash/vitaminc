@@ -1,4 +1,19 @@
 
+## [0.6.0] - 2026-10-09
+
+### Breaking
+
+- **Breaking:** make Value equality terms an opt-in `value` feature
+
+### Features
+
+- derive canonical equality from values
+
+### Fixes
+
+- match equal integers across widths in equality terms
+- match equal floats across widths in equality terms
+
 ## [0.5.1] - 2026-10-05
 
 ## [0.5.0] - 2026-09-20
