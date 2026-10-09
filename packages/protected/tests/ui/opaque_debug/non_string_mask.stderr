@@ -1,0 +1,5 @@
+error: expected string literal
+ --> tests/ui/opaque_debug/non_string_mask.rs:4:23
+  |
+4 | #[opaque_debug(mask = 42)]
+  |                       ^^
