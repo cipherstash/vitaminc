@@ -10,7 +10,7 @@ mod scalar;
 mod value;
 pub use scalar::ConversionError;
 
-pub use ciphertext::JsCipherText;
+pub use ciphertext::{JsCipherText, NapiPassthrough};
 pub use value::NapiValue;
 // Re-exported so addon crates need not depend on the value crate directly.
 pub use vitaminc_aead_value::Value;

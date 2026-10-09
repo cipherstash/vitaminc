@@ -26,6 +26,7 @@ use napi::{sys, Env, Error, Property, Result, Status, ValueType};
 use vitaminc_aead_value::Value;
 use vitaminc_protected::{Controlled, Protected};
 
+use crate::ciphertext::NapiPassthrough;
 use crate::scalar;
 use crate::value::NapiValue;
 
@@ -443,6 +444,17 @@ fn wrapper_to_js<'e>(env: &'e Env, key: &str, text: String) -> Result<Unknown<'e
     let value = text.into_unknown(env)?;
     define_own_properties(&mut obj, &[own_property(env, key, &value)?])?;
     obj.into_unknown(env)
+}
+
+/// A [`Value`] payload continues the tree's depth count.
+impl NapiPassthrough for NapiValue {
+    fn to_js(self, env: &Env, depth: usize) -> Result<Unknown<'_>> {
+        value_to_js(env, self.0, depth)
+    }
+
+    fn from_js(value: Unknown<'_>, depth: usize) -> Result<Self> {
+        js_to_value(value, depth).map(NapiValue)
+    }
 }
 
 impl ToNapiValue for NapiValue {

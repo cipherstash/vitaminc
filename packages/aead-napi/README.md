@@ -45,7 +45,10 @@ cross-language leaf wire format. This crate adds only what is JS-specific:
 - **`JsCipherText<Leaf, P>`** — projects the generic `CipherText` container
   onto plain JS values (`{ t, v }` nodes with `Buffer` leaves) and back, as
   an in-memory/application-side representation. Durable cross-language
-  database storage is the EQL layer's job, not this projection's.
+  database storage is the EQL layer's job, not this projection's. The
+  passthrough payload `P` converts through `NapiPassthrough`, implemented
+  for `NapiValue` and `()`, which carries the tree's nesting depth into the
+  payload.
 
 This crate is a library consumed by the Node addon (cdylib/npm package);
 it is not itself loadable from Node.
@@ -81,14 +84,18 @@ node packages/aead-napi/tests/kind_inventory.cjs target/debug/examples/libkind_i
 
 The JS-boundary conversion functions — `js_to_value`, `value_to_js`,
 `node_to_js`, `node_from_js` — and their helpers — `own_enumerable_keys`,
-`get_property_unknown`, `ensure_plain_object`, `define_own_property`,
-`wrapper_text` — take a live `napi_env`, `Unknown`, or `Object`, which only
-exists inside a running V8 isolate, so Rust unit tests cannot reach them. The
-Node suites do: `tests/node.rs` rebuilds the test addon from the crate's
-source, so the mutation gate tests these functions like any other code. Only
-the CRAP gate still exempts them, by name in `.cargo-crap.toml`, because they
-run inside the separately built addon, where `cargo llvm-cov` cannot measure
-their coverage.
+`get_property_unknown`, `ensure_plain_object`, `wrapper_text`,
+`wrapper_to_js` — take a live
+`napi_env`, `Unknown`, or `Object`, which only exists inside a running V8
+isolate, so Rust unit tests cannot reach them. The Node suites do:
+`tests/node.rs` rebuilds the test addon from the crate's source, so the
+mutation gate tests these functions like any other code. Only the CRAP gate
+still exempts them, by name in `.cargo-crap.toml`, because they run inside
+the separately built addon, where `cargo llvm-cov` cannot measure their
+coverage. The smaller helpers in the same position (`define_own_properties`,
+`own_property`, `new_array`, `get_own`, `lossless_string`, `node_object`)
+are simple enough to stay under the CRAP threshold even at 0% coverage, so
+they are not exempted.
 
 ## Safety notes
 

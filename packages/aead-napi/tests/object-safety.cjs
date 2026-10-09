@@ -197,3 +197,45 @@ try {
   delete String.prototype.t;
   delete Number.prototype.t;
 }
+
+// A node's `t` and `v` must be its own: a polluted prototype cannot supply
+// either. An own `v: undefined` is still accepted (see `u` above).
+for (const [key, value] of [['t', 'pt'], ['v', leaf]]) {
+  Object.prototype[key] = value;
+  try {
+    assert.throws(() => addon.readCiphertext(key === 't' ? { v: leaf } : { t: 'ct' }), /malformed ciphertext/);
+  } finally {
+    delete Object.prototype[key];
+  }
+}
+Object.prototype.t = 'pt';
+Object.prototype.v = 'injected';
+try {
+  assert.throws(() => addon.readCiphertext({}), /malformed ciphertext/);
+} finally {
+  delete Object.prototype.t;
+  delete Object.prototype.v;
+}
+
+// Sequence elements must be own: a hole cannot be filled by a node on a
+// polluted Array.prototype.
+Array.prototype[0] = { t: 'ct', v: leaf };
+try {
+  assert.throws(() => addon.readCiphertext({ t: 'seq', v: new Array(1) }), /malformed ciphertext/);
+} finally {
+  delete Array.prototype[0];
+}
+
+// A passthrough payload continues the tree's depth count, in both
+// directions, as it does in the transport encoding: 60 sequences, the
+// passthrough node, then 67 arrays reach exactly 128.
+addon.ciphertextWithPayload(60, 67);
+assert.throws(() => addon.ciphertextWithPayload(60, 68), /nested too deeply/);
+const payloadTree = (arrays) =>
+  nest(60, (v) => ({ t: 'seq', v: [v] }), { t: 'pt', v: nest(arrays, (v) => [v], true) });
+addon.readCiphertext(payloadTree(67));
+assert.throws(() => addon.readCiphertext(payloadTree(68)), /nested too deeply/);
+
+// With no passthrough payload type, a passthrough node must carry undefined.
+addon.readUnitCiphertext({ t: 'pt', v: undefined });
+assert.throws(() => addon.readUnitCiphertext({ t: 'pt', v: 1 }), /malformed ciphertext/);

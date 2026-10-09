@@ -75,8 +75,29 @@ pub fn nested_ciphertext(levels: u32, wrap: String) -> JsCipherText<Vec<u8>, Nap
     JsCipherText(node)
 }
 
+/// `ct_levels` ciphertext sequences around a passthrough node whose payload
+/// is `value_levels` arrays around `true`: one tree whose depth spans both.
+#[napi(ts_return_type = "unknown")]
+pub fn ciphertext_with_payload(
+    ct_levels: u32,
+    value_levels: u32,
+) -> JsCipherText<Vec<u8>, NapiValue> {
+    let NapiValue(payload) = nested_value(value_levels, "array".into());
+    let mut node = CipherText::Passthrough(NapiValue(payload));
+    for _ in 0..ct_levels {
+        node = CipherText::Sequence(vec![node]);
+    }
+    JsCipherText(node)
+}
+
 /// Read a ciphertext node tree into Rust and drop it, to test reading alone.
 #[napi]
 pub fn read_ciphertext(#[napi(ts_arg_type = "unknown")] ct: JsCipherText<Vec<u8>, NapiValue>) {
+    drop(ct);
+}
+
+/// As `read_ciphertext`, for a cipher with no passthrough payload.
+#[napi]
+pub fn read_unit_ciphertext(#[napi(ts_arg_type = "unknown")] ct: JsCipherText<Vec<u8>, ()>) {
     drop(ct);
 }

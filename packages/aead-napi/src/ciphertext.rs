@@ -26,7 +26,9 @@
 //! have persisted it), but it is not a cross-language wire commitment;
 //! only the leaf byte format (see `vitaminc-aead-value`) is frozen.
 
-use napi::bindgen_prelude::{Array, Buffer, FromNapiValue, JsValue, Object, ToNapiValue, Unknown};
+use napi::bindgen_prelude::{
+    Array, Buffer, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue, Unknown,
+};
 use napi::{sys, Env, Error, Result, Status, ValueType};
 use vitaminc_aead::CipherText;
 
@@ -47,11 +49,41 @@ const T_PASSTHROUGH: &str = "pt";
 /// node projection documented at the module level.
 ///
 /// `Leaf` needs only byte-level accessors (`AsRef<[u8]>` out,
-/// `From<Vec<u8>>` in); the passthrough payload `P` uses its own NAPI
-/// conversions. For a cipher whose passthrough payload type is not itself
-/// NAPI-convertible (e.g. the Rust-native `Box<dyn Any + Send>`), re-home
-/// the tree first with [`CipherText::map_passthrough`].
+/// `From<Vec<u8>>` in); the passthrough payload `P` converts through
+/// [`NapiPassthrough`]. For a cipher whose passthrough payload type is not
+/// [`NapiValue`] or `()` (e.g. the Rust-native `Box<dyn Any + Send>`),
+/// re-home the tree first with [`CipherText::map_passthrough`].
+///
+/// [`NapiValue`]: crate::NapiValue
 pub struct JsCipherText<Leaf, P>(pub CipherText<Leaf, P>);
+
+/// A ciphertext passthrough payload's conversion to and from JS.
+///
+/// Both directions take the depth the payload sits at, so a payload shares
+/// the tree's 128-level nesting limit, as it does in the transport encoding,
+/// rather than starting a fresh count.
+pub trait NapiPassthrough: Sized {
+    /// Build the payload's JS value at `depth`.
+    fn to_js(self, env: &Env, depth: usize) -> Result<Unknown<'_>>;
+    /// Read the payload from its JS value at `depth`.
+    fn from_js(value: Unknown<'_>, depth: usize) -> Result<Self>;
+}
+
+/// No payload: projects to `undefined`, which is all it accepts back.
+impl NapiPassthrough for () {
+    fn to_js(self, env: &Env, _depth: usize) -> Result<Unknown<'_>> {
+        ().into_unknown(env)
+    }
+
+    fn from_js(value: Unknown<'_>, _depth: usize) -> Result<Self> {
+        // napi-rs's own `()` conversion accepts any value; check instead.
+        if value.get_type()? == ValueType::Undefined {
+            Ok(())
+        } else {
+            Err(shape_error())
+        }
+    }
+}
 
 fn depth_error() -> Error {
     Error::new(Status::InvalidArg, "ciphertext is nested too deeply")
@@ -64,7 +96,7 @@ fn shape_error() -> Error {
 fn node_to_js<Leaf, P>(env: &Env, node: CipherText<Leaf, P>, depth: usize) -> Result<Object<'_>>
 where
     Leaf: AsRef<[u8]>,
-    P: ToNapiValue,
+    P: NapiPassthrough,
 {
     if depth > MAX_DEPTH {
         return Err(depth_error());
@@ -106,7 +138,8 @@ where
             define_own_properties(&mut map, &properties)?;
             (T_MAP, map.into_unknown(env)?)
         }
-        CipherText::Passthrough(p) => (T_PASSTHROUGH, p.into_unknown(env)?),
+        // The payload sits one level deeper, as the transport encoding counts it.
+        CipherText::Passthrough(p) => (T_PASSTHROUGH, p.to_js(env, depth + 1)?),
     };
     // Own properties throughout, so a polluted inherited `t`, `v` or index
     // setter never sees the ciphertext (see `define_own_properties`).
@@ -128,7 +161,7 @@ const V_KEY: &str = "v";
 impl<Leaf, P> ToNapiValue for JsCipherText<Leaf, P>
 where
     Leaf: AsRef<[u8]>,
-    P: ToNapiValue,
+    P: NapiPassthrough,
 {
     unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
         Ok(node_to_js(&Env::from_raw(env), val.0, 0)?.raw())
@@ -149,10 +182,18 @@ fn node_object(value: Unknown<'_>) -> Result<Object<'_>> {
 fn node_from_js<Leaf, P>(obj: &Object<'_>, depth: usize) -> Result<CipherText<Leaf, P>>
 where
     Leaf: From<Vec<u8>>,
-    P: FromNapiValue,
+    P: NapiPassthrough,
 {
     if depth > MAX_DEPTH {
         return Err(depth_error());
+    }
+    // Own `t` and `v` only: a node missing either would otherwise take it
+    // from a (possibly polluted) prototype. An own `v: undefined` still
+    // counts, for a passthrough of `undefined`.
+    for key in [T_KEY, V_KEY] {
+        if !obj.has_own_property(key)? {
+            return Err(shape_error());
+        }
     }
     let t: String = obj.get(T_KEY)?.ok_or_else(shape_error)?;
     match t.as_str() {
@@ -168,6 +209,8 @@ where
         }
         T_SEQ => {
             let arr: Array = obj.get(V_KEY)?.ok_or_else(shape_error)?;
+            // The same array seen as an object, for per-index own checks.
+            let elements = Object::from_unknown(arr.to_unknown())?;
             let len = arr.len();
             // Capacity is granted lazily: the reported length is
             // attacker-cheap (`{t:"seq", v:new Array(2**32-1)}` materialises
@@ -175,9 +218,12 @@ where
             // allocation failure before any element is validated.
             let mut items = Vec::with_capacity(eager_capacity(len));
             for i in 0..len {
-                // `Array::get` maps only out-of-range indices to `None`; a
-                // hole comes back as `undefined`, which is not a node
-                // object — check the type before treating it as one.
+                // Own elements only: a hole would otherwise read an element
+                // from a (possibly polluted) `Array.prototype`, and as
+                // `undefined` it is not a node anyway.
+                if !elements.has_own_property(&i.to_string())? {
+                    return Err(shape_error());
+                }
                 let element = arr.get::<Unknown>(i)?.ok_or_else(shape_error)?;
                 items.push(node_from_js(&node_object(element)?, depth + 1)?);
             }
@@ -211,8 +257,7 @@ where
             // crate's own output as malformed. Whether `undefined`
             // converts is `P`'s decision.
             let value = get_property_unknown(obj, V_KEY)?;
-            let p = P::from_unknown(value)?;
-            Ok(CipherText::Passthrough(p))
+            Ok(CipherText::Passthrough(P::from_js(value, depth + 1)?))
         }
         _ => Err(shape_error()),
     }
@@ -221,7 +266,7 @@ where
 impl<Leaf, P> FromNapiValue for JsCipherText<Leaf, P>
 where
     Leaf: From<Vec<u8>>,
-    P: FromNapiValue,
+    P: NapiPassthrough,
 {
     unsafe fn from_napi_value(env: sys::napi_env, napi_val: sys::napi_value) -> Result<Self> {
         // SAFETY: napi-rs calls this with the `env` and `napi_val` of the
