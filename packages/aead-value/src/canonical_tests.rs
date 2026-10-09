@@ -190,11 +190,11 @@ fn every_non_scalar_is_explicitly_refused() {
 #[test]
 fn floats_have_postgres_zero_and_nan_ordering() {
     assert_eq!(bytes(Value::Float64(-0.0)), bytes(Value::Float64(0.0)));
-    assert_eq!(bytes(Value::Float32(-0.0)), bytes(Value::Float32(0.0)));
+    assert_eq!(bytes(Value::Float32(-0.0)), bytes(Value::Float64(0.0)));
     for bits in [0x7fc0_0000, 0xff80_0001, 0xffff_ffff, 0x7f80_0001] {
         assert_eq!(
             bytes(Value::Float32(f32::from_bits(bits))),
-            [0xff, 0xc0, 0, 0]
+            [0xff, 0xf8, 0, 0, 0, 0, 0, 0]
         );
     }
     for bits in [0x7ff8_0000_0000_0000, 0xfff0_0000_0000_0001, u64::MAX] {
@@ -203,12 +203,18 @@ fn floats_have_postgres_zero_and_nan_ordering() {
             [0xff, 0xf8, 0, 0, 0, 0, 0, 0]
         );
     }
-    assert_eq!(bytes(Value::Float32(1.5)), [0xbf, 0xc0, 0, 0]);
-    assert_eq!(bytes(Value::Float32(-1.5)), [0x40, 0x3f, 0xff, 0xff]);
-    assert_eq!(bytes(Value::Float32(f32::INFINITY)), [0xff, 0x80, 0, 0]);
+    assert_eq!(bytes(Value::Float32(1.5)), [0xbf, 0xf8, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(
+        bytes(Value::Float32(-1.5)),
+        [0x40, 0x07, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]
+    );
+    assert_eq!(
+        bytes(Value::Float32(f32::INFINITY)),
+        [0xff, 0xf0, 0, 0, 0, 0, 0, 0]
+    );
     assert_eq!(
         bytes(Value::Float32(f32::NEG_INFINITY)),
-        [0, 0x7f, 0xff, 0xff]
+        [0, 0x0f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]
     );
     let ascending = [f64::NEG_INFINITY, -1.0, 0.0, 1.0, f64::INFINITY, f64::NAN];
     for pair in ascending.windows(2) {
@@ -224,10 +230,67 @@ fn f64_order_agrees_with_numeric_order(a: f64, b: f64) -> bool {
             == a.partial_cmp(&b).expect("valid test value")
 }
 
+#[test]
+fn float_widths_share_one_domain_for_equal_numbers() {
+    for value in [
+        0.0f32,
+        1.5,
+        -0.25,
+        16_777_216.0,
+        f32::MAX,
+        f32::MIN_POSITIVE,
+    ] {
+        assert_eq!(
+            bytes(Value::Float32(value)),
+            bytes(Value::Float64(value.into()))
+        );
+    }
+    // 0.1 is a different number in each width, so the terms differ.
+    assert_ne!(bytes(Value::Float32(0.1)), bytes(Value::Float64(0.1)));
+}
+
+fn widen_matches_hardware(bits: u32) -> bool {
+    let value = f32::from_bits(bits);
+    let (ours, hardware) = (widen_f32(value), f64::from(value));
+    // NaN payload bits are folded later; only NaN-ness must agree for them.
+    if value.is_nan() {
+        ours.is_nan() && ours.is_sign_negative() == hardware.is_sign_negative()
+    } else {
+        ours.to_bits() == hardware.to_bits()
+    }
+}
+
+#[test]
+fn widening_matches_hardware_at_every_exponent_and_subnormal_bit() {
+    for sign in [0, 1u32 << 31] {
+        for exponent in 0..=0xffu32 {
+            for mantissa in [0, 1, 0x40_0000, 0x7f_ffff, 0x2a_aaaa] {
+                let bits = sign | (exponent << 23) | mantissa;
+                assert!(widen_matches_hardware(bits), "{bits:#010x}");
+            }
+        }
+        for shift in 0..23 {
+            let bits = sign | 1 << shift;
+            assert!(widen_matches_hardware(bits), "{bits:#010x}");
+            assert!(
+                widen_matches_hardware(bits | ((1 << shift) - 1)),
+                "{bits:#010x}"
+            );
+        }
+    }
+}
+
 #[quickcheck]
-fn f32_canonicalisation_is_idempotent(bits: u32) -> bool {
-    let value = canonical_f32(f32::from_bits(bits));
-    canonical_f32(value).to_bits() == value.to_bits()
+fn widening_matches_hardware_conversion(bits: u32) -> bool {
+    widen_matches_hardware(bits)
+}
+
+/// Every f32 bit pattern; slow in debug builds, so run on demand with
+/// `cargo test --release -p vitaminc-aead-value --features canonical -- --ignored`.
+#[test]
+#[ignore]
+fn widening_matches_hardware_for_every_f32() {
+    assert!((0..=u32::MAX).all(widen_matches_hardware));
 }
 
 #[quickcheck]

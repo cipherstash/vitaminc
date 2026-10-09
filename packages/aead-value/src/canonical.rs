@@ -1,8 +1,9 @@
 //! Canonical scalar plaintext for search terms, separate from reversible ciphertext.
 //!
-//! Every integer kind shares one 17-byte encoding and domain, so equal
-//! numbers match whichever width wrote them. Other numeric encodings come
-//! from `orderable-bytes` at their natural widths. Text uses Unicode 16 NFC.
+//! Every integer kind shares one 17-byte encoding and domain, and both float
+//! kinds share one 8-byte encoding and domain, so equal numbers match
+//! whichever width wrote them. Other encodings come from `orderable-bytes` at
+//! their natural widths. Text uses Unicode 16 NFC.
 //! These bytes and their [`domain`] labels are protocol data: changing either
 //! requires a new domain. Text processing is variable-time; this module makes
 //! no constant-time claim for Unicode normalization.
@@ -48,10 +49,8 @@ impl std::error::Error for CanonicalError {}
 pub mod domain {
     /// Every integer kind, `int8` through `uint128`.
     pub const INTEGER: &str = "vitaminc/prf/value/integer-orderable/v1";
-    /// `float32`.
-    pub const FLOAT32: &str = "vitaminc/prf/value/float32-orderable/v1";
-    /// `float64`.
-    pub const FLOAT64: &str = "vitaminc/prf/value/float64-orderable/v1";
+    /// `float32` and `float64`, as `float64`.
+    pub const FLOAT: &str = "vitaminc/prf/value/float-orderable/v1";
     /// `date`.
     pub const DATE: &str = "vitaminc/prf/value/date-orderable/v1";
     /// `timestamp`, truncated to microseconds.
@@ -89,8 +88,7 @@ pub const fn equality_domain(kind: ValueKind) -> Option<&'static str> {
         | ValueKind::UInt64
         | ValueKind::Int128
         | ValueKind::UInt128 => Some(domain::INTEGER),
-        ValueKind::Float32 => Some(domain::FLOAT32),
-        ValueKind::Float64 => Some(domain::FLOAT64),
+        ValueKind::Float32 | ValueKind::Float64 => Some(domain::FLOAT),
         ValueKind::Date => Some(domain::DATE),
         ValueKind::Timestamp => Some(domain::TIMESTAMP),
         ValueKind::Decimal => Some(domain::DECIMAL),
@@ -106,7 +104,10 @@ pub const fn equality_domain(kind: ValueKind) -> Option<&'static str> {
 /// Integers of every width share [`domain::INTEGER`]: a sign byte (`0x00`
 /// negative, `0x01` otherwise) then the value as a big-endian 128-bit
 /// two's-complement word, which orders correctly across `i128::MIN` to
-/// `u128::MAX`. Float zero signs and NaN payloads are folded. Timestamps truncate their
+/// `u128::MAX`. Both float widths share [`domain::FLOAT`]: a `float32` widens
+/// exactly to `float64`, so it matches a `float64` only when the numbers are
+/// equal (`float32` 1.5 matches, `float32` 0.1 does not match `float64` 0.1).
+/// Float zero signs and NaN payloads are folded. Timestamps truncate their
 /// fractional second to microseconds (also before the epoch and during leap
 /// seconds), retaining the upstream 12-byte seconds/nanoseconds layout.
 /// Decimal encoding itself normalizes scale, including signed zero, without
@@ -125,8 +126,8 @@ pub fn equality_input(value: &Value) -> Result<EqualityInput, CanonicalError> {
         Value::UInt64(v) => (domain::INTEGER, unsigned((*v).into())),
         Value::Int128(v) => (domain::INTEGER, signed(*v)),
         Value::UInt128(v) => (domain::INTEGER, unsigned(*v)),
-        Value::Float32(v) => (domain::FLOAT32, fixed(&canonical_f32(*v))),
-        Value::Float64(v) => (domain::FLOAT64, fixed(&canonical_f64(*v))),
+        Value::Float32(v) => (domain::FLOAT, fixed(&canonical_f64(widen_f32(*v)))),
+        Value::Float64(v) => (domain::FLOAT, fixed(&canonical_f64(*v))),
         #[cfg(feature = "chrono")]
         Value::Date(v) => (domain::DATE, fixed(v)),
         #[cfg(feature = "chrono")]
@@ -173,12 +174,26 @@ where
     Protected::new(bytes.risky_ref().as_ref().to_vec())
 }
 
-fn canonical_f32(value: f32) -> f32 {
+/// `f64::from(f32)` in integer operations only. A hardware conversion can
+/// take a slow path on subnormal inputs, which would leak timing; this keeps
+/// the float path free of floating-point arithmetic.
+fn widen_f32(value: f32) -> f64 {
     let bits = value.to_bits();
-    let magnitude = bits & 0x7fff_ffff;
-    let nan = 0u32.wrapping_sub((magnitude > 0x7f80_0000) as u32);
-    let nonzero = 0u32.wrapping_sub((magnitude != 0) as u32);
-    f32::from_bits((bits & !nan).wrapping_add(0x7fc0_0000 & nan) & nonzero)
+    let sign = u64::from(bits >> 31) << 63;
+    let exponent = (bits >> 23) & 0xff;
+    let mantissa = u64::from(bits & 0x7f_ffff);
+    let zero_exponent = 0u64.wrapping_sub((exponent == 0) as u64);
+    let max_exponent = 0u64.wrapping_sub((exponent == 0xff) as u64);
+    let nonzero = 0u64.wrapping_sub((mantissa != 0) as u64);
+    // Normal, infinite and NaN: rebias the exponent (127 to 1023, or all
+    // ones stays all ones) and left-align the mantissa.
+    let rebiased = ((u64::from(exponent) + 896) & !max_exponent) | (0x7ff & max_exponent);
+    let normal = (rebiased << 52) | (mantissa << 29);
+    // Subnormal: the highest set bit becomes the implicit leading one. `| 1`
+    // keeps the shift in range for a zero mantissa, which is masked out.
+    let top = u64::from(63 - (mantissa | 1).leading_zeros());
+    let subnormal = ((top + 874) << 52) | ((mantissa << (52 - top)) & ((1 << 52) - 1));
+    f64::from_bits(sign | (normal & !zero_exponent) | (subnormal & zero_exponent & nonzero))
 }
 
 fn canonical_f64(value: f64) -> f64 {

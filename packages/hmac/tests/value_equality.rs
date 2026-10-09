@@ -1,7 +1,8 @@
 //! Vectors independently calculated with Python hashlib/hmac and explicit
 //! big-endian canonical payloads; key = 0x0b * 32, empty context, PAE framing.
 //! Every integer width shares one domain and payload, so each integer kind
-//! carries the same vector for the same number.
+//! carries the same vector for the same number; both float widths likewise
+//! share one domain, with float32 widened exactly to float64.
 use vitaminc_aead_value::{canonical::equality_input, Value, ValueKind};
 use vitaminc_hmac::HmacSha256Prf;
 use vitaminc_prf::{CanonicalError, PrfEncoding, PrfError, PrfKeyInit, PrfValue};
@@ -77,15 +78,15 @@ fn every_equality_domain_has_a_known_answer() {
         ),
         (
             Value::Float32(1.5),
-            "vitaminc/prf/value/float32-orderable/v1",
-            "bfc00000",
-            "b14abcd83e1c53639315fae63c96b98d93cfec5793929ff37376dff64b3f73e9",
+            "vitaminc/prf/value/float-orderable/v1",
+            "bff8000000000000",
+            "8a4e5233cd0f982178536465a0ced2b2d3451198a57da553970a17a0069be1e1",
         ),
         (
             Value::Float64(-1.5),
-            "vitaminc/prf/value/float64-orderable/v1",
+            "vitaminc/prf/value/float-orderable/v1",
             "4007ffffffffffff",
-            "e31d40623c1470970496696ec78f168e100d0404e5e5f1da83b9d5d01402e48a",
+            "cf40d5d1d3da65f02bb0ceaabebce6c2569a129cb890e19a9b4dbacefb763adb",
         ),
         (
             Value::Date(chrono::NaiveDate::from_ymd_opt(1970, 1, 1).unwrap()),

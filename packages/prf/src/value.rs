@@ -62,14 +62,8 @@ mod tests {
                 ValueKind::UInt128,
                 "vitaminc/prf/value/integer-orderable/v1",
             ),
-            (
-                ValueKind::Float32,
-                "vitaminc/prf/value/float32-orderable/v1",
-            ),
-            (
-                ValueKind::Float64,
-                "vitaminc/prf/value/float64-orderable/v1",
-            ),
+            (ValueKind::Float32, "vitaminc/prf/value/float-orderable/v1"),
+            (ValueKind::Float64, "vitaminc/prf/value/float-orderable/v1"),
             (ValueKind::Date, "vitaminc/prf/value/date-orderable/v1"),
             (
                 ValueKind::Timestamp,
