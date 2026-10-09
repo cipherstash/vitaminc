@@ -29,8 +29,13 @@ pub enum PrfVisitorError {
 /// Builder and visitor failures describe malformed local structure. Backend
 /// failures describe execution of an otherwise valid program (for example, a
 /// remote batch request being rejected).
+///
+/// Non-exhaustive: optional features add variants.
 #[derive(Debug, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum PrfError<E> {
+    /// A `Value` with no equality term (requires the `value` feature).
+    #[cfg(feature = "value")]
     #[error("cannot derive an equality term: {0}")]
     Canonical(#[from] crate::CanonicalError),
     #[error("failed to build PRF operation: {0}")]

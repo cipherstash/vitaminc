@@ -97,10 +97,13 @@ jobs:
           cargo test -p vitaminc-aead-value --all-features
 
       - name: test (canonical equality features)
+        # The workspace run unifies hmac's dev-dependency features, so test
+        # prf alone without `value` as well as with each optional feature.
         run: |
+          cargo test -p vitaminc-prf &&
           cargo test -p vitaminc-prf --features chrono &&
           cargo test -p vitaminc-prf --features rust_decimal &&
-          cargo test -p vitaminc-prf -p vitaminc-aead-value --all-features &&
+          cargo test -p vitaminc-prf --all-features &&
           cargo test -p vitaminc-hmac --test value_equality
 
       - name: test (vitaminc-encrypt, RustCrypto backend on native)
