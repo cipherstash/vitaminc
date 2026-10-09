@@ -189,11 +189,20 @@ fn widen_f32(value: f32) -> f64 {
     // ones stays all ones) and left-align the mantissa.
     let rebiased = ((u64::from(exponent) + 896) & !max_exponent) | (0x7ff & max_exponent);
     let normal = (rebiased << 52) | (mantissa << 29);
-    // Subnormal: the highest set bit becomes the implicit leading one. `| 1`
-    // keeps the shift in range for a zero mantissa, which is masked out.
-    let top = u64::from(63 - (mantissa | 1).leading_zeros());
+    // Subnormal: the highest set bit becomes the implicit leading one.
+    let top = highest_set_bit(mantissa);
     let subnormal = ((top + 874) << 52) | ((mantissa << (52 - top)) & ((1 << 52) - 1));
     f64::from_bits(sign | (normal & !zero_exponent) | (subnormal & zero_exponent & nonzero))
+}
+
+/// Index of the highest set bit of a subnormal f32 mantissa. `| 1` keeps the
+/// result in range for a zero mantissa, which `widen_f32` masks out.
+///
+/// Kept out of `widen_f32` so the `.cargo/mutants.toml` exclusion of that
+/// function's equivalent `|`-to-`^` mutants cannot reach this `|`, whose
+/// operands overlap and whose mutant a test does catch.
+fn highest_set_bit(mantissa: u64) -> u64 {
+    u64::from(63 - (mantissa | 1).leading_zeros())
 }
 
 fn canonical_f64(value: f64) -> f64 {
