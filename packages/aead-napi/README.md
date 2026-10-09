@@ -47,8 +47,8 @@ cross-language leaf wire format. This crate adds only what is JS-specific:
   an in-memory/application-side representation. Durable cross-language
   database storage is the EQL layer's job, not this projection's. The
   passthrough payload `P` converts through `NapiPassthrough`, implemented
-  for `NapiValue` and `()`, which carries the tree's nesting depth into the
-  payload.
+  for `NapiValue` and `()`, which applies the tree's nesting limit to the
+  payload too.
 
 This crate is a library consumed by the Node addon (cdylib/npm package);
 it is not itself loadable from Node.
@@ -109,8 +109,10 @@ they are not exempted.
 - Property names that would touch the prototype chain (`__proto__`,
   `constructor`, `prototype`) are rejected in both directions. Nesting is
   limited to 128 levels in both directions too, counted as the transport
-  decoder counts it, so a tree built in Rust fails cleanly instead of
-  overflowing the stack.
+  decoder counts it, including inside a ciphertext's passthrough payload. A
+  tree built in Rust is measured before it is converted, and one that is too
+  deep is dropped without recursing, so even a tree far too deep for the
+  stack fails cleanly instead of aborting Node.
 - Only **plain objects** (prototype `Object.prototype` or `null`) are
   accepted for encryption. `Map`, `Set`, `RegExp`, `DataView`, class
   instances and other exotic objects keep their state in internal slots and

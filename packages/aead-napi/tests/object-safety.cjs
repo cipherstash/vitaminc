@@ -275,3 +275,25 @@ assert.throws(() => addon.readCiphertext(payloadTree(68)), /nested too deeply/);
 // With no passthrough payload type, a passthrough node must carry undefined.
 addon.readUnitCiphertext({ t: 'pt', v: undefined });
 assert.throws(() => addon.readUnitCiphertext({ t: 'pt', v: 1 }), /malformed ciphertext/);
+
+// A `()` payload counts like any other: it sits one level below its
+// passthrough node, so 127 sequences are the most it allows.
+addon.unitCiphertext(127);
+assert.throws(() => addon.unitCiphertext(128), /nested too deeply/);
+addon.readUnitCiphertext(nest(127, (v) => ({ t: 'seq', v: [v] }), { t: 'pt' }));
+assert.throws(
+  () => addon.readUnitCiphertext(nest(128, (v) => ({ t: 'seq', v: [v] }), { t: 'pt' })),
+  /nested too deeply/,
+);
+
+// A Rust-built tree far too deep for the stack is refused cleanly: it is
+// measured and then dropped without recursing once per level, so neither
+// step can overflow the stack and abort Node.
+const HUGE = 1_000_000;
+for (const wrap of ['array', 'object', 'passthrough']) {
+  assert.throws(() => addon.nestedValue(HUGE, wrap), /nested too deeply/, wrap);
+}
+for (const wrap of ['seq', 'map']) {
+  assert.throws(() => addon.nestedCiphertext(HUGE, wrap), /nested too deeply/, wrap);
+}
+assert.throws(() => addon.ciphertextWithPayload(60, HUGE), /nested too deeply/);

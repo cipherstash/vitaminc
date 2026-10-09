@@ -44,7 +44,7 @@ pub(crate) fn forbidden_key(key: &str) -> bool {
     matches!(key, "__proto__" | "constructor" | "prototype")
 }
 
-fn depth_error() -> Error {
+pub(crate) fn depth_error() -> Error {
     Error::new(Status::InvalidArg, "value is nested too deeply")
 }
 
@@ -339,10 +339,9 @@ impl FromNapiValue for NapiValue {
     }
 }
 
-fn value_to_js(env: &Env, value: Value, depth: usize) -> Result<Unknown<'_>> {
-    if depth > MAX_DEPTH {
-        return Err(depth_error());
-    }
+/// Build `value` in JS. Callers check [`value_exceeds_depth`] first, which
+/// bounds this recursion.
+fn value_to_js(env: &Env, value: Value) -> Result<Unknown<'_>> {
     match value {
         Value::Null => Null.into_unknown(env),
         Value::Undefined => ().into_unknown(env),
@@ -391,7 +390,7 @@ fn value_to_js(env: &Env, value: Value, depth: usize) -> Result<Unknown<'_>> {
             let mut arr = new_array(env, items.len())?;
             let mut elements = Vec::with_capacity(items.len());
             for (i, item) in items.into_iter().enumerate() {
-                let js_value = value_to_js(env, item, depth + 1)?;
+                let js_value = value_to_js(env, item)?;
                 elements.push(own_property(env, &i.to_string(), &js_value)?);
             }
             define_own_properties(&mut arr, &elements)?;
@@ -406,7 +405,7 @@ fn value_to_js(env: &Env, value: Value, depth: usize) -> Result<Unknown<'_>> {
                 if forbidden_key(&key) {
                     return Err(forbidden_key_error(&key));
                 }
-                let js_value = value_to_js(env, value, depth + 1)?;
+                let js_value = value_to_js(env, value)?;
                 properties.push(own_property(env, &key, &js_value)?);
             }
             define_own_properties(&mut obj, &properties)?;
@@ -417,8 +416,7 @@ fn value_to_js(env: &Env, value: Value, depth: usize) -> Result<Unknown<'_>> {
         // ordinary value to the application. (Round-tripping the *marking*
         // back into a re-encryptable JS value is future work — see
         // `js_to_value`, which has no passthrough constructor yet.)
-        // One level deeper, as the transport decoder counts it.
-        Value::Passthrough(inner) => value_to_js(env, *inner, depth + 1),
+        Value::Passthrough(inner) => value_to_js(env, *inner),
         _ => Err(Error::new(Status::GenericFailure, "unsupported value kind")),
     }
 }
@@ -457,26 +455,109 @@ fn wrapper_to_js<'e>(env: &'e Env, key: &str, text: String) -> Result<Unknown<'e
     obj.into_unknown(env)
 }
 
+/// Whether `value`, placed at `depth`, nests past [`MAX_DEPTH`], counted as
+/// the transport decoder counts it (a passthrough's inner value is one level
+/// deeper). Iterative, so a tree of any depth is measured without recursion.
+pub(crate) fn value_exceeds_depth(value: &Value, depth: usize) -> bool {
+    let mut stack = vec![(value, depth)];
+    while let Some((value, depth)) = stack.pop() {
+        if depth > MAX_DEPTH {
+            return true;
+        }
+        match value {
+            Value::Array(items) => stack.extend(items.iter().map(|item| (item, depth + 1))),
+            Value::Object(entries) => {
+                stack.extend(entries.iter().map(|(_, value)| (value, depth + 1)))
+            }
+            Value::Passthrough(inner) => stack.push((inner, depth + 1)),
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Drop `value` without recursing. `Value`'s own drop recurses once per
+/// level, so dropping a tree too deep to convert could overflow the stack
+/// and abort Node instead of returning the depth error.
+pub(crate) fn drop_value_flat(value: Value) {
+    let mut stack = vec![value];
+    while let Some(value) = stack.pop() {
+        match value {
+            Value::Array(items) => stack.extend(items),
+            Value::Object(entries) => stack.extend(entries.into_iter().map(|(_, value)| value)),
+            Value::Passthrough(inner) => stack.push(*inner),
+            _ => {}
+        }
+    }
+}
+
 /// A [`Value`] payload continues the tree's depth count.
 impl NapiPassthrough for NapiValue {
-    fn to_js(self, env: &Env, depth: usize) -> Result<Unknown<'_>> {
-        value_to_js(env, self.0, depth)
+    fn to_js(self, env: &Env) -> Result<Unknown<'_>> {
+        value_to_js(env, self.0)
     }
 
     fn from_js(value: Unknown<'_>, depth: usize) -> Result<Self> {
         js_to_value(value, depth).map(NapiValue)
     }
+
+    fn exceeds_depth(&self, depth: usize) -> bool {
+        value_exceeds_depth(&self.0, depth)
+    }
+
+    fn drop_flat(self) {
+        drop_value_flat(self.0);
+    }
 }
 
 impl ToNapiValue for NapiValue {
     unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
-        Ok(value_to_js(&Env::from_raw(env), val.0, 0)?.raw())
+        if val.exceeds_depth(0) {
+            val.drop_flat();
+            return Err(depth_error());
+        }
+        Ok(val.to_js(&Env::from_raw(env))?.raw())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{eager_capacity, forbidden_key, MAX_EAGER_CAPACITY};
+    use super::{
+        drop_value_flat, eager_capacity, forbidden_key, value_exceeds_depth, Value, MAX_DEPTH,
+        MAX_EAGER_CAPACITY,
+    };
+
+    fn nested(levels: usize, wrap: fn(Value) -> Value) -> Value {
+        (0..levels).fold(Value::Bool(true), |value, _| wrap(value))
+    }
+
+    const WRAPS: [fn(Value) -> Value; 3] = [
+        |v| Value::Array(vec![Value::Null, v]),
+        |v| Value::Object(vec![("a".into(), Value::Null), ("k".into(), v)]),
+        |v| Value::Passthrough(Box::new(v)),
+    ];
+
+    #[test]
+    fn depth_is_measured_to_the_limit_for_every_container() {
+        for wrap in WRAPS {
+            assert!(!value_exceeds_depth(&nested(MAX_DEPTH, wrap), 0));
+            assert!(value_exceeds_depth(&nested(MAX_DEPTH + 1, wrap), 0));
+            // Placed one level down, as a ciphertext payload is.
+            assert!(!value_exceeds_depth(&nested(MAX_DEPTH - 1, wrap), 1));
+            assert!(value_exceeds_depth(&nested(MAX_DEPTH, wrap), 1));
+        }
+        assert!(!value_exceeds_depth(&Value::Null, MAX_DEPTH));
+        assert!(value_exceeds_depth(&Value::Null, MAX_DEPTH + 1));
+    }
+
+    #[test]
+    fn trees_too_deep_for_the_stack_are_measured_and_dropped_flat() {
+        for wrap in WRAPS {
+            let deep = nested(1_000_000, wrap);
+            assert!(value_exceeds_depth(&deep, 0));
+            drop_value_flat(deep);
+        }
+    }
 
     #[test]
     fn forbidden_keys_are_rejected() {

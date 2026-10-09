@@ -101,3 +101,13 @@ pub fn read_ciphertext(#[napi(ts_arg_type = "unknown")] ct: JsCipherText<Vec<u8>
 pub fn read_unit_ciphertext(#[napi(ts_arg_type = "unknown")] ct: JsCipherText<Vec<u8>, ()>) {
     drop(ct);
 }
+
+/// `levels` ciphertext sequences around a passthrough node with no payload.
+#[napi(ts_return_type = "unknown")]
+pub fn unit_ciphertext(levels: u32) -> JsCipherText<Vec<u8>, ()> {
+    let mut node = CipherText::Passthrough(());
+    for _ in 0..levels {
+        node = CipherText::Sequence(vec![node]);
+    }
+    JsCipherText(node)
+}
