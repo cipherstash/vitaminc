@@ -51,9 +51,9 @@ targets in this package pin that contract, and also require anything accepted
 to re-encode to the same bytes (Undefined becoming Null is the one allowed
 difference). PR CI runs them over their seeds, which include every shared
 corpus vector, and the whole suite on 32-bit GOARCH, where the u32-bound
-guards are load-bearing. `.github/workflows/fuzz.yml` fuzzes them nightly;
-commit any failing input it reports under `testdata/fuzz` as a regression
-seed.
+guards are load-bearing. `.github/workflows/fuzz.yml` fuzzes them nightly
+and records a failure on an open issue labelled `fuzz`; commit the failing
+input attached to that run under `testdata/fuzz` as a regression seed.
 
 `ErrMalformed` covers hostile bytes, not caller mistakes: a `LeafSet` that is
 partially wired, or that does not materialize a kind the buffer carries,
