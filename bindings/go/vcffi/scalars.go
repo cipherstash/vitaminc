@@ -70,12 +70,7 @@ func (e Encoder) Decimal(v vcvalue.Decimal) {
 }
 
 func decodeScalar(r *reader, tag byte) (any, error) {
-	widths := map[byte]int{tagInt8: 1, tagUint8: 1, tagInt16: 2, tagUint16: 2, tagDate: 4, tagTimestamp: 12, tagInt128: 16, tagUint128: 16, tagDecimal: 16}
-	width, ok := widths[tag]
-	if !ok {
-		return nil, ErrMalformed
-	}
-	b, err := r.take(width)
+	b, err := r.take(scalarWidth(tag))
 	if err != nil {
 		return nil, err
 	}
@@ -121,4 +116,22 @@ func decodeScalar(r *reader, tag byte) (any, error) {
 	default:
 		return nil, ErrMalformed
 	}
+}
+
+// scalarWidth is the fixed payload width of an extended scalar tag, or zero
+// for a tag decodeScalar does not handle.
+func scalarWidth(tag byte) int {
+	switch tag {
+	case tagInt8, tagUint8:
+		return 1
+	case tagInt16, tagUint16:
+		return 2
+	case tagDate:
+		return 4
+	case tagTimestamp:
+		return 12
+	case tagInt128, tagUint128, tagDecimal:
+		return 16
+	}
+	return 0
 }
