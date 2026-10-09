@@ -10,7 +10,13 @@
 //! integer width, preferring signed at a given width, through 128 bits.
 //! Every integer kind decodes as BigInt. Date maps to Timestamp; calendar
 //! dates use `{ date: "YYYY-MM-DD" }` and decimals `{ decimal: "1.50" }`.
-//! Timestamp values beyond Date's precision/range use an RFC3339 wrapper.
+//! Timestamps finer than Date's millisecond precision, and leap seconds,
+//! use a `{ timestamp }` wrapper: RFC 3339, or an ISO 8601 expanded year
+//! outside 0000-9999.
+//!
+//! The wrapper keys are reserved: a one-key object named `date`,
+//! `timestamp` or `decimal` is always read as a wrapper, including one
+//! decrypted from data another language wrote as an ordinary object.
 
 use napi::bindgen_prelude::{
     Array, BigInt, Buffer, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue, Uint8Array,
@@ -295,35 +301,25 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<Value> {
                 let obj = Object::from_unknown(unknown)?;
                 ensure_plain_object(&obj)?;
                 let keys = own_enumerable_keys(&obj)?;
-                if keys.len() == 1 {
-                    let parser = match keys[0].as_str() {
+                if let [key] = keys.as_slice() {
+                    use scalar::ConversionError::{InvalidDate, InvalidDecimal, InvalidTimestamp};
+                    let parsed = match key.as_str() {
                         "date" => Some(
-                            scalar::date
-                                as fn(&str) -> std::result::Result<Value, scalar::ConversionError>,
+                            wrapper_text(&obj, key, InvalidDate)?
+                                .and_then(|text| scalar::date(&text)),
                         ),
                         "timestamp" => Some(
-                            scalar::timestamp
-                                as fn(&str) -> std::result::Result<Value, scalar::ConversionError>,
+                            wrapper_text(&obj, key, InvalidTimestamp)?
+                                .and_then(|text| scalar::timestamp(&text)),
                         ),
                         "decimal" => Some(
-                            scalar::decimal
-                                as fn(&str) -> std::result::Result<Value, scalar::ConversionError>,
+                            wrapper_text(&obj, key, InvalidDecimal)?
+                                .and_then(|text| scalar::decimal(&text)),
                         ),
                         _ => None,
                     };
-                    if let Some(parse) = parser {
-                        let input = get_property_unknown(&obj, &keys[0])?;
-                        if keys[0] == "decimal" && input.get_type()? == ValueType::Number {
-                            let number = f64::from_unknown(input)?;
-                            let error = if number.is_finite() {
-                                scalar::ConversionError::InvalidDecimal
-                            } else {
-                                scalar::ConversionError::NonFiniteDecimal
-                            };
-                            return Err(conversion_error(Env::from_raw(obj.value().env), error));
-                        }
-                        let text = String::from_unknown(input)?;
-                        return parse(&text)
+                    if let Some(parsed) = parsed {
+                        return parsed
                             .map_err(|e| conversion_error(Env::from_raw(obj.value().env), e));
                     }
                 }
@@ -377,9 +373,10 @@ fn value_to_js(env: sys::napi_env, value: Value) -> Result<sys::napi_value> {
         Value::Date(v) => wrapper_to_js(env, "date", v.to_string()),
         Value::Decimal(v) => wrapper_to_js(env, "decimal", v.to_string()),
         Value::Timestamp(v) => {
+            // chrono's range (about ±8.21e15 ms) lies inside JS Date's
+            // (±8.64e15 ms), so only precision and leap seconds need a wrapper.
             if v.timestamp_subsec_nanos() < 1_000_000_000
                 && v.timestamp_subsec_nanos() % 1_000_000 == 0
-                && v.timestamp_millis().unsigned_abs() <= 8_640_000_000_000_000
             {
                 Ok(Env::from_raw(env)
                     .create_date(v.timestamp_millis() as f64)?
@@ -437,6 +434,28 @@ fn value_to_js(env: sys::napi_env, value: Value) -> Result<sys::napi_value> {
         Value::Passthrough(inner) => value_to_js(env, *inner),
         _ => Err(Error::new(Status::GenericFailure, "unsupported value kind")),
     }
+}
+
+/// The string payload of a one-key scalar wrapper. Any other payload
+/// (`{ date: new Date() }`, `{ decimal: 1n }`, ...) is refused with the
+/// wrapper's own typed error rather than a generic N-API one; a non-finite
+/// number in `{ decimal }` keeps its distinct code.
+fn wrapper_text(
+    obj: &Object,
+    key: &str,
+    invalid: scalar::ConversionError,
+) -> Result<std::result::Result<String, scalar::ConversionError>> {
+    let input = get_property_unknown(obj, key)?;
+    Ok(match input.get_type()? {
+        ValueType::String => Ok(String::from_unknown(input)?),
+        ValueType::Number
+            if invalid == scalar::ConversionError::InvalidDecimal
+                && !f64::from_unknown(input)?.is_finite() =>
+        {
+            Err(scalar::ConversionError::NonFiniteDecimal)
+        }
+        _ => Err(invalid),
+    })
 }
 
 fn conversion_error(env: Env, error: scalar::ConversionError) -> Error {

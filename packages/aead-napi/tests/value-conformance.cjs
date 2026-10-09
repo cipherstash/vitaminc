@@ -44,6 +44,23 @@ assert.deepEqual(addon.decode(addon.encode(nested)), nested);
 assert.throws(() => addon.encode(new Map([['a',1]])));
 assert.throws(() => addon.encode([,1]));
 assert.throws(() => addon.encode('\ud800'));
+// Non-string wrapper payloads keep the wrapper's typed error code.
+for (const [input, code] of [
+  [{date: new Date(0)}, 'ERR_INVALID_DATE'],
+  [{date: {y: 2024}}, 'ERR_INVALID_DATE'],
+  [{timestamp: 1700000000000}, 'ERR_INVALID_TIMESTAMP'],
+  [{timestamp: null}, 'ERR_INVALID_TIMESTAMP'],
+  [{decimal: 1n}, 'ERR_INVALID_DECIMAL'],
+  [{decimal: 1.5}, 'ERR_INVALID_DECIMAL'],
+]) assert.throws(() => addon.encode(input), {name: 'TypeError', code}, JSON.stringify(Object.keys(input)));
+// Expanded-year timestamps decrypt as wrappers and encrypt again unchanged.
+for (const timestamp of ['+12000-01-01T00:00:00.000000001Z', '-0005-03-01T12:00:00.000000001Z']) {
+  assert.deepEqual(addon.decode(addon.encode({timestamp})), {timestamp});
+}
+// Reserved wrapper keys: a one-key object from another language reads as a
+// wrapper, so this decrypt-then-encrypt is lossy by design (documented).
+assert.deepEqual(addon.decode(addon.encode({date: '2024-01-01'})), {date: '2024-01-01'});
+assert.throws(() => addon.encode({date: 'tomorrow'}), {code: 'ERR_INVALID_DATE'});
 const ordinary = {date:'not a wrapper', extra:true};
 assert.deepEqual(addon.decode(addon.encode(ordinary)), ordinary);
 console.log(`Node conformance: ${corpus.vectors.length} values, ${corpus.malformed.length} refusals, BigInt boundaries passed`);

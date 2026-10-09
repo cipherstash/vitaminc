@@ -100,7 +100,15 @@ pub(crate) fn date(text: &str) -> Result<Value, ConversionError> {
 }
 
 pub(crate) fn timestamp(text: &str) -> Result<Value, ConversionError> {
-    DateTime::parse_from_rfc3339(text)
+    // RFC 3339 only spells years 0000-9999. Outside that range decryption
+    // emits an ISO 8601 expanded year (`+12000-…`, `-0005-…`), so accept that
+    // form too or a decrypted timestamp could not be encrypted again.
+    let parsed = if text.starts_with(['+', '-']) {
+        DateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S%.f%#z")
+    } else {
+        DateTime::parse_from_rfc3339(text)
+    };
+    parsed
         .map(|value| Value::Timestamp(value.with_timezone(&Utc)))
         .map_err(|_| ConversionError::InvalidTimestamp)
 }
@@ -232,6 +240,34 @@ mod tests {
             );
         }
         assert!(timestamp("2016-12-31T23:59:60.123456789Z").is_ok());
+        // Decryption spells years outside 0000-9999 in ISO 8601 expanded form;
+        // each must parse back to the same instant.
+        for value in [
+            DateTime::<Utc>::MIN_UTC,
+            DateTime::<Utc>::MAX_UTC,
+            "+12000-01-01T00:00:00.000000001Z".parse().expect("valid"),
+            "-0005-03-01T12:00:00.000000001Z".parse().expect("valid"),
+        ] {
+            let text = value.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+            assert!(
+                matches!(timestamp(&text), Ok(Value::Timestamp(v)) if v == value),
+                "{text}"
+            );
+        }
+        assert!(matches!(
+            timestamp("-0005-03-01T12:00:00+01:00"),
+            Ok(Value::Timestamp(v)) if v.to_rfc3339() == "-0005-03-01T11:00:00+00:00"
+        ));
+        for invalid in [
+            "+12000-01-01",
+            "+12000-13-01T00:00:00Z",
+            "-0005-03-01T12:00:00",
+        ] {
+            assert_eq!(
+                timestamp(invalid).err().expect("invalid timestamp"),
+                ConversionError::InvalidTimestamp
+            );
+        }
         assert_eq!(
             timestamp("bad").err().expect("invalid timestamp"),
             ConversionError::InvalidTimestamp
