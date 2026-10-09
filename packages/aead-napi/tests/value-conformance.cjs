@@ -19,7 +19,10 @@ for (const row of corpus.vectors) {
   assert.equal(addon.codecRoundTrip(wire).toString('hex'), row.transport, row.name);
   const value = addon.decode(wire);
   assert.deepEqual(value, expected(row), row.name);
-  assert.equal(addon.encode(value).toString('hex'), row.js_reencode ?? row.transport, row.name);
+  // Encode the decoded value and, independently, the expected one.
+  for (const input of [value, expected(row)]) {
+    assert.equal(addon.encode(input).toString('hex'), row.js_reencode ?? row.transport, row.name);
+  }
 }
 for (const row of corpus.malformed) assert.throws(() => addon.decode(Buffer.from(row.transport, 'hex')), undefined, row.name);
 const boundaries = [
