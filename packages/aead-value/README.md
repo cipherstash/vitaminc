@@ -174,6 +174,19 @@ are single-valued, and passthrough is a transport choice, not a type.
 `Value::kind` reports a value's kind, `ValueKind::holds` checks one,
 and `ValueKind::tags` maps a kind to the tags above.
 
+**Breaking:** `ValueKind::ALL` changes from `[ValueKind; 11]` to
+`&'static [ValueKind]` so new kinds can be added without changing its type.
+Iteration now yields `&ValueKind`; use `for &kind in ValueKind::ALL` or
+`ValueKind::ALL.iter().copied()` when owned values are needed. Code requiring
+the fixed-size array type must migrate to a slice.
+
+## Transport compatibility
+
+Transport framing uses `0xF0` (array), `0xF1` (object), and `0xF2`
+(passthrough), leaving the lower tags available for future scalar kinds.
+This changes the transport encoding; hosts and guests must ship together.
+The frozen sealed leaf tags and stored ciphertext payloads are unchanged.
+
 ## Security notes
 
 - String and byte leaves are held in `Protected`, so the Rust-side copies
@@ -191,8 +204,3 @@ and `ValueKind::tags` maps a kind to the tags above.
 [`Decipher`]: vitaminc_aead::Decipher
 [`Context::for_map_entry`]: vitaminc_aead::Context::for_map_entry
 [`Unspecified`]: vitaminc_aead::Unspecified
-
-Transport framing uses `0xF0` (array), `0xF1` (object), and `0xF2`
-(passthrough), leaving the lower tags available for future scalar kinds.
-This changes the transport encoding; hosts and guests must ship together.
-The frozen sealed leaf tags and stored ciphertext payloads are unchanged.

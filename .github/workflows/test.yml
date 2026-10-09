@@ -101,16 +101,24 @@ jobs:
           cargo test -p vitaminc-aead-value --all-features
 
       - name: test (canonical equality features)
+        # The workspace run unifies hmac's dev-dependency features, so test
+        # prf alone without `value` as well as with each optional feature.
         run: |
+          cargo test -p vitaminc-prf &&
           cargo test -p vitaminc-prf --features chrono &&
           cargo test -p vitaminc-prf --features rust_decimal &&
-          cargo test -p vitaminc-prf -p vitaminc-aead-value --all-features &&
+          cargo test -p vitaminc-prf --all-features &&
           cargo test -p vitaminc-hmac --test value_equality
 
       - name: test (vitaminc-encrypt, RustCrypto backend on native)
         # Forces the RustCrypto path that wasm32 uses, so the same property
         # tests run against both backends in CI.
         run: cargo test -p vitaminc-encrypt --features _test-rust-crypto-backend
+
+      - name: test (Node conversion kind inventory)
+        run: |
+          cargo build --locked -p vitaminc-aead-napi --example kind_inventory
+          node packages/aead-napi/tests/kind_inventory.cjs target/debug/examples/libkind_inventory.so
 
       - name: test (hlist static-ciphertext feature)
         # The `hlist` feature gates the static-ciphertext API and is NOT in the

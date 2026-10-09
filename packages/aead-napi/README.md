@@ -16,18 +16,29 @@ cross-language leaf wire format. This crate adds only what is JS-specific:
   - JS `number` ↔ `Value::Float64`. `BigInt` selects the smallest fitting
     integer width through 128 bits, preferring signed at each width. Every
     integer kind decodes as `BigInt`; `Float32` widens exactly to `number`.
-  - JS `Date` ↔ `Timestamp` at millisecond precision within chrono's range.
-    Sub-millisecond timestamps, leap seconds and timestamps beyond JS Date's
-    range decode as `{ timestamp: "RFC3339-with-nanoseconds" }`, also accepted
-    on input, so no precision is discarded.
+    Equality terms share one domain across integer widths, so a `BigInt`
+    written as `int8` matches the same number written as `int64` from Go.
+  - JS `Date` ↔ `Timestamp` at millisecond precision. Sub-millisecond
+    timestamps and leap seconds decode as
+    `{ timestamp: "RFC3339-with-nanoseconds" }`, also accepted on input, so no
+    precision is discarded. Years outside 0000–9999 use an ISO 8601 expanded
+    year (`+12000-01-01T00:00:00.000000001Z`), accepted on input as well.
   - Calendar dates use `{ date: "YYYY-MM-DD" }` (including ISO extended years);
     finite decimals use `{ decimal: "1.50" }`, retaining scale and signed zero.
     These wrappers reserve exactly one own enumerable property; an object with
     additional properties remains an ordinary object. Decimal input is exact
     fixed-point text, not a JS number or an arbitrary decimal-library instance.
     NaN and infinities throw `TypeError` with code `ERR_NON_FINITE_DECIMAL`.
-    Other scalar failures have stable `ERR_INTEGER_RANGE`, `ERR_INVALID_DATE`,
+    Other scalar failures, including a wrapper whose payload is not a string,
+    have stable `ERR_INTEGER_RANGE`, `ERR_INVALID_DATE`,
     `ERR_INVALID_TIMESTAMP` and `ERR_INVALID_DECIMAL` codes.
+  - **The wrapper keys are reserved.** An object with exactly one own
+    enumerable property named `date`, `timestamp` or `decimal` is always read
+    as a wrapper. Other languages can store such an object as ordinary data,
+    so decrypting it in JS and encrypting it again is lossy: Go's
+    `{"date": "2024-01-01"}` comes back as a `date` scalar, and
+    `{"date": "tomorrow"}` throws `ERR_INVALID_DATE`. Avoid these one-key
+    shapes in data that crosses languages.
 - **`JsCipherText<Leaf, P>`** — projects the generic `CipherText` container
   onto plain JS values (`{ t, v }` nodes with `Buffer` leaves) and back, as
   an in-memory/application-side representation. Durable cross-language
@@ -51,9 +62,25 @@ as Float64. Go retains its established undefined-to-nil projection. These two
 host projections are explicit fields in the corpus; Rust codec vectors always
 round-trip byte-for-byte.
 
-The existing named metric exemptions for live N-API entry points remain;
-new pure scalar conversion helpers participate in coverage and mutation gates.
-The Node test runs in package-scoped mutation tests as well as CI.
+A second live Node test converts a sample for every `ValueKind::ALL` entry
+through `NapiValue::to_napi_value` and checks its JavaScript value, so adding
+a kind without a sample or a working output conversion fails CI. It also
+covers `Null`, `Undefined`, and `Passthrough`, which have no kind. Run it
+locally (use `.dylib` instead of `.so` on macOS):
+
+```sh
+cargo build --locked -p vitaminc-aead-napi --example kind_inventory
+node packages/aead-napi/tests/kind_inventory.cjs target/debug/examples/libkind_inventory.so
+```
+
+The JS-boundary conversion functions — `js_to_value`, `value_to_js`,
+`node_to_js`, `node_from_js` — and their helpers — `own_enumerable_keys`,
+`get_property_unknown`, `ensure_plain_object`, `define_own_property` — take a
+live `napi_env`, `Unknown`, or `Object`, which only exists inside a running V8
+isolate, so Rust unit tests cannot reach them. They remain exempted by name in
+`.cargo-crap.toml` and `.cargo/mutants.toml`; new pure scalar conversion
+helpers participate in coverage and mutation gates. The Node conformance test
+runs in package-scoped mutation tests as well as CI.
 
 ## Safety notes
 

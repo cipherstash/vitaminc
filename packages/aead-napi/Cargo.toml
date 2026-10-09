@@ -27,7 +27,12 @@ napi = { version = "3", default-features = false, features = ["napi6"] }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-# `noop` stubs the Node-API symbols so unit tests link without a Node host.
+# `noop` disables automatic addon registration in unit tests.
+# `dyn-symbols` lets the test addon load Node-API symbols from its live host.
 # (Cipher round-trip tests live in `vitaminc-aead-value`, which this crate's
 # value type comes from.)
-napi = { version = "3", default-features = false, features = ["noop"] }
+napi = { version = "3", default-features = false, features = ["noop", "dyn-symbols"] }
+
+[[example]]
+name = "kind_inventory"
+crate-type = ["cdylib"]
