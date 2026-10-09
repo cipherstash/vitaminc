@@ -300,7 +300,8 @@ pub unsafe extern "C" fn vc_encrypt_element(
 
 fn encrypt(handle: u32, aad: &[u8], val: &[u8], as_element: bool) -> Result<Vec<u8>, u32> {
     // Decode the input value first so garbage bytes surface as an encoding
-    // error even for an unknown handle.
+    // error even for an unknown handle. vcencrypt's differential fuzz targets
+    // rely on this order (`differential_fuzz_test.go`).
     let value = codec::decode_value(&mut codec::Reader::new(val)).map_err(|_| STATUS_ENCODING)?;
     with_cipher(handle, |cipher| {
         let aad = Context::from_encoded(aad);
@@ -376,7 +377,9 @@ pub unsafe extern "C" fn vc_decrypt_element(
 }
 
 fn decrypt(handle: u32, aad: &[u8], ct: &[u8], as_element: bool) -> Result<Vec<u8>, u32> {
-    // Decode + re-home to the Box passthrough payload type the decipher expects.
+    // Decode + re-home to the Box passthrough payload type the decipher
+    // expects. Decoding before the handle lookup is relied on by vcencrypt's
+    // differential fuzz targets, as in `encrypt`.
     let ct: AesCipherText =
         codec::decode_ciphertext_boxed(&mut codec::Reader::new(ct)).map_err(|_| STATUS_ENCODING)?;
     with_cipher(handle, |cipher| {
