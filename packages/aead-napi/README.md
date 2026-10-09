@@ -32,22 +32,34 @@ it is not itself loadable from Node.
 ## Testing the conversion layer
 
 The `Encrypt`/`Decrypt` impls and the value tree are covered by ordinary Rust
-unit tests. The JS-boundary conversion functions — `js_to_value`,
+unit tests. A live Node test converts a sample for every `ValueKind::ALL`
+entry through `NapiValue::to_napi_value` and checks its JavaScript value.
+Adding a kind without a sample or a working output conversion fails CI.
+It also covers `Null`, `Undefined`, and `Passthrough`, which have no kind.
+
+Run the same test locally (use `.dylib` instead of `.so` on macOS):
+
+```sh
+cargo build --locked -p vitaminc-aead-napi --example kind_inventory
+node packages/aead-napi/tests/kind_inventory.cjs target/debug/examples/libkind_inventory.so
+```
+
+The JS-boundary conversion functions — `js_to_value`,
 `value_to_js`, `node_to_js`, `node_from_js` — and their helpers —
 `own_enumerable_keys`, `get_property_unknown`, `ensure_plain_object`,
 `define_own_property` — are
-**not**, and cannot be: each takes a live `napi_env`, `Unknown`, or `Object`,
-which only exists inside a running V8 isolate. The `napi/noop` dev-dependency stubs those
-symbols so the crate links under `cargo test`; it does not make the calls
-work. They are therefore exempted in `.cargo-crap.toml` and
+not covered by the Rust unit tests: each takes a live `napi_env`, `Unknown`, or `Object`,
+which only exists inside a running V8 isolate. The `napi/noop` dev feature
+disables automatic addon registration, and `dyn-symbols` loads Node-API
+symbols when the test addon runs in Node. Neither supplies a Node environment
+to Rust unit tests. These functions remain exempted in `.cargo-crap.toml` and
 `.cargo/mutants.toml`, by name rather than by file so the rest of those
 modules stays gated.
 
-That exemption is a deferral, not a dismissal — it is the difference between
-"cannot be reached by this harness" and "does not need testing". Covering
-them needs JS-level tests driving a built addon, which should land alongside
-the first `#[napi]` entry points that consume this crate. Until then, treat
-changes to those two modules as unguarded by CI and review them by hand.
+The kind inventory test covers the output mapping and basic recursive
+conversion. Input conversion, ciphertext conversion, and boundary rejection
+cases still need JS-level tests driving a built addon; review changes to
+those paths by hand until that coverage lands.
 
 ## Safety notes
 

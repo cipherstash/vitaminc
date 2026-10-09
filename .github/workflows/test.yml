@@ -101,6 +101,11 @@ jobs:
         # tests run against both backends in CI.
         run: cargo test -p vitaminc-encrypt --features _test-rust-crypto-backend
 
+      - name: test (Node conversion kind inventory)
+        run: |
+          cargo build --locked -p vitaminc-aead-napi --example kind_inventory
+          node packages/aead-napi/tests/kind_inventory.cjs target/debug/examples/libkind_inventory.so
+
       - name: test (hlist static-ciphertext feature)
         # The `hlist` feature gates the static-ciphertext API and is NOT in the
         # default set, so plain `cargo test` above never builds or runs it. The
