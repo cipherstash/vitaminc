@@ -8,7 +8,10 @@ pub fn derive_opaque_debug(input: DeriveInput) -> TokenStream {
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     // Only config is the mask string (default "***")
-    let mask = parse_mask_attr(&input);
+    let mask = match parse_mask_attr(&input) {
+        Ok(mask) => mask,
+        Err(err) => return err.to_compile_error().into(),
+    };
 
     let marker_impl = quote! {
         impl #impl_generics OpaqueDebug for #ident #ty_generics #where_clause {}
@@ -51,8 +54,11 @@ fn has_non_sensitive(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|a| a.path().is_ident("non_sensitive"))
 }
 
-/// Parse `#[opaque_debug(mask = "...")]` using syn v2 `parse_nested_meta`.
-fn parse_mask_attr(input: &DeriveInput) -> String {
+/// Parse `#[opaque_debug(mask = "...")]` using syn's `parse_nested_meta`.
+///
+/// A malformed attribute is a compile error rather than a silent fallback to
+/// the default mask, so a typo can't quietly change how a value is redacted.
+fn parse_mask_attr(input: &DeriveInput) -> syn::Result<String> {
     let mut mask = "***".to_string();
 
     for attr in &input.attrs {
@@ -60,7 +66,7 @@ fn parse_mask_attr(input: &DeriveInput) -> String {
             continue;
         }
         // Accept: #[opaque_debug(mask = "...")]
-        let _ = attr.parse_nested_meta(|meta| {
+        attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("mask") {
                 let lit: syn::LitStr = meta.value()?.parse()?;
                 mask = lit.value();
@@ -68,10 +74,10 @@ fn parse_mask_attr(input: &DeriveInput) -> String {
             }
             // Unknown keys produce a nice error tied to the attribute span
             Err(meta.error("unsupported attribute; expected `mask = \"...\"`"))
-        });
+        })?;
     }
 
-    mask
+    Ok(mask)
 }
 
 fn debug_impl_for_struct(
@@ -246,5 +252,54 @@ fn debug_impl_for_enum(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_mask_attr;
+    use syn::{parse_quote, DeriveInput};
+
+    #[test]
+    fn mask_defaults_without_attribute() {
+        let input: DeriveInput = parse_quote! { struct Token(String); };
+        assert_eq!(parse_mask_attr(&input).unwrap(), "***");
+    }
+
+    #[test]
+    fn mask_is_read_from_attribute() {
+        let input: DeriveInput = parse_quote! {
+            #[opaque_debug(mask = "##")]
+            struct Token(String);
+        };
+        assert_eq!(parse_mask_attr(&input).unwrap(), "##");
+    }
+
+    #[test]
+    fn unknown_key_is_an_error() {
+        let input: DeriveInput = parse_quote! {
+            #[opaque_debug(msk = "##")]
+            struct Token(String);
+        };
+        let err = parse_mask_attr(&input).unwrap_err();
+        assert!(err.to_string().contains("unsupported attribute"), "{err}");
+    }
+
+    #[test]
+    fn non_string_mask_is_an_error() {
+        let input: DeriveInput = parse_quote! {
+            #[opaque_debug(mask = 42)]
+            struct Token(String);
+        };
+        assert!(parse_mask_attr(&input).is_err());
+    }
+
+    #[test]
+    fn bare_attribute_is_an_error() {
+        let input: DeriveInput = parse_quote! {
+            #[opaque_debug]
+            struct Token(String);
+        };
+        assert!(parse_mask_attr(&input).is_err());
     }
 }

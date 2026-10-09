@@ -1,0 +1,5 @@
+error: unsupported attribute; expected `mask = "..."`
+ --> tests/ui/opaque_debug/unknown_key.rs:4:16
+  |
+4 | #[opaque_debug(msk = "##")]
+  |                ^^^
