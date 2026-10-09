@@ -54,6 +54,8 @@ corpus vector, and the whole suite on 32-bit GOARCH, where the u32-bound
 guards are load-bearing. `.github/workflows/fuzz.yml` fuzzes them nightly
 and records a failure on an open issue labelled `fuzz`; commit the failing
 input attached to that run under `testdata/fuzz` as a regression seed.
+vcencrypt's differential fuzz targets check the same decoders against the
+Rust ones in its wasm guest (see its README).
 
 `ErrMalformed` covers hostile bytes, not caller mistakes: a `LeafSet` that is
 partially wired, or that does not materialize a kind the buffer carries,

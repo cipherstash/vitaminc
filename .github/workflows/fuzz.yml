@@ -25,11 +25,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # `go test -fuzz` runs one target per invocation.
-        target: [FuzzUnmarshal, FuzzUnmarshalCipherText]
+        # `go test -fuzz` runs one target per invocation. The differential
+        # targets compare vcffi against the Rust decoder in the wasm guest,
+        # so they live with the guest in vcencrypt.
+        include:
+          - { target: FuzzUnmarshal, dir: bindings/go/vcffi }
+          - { target: FuzzUnmarshalCipherText, dir: bindings/go/vcffi }
+          - { target: FuzzDifferentialValue, dir: bindings/go/vcencrypt }
+          - { target: FuzzDifferentialCipherText, dir: bindings/go/vcencrypt }
 
     steps:
       - uses: actions/checkout@v7
+
+      # The committed guest binary is rebuilt by hand, so it can lag the
+      # Rust it was built from. A differential run must compare Go against
+      # the Rust on this commit, so rebuild it in place first.
+      - name: setup rust stable
+        if: matrix.dir == 'bindings/go/vcencrypt'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - name: rebuild the wasm guest
+        if: matrix.dir == 'bindings/go/vcencrypt'
+        working-directory: bindings/go/vcencrypt/guest
+        run: |
+          cargo build --release --target wasm32-wasip1
+          cp target/wasm32-wasip1/release/vitaminc_wasi_guest.wasm ../wasm/vitaminc_guest.wasm
 
       - uses: actions/setup-go@v7
         with:
@@ -39,7 +61,7 @@ jobs:
             bindings/go/vcencrypt/examples/go.sum
 
       - name: fuzz ${{ matrix.target }}
-        working-directory: bindings/go/vcffi
+        working-directory: ${{ matrix.dir }}
         env:
           FUZZTIME: ${{ inputs.fuzztime || '5m' }}
         run: CGO_ENABLED=0 go test -run='^$' -fuzz="^${{ matrix.target }}\$" -fuzztime="$FUZZTIME" .
@@ -51,7 +73,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-${{ matrix.target }}
-          path: bindings/go/vcffi/testdata/fuzz
+          path: ${{ matrix.dir }}/testdata/fuzz
 
   report:
     # A scheduled run has no PR to turn red, so a failure would otherwise sit
@@ -76,8 +98,9 @@ jobs:
           body="The nightly fuzz run failed: $RUN_URL
 
           The failing input is attached to that run as a \`fuzz-<target>\`
-          artifact. Commit it under \`bindings/go/vcffi/testdata/fuzz\` so every
-          PR run replays it, fix the bug, then close this issue."
+          artifact. Commit it under that target's \`testdata/fuzz\` (in
+          \`bindings/go/vcffi\` or \`bindings/go/vcencrypt\`) so every PR run
+          replays it, fix the bug, then close this issue."
           issue=$(gh issue list --label fuzz --state open --limit 1 --json number --jq '.[0].number')
           if [ -n "$issue" ]; then
             gh issue comment "$issue" --body "$body"
