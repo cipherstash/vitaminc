@@ -1206,3 +1206,7 @@ mod tests {
         assert_eq!(encode_ciphertext_boxed(ct, &mut out), Err(CodecError));
     }
 }
+
+#[cfg(test)]
+#[path = "transport_properties.rs"]
+mod properties;

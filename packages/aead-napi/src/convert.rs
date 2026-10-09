@@ -6,41 +6,35 @@
 //!
 //! # Numeric mapping
 //!
-//! JS `number` always converts to [`Value::Float64`] — integral JS
-//! numbers do **not** become an integer variant, preserving JS semantics
-//! (`42` and `42.0` are the same value in JS). JS `BigInt` carries integer
-//! typing: one that fits `i64` converts to [`Value::Int64`]; one above
-//! `i64::MAX` that still fits `u64` converts to [`Value::UInt64`];
-//! anything larger is rejected. JS has no 32-bit numeric types, so it
-//! **never** encodes [`Value::Int32`], [`Value::UInt32`], or
-//! [`Value::Float32`].
+//! JS `number` converts to `Float64`. BigInt uses the smallest fitting
+//! integer width, preferring signed at a given width, through 128 bits.
+//! Every integer kind decodes as BigInt. Date maps to Timestamp; calendar
+//! dates use `{ date: "YYYY-MM-DD" }` and decimals `{ decimal: "1.50" }`.
+//! Timestamps finer than Date's millisecond precision, and leap seconds,
+//! use a `{ timestamp }` wrapper: RFC 3339, or an ISO 8601 expanded year
+//! outside 0000-9999.
 //!
-//! On the way out, values written by other languages (Python, Go) surface
-//! losslessly: [`Value::Float32`] widens exactly to a JS `number`
-//! (`f64::from(f32)`); [`Value::Float64`] is a `number`;
-//! [`Value::Int32`] / [`Value::UInt32`] are always a `number` (their
-//! magnitude never exceeds 2⁵³); [`Value::Int64`] / [`Value::UInt64`]
-//! become a `number` when within `Number.MAX_SAFE_INTEGER` (2⁵³ − 1 in
-//! magnitude) and a `BigInt` otherwise.
+//! The wrapper keys are reserved: a one-key object named `date`,
+//! `timestamp` or `decimal` is always read as a wrapper, including one
+//! decrypted from data another language wrote as an ordinary object.
 
 use napi::bindgen_prelude::{
-    Array, BigInt, Buffer, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue, Uint8Array,
-    Unknown, Utf16String,
+    Array, BigInt, Buffer, FromNapiValue, JsObjectValue, JsValue, KeyCollectionMode, KeyConversion,
+    KeyFilter, Null, Object, ToNapiValue, Uint8Array, Unknown, Utf16String,
 };
-use napi::{sys, Env, Error, Result, Status, ValueType};
+use napi::{sys, Env, Error, Property, Result, Status, ValueType};
 use vitaminc_aead_value::Value;
 use vitaminc_protected::{Controlled, Protected};
 
+use crate::ciphertext::NapiPassthrough;
+use crate::scalar;
 use crate::value::NapiValue;
 
-/// Maximum nesting depth accepted when converting a JS value tree (and when
-/// rebuilding one). Bounds recursion so a hostile deeply-nested input cannot
-/// overflow the stack.
+/// Maximum nesting depth, in both directions: converting a JS value tree to
+/// Rust, and building one from a Rust tree. Bounds recursion so a deeply
+/// nested input cannot overflow the stack. The same limit, counted the same
+/// way, as the transport decoder's, so any decoded tree converts.
 pub(crate) const MAX_DEPTH: usize = 128;
-
-/// The largest integer JS numbers represent exactly: 2⁵³ − 1
-/// (`Number.MAX_SAFE_INTEGER`).
-const MAX_SAFE_INTEGER: i64 = (1 << 53) - 1;
 
 /// Property names that must never be read from or written onto a plain JS
 /// object: assigning them via `napi_set_property` triggers prototype-chain
@@ -50,7 +44,7 @@ pub(crate) fn forbidden_key(key: &str) -> bool {
     matches!(key, "__proto__" | "constructor" | "prototype")
 }
 
-fn depth_error() -> Error {
+pub(crate) fn depth_error() -> Error {
     Error::new(Status::InvalidArg, "value is nested too deeply")
 }
 
@@ -74,7 +68,14 @@ pub(crate) fn eager_capacity(reported_len: u32) -> usize {
     (reported_len as usize).min(MAX_EAGER_CAPACITY)
 }
 
-/// Own, enumerable, string-keyed property names of `obj`.
+/// An own property key: the JS key itself, for reading the property back
+/// exactly, and its text.
+pub(crate) struct OwnKey<'e> {
+    handle: Unknown<'e>,
+    pub(crate) name: String,
+}
+
+/// Own, enumerable, string-keyed properties of `obj`.
 ///
 /// `Object::keys` (`napi_get_property_names`) walks the prototype chain —
 /// per the Node-API spec it equals `napi_get_all_property_names` with
@@ -82,34 +83,59 @@ pub(crate) fn eager_capacity(reported_len: u32) -> usize {
 /// (or an instance with enumerable prototype members) would inject its
 /// keys into the result, and inherited getters would run when the values
 /// are read. Own-only enumeration forecloses both.
-pub(crate) fn own_enumerable_keys(obj: &Object<'_>) -> Result<Vec<String>> {
-    let raw = obj.value();
-    let mut names = std::ptr::null_mut();
-    let status = unsafe {
-        sys::napi_get_all_property_names(
-            raw.env,
-            raw.value,
-            sys::KeyCollectionMode::own_only,
-            sys::KeyFilter::enumerable | sys::KeyFilter::skip_symbols,
-            sys::KeyConversion::numbers_to_strings,
-            &mut names,
-        )
-    };
-    if status != sys::Status::napi_ok {
-        return Err(Error::new(
-            Status::GenericFailure,
-            "failed to enumerate object properties",
-        ));
-    }
-    let names = unsafe { Array::from_napi_value(raw.env, names) }?;
-    let mut keys = Vec::with_capacity(eager_capacity(names.len()));
-    for i in 0..names.len() {
-        let key = names.get::<String>(i)?.ok_or_else(|| {
-            Error::new(Status::GenericFailure, "property name vanished during read")
-        })?;
-        keys.push(key);
+///
+/// A key holding an unpaired surrogate is refused, as string values are: it
+/// has no UTF-8 spelling, so it could not be sealed as written.
+pub(crate) fn own_enumerable_keys<'e>(obj: &Object<'e>) -> Result<Vec<OwnKey<'e>>> {
+    // napi-rs takes a single key filter, so symbol keys are skipped below
+    // rather than by an `enumerable | skip_symbols` filter.
+    let names = obj.get_all_property_names(
+        KeyCollectionMode::OwnOnly,
+        KeyFilter::Enumerable,
+        KeyConversion::NumbersToStrings,
+    )?;
+    let len = names.get_array_length()?;
+    let mut keys = Vec::with_capacity(eager_capacity(len));
+    for i in 0..len {
+        let handle = names.get_element::<Unknown>(i)?;
+        if handle.get_type()? == ValueType::Symbol {
+            continue;
+        }
+        let name = lossless_string(handle, "property name")?;
+        keys.push(OwnKey { handle, name });
     }
     Ok(keys)
+}
+
+/// Read the own property `key` names, by the key's own JS handle.
+///
+/// The key list is a snapshot, and a getter that ran since may have deleted
+/// this property; `[[Get]]` would then read it from a (possibly polluted)
+/// prototype. So ownership is checked again immediately before the read,
+/// where no JS can run in between for an ordinary object.
+pub(crate) fn get_own<'e>(obj: &Object<'e>, key: &OwnKey<'e>) -> Result<Unknown<'e>> {
+    if !obj.has_own_property_js(key.handle)? {
+        return Err(Error::new(
+            Status::InvalidArg,
+            format!("property was removed while it was being read: {}", key.name),
+        ));
+    }
+    obj.get_property_unchecked(key.handle)
+}
+
+/// A JS string as Rust text. Fetched as UTF-16 (JS's native representation)
+/// and converted with `String::from_utf16`, which errors on unpaired
+/// surrogates. The UTF-8 fetch (`napi_get_value_string_utf8`) would silently
+/// replace them with U+FFFD, so a value would seal *mutated* and a key would
+/// stop naming its property; refuse loudly instead.
+fn lossless_string(value: Unknown<'_>, what: &str) -> Result<String> {
+    let utf16 = Utf16String::from_unknown(value)?;
+    String::from_utf16(&utf16).map_err(|_| {
+        Error::new(
+            Status::InvalidArg,
+            format!("{what} contains an unpaired surrogate and cannot be encrypted losslessly"),
+        )
+    })
 }
 
 /// Fetch a property as the raw JS value, without [`Object::get`]'s
@@ -119,31 +145,11 @@ pub(crate) fn own_enumerable_keys(obj: &Object<'_>) -> Result<Vec<String>> {
 /// missing property also comes back as `undefined`, which is exactly JS
 /// property semantics.
 pub(crate) fn get_property_unknown<'e>(obj: &Object<'e>, key: &str) -> Result<Unknown<'e>> {
-    let raw = obj.value();
-    let mut js_key = std::ptr::null_mut();
-    let status = unsafe {
-        sys::napi_create_string_utf8(
-            raw.env,
-            key.as_ptr().cast(),
-            key.len() as isize,
-            &mut js_key,
-        )
-    };
-    if status != sys::Status::napi_ok {
-        return Err(Error::new(
-            Status::GenericFailure,
-            "failed to create property key",
-        ));
-    }
-    let mut value = std::ptr::null_mut();
-    let status = unsafe { sys::napi_get_property(raw.env, raw.value, js_key, &mut value) };
-    if status != sys::Status::napi_ok {
-        return Err(Error::new(
-            Status::GenericFailure,
-            "failed to read object property",
-        ));
-    }
-    unsafe { Unknown::from_napi_value(raw.env, value) }
+    // The key goes over as a JS string with an explicit length, so a key
+    // holding NUL survives (`get_named_property` would refuse it).
+    let env = Env::from_raw(obj.value().env);
+    let js_key = key.into_unknown(&env)?;
+    obj.get_property_unchecked(js_key)
 }
 
 /// Accept only plain objects — prototype `Object.prototype` (compared
@@ -184,55 +190,37 @@ fn ensure_plain_object(obj: &Object<'_>) -> Result<()> {
 // direction still projects a passthrough produced elsewhere (e.g. a value
 // written by another binding) onto its plain JS value. Follow-up: add an
 // explicit passthrough marker type to the JS API.
-/// Write `value` onto `obj` as an **own data property** (`defineProperty`
-/// semantics: writable, enumerable, configurable) rather than through
-/// [`Object::set`] (`napi_set_property`, `[[Set]]` semantics), which walks
-/// the prototype chain: a polluted inherited setter on the key would receive
-/// the decrypted plaintext (leak) and leave the result without the own
-/// property (drop). The intake side already treats prototype pollution as
-/// in-threat-model (`own_enumerable_keys`, `ensure_plain_object`); this
-/// closes the output side.
-pub(crate) fn define_own_property(
-    obj: &Object<'_>,
+
+/// One own data property, for [`define_own_properties`]. `Property::new()`
+/// defaults to writable, enumerable and configurable, the attributes
+/// `obj.key = value` would give.
+pub(crate) fn own_property<'e, V: JsValue<'e>>(
+    env: &Env,
     key: &str,
-    value: sys::napi_value,
-) -> Result<()> {
-    let raw = obj.value();
-    let mut js_key = std::ptr::null_mut();
-    let status = unsafe {
-        sys::napi_create_string_utf8(
-            raw.env,
-            key.as_ptr().cast(),
-            key.len() as isize,
-            &mut js_key,
-        )
-    };
-    if status != sys::Status::napi_ok {
-        return Err(Error::new(
-            Status::GenericFailure,
-            "failed to create property key",
-        ));
-    }
-    let descriptor = sys::napi_property_descriptor {
-        utf8name: std::ptr::null(),
-        name: js_key,
-        method: None,
-        getter: None,
-        setter: None,
-        value,
-        attributes: sys::PropertyAttributes::writable
-            | sys::PropertyAttributes::enumerable
-            | sys::PropertyAttributes::configurable,
-        data: std::ptr::null_mut(),
-    };
-    let status = unsafe { sys::napi_define_properties(raw.env, raw.value, 1, &descriptor) };
-    if status != sys::Status::napi_ok {
-        return Err(Error::new(
-            Status::GenericFailure,
-            "failed to define object property",
-        ));
-    }
-    Ok(())
+    value: &V,
+) -> Result<Property> {
+    // A JS string name, not a UTF-8 C string, so a key holding NUL works.
+    Ok(Property::new().with_name(env, key)?.with_value(value))
+}
+
+/// Write `properties` onto `obj` as **own data properties**
+/// (`defineProperty` semantics) rather than through [`Object::set`] or
+/// `Array::set` (`napi_set_property` / `napi_set_element`, `[[Set]]`
+/// semantics), which walk the prototype chain: a polluted inherited setter on
+/// a key or array index would receive the decrypted plaintext (leak) and
+/// leave the result without the own property (drop). The intake side already
+/// treats prototype pollution as in-threat-model (`own_enumerable_keys`,
+/// `ensure_plain_object`); this closes the output side. One call per object.
+pub(crate) fn define_own_properties(obj: &mut Object<'_>, properties: &[Property]) -> Result<()> {
+    obj.define_properties(properties)
+}
+
+/// A new JS array of `len` holes, seen as an object so its elements can be
+/// defined with [`define_own_properties`].
+pub(crate) fn new_array<'e>(env: &'e Env, len: usize) -> Result<Object<'e>> {
+    let len = u32::try_from(len)
+        .map_err(|_| Error::new(Status::InvalidArg, "array is too long for JS"))?;
+    Object::from_unknown(env.create_array(len)?.to_unknown())
 }
 
 fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<Value> {
@@ -245,40 +233,14 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<Value> {
         ValueType::Boolean => Ok(Value::Bool(bool::from_unknown(unknown)?)),
         ValueType::Number => Ok(Value::Float64(f64::from_unknown(unknown)?)),
         ValueType::BigInt => {
+            let env = Env::from_raw(unknown.value().env);
             let big = BigInt::from_unknown(unknown)?;
-            // Signed first: a BigInt that fits `i64` is an `Int64`.
-            let (signed, i64_lossless) = big.get_i64();
-            if i64_lossless {
-                return Ok(Value::Int64(signed));
-            }
-            // Otherwise try unsigned: `get_u64` reports lossless only when the
-            // value is non-negative and fits in a single 64-bit word, so a
-            // positive BigInt in (i64::MAX, u64::MAX] lands here as `UInt64`.
-            let (_sign, unsigned, u64_lossless) = big.get_u64();
-            if u64_lossless {
-                return Ok(Value::UInt64(unsigned));
-            }
-            Err(Error::new(
-                Status::InvalidArg,
-                "BigInt value does not fit in a 64-bit integer",
-            ))
+            scalar::bigint(big.sign_bit, &big.words).map_err(|e| conversion_error(env, e))
         }
         ValueType::String => {
-            // Fetch as UTF-16 (JS's native representation) and convert with
-            // `String::from_utf16`, which errors on unpaired surrogates. The
-            // UTF-8 fetch (`napi_get_value_string_utf8`) would silently
-            // replace them with U+FFFD — sealing a *mutated* plaintext that
-            // no longer equals what the caller passed — so refuse loudly
-            // instead. The converted copy moves into `Protected`; the V8
-            // original is owned by the engine and cannot be wiped from here.
-            let utf16 = Utf16String::from_unknown(unknown)?;
-            let s = String::from_utf16(&utf16).map_err(|_| {
-                Error::new(
-                    Status::InvalidArg,
-                    "string contains an unpaired surrogate and cannot be encrypted losslessly",
-                )
-            })?;
-            Ok(Value::String(s.into()))
+            // The converted copy moves into `Protected`; the V8 original is
+            // owned by the engine and cannot be wiped from here.
+            Ok(Value::String(lossless_string(unknown, "string")?.into()))
         }
         ValueType::Object => {
             if unknown.is_buffer()? {
@@ -316,23 +278,44 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<Value> {
                 }
                 Ok(Value::Array(items))
             } else if unknown.is_date()? {
-                Err(Error::new(
-                    Status::InvalidArg,
-                    "Date values are not supported yet; pass a number or ISO string",
-                ))
+                let env = Env::from_raw(unknown.value().env);
+                let date = napi::JsDate::from_unknown(unknown)?;
+                scalar::date_millis(date.value_of()?).map_err(|e| conversion_error(env, e))
             } else {
                 let obj = Object::from_unknown(unknown)?;
                 ensure_plain_object(&obj)?;
                 let keys = own_enumerable_keys(&obj)?;
+                if let [key] = keys.as_slice() {
+                    use scalar::ConversionError::{InvalidDate, InvalidDecimal, InvalidTimestamp};
+                    let parsed = match key.name.as_str() {
+                        "date" => Some(
+                            wrapper_text(&obj, key, InvalidDate)?
+                                .and_then(|text| scalar::date(&text)),
+                        ),
+                        "timestamp" => Some(
+                            wrapper_text(&obj, key, InvalidTimestamp)?
+                                .and_then(|text| scalar::timestamp(&text)),
+                        ),
+                        "decimal" => Some(
+                            wrapper_text(&obj, key, InvalidDecimal)?
+                                .and_then(|text| scalar::decimal(&text)),
+                        ),
+                        _ => None,
+                    };
+                    if let Some(parsed) = parsed {
+                        return parsed
+                            .map_err(|e| conversion_error(Env::from_raw(obj.value().env), e));
+                    }
+                }
                 let mut entries = Vec::with_capacity(keys.len());
                 for key in keys {
-                    if forbidden_key(&key) {
-                        return Err(forbidden_key_error(&key));
+                    if forbidden_key(&key.name) {
+                        return Err(forbidden_key_error(&key.name));
                     }
                     // Raw fetch so an explicit `undefined` value survives as
                     // `Value::Undefined` instead of erroring.
-                    let value = get_property_unknown(&obj, &key)?;
-                    entries.push((key, js_to_value(value, depth + 1)?));
+                    let value = get_own(&obj, &key)?;
+                    entries.push((key.name, js_to_value(value, depth + 1)?));
                 }
                 Ok(Value::Object(entries))
             }
@@ -346,45 +329,51 @@ fn js_to_value(unknown: Unknown<'_>, depth: usize) -> Result<Value> {
 
 impl FromNapiValue for NapiValue {
     unsafe fn from_napi_value(env: sys::napi_env, napi_val: sys::napi_value) -> Result<Self> {
+        // SAFETY: napi-rs calls this with the `env` and `napi_val` of the
+        // current call, which is all `Unknown::from_napi_value` needs: an
+        // `Unknown` may hold any value type, and `js_to_value` checks the
+        // type before every narrower conversion. The handle does not outlive
+        // this call.
         let unknown = unsafe { Unknown::from_napi_value(env, napi_val) }?;
         js_to_value(unknown, 0).map(NapiValue)
     }
 }
 
-fn value_to_js(env: sys::napi_env, value: Value) -> Result<sys::napi_value> {
+/// Build `value` in JS. Callers check [`value_exceeds_depth`] first, which
+/// bounds this recursion.
+fn value_to_js(env: &Env, value: Value) -> Result<Unknown<'_>> {
     match value {
-        Value::Null => unsafe {
-            napi::bindgen_prelude::Null::to_napi_value(env, napi::bindgen_prelude::Null)
-        },
-        Value::Undefined => unsafe { <()>::to_napi_value(env, ()) },
-        Value::Bool(b) => unsafe { bool::to_napi_value(env, b) },
+        Value::Null => Null.into_unknown(env),
+        Value::Undefined => ().into_unknown(env),
+        Value::Bool(b) => b.into_unknown(env),
         // Both float widths surface as a JS `number`; `f32` widens exactly.
-        Value::Float64(n) => unsafe { f64::to_napi_value(env, n) },
-        Value::Float32(f) => unsafe { f64::to_napi_value(env, f64::from(f)) },
-        // 32-bit integers always fit `Number.MAX_SAFE_INTEGER`, so they are
-        // always a plain JS `number`.
-        Value::Int32(i) => unsafe { f64::to_napi_value(env, i as f64) },
-        Value::UInt32(u) => unsafe { f64::to_napi_value(env, u as f64) },
-        Value::Int64(i) => {
-            // Exactly representable → plain number (the common case, and
-            // what JS callers expect for e.g. a Python-written `30`).
-            // Beyond ±MAX_SAFE_INTEGER → BigInt, losslessly. `unsigned_abs`
-            // (not `abs`) so `i64::MIN` — whose magnitude has no `i64`
-            // representation — takes the BigInt branch instead of panicking
-            // (debug) or wrapping negative and losing precision (release).
-            if i.unsigned_abs() <= MAX_SAFE_INTEGER as u64 {
-                unsafe { f64::to_napi_value(env, i as f64) }
+        Value::Float64(n) => n.into_unknown(env),
+        Value::Float32(f) => f64::from(f).into_unknown(env),
+        Value::Int8(v) => BigInt::from(i128::from(v)).into_unknown(env),
+        Value::UInt8(v) => BigInt::from(u128::from(v)).into_unknown(env),
+        Value::Int16(v) => BigInt::from(i128::from(v)).into_unknown(env),
+        Value::UInt16(v) => BigInt::from(u128::from(v)).into_unknown(env),
+        Value::Int32(v) => BigInt::from(i128::from(v)).into_unknown(env),
+        Value::UInt32(v) => BigInt::from(u128::from(v)).into_unknown(env),
+        Value::Int64(v) => BigInt::from(v).into_unknown(env),
+        Value::UInt64(v) => BigInt::from(v).into_unknown(env),
+        Value::Int128(v) => BigInt::from(v).into_unknown(env),
+        Value::UInt128(v) => BigInt::from(v).into_unknown(env),
+        Value::Date(v) => wrapper_to_js(env, "date", v.to_string()),
+        Value::Decimal(v) => wrapper_to_js(env, "decimal", v.to_string()),
+        Value::Timestamp(v) => {
+            // chrono's range (about ±8.21e15 ms) lies inside JS Date's
+            // (±8.64e15 ms), so only precision and leap seconds need a wrapper.
+            if v.timestamp_subsec_nanos() < 1_000_000_000
+                && v.timestamp_subsec_nanos() % 1_000_000 == 0
+            {
+                Ok(env.create_date(v.timestamp_millis() as f64)?.to_unknown())
             } else {
-                unsafe { BigInt::to_napi_value(env, BigInt::from(i)) }
-            }
-        }
-        Value::UInt64(u) => {
-            // Same rule as `Int64`: exactly representable → plain number, else
-            // BigInt. `MAX_SAFE_INTEGER` is non-negative so the cast is safe.
-            if u <= MAX_SAFE_INTEGER as u64 {
-                unsafe { f64::to_napi_value(env, u as f64) }
-            } else {
-                unsafe { BigInt::to_napi_value(env, BigInt::from(u)) }
+                wrapper_to_js(
+                    env,
+                    "timestamp",
+                    v.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+                )
             }
         }
         Value::String(s) => {
@@ -392,26 +381,24 @@ fn value_to_js(env: sys::napi_env, value: Value) -> Result<sys::napi_value> {
             // and the JS-side conversion produce valid UTF-8).
             let utf8 = std::str::from_utf8(s.risky_ref())
                 .map_err(|_| Error::new(Status::GenericFailure, "invalid UTF-8 string value"))?;
-            unsafe { <&str>::to_napi_value(env, utf8) }
+            utf8.into_unknown(env)
             // `s` drops (and wipes the Rust copy) here; the JS copy is owned
             // by the engine.
         }
-        Value::Bytes(b) => {
-            let buf = Buffer::from(b.risky_ref().to_vec());
-            unsafe { Buffer::to_napi_value(env, buf) }
-        }
+        Value::Bytes(b) => Buffer::from(b.risky_ref().to_vec()).into_unknown(env),
         Value::Array(items) => {
-            let raw_env = Env::from_raw(env);
-            let mut arr = raw_env.create_array(items.len() as u32)?;
+            let mut arr = new_array(env, items.len())?;
+            let mut elements = Vec::with_capacity(items.len());
             for (i, item) in items.into_iter().enumerate() {
-                let js = ValueHandle(item);
-                arr.set(i as u32, js)?;
+                let js_value = value_to_js(env, item)?;
+                elements.push(own_property(env, &i.to_string(), &js_value)?);
             }
-            unsafe { Array::to_napi_value(env, arr) }
+            define_own_properties(&mut arr, &elements)?;
+            arr.into_unknown(env)
         }
         Value::Object(entries) => {
-            let raw_env = Env::from_raw(env);
-            let obj = Object::new(&raw_env)?;
+            let mut obj = Object::new(env)?;
+            let mut properties = Vec::with_capacity(entries.len());
             for (key, value) in entries {
                 // Keys decrypted from a ciphertext are attacker-influenced
                 // in principle; never assign prototype-polluting names.
@@ -419,9 +406,10 @@ fn value_to_js(env: sys::napi_env, value: Value) -> Result<sys::napi_value> {
                     return Err(forbidden_key_error(&key));
                 }
                 let js_value = value_to_js(env, value)?;
-                define_own_property(&obj, &key, js_value)?;
+                properties.push(own_property(env, &key, &js_value)?);
             }
-            unsafe { Object::to_napi_value(env, obj) }
+            define_own_properties(&mut obj, &properties)?;
+            obj.into_unknown(env)
         }
         // A passthrough subtree projects onto its plain JS value: the marking
         // exists to steer encryption, and once decrypted the field is an
@@ -433,26 +421,143 @@ fn value_to_js(env: sys::napi_env, value: Value) -> Result<sys::napi_value> {
     }
 }
 
-/// Internal newtype so recursive positions (array elements, object values)
-/// can go through `ToNapiValue` without exposing a blanket recursive impl
-/// signature difference.
-struct ValueHandle(Value);
+/// The string payload of a one-key scalar wrapper. Any other payload
+/// (`{ date: new Date() }`, `{ decimal: 1n }`, ...) is refused with a typed
+/// error chosen by [`scalar::non_string_payload`] rather than a generic
+/// N-API one.
+fn wrapper_text<'e>(
+    obj: &Object<'e>,
+    key: &OwnKey<'e>,
+    invalid: scalar::ConversionError,
+) -> Result<std::result::Result<String, scalar::ConversionError>> {
+    let input = get_own(obj, key)?;
+    Ok(match input.get_type()? {
+        ValueType::String => Ok(String::from_unknown(input)?),
+        ValueType::Number => Err(scalar::non_string_payload(
+            invalid,
+            Some(f64::from_unknown(input)?),
+        )),
+        _ => Err(scalar::non_string_payload(invalid, None)),
+    })
+}
 
-impl ToNapiValue for ValueHandle {
-    unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
-        value_to_js(env, val.0)
+fn conversion_error(env: Env, error: scalar::ConversionError) -> Error {
+    match env.throw_type_error(&error.to_string(), Some(error.code())) {
+        Ok(()) => Error::new(Status::PendingException, error.to_string()),
+        Err(error) => error,
+    }
+}
+
+fn wrapper_to_js<'e>(env: &'e Env, key: &str, text: String) -> Result<Unknown<'e>> {
+    let mut obj = Object::new(env)?;
+    let value = text.into_unknown(env)?;
+    define_own_properties(&mut obj, &[own_property(env, key, &value)?])?;
+    obj.into_unknown(env)
+}
+
+/// Whether `value`, placed at `depth`, nests past [`MAX_DEPTH`], counted as
+/// the transport decoder counts it (a passthrough's inner value is one level
+/// deeper). Iterative, so a tree of any depth is measured without recursion.
+pub(crate) fn value_exceeds_depth(value: &Value, depth: usize) -> bool {
+    let mut stack = vec![(value, depth)];
+    while let Some((value, depth)) = stack.pop() {
+        if depth > MAX_DEPTH {
+            return true;
+        }
+        match value {
+            Value::Array(items) => stack.extend(items.iter().map(|item| (item, depth + 1))),
+            Value::Object(entries) => {
+                stack.extend(entries.iter().map(|(_, value)| (value, depth + 1)))
+            }
+            Value::Passthrough(inner) => stack.push((inner, depth + 1)),
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Drop `value` without recursing. `Value`'s own drop recurses once per
+/// level, so dropping a tree too deep to convert could overflow the stack
+/// and abort Node instead of returning the depth error.
+pub(crate) fn drop_value_flat(value: Value) {
+    let mut stack = vec![value];
+    while let Some(value) = stack.pop() {
+        match value {
+            Value::Array(items) => stack.extend(items),
+            Value::Object(entries) => stack.extend(entries.into_iter().map(|(_, value)| value)),
+            Value::Passthrough(inner) => stack.push(*inner),
+            _ => {}
+        }
+    }
+}
+
+/// A [`Value`] payload continues the tree's depth count.
+impl NapiPassthrough for NapiValue {
+    fn to_js(self, env: &Env) -> Result<Unknown<'_>> {
+        value_to_js(env, self.0)
+    }
+
+    fn from_js(value: Unknown<'_>, depth: usize) -> Result<Self> {
+        js_to_value(value, depth).map(NapiValue)
+    }
+
+    fn exceeds_depth(&self, depth: usize) -> bool {
+        value_exceeds_depth(&self.0, depth)
+    }
+
+    fn drop_flat(self) {
+        drop_value_flat(self.0);
     }
 }
 
 impl ToNapiValue for NapiValue {
     unsafe fn to_napi_value(env: sys::napi_env, val: Self) -> Result<sys::napi_value> {
-        value_to_js(env, val.0)
+        if val.exceeds_depth(0) {
+            val.drop_flat();
+            return Err(depth_error());
+        }
+        Ok(val.to_js(&Env::from_raw(env))?.raw())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{eager_capacity, forbidden_key, MAX_EAGER_CAPACITY, MAX_SAFE_INTEGER};
+    use super::{
+        drop_value_flat, eager_capacity, forbidden_key, value_exceeds_depth, Value, MAX_DEPTH,
+        MAX_EAGER_CAPACITY,
+    };
+
+    fn nested(levels: usize, wrap: fn(Value) -> Value) -> Value {
+        (0..levels).fold(Value::Bool(true), |value, _| wrap(value))
+    }
+
+    const WRAPS: [fn(Value) -> Value; 3] = [
+        |v| Value::Array(vec![Value::Null, v]),
+        |v| Value::Object(vec![("a".into(), Value::Null), ("k".into(), v)]),
+        |v| Value::Passthrough(Box::new(v)),
+    ];
+
+    #[test]
+    fn depth_is_measured_to_the_limit_for_every_container() {
+        for wrap in WRAPS {
+            assert!(!value_exceeds_depth(&nested(MAX_DEPTH, wrap), 0));
+            assert!(value_exceeds_depth(&nested(MAX_DEPTH + 1, wrap), 0));
+            // Placed one level down, as a ciphertext payload is.
+            assert!(!value_exceeds_depth(&nested(MAX_DEPTH - 1, wrap), 1));
+            assert!(value_exceeds_depth(&nested(MAX_DEPTH, wrap), 1));
+        }
+        assert!(!value_exceeds_depth(&Value::Null, MAX_DEPTH));
+        assert!(value_exceeds_depth(&Value::Null, MAX_DEPTH + 1));
+    }
+
+    #[test]
+    fn trees_too_deep_for_the_stack_are_measured_and_dropped_flat() {
+        for wrap in WRAPS {
+            let deep = nested(1_000_000, wrap);
+            assert!(value_exceeds_depth(&deep, 0));
+            drop_value_flat(deep);
+        }
+    }
 
     #[test]
     fn forbidden_keys_are_rejected() {
@@ -462,12 +567,6 @@ mod tests {
         assert!(!forbidden_key("proto"));
         assert!(!forbidden_key("name"));
         assert!(!forbidden_key(""));
-    }
-
-    #[test]
-    fn max_safe_integer_matches_js() {
-        // Number.MAX_SAFE_INTEGER
-        assert_eq!(MAX_SAFE_INTEGER, 9_007_199_254_740_991);
     }
 
     #[test]

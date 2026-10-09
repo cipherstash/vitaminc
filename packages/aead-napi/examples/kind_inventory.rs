@@ -1,13 +1,13 @@
 //! Test addon loaded by `tests/kind_inventory.cjs` in a live Node environment.
 
-use napi::bindgen_prelude::{Object, ToNapiValue};
+use napi::bindgen_prelude::{JsValue, Object};
 use napi::{sys, Env, Error, JsError, Result, Status};
 use vitaminc_aead_napi::{NapiValue, Value};
 use vitaminc_aead_value::ValueKind;
 use vitaminc_protected::Protected;
 
-fn sample(kind: ValueKind) -> Result<Option<Value>> {
-    Ok(Some(match kind {
+fn sample(kind: ValueKind) -> Result<Value> {
+    Ok(match kind {
         ValueKind::Bool => Value::Bool(true),
         ValueKind::Int32 => Value::Int32(-32),
         ValueKind::Int64 => Value::Int64(i64::MIN),
@@ -19,24 +19,24 @@ fn sample(kind: ValueKind) -> Result<Option<Value>> {
         ValueKind::Bytes => Value::Bytes(Protected::new(vec![0, 255])),
         ValueKind::Array => Value::Array(vec![Value::Bool(true)]),
         ValueKind::Object => Value::Object(vec![("answer".into(), Value::UInt32(42))]),
-        // The Node mappings for these kinds land with #375. Listing them keeps
-        // any other new kind failing below until it has a sample.
-        ValueKind::Int8
-        | ValueKind::UInt8
-        | ValueKind::Int16
-        | ValueKind::UInt16
-        | ValueKind::Int128
-        | ValueKind::UInt128
-        | ValueKind::Date
-        | ValueKind::Timestamp
-        | ValueKind::Decimal => return Ok(None),
+        ValueKind::Int8 => Value::Int8(i8::MIN),
+        ValueKind::UInt8 => Value::UInt8(u8::MAX),
+        ValueKind::Int16 => Value::Int16(i16::MIN),
+        ValueKind::UInt16 => Value::UInt16(u16::MAX),
+        ValueKind::Int128 => Value::Int128(i128::MIN),
+        ValueKind::UInt128 => Value::UInt128(u128::MAX),
+        ValueKind::Date => {
+            Value::Date(chrono::NaiveDate::from_ymd_opt(2024, 2, 29).expect("valid sample date"))
+        }
+        ValueKind::Timestamp => Value::Timestamp(chrono::DateTime::UNIX_EPOCH),
+        ValueKind::Decimal => Value::Decimal("1.50".parse().expect("valid sample decimal")),
         _ => {
             return Err(Error::new(
                 Status::GenericFailure,
                 format!("add a Node conversion sample for {kind}"),
             ));
         }
-    }))
+    })
 }
 
 fn convert_samples(env: sys::napi_env) -> Result<sys::napi_value> {
@@ -45,9 +45,7 @@ fn convert_samples(env: sys::napi_env) -> Result<sys::napi_value> {
     // Drive coverage from the upstream inventory: a newly added kind must
     // have both a sample here and a working production ToNapiValue mapping.
     for &kind in ValueKind::ALL {
-        let Some(value) = sample(kind)? else {
-            continue;
-        };
+        let value = sample(kind)?;
         if value.kind() != Some(kind) {
             return Err(Error::new(
                 Status::GenericFailure,
@@ -63,7 +61,7 @@ fn convert_samples(env: sys::napi_env) -> Result<sys::napi_value> {
         "passthrough",
         NapiValue(Value::Passthrough(Box::new(Value::Bool(true)))),
     )?;
-    unsafe { Object::to_napi_value(env, exports) }
+    Ok(exports.raw())
 }
 
 /// Load the test samples through the same conversion used by consumer addons.

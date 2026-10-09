@@ -47,8 +47,15 @@ keep single.
 recursion depth, length prefixes and item counts are bounded, strings are
 UTF-8 validated, duplicate map keys are rejected, and every malformed input
 fails with `ErrMalformed` rather than panicking or over-allocating. The fuzz
-targets in this package pin that contract, and CI runs the whole suite on
-32-bit GOARCH, where the u32-bound guards are load-bearing.
+targets in this package pin that contract, and also require anything accepted
+to re-encode to the same bytes (Undefined becoming Null is the one allowed
+difference). PR CI runs them over their seeds, which include every shared
+corpus vector, and the whole suite on 32-bit GOARCH, where the u32-bound
+guards are load-bearing. `.github/workflows/fuzz.yml` fuzzes them nightly
+and records a failure on an open issue labelled `fuzz`; commit the failing
+input attached to that run under `testdata/fuzz` as a regression seed.
+vcencrypt's differential fuzz targets check the same decoders against the
+Rust ones in its wasm guest (see its README).
 
 `ErrMalformed` covers hostile bytes, not caller mistakes: a `LeafSet` that is
 partially wired, or that does not materialize a kind the buffer carries,
@@ -143,3 +150,17 @@ var stackLeaves = vcffi.LeafSet{
 (`LeafSingle`, `LeafNone`, `LeafEmptySeq`, `LeafEmptyMap`); returning nil for
 a kind the wire carries fails the decode attributably rather than injecting an
 untyped nil.
+
+## Scalar mappings and shared vectors
+
+Fixed integer widths remain exact (`int8`→Int8, `uint16`→UInt16, and so on).
+`vcvalue.Int128`, `Uint128`, `Date` and `Decimal` are intercepted before
+reflection, including inside structs, pointers and containers. `time.Time`
+encodes a nanosecond Timestamp; leap-second timestamps decode into
+`vcvalue.Timestamp` so they can be re-encoded without loss. Matching explicit
+Encoder channels are available for custom `Encryptable` implementations.
+
+The codec reads `testdata/value-conformance.json` from the repo root directly,
+as do Rust and Node. Invalid scalar widths, date ranges, nanoseconds, decimal
+flags and scales return `ErrMalformed`. Value construction errors retain the
+typed `vcvalue` errors. The broader #332 guest-object corpus remains separate.

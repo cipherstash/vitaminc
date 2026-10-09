@@ -13,8 +13,7 @@ use vitaminc_aead_value::Value;
 /// with the bare [`Value`].
 ///
 /// See the `vitaminc-aead-value` crate docs for the JS type mapping,
-/// including the `Number`/`Int` split (JS numbers always encode as
-/// `Number`; `BigInt` encodes as `Int`) and the `BigInt` decode rule.
+/// including the Float64/BigInt split and the scalar wrapper types.
 pub struct NapiValue(pub Value);
 
 impl NapiValue {

@@ -1,6 +1,7 @@
 package vcffi
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"math"
@@ -35,12 +36,12 @@ func TestReflectNatives(t *testing.T) {
 		{"nil", nil, nil},
 		{"bool", true, true},
 		{"int", 42, int64(42)},                 // int → Int64
-		{"int8", int8(-5), int32(-5)},          // narrow signed → Int32
-		{"int16", int16(-300), int32(-300)},    // narrow signed → Int32
+		{"int8", int8(-5), int8(-5)},           // exact signed width
+		{"int16", int16(-300), int16(-300)},    // exact signed width
 		{"int32", int32(-9), int32(-9)},        // Int32, exact width
 		{"int64", int64(-9), int64(-9)},        // Int64
-		{"uint8", uint8(7), uint32(7)},         // narrow unsigned → UInt32
-		{"uint16", uint16(300), uint32(300)},   // narrow unsigned → UInt32
+		{"uint8", uint8(7), uint8(7)},          // exact unsigned width
+		{"uint16", uint16(300), uint16(300)},   // exact unsigned width
 		{"uint32", uint32(7), uint32(7)},       // UInt32, exact width
 		{"uint", uint(7), uint64(7)},           // bare uint → UInt64 (no fit-check)
 		{"uint64-small", uint64(7), uint64(7)}, // uint64 → UInt64
@@ -1005,8 +1006,36 @@ func TestFramingTags(t *testing.T) {
 		}
 	}
 	for _, old := range []byte{0x10, 0x11, 0x12} {
-		if _, err := Unmarshal([]byte{old, 0, 0, 0, 0}); err == nil {
-			t.Fatalf("old framing tag %x accepted", old)
+		if _, err := Unmarshal([]byte{old}); err == nil {
+			t.Fatalf("truncated scalar tag %x accepted", old)
+		}
+	}
+}
+
+// A signaling NaN must keep its bits: widening it to float64 on the way to
+// the encoder would set the quiet bit (found by FuzzUnmarshal).
+// namedFloat32 has no Encryptable method, so it reaches the reflect path.
+type namedFloat32 float32
+
+func TestFloat32SignalingNaNKeepsItsBits(t *testing.T) {
+	for _, bits := range []uint32{0xff833030, 0x7fba3030, 0x7f800001} {
+		wire := binary.LittleEndian.AppendUint32([]byte{tagFloat32}, bits)
+		value, err := Unmarshal(wire)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f := value.(float32)
+		for _, v := range []any{
+			value, []any{value}, struct{ F float32 }{f},
+			namedFloat32(f), []namedFloat32{namedFloat32(f)}, struct{ F namedFloat32 }{namedFloat32(f)},
+		} {
+			encoded, err := Marshal(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(encoded, wire) {
+				t.Fatalf("%08x re-encoded as %x", bits, encoded)
+			}
 		}
 	}
 }

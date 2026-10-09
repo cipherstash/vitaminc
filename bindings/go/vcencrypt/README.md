@@ -216,6 +216,40 @@ cargo run --example gen_fixture   # only if the fixture value/codec changed
 cd .. && CGO_ENABLED=0 go test ./...
 ```
 
+## Differential fuzzing
+
+`differential_fuzz_test.go` feeds the same bytes to Go's decoder (`vcffi`)
+and to the Rust decoder inside this guest, and fails when they disagree.
+Each side's own fuzz targets already prove it round-trips its own input;
+these find inputs where both are self-consistent but differ from each other.
+
+- **`FuzzDifferentialValue`** checks that both sides accept or reject the
+  same value bytes. When both accept, it checks that Rust re-encodes the
+  input exactly and that Go's re-encoding matches, allowing only Go's
+  `undefined` to `null` projection.
+- **`FuzzDifferentialCipherText`** checks that both sides accept or reject
+  the same ciphertext bytes. Fuzzed seals never authenticate, so there is no
+  plaintext to compare.
+
+The guest has no decode-only export, and adding a test-only one would ship it
+in the production module. The targets rely on how the existing exports
+behave instead:
+
+- `vc_encrypt` and `vc_decrypt` decode their input before they look up the
+  cipher handle. Called with a handle that was never issued, they return
+  `ErrEncoding` when Rust rejects the bytes and `ErrBadHandle` when it
+  accepts them, with no AES work. `TestUnissuedHandleReportsDecoding` pins
+  that order.
+- Rust's re-encoding comes from decrypting a ciphertext that is a single
+  passthrough node carrying the input. That path involves no AES and none of
+  the cipher's rules about what may be sealed. Encrypting would not work
+  here: for example, the cipher refuses a container whose children are all
+  passthrough values.
+
+PR CI runs both targets over their seeds against the committed guest. The
+nightly fuzz workflow (`.github/workflows/fuzz.yml`) rebuilds the guest from
+source first, so it always compares Go with the Rust on the same commit.
+
 ## Trade-offs (accepted for the spike)
 
 - On wasm32 `vitaminc-encrypt` uses its pure-Rust RustCrypto backend: no
