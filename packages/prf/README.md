@@ -124,9 +124,14 @@ dispatch and returns each term's domain with its bytes. Every integer kind,
 `int8` through `uint128`, shares one domain and a 17-byte encoding (a sign
 byte, then a big-endian 128-bit two's-complement word), so equal numbers give
 equal terms whatever width wrote them: a JavaScript `BigInt` stored as `int8`
-matches the same number stored as `int64` from Go. Other scalars use
-`orderable-bytes` at their natural width: floats fold signed zero and every
-NaN to one positive quiet NaN, timestamps truncate fractional nanoseconds to
+matches the same number stored as `int64` from Go. Both float kinds share one
+domain: a `float32` widens exactly to `float64` (in integer operations, so
+subnormals take no slow path), then signed zero and every NaN fold to one
+positive quiet NaN. Equal numbers match across widths; `float32` 0.1 and
+`float64` 0.1 are different numbers and do not. Integer and float domains are
+distinct, so a JavaScript `number` 5 (`float64`) does not match an `int64` 5;
+use `BigInt` for integer data. Other scalars use `orderable-bytes` at their
+natural width: timestamps truncate fractional nanoseconds to
 microseconds while retaining the 12-byte seconds/nanoseconds layout, and
 decimal encodings normalize scale and signed zero. Text equality is Unicode 16
 NFC without accent or case folding; the Unicode assignment table is pinned
