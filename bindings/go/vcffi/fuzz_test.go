@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"slices"
 	"testing"
 )
 
@@ -36,20 +37,95 @@ func addCorpusSeeds(f *testing.F, wrap func([]byte) []byte) {
 	}
 }
 
-// requireCanonical fails unless out re-encodes data exactly. The one allowed
-// difference is Go's documented projection of Undefined to nil: both are
-// one-byte tags, so a lossless re-encode keeps the length and may differ
-// only where an Undefined tag (0x01) became Null (0x00).
-func requireCanonical(t *testing.T, data, out []byte) {
+// requireCanonical fails unless out re-encodes data exactly, apart from Go's
+// documented projection of Undefined to nil: each offset in undefinedAt is an
+// Undefined tag (0x01) that must come back as Null (0x00). Every other byte,
+// including a 0x01 inside a payload, must be unchanged.
+func requireCanonical(t *testing.T, data, out []byte, undefinedAt []int) {
 	t.Helper()
-	if len(out) != len(data) {
-		t.Fatalf("accepted %x re-encoded with a different length: %x", data, out)
+	want := bytes.Clone(data)
+	for _, at := range undefinedAt {
+		want[at] = tagNull
 	}
-	for i := range data {
-		if data[i] != out[i] && (data[i] != 0x01 || out[i] != 0x00) {
-			t.Fatalf("accepted %x re-encoded differently at byte %d: %x", data, i, out)
+	if !bytes.Equal(out, want) {
+		t.Fatalf("accepted %x re-encoded as %x, want %x", data, out, want)
+	}
+}
+
+// valueUndefinedTags returns the offset of every Undefined value-node tag in
+// an accepted value tree, nested ones included. It walks the transport format
+// independently of the decoder, so a walk that falls out of step with it
+// reports the wrong offsets and fails requireCanonical rather than passing.
+func valueUndefinedTags(data []byte) []int {
+	r := &reader{buf: data}
+	var at []int
+	walkValue(r, &at)
+	return at
+}
+
+func walkValue(r *reader, at *[]int) {
+	pos := r.pos
+	tag, _ := r.byteTag()
+	switch tag {
+	case tagUndefined:
+		*at = append(*at, pos)
+	case tagInt32, tagUint32, tagFloat32:
+		_, _ = r.take(4)
+	case tagInt64, tagUint64, tagFloat64:
+		_, _ = r.take(8)
+	case tagString, tagBytes:
+		n, _ := r.count()
+		_, _ = r.take(n)
+	case tagArray:
+		n, _ := r.count()
+		for range n {
+			walkValue(r, at)
+		}
+	case tagObject:
+		n, _ := r.count()
+		for range n {
+			_, _ = r.str()
+			walkValue(r, at)
+		}
+	case tagPassthrough:
+		walkValue(r, at)
+	default:
+		// Null, booleans and the fixed-width extended scalars.
+		_, _ = r.take(scalarWidth(tag))
+	}
+}
+
+// cipherUndefinedTags is valueUndefinedTags for an accepted ciphertext tree,
+// where Undefined can only appear inside passthrough nodes.
+func cipherUndefinedTags(data []byte) []int {
+	r := &reader{buf: data}
+	var at []int
+	var walk func()
+	walk = func() {
+		tag, _ := r.byteTag()
+		if _, ok := leafKind(tag); ok {
+			n, _ := r.count()
+			_, _ = r.take(n)
+			return
+		}
+		switch tag {
+		case ctSeq:
+			n, _ := r.count()
+			for range n {
+				walk()
+			}
+		case ctMap:
+			n, _ := r.count()
+			for range n {
+				_, _ = r.str()
+				walk()
+			}
+		case ctPassthrough:
+			walkValue(r, &at)
 		}
 	}
+	walk()
+	return at
 }
 
 func FuzzUnmarshal(f *testing.F) {
@@ -76,7 +152,7 @@ func FuzzUnmarshal(f *testing.F) {
 		if err != nil {
 			t.Fatalf("accepted decode failed to re-encode: %v (value %#v)", err, v)
 		}
-		requireCanonical(t, data, out)
+		requireCanonical(t, data, out, valueUndefinedTags(data))
 		// The re-encoding holds no Undefined, so it must be a fixed point.
 		again, err := Unmarshal(out)
 		if err != nil {
@@ -109,6 +185,30 @@ func FuzzUnmarshalCipherText(f *testing.F) {
 		if err != nil {
 			t.Fatalf("accepted ciphertext decode failed to re-encode: %v (value %#v)", err, v)
 		}
-		requireCanonical(t, data, out)
+		requireCanonical(t, data, out, cipherUndefinedTags(data))
 	})
+}
+
+// The walkers decide which bytes may legitimately change, so pin that they
+// find nested Undefined tags and nothing else.
+func TestUndefinedTagWalkers(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		walk func([]byte) []int
+		data []byte
+		want []int
+	}{
+		{"bare", valueUndefinedTags, []byte{0x01}, []int{0}},
+		{"bytes payload of 0x01", valueUndefinedTags, []byte{0x0B, 1, 0, 0, 0, 0x01}, nil},
+		{"array", valueUndefinedTags, []byte{0xF0, 2, 0, 0, 0, 0x0B, 1, 0, 0, 0, 0x01, 0x01}, []int{11}},
+		{"object", valueUndefinedTags, []byte{0xF1, 1, 0, 0, 0, 1, 0, 0, 0, 0x01, 0x01}, []int{10}},
+		{"passthrough", valueUndefinedTags, []byte{0xF2, 0x01}, []int{1}},
+		{"extended scalar", valueUndefinedTags, []byte{0xF0, 2, 0, 0, 0, 0x0D, 0x01, 0x01}, []int{7}},
+		{"sealed leaf of 0x01", cipherUndefinedTags, []byte{0x01, 1, 0, 0, 0, 0x01}, nil},
+		{"ciphertext passthrough", cipherUndefinedTags, []byte{0x03, 1, 0, 0, 0, 0x05, 0xF0, 1, 0, 0, 0, 0x01}, []int{11}},
+	} {
+		if got := tc.walk(tc.data); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
 }

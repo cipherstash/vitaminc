@@ -1014,6 +1014,9 @@ func TestFramingTags(t *testing.T) {
 
 // A signaling NaN must keep its bits: widening it to float64 on the way to
 // the encoder would set the quiet bit (found by FuzzUnmarshal).
+// namedFloat32 has no Encryptable method, so it reaches the reflect path.
+type namedFloat32 float32
+
 func TestFloat32SignalingNaNKeepsItsBits(t *testing.T) {
 	for _, bits := range []uint32{0xff833030, 0x7fba3030, 0x7f800001} {
 		wire := binary.LittleEndian.AppendUint32([]byte{tagFloat32}, bits)
@@ -1021,7 +1024,11 @@ func TestFloat32SignalingNaNKeepsItsBits(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, v := range []any{value, []any{value}, struct{ F float32 }{value.(float32)}} {
+		f := value.(float32)
+		for _, v := range []any{
+			value, []any{value}, struct{ F float32 }{f},
+			namedFloat32(f), []namedFloat32{namedFloat32(f)}, struct{ F namedFloat32 }{namedFloat32(f)},
+		} {
 			encoded, err := Marshal(v)
 			if err != nil {
 				t.Fatal(err)

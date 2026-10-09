@@ -585,10 +585,11 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 		enc.UInt64(rv.Uint())
 	case reflect.Float32:
 		// rv.Float() widens to float64, and the hardware widening sets the
-		// quiet bit of a signaling NaN. Read a plain float32 directly so its
-		// bits survive; a named float32 type has no bit-exact reflect path
-		// without unsafe, so only it falls back to the widening.
-		if f, ok := interfaceOf(rv).(float32); ok {
+		// quiet bit of a signaling NaN. Converting to the built-in float32
+		// instead copies the bits (reflect special-cases float32 to float32,
+		// Go issue 36400), so a named float32 type keeps them too. Only a
+		// value that cannot be read as an interface falls back to widening.
+		if f, ok := interfaceOf(rv.Convert(float32Type)).(float32); ok {
 			enc.Float32(f)
 		} else {
 			enc.Float32(float32(rv.Float()))
@@ -699,6 +700,8 @@ func encodeStruct(enc Encoder, rv reflect.Value) {
 
 // interfaceOf is rv.Interface(), or nil where reflection forbids it
 // (values reached through unexported fields).
+var float32Type = reflect.TypeOf(float32(0))
+
 func interfaceOf(rv reflect.Value) any {
 	if !rv.CanInterface() {
 		return nil
