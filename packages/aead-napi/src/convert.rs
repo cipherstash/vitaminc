@@ -107,8 +107,19 @@ pub(crate) fn own_enumerable_keys<'e>(obj: &Object<'e>) -> Result<Vec<OwnKey<'e>
     Ok(keys)
 }
 
-/// Read the property `key` names, by the key's own JS handle.
+/// Read the own property `key` names, by the key's own JS handle.
+///
+/// The key list is a snapshot, and a getter that ran since may have deleted
+/// this property; `[[Get]]` would then read it from a (possibly polluted)
+/// prototype. So ownership is checked again immediately before the read,
+/// where no JS can run in between for an ordinary object.
 pub(crate) fn get_own<'e>(obj: &Object<'e>, key: &OwnKey<'e>) -> Result<Unknown<'e>> {
+    if !obj.has_own_property_js(key.handle)? {
+        return Err(Error::new(
+            Status::InvalidArg,
+            format!("property was removed while it was being read: {}", key.name),
+        ));
+    }
     obj.get_property_unchecked(key.handle)
 }
 

@@ -179,6 +179,17 @@ fn node_object(value: Unknown<'_>) -> Result<Object<'_>> {
     Object::from_unknown(value)
 }
 
+/// A node's own `t` or `v`. A node missing either would otherwise take it
+/// from a (possibly polluted) prototype. Ownership is checked immediately
+/// before the read, where no JS can run in between, so a getter on the
+/// other field cannot delete this one after the check.
+fn own_field<'e>(obj: &Object<'e>, key: &str) -> Result<Unknown<'e>> {
+    if !obj.has_own_property(key)? {
+        return Err(shape_error());
+    }
+    get_property_unknown(obj, key)
+}
+
 fn node_from_js<Leaf, P>(obj: &Object<'_>, depth: usize) -> Result<CipherText<Leaf, P>>
 where
     Leaf: From<Vec<u8>>,
@@ -187,18 +198,10 @@ where
     if depth > MAX_DEPTH {
         return Err(depth_error());
     }
-    // Own `t` and `v` only: a node missing either would otherwise take it
-    // from a (possibly polluted) prototype. An own `v: undefined` still
-    // counts, for a passthrough of `undefined`.
-    for key in [T_KEY, V_KEY] {
-        if !obj.has_own_property(key)? {
-            return Err(shape_error());
-        }
-    }
-    let t: String = obj.get(T_KEY)?.ok_or_else(shape_error)?;
+    let t = String::from_unknown(own_field(obj, T_KEY)?)?;
     match t.as_str() {
         T_CIPHERTEXT | T_NONE | T_EMPTY_SEQ | T_EMPTY_MAP => {
-            let buf: Buffer = obj.get(V_KEY)?.ok_or_else(shape_error)?;
+            let buf = Buffer::from_unknown(own_field(obj, V_KEY)?)?;
             let leaf = Leaf::from(buf.to_vec());
             Ok(match t.as_str() {
                 T_CIPHERTEXT => CipherText::Single(leaf),
@@ -208,7 +211,7 @@ where
             })
         }
         T_SEQ => {
-            let arr: Array = obj.get(V_KEY)?.ok_or_else(shape_error)?;
+            let arr = Array::from_unknown(own_field(obj, V_KEY)?)?;
             // The same array seen as an object, for per-index own checks.
             let elements = Object::from_unknown(arr.to_unknown())?;
             let len = arr.len();
@@ -230,7 +233,7 @@ where
             Ok(CipherText::Sequence(items))
         }
         T_MAP => {
-            let map = node_object(get_property_unknown(obj, V_KEY)?)?;
+            let map = node_object(own_field(obj, V_KEY)?)?;
             // Own keys only — `Object::keys` walks the prototype chain, so
             // a hostile node object with enumerable prototype members would
             // otherwise have its inherited keys become ciphertext map
@@ -250,13 +253,18 @@ where
             Ok(CipherText::Map(entries))
         }
         T_PASSTHROUGH => {
-            // Raw fetch, not `obj.get` — `undefined` is a *faithful*
-            // projection here (`P = ()` and `NapiValue::Undefined` both
-            // project to it, and `JSON.stringify` drops the key outright),
-            // and `Object::get` would map it to `None` and reject the
-            // crate's own output as malformed. Whether `undefined`
-            // converts is `P`'s decision.
-            let value = get_property_unknown(obj, V_KEY)?;
+            // `undefined` is a *faithful* projection here (`P = ()` and
+            // `NapiValue::Undefined` both project to it), and
+            // `JSON.stringify` drops a `v: undefined` key outright, so a
+            // missing `v` reads as `undefined` rather than as malformed —
+            // never from the prototype. Whether `undefined` converts is
+            // `P`'s decision.
+            let env = Env::from_raw(obj.value().env);
+            let value = if obj.has_own_property(V_KEY)? {
+                own_field(obj, V_KEY)?
+            } else {
+                ().into_unknown(&env)?
+            };
             Ok(CipherText::Passthrough(P::from_js(value, depth + 1)?))
         }
         _ => Err(shape_error()),

@@ -208,6 +208,42 @@ for (const [key, value] of [['t', 'pt'], ['v', leaf]]) {
     delete Object.prototype[key];
   }
 }
+
+// A passthrough of undefined loses its `v` key through JSON, so a missing
+// `v` reads as undefined there, and never from the prototype.
+Object.prototype.v = 'injected';
+try {
+  const out = addon.ciphertextRoundTrip(JSON.parse(JSON.stringify({ t: 'pt', v: undefined })));
+  assert.ok(Object.hasOwn(out, 'v'));
+  assert.equal(out.v, undefined);
+} finally {
+  delete Object.prototype.v;
+}
+
+// Ownership is checked right before each read, so a getter that deletes a
+// later property cannot make that read fall through to the prototype.
+Object.prototype.b = 'injected';
+Object.prototype.v = leaf;
+try {
+  assert.throws(
+    () => addon.encode({ get a() { delete this.b; return 1; }, b: 2 }),
+    /removed while it was being read/,
+  );
+  assert.throws(
+    () => addon.readCiphertext({ get t() { delete this.v; return 'ct'; }, v: leaf }),
+    /malformed ciphertext/,
+  );
+  assert.throws(
+    () => addon.readCiphertext({
+      t: 'map',
+      v: { get a() { delete this.b; return { t: 'ct', v: leaf }; }, b: { t: 'ct', v: leaf } },
+    }),
+    /removed while it was being read/,
+  );
+} finally {
+  delete Object.prototype.b;
+  delete Object.prototype.v;
+}
 Object.prototype.t = 'pt';
 Object.prototype.v = 'injected';
 try {
