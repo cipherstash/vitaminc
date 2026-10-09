@@ -2,6 +2,7 @@ package vcencrypt
 
 import (
 	"context"
+	"crypto/rand"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -77,6 +78,17 @@ func compilationCache() wazero.CompilationCache {
 	return sharedCache
 }
 
+// guestModuleConfig supplies the host's CSPRNG and clocks to WASI. wazero's
+// defaults are deterministic: every new module would otherwise start the
+// same random_get stream, repeating AES-GCM nonces under a reused key.
+// TestGuestModuleConfigUsesHostRandomAndClocks checks these overrides.
+func guestModuleConfig() wazero.ModuleConfig {
+	return wazero.NewModuleConfig().
+		WithRandSource(rand.Reader).
+		WithSysNanotime().
+		WithSysWalltime()
+}
+
 // Client wraps one instance of the wasm guest. It is safe for concurrent use;
 // calls are serialized internally (wasm instances are single-threaded).
 // Ciphers created from it share the instance and that serialization.
@@ -110,7 +122,7 @@ func NewClient(ctx context.Context) (*Client, error) {
 	runtime := wazero.NewRuntimeWithConfig(ctx, config)
 	wasi_snapshot_preview1.MustInstantiate(ctx, runtime)
 
-	module, err := runtime.Instantiate(ctx, guestWasm)
+	module, err := runtime.InstantiateWithConfig(ctx, guestWasm, guestModuleConfig())
 	if err != nil {
 		_ = runtime.Close(ctx)
 		return nil, fmt.Errorf("vcencrypt: instantiating guest: %w", err)

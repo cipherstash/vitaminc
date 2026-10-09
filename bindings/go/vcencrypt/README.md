@@ -216,6 +216,9 @@ cargo run --example gen_fixture   # only if the fixture value/codec changed
 cd .. && CGO_ENABLED=0 go test ./...
 ```
 
+The Go tests include `TestGuestImportsWASIRandomGet`, which checks that the
+rebuilt guest still imports WASI's `random_get` for nonce entropy.
+
 ## Trade-offs (accepted for the spike)
 
 - On wasm32 `vitaminc-encrypt` uses its pure-Rust RustCrypto backend: no
