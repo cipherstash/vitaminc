@@ -29,15 +29,17 @@ fn node_value_conformance() {
     ));
     let module = target.join("addon.node");
     std::fs::copy(library, &module).expect("copy Node module");
-    let result = Command::new("node")
-        .arg(package.join("tests/value-conformance.cjs"))
-        .arg(module)
-        .output()
-        .expect("Node.js is required for binding tests");
-    assert!(
-        result.status.success(),
-        "Node conformance:\n{}\n{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr)
-    );
+    for suite in ["tests/value-conformance.cjs", "tests/object-safety.cjs"] {
+        let result = Command::new("node")
+            .arg(package.join(suite))
+            .arg(&module)
+            .output()
+            .expect("Node.js is required for binding tests");
+        assert!(
+            result.status.success(),
+            "{suite}:\n{}\n{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
 }
