@@ -1,6 +1,7 @@
 package vcffi
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"math"
@@ -1007,6 +1008,27 @@ func TestFramingTags(t *testing.T) {
 	for _, old := range []byte{0x10, 0x11, 0x12} {
 		if _, err := Unmarshal([]byte{old}); err == nil {
 			t.Fatalf("truncated scalar tag %x accepted", old)
+		}
+	}
+}
+
+// A signaling NaN must keep its bits: widening it to float64 on the way to
+// the encoder would set the quiet bit (found by FuzzUnmarshal).
+func TestFloat32SignalingNaNKeepsItsBits(t *testing.T) {
+	for _, bits := range []uint32{0xff833030, 0x7fba3030, 0x7f800001} {
+		wire := binary.LittleEndian.AppendUint32([]byte{tagFloat32}, bits)
+		value, err := Unmarshal(wire)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range []any{value, []any{value}, struct{ F float32 }{value.(float32)}} {
+			encoded, err := Marshal(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(encoded, wire) {
+				t.Fatalf("%08x re-encoded as %x", bits, encoded)
+			}
 		}
 	}
 }

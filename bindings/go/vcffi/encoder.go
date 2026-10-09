@@ -584,7 +584,15 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 		// UInt64 (no fit-check: a bare uint always maps to UINT64 now).
 		enc.UInt64(rv.Uint())
 	case reflect.Float32:
-		enc.Float32(float32(rv.Float()))
+		// rv.Float() widens to float64, and the hardware widening sets the
+		// quiet bit of a signaling NaN. Read a plain float32 directly so its
+		// bits survive; a named float32 type has no bit-exact reflect path
+		// without unsafe, so only it falls back to the widening.
+		if f, ok := interfaceOf(rv).(float32); ok {
+			enc.Float32(f)
+		} else {
+			enc.Float32(float32(rv.Float()))
+		}
 	case reflect.Float64:
 		enc.Float64(rv.Float())
 	case reflect.String:
@@ -687,4 +695,13 @@ func encodeStruct(enc Encoder, rv reflect.Value) {
 		return
 	}
 	_ = m.End()
+}
+
+// interfaceOf is rv.Interface(), or nil where reflection forbids it
+// (values reached through unexported fields).
+func interfaceOf(rv reflect.Value) any {
+	if !rv.CanInterface() {
+		return nil
+	}
+	return rv.Interface()
 }
