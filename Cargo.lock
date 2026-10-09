@@ -2611,7 +2611,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vitaminc"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "vitaminc",
  "vitaminc-aead",
@@ -2629,7 +2629,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-aead"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "bytes",
  "quickcheck",
@@ -2646,7 +2646,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-aead-derive"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2655,7 +2655,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-aead-napi"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "napi",
@@ -2669,7 +2669,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-aead-value"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "orderable-bytes",
@@ -2687,7 +2687,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-async-traits"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "vitaminc-protected",
  "vitaminc-traits",
@@ -2695,7 +2695,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-context"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "mutants",
  "quickcheck",
@@ -2705,7 +2705,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-encrypt"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "aes-gcm",
  "aws-lc-rs",
@@ -2720,7 +2720,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-hmac"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "chrono",
  "futures",
@@ -2738,7 +2738,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-kms"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "aws-config",
  "aws-sdk-kms",
@@ -2752,7 +2752,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-password"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "vitaminc-protected",
  "vitaminc-random",
@@ -2760,7 +2760,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-permutation"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "bitvec",
  "rand 0.10.3",
@@ -2774,7 +2774,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-prf"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "mutants",
  "quickcheck",
@@ -2787,7 +2787,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-protected"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "bitvec",
  "digest 0.11.2",
@@ -2809,7 +2809,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-protected-derive"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2818,7 +2818,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-random"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "chacha20",
  "getrandom 0.4.3",
@@ -2831,7 +2831,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-random-derives"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2840,7 +2840,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-traits"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "bytes",
