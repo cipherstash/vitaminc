@@ -4,7 +4,7 @@
 //!
 //! - [`Backend`]: seal and open one leaf. Bytes only, no types. This is
 //!   the part of today's `Cipher` that genuinely belongs to the AEAD.
-//! - [`EncryptSink`]: typed scalars to tagged leaf bytes, and the container
+//! - [`EncryptSink`]: scalars to tagged leaf bytes, and the container
 //!   rules (element and entry AAD, empty markers, at least one sealed node,
 //!   no duplicate keys). This is the rest of today's `Cipher` plus
 //!   `impl Encrypt for Value`, in one place.
@@ -14,16 +14,14 @@
 
 use std::collections::HashSet;
 
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
-use rust_decimal::Decimal;
 use vitaminc_aead::{Cipher, CipherText, Context, Decipher, DecipherVisitor, IntoAad, LocalCipherText, Unspecified};
-use vitaminc_aead_value::tags;
 use vitaminc_encrypt::{Aes256Cipher, AesCipherText};
 use vitaminc_protected::{Controlled, Protected};
 
 use crate::frame_writer::{to_frame, FrameWriteError};
+use crate::kinds::{Logical, Physical};
 use crate::model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
-use crate::scalar;
+use crate::scalar::{self, Form, ScalarError};
 
 /// Seal and open one leaf. The backend binds the wire version into the AAD
 /// itself (`for_leaf`), as `seal_leaf` does today.
@@ -72,7 +70,8 @@ pub type Node<L> = CipherText<L, PassthroughFrame>;
 pub enum EncryptError<E> {
     Backend(E),
     Source(SourceError),
-    /// Duplicate key, or a container with nothing sealed in it.
+    /// Duplicate key, a container with nothing sealed in it, or a value
+    /// that isn't valid for its logical type.
     Shape(&'static str),
 }
 
@@ -151,11 +150,13 @@ impl<'b, B: Backend> EncryptSink<'b, B, Root> {
 }
 
 impl<B: Backend, O: Slot<B::Leaf>> EncryptSink<'_, B, O> {
-    /// Seal `tag ++ payload` as one leaf.
-    fn leaf(self, tag: u8, payload: &[u8]) -> Result<O::Ok, EncryptError<B::Error>> {
-        let mut plaintext = Protected::new(Vec::with_capacity(1 + payload.len()));
-        plaintext.risky_inner_mut().push(tag);
-        plaintext.risky_inner_mut().extend_from_slice(payload);
+    /// Seal one scalar as one leaf: its tag, then its payload.
+    fn leaf(self, ty: Option<Logical>, v: Physical<'_>) -> Result<O::Ok, EncryptError<B::Error>> {
+        let mut plaintext = Protected::new(Vec::new());
+        scalar::write(ty, v, plaintext.risky_inner_mut(), Form::Leaf).map_err(|e| match e {
+            ScalarError::Invalid => EncryptError::Shape("value isn't valid for its logical type"),
+            ScalarError::TooLong => EncryptError::Shape("too long"),
+        })?;
         let leaf = self.backend.seal(plaintext, &self.aad).map_err(EncryptError::Backend)?;
         Ok(self.out.put(CipherText::Single(leaf)))
     }
@@ -165,65 +166,14 @@ impl<B: Backend, O: Slot<B::Leaf>> EncryptSink<'_, B, O> {
     }
 }
 
-macro_rules! le {
-    ($($method:ident($ty:ty) => $tag:ident),* $(,)?) => {
-        $(
-            fn $method(self, v: $ty) -> Result<O::Ok, Self::Error> {
-                self.leaf(tags::$tag, &v.to_le_bytes())
-            }
-        )*
-    };
-}
-
 impl<'b, B: Backend, O: Slot<B::Leaf>> Sink for EncryptSink<'b, B, O> {
     type Ok = O::Ok;
     type Error = EncryptError<B::Error>;
     type Seq = EncryptSeq<'b, B, O>;
     type Map = EncryptMap<'b, B, O>;
 
-    fn null(self) -> Result<O::Ok, Self::Error> {
-        self.leaf(tags::NULL, &[])
-    }
-
-    fn undefined(self) -> Result<O::Ok, Self::Error> {
-        self.leaf(tags::UNDEFINED, &[])
-    }
-
-    fn bool(self, v: bool) -> Result<O::Ok, Self::Error> {
-        self.leaf(if v { tags::BOOL_TRUE } else { tags::BOOL_FALSE }, &[])
-    }
-
-    le! {
-        i8(i8) => INT8, i16(i16) => INT16, i32(i32) => INT32, i64(i64) => INT64, i128(i128) => INT128,
-        u8(u8) => UINT8, u16(u16) => UINT16, u32(u32) => UINT32, u64(u64) => UINT64, u128(u128) => UINT128,
-    }
-
-    fn f32(self, v: f32) -> Result<O::Ok, Self::Error> {
-        self.leaf(tags::FLOAT32, &v.to_bits().to_le_bytes())
-    }
-
-    fn f64(self, v: f64) -> Result<O::Ok, Self::Error> {
-        self.leaf(tags::FLOAT64, &v.to_bits().to_le_bytes())
-    }
-
-    fn date(self, v: NaiveDate) -> Result<O::Ok, Self::Error> {
-        self.leaf(tags::DATE, &v.num_days_from_ce().to_le_bytes())
-    }
-
-    fn timestamp(self, v: DateTime<Utc>) -> Result<O::Ok, Self::Error> {
-        self.leaf(tags::TIMESTAMP, &scalar::timestamp_bytes(v))
-    }
-
-    fn decimal(self, v: Decimal) -> Result<O::Ok, Self::Error> {
-        self.leaf(tags::DECIMAL, &v.serialize())
-    }
-
-    fn str(self, v: &str) -> Result<O::Ok, Self::Error> {
-        self.leaf(tags::STRING, v.as_bytes())
-    }
-
-    fn bytes(self, v: &[u8]) -> Result<O::Ok, Self::Error> {
-        self.leaf(tags::BYTES, v)
+    fn scalar(self, ty: Option<Logical>, v: Physical<'_>) -> Result<O::Ok, Self::Error> {
+        self.leaf(ty, v)
     }
 
     fn seq(self, len: Option<usize>) -> Result<Self::Seq, Self::Error> {

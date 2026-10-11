@@ -42,6 +42,15 @@ pub fn valid() -> Vec<Vector> {
     all
 }
 
+/// Valid today, but with no physical-plus-logical form: a leap second has
+/// no count of nanoseconds, and `(scale, int)` has no negative zero.
+pub const UNREPRESENTABLE: [&str; 2] = ["timestamp-leap", "decimal-negative-zero"];
+
+/// Every valid vector the physical-plus-logical model can hold.
+pub fn representable() -> Vec<Vector> {
+    valid().into_iter().filter(|v| !UNREPRESENTABLE.contains(&v.name.as_str())).collect()
+}
+
 pub fn malformed() -> Vec<Vector> {
     vectors("malformed")
 }

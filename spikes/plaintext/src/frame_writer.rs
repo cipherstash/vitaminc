@@ -3,18 +3,19 @@
 
 use std::collections::HashSet;
 
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
-use rust_decimal::Decimal;
-use vitaminc_aead_value::{tags, transport};
+use vitaminc_aead_value::transport;
 use vitaminc_protected::{Controlled, Protected};
 
+use crate::kinds::{Logical, Physical};
 use crate::model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
-use crate::scalar;
+use crate::scalar::{self, Form, ScalarError};
 
 #[derive(Debug)]
 pub enum FrameWriteError {
     TooDeep,
     TooLong,
+    /// A value that isn't valid for its logical type.
+    Invalid,
     CountMismatch,
     DuplicateKey,
     Source(SourceError),
@@ -54,18 +55,6 @@ impl<'o> FrameWriter<'o> {
         }
         self.out.push(tag);
         Ok(self.out)
-    }
-
-    fn fixed(self, tag: u8, payload: &[u8]) -> Result<(), FrameWriteError> {
-        self.node(tag)?.extend_from_slice(payload);
-        Ok(())
-    }
-
-    fn variable(self, tag: u8, payload: &[u8]) -> Result<(), FrameWriteError> {
-        let out = self.node(tag)?;
-        write_len(out, payload.len())?;
-        out.extend_from_slice(payload);
-        Ok(())
     }
 
     fn container(self, tag: u8) -> Result<Count<'o>, FrameWriteError> {
@@ -115,65 +104,20 @@ impl<'o> Count<'o> {
     }
 }
 
-macro_rules! le {
-    ($($method:ident($ty:ty) => $tag:ident),* $(,)?) => {
-        $(
-            fn $method(self, v: $ty) -> Result<(), FrameWriteError> {
-                self.fixed(tags::$tag, &v.to_le_bytes())
-            }
-        )*
-    };
-}
-
 impl<'o> Sink for FrameWriter<'o> {
     type Ok = ();
     type Error = FrameWriteError;
     type Seq = FrameSeq<'o>;
     type Map = FrameMap<'o>;
 
-    fn null(self) -> Result<(), FrameWriteError> {
-        self.fixed(tags::NULL, &[])
-    }
-
-    fn undefined(self) -> Result<(), FrameWriteError> {
-        self.fixed(tags::UNDEFINED, &[])
-    }
-
-    fn bool(self, v: bool) -> Result<(), FrameWriteError> {
-        self.fixed(if v { tags::BOOL_TRUE } else { tags::BOOL_FALSE }, &[])
-    }
-
-    le! {
-        i8(i8) => INT8, i16(i16) => INT16, i32(i32) => INT32, i64(i64) => INT64, i128(i128) => INT128,
-        u8(u8) => UINT8, u16(u16) => UINT16, u32(u32) => UINT32, u64(u64) => UINT64, u128(u128) => UINT128,
-    }
-
-    fn f32(self, v: f32) -> Result<(), FrameWriteError> {
-        self.fixed(tags::FLOAT32, &v.to_bits().to_le_bytes())
-    }
-
-    fn f64(self, v: f64) -> Result<(), FrameWriteError> {
-        self.fixed(tags::FLOAT64, &v.to_bits().to_le_bytes())
-    }
-
-    fn date(self, v: NaiveDate) -> Result<(), FrameWriteError> {
-        self.fixed(tags::DATE, &v.num_days_from_ce().to_le_bytes())
-    }
-
-    fn timestamp(self, v: DateTime<Utc>) -> Result<(), FrameWriteError> {
-        self.fixed(tags::TIMESTAMP, &scalar::timestamp_bytes(v))
-    }
-
-    fn decimal(self, v: Decimal) -> Result<(), FrameWriteError> {
-        self.fixed(tags::DECIMAL, &v.serialize())
-    }
-
-    fn str(self, v: &str) -> Result<(), FrameWriteError> {
-        self.variable(tags::STRING, v.as_bytes())
-    }
-
-    fn bytes(self, v: &[u8]) -> Result<(), FrameWriteError> {
-        self.variable(tags::BYTES, v)
+    fn scalar(self, ty: Option<Logical>, v: Physical<'_>) -> Result<(), FrameWriteError> {
+        if self.depth > transport::MAX_DEPTH {
+            return Err(FrameWriteError::TooDeep);
+        }
+        scalar::write(ty, v, self.out, Form::Frame).map_err(|e| match e {
+            ScalarError::Invalid => FrameWriteError::Invalid,
+            ScalarError::TooLong => FrameWriteError::TooLong,
+        })
     }
 
     fn seq(self, len: Option<usize>) -> Result<FrameSeq<'o>, FrameWriteError> {

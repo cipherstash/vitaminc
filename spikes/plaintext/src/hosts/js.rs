@@ -12,16 +12,15 @@
 //! The hardening in aead-napi's `convert.rs` (own-property re-checks,
 //! prototype rules, depth) is left out.
 
-use chrono::{DateTime, NaiveDate, Utc};
 use napi::bindgen_prelude::{
     Array, BigInt, Buffer, FromNapiValue, JsObjectValue, JsValue, KeyCollectionMode, KeyConversion,
     KeyFilter, Null, Object, ToNapiValue, Uint8Array, Unknown, Utf16String,
 };
 use napi::{Env, Property, ValueType};
-use rust_decimal::Decimal;
 use vitaminc_aead::{Context, LocalCipherText};
 use vitaminc_encrypt::Aes256Cipher;
 
+use crate::kinds::{self, Float, Int, Logical, Physical, TimeUnit};
 use crate::model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
 use crate::{decrypt_into, encrypt as encrypt_any, DecryptError, EncryptError, Node};
 
@@ -56,18 +55,21 @@ impl Plaintext for JsRef<'_> {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         let v = self.0;
         match v.get_type().map_err(fail)? {
-            ValueType::Null => sink.null(),
-            ValueType::Undefined => sink.undefined(),
-            ValueType::Boolean => sink.bool(bool::from_unknown(v).map_err(fail)?),
-            ValueType::Number => sink.f64(f64::from_unknown(v).map_err(fail)?),
+            ValueType::Null => sink.scalar(None, Physical::Null),
+            ValueType::Undefined => sink.scalar(Some(Logical::Undefined), Physical::Null),
+            ValueType::Boolean => sink.scalar(None, Physical::Bool(bool::from_unknown(v).map_err(fail)?)),
+            ValueType::Number => sink.scalar(None, Physical::Float(Float::F64(f64::from_unknown(v).map_err(fail)?))),
             ValueType::BigInt => {
                 let big = BigInt::from_unknown(v).map_err(fail)?;
-                bigint(big.sign_bit, &big.words, sink)
+                let int = bigint(big.sign_bit, &big.words).map_err(S::Error::source)?;
+                sink.scalar(None, Physical::Int(int))
             }
-            ValueType::String => sink.str(&text(v).map_err(fail)?),
-            ValueType::Object if v.is_buffer().map_err(fail)? => sink.bytes(&Buffer::from_unknown(v).map_err(fail)?),
+            ValueType::String => sink.scalar(None, Physical::Text(&text(v).map_err(fail)?)),
+            ValueType::Object if v.is_buffer().map_err(fail)? => {
+                sink.scalar(None, Physical::Bytes(&Buffer::from_unknown(v).map_err(fail)?))
+            }
             ValueType::Object if v.is_typedarray().map_err(fail)? => {
-                sink.bytes(&Uint8Array::from_unknown(v).map_err(fail)?)
+                sink.scalar(None, Physical::Bytes(&Uint8Array::from_unknown(v).map_err(fail)?))
             }
             ValueType::Object if v.is_array().map_err(fail)? => {
                 let arr = Array::from_unknown(v).map_err(fail)?;
@@ -81,13 +83,14 @@ impl Plaintext for JsRef<'_> {
                 }
                 seq.end()
             }
+            // A Date is a count of milliseconds, so that's what it says: no
+            // conversion to chrono and no loss either way.
             ValueType::Object if v.is_date().map_err(fail)? => {
                 let ms = napi::JsDate::from_unknown(v).map_err(fail)?.value_of().map_err(fail)?;
-                let ts = (ms.is_finite() && ms.fract() == 0.0)
-                    .then(|| DateTime::from_timestamp_millis(ms as i64))
-                    .flatten()
-                    .ok_or_else(|| S::Error::source(SourceError::msg("invalid Date")))?;
-                sink.timestamp(ts)
+                if !(ms.is_finite() && ms.fract() == 0.0) {
+                    return Err(S::Error::source(SourceError::msg("invalid Date")));
+                }
+                sink.scalar(Some(Logical::Timestamp(TimeUnit::Millis)), Physical::Int(Int::I64(ms as i64)))
             }
             ValueType::Object => {
                 let obj = Object::from_unknown(v).map_err(fail)?;
@@ -115,8 +118,8 @@ impl Plaintext for JsRef<'_> {
 }
 
 /// Smallest width that fits, signed first, as aead-napi does today.
-fn bigint<S: Sink>(negative: bool, words: &[u64], sink: S) -> Result<S::Ok, S::Error> {
-    let range = || S::Error::source(SourceError::msg("BigInt out of range"));
+fn bigint(negative: bool, words: &[u64]) -> Result<Int, SourceError> {
+    let range = || SourceError::msg("BigInt out of range");
     if words.get(2..).is_some_and(|tail| tail.iter().any(|&w| w != 0)) {
         return Err(range());
     }
@@ -126,26 +129,26 @@ fn bigint<S: Sink>(negative: bool, words: &[u64], sink: S) -> Result<S::Ok, S::E
             return Err(range());
         }
         let v = (m as i128).wrapping_neg();
-        return match () {
-            _ if i8::try_from(v).is_ok() => sink.i8(v as i8),
-            _ if i16::try_from(v).is_ok() => sink.i16(v as i16),
-            _ if i32::try_from(v).is_ok() => sink.i32(v as i32),
-            _ if i64::try_from(v).is_ok() => sink.i64(v as i64),
-            _ => sink.i128(v),
-        };
+        return Ok(match () {
+            _ if i8::try_from(v).is_ok() => Int::I8(v as i8),
+            _ if i16::try_from(v).is_ok() => Int::I16(v as i16),
+            _ if i32::try_from(v).is_ok() => Int::I32(v as i32),
+            _ if i64::try_from(v).is_ok() => Int::I64(v as i64),
+            _ => Int::I128(v),
+        });
     }
-    match () {
-        _ if i8::try_from(m).is_ok() => sink.i8(m as i8),
-        _ if u8::try_from(m).is_ok() => sink.u8(m as u8),
-        _ if i16::try_from(m).is_ok() => sink.i16(m as i16),
-        _ if u16::try_from(m).is_ok() => sink.u16(m as u16),
-        _ if i32::try_from(m).is_ok() => sink.i32(m as i32),
-        _ if u32::try_from(m).is_ok() => sink.u32(m as u32),
-        _ if i64::try_from(m).is_ok() => sink.i64(m as i64),
-        _ if u64::try_from(m).is_ok() => sink.u64(m as u64),
-        _ if i128::try_from(m).is_ok() => sink.i128(m as i128),
-        _ => sink.u128(m),
-    }
+    Ok(match () {
+        _ if i8::try_from(m).is_ok() => Int::I8(m as i8),
+        _ if u8::try_from(m).is_ok() => Int::U8(m as u8),
+        _ if i16::try_from(m).is_ok() => Int::I16(m as i16),
+        _ if u16::try_from(m).is_ok() => Int::U16(m as u16),
+        _ if i32::try_from(m).is_ok() => Int::I32(m as i32),
+        _ if u32::try_from(m).is_ok() => Int::U32(m as u32),
+        _ if i64::try_from(m).is_ok() => Int::I64(m as i64),
+        _ if u64::try_from(m).is_ok() => Int::U64(m as u64),
+        _ if i128::try_from(m).is_ok() => Int::I128(m as i128),
+        _ => Int::U128(m),
+    })
 }
 
 /// The sink side: build JS values directly. Replaces `value_to_js`.
@@ -207,22 +210,38 @@ impl<'e, T: Target<'e>> JsBuilder<'e, T> {
         self.target.put(self.env, value)
     }
 
-    fn wrapper(self, key: &str, text: String) -> Result<T::Ok, JsError> {
+    /// A plain object of own properties: how a logical type with no JS
+    /// counterpart surfaces.
+    fn object(self, fields: &[(&str, Unknown<'e>)]) -> Result<T::Ok, JsError> {
         let mut obj = Object::new(self.env)?;
-        let value = text.into_unknown(self.env)?;
-        obj.define_properties(&[Property::new().with_name(self.env, key)?.with_value(&value)])?;
+        let props = fields
+            .iter()
+            .map(|&(key, ref value)| Ok(Property::new().with_name(self.env, key)?.with_value(value)))
+            .collect::<napi::Result<Vec<_>>>()?;
+        obj.define_properties(&props)?;
         self.put(obj)
     }
 }
 
-macro_rules! bigint_out {
-    ($($method:ident($ty:ty) => $wide:ty),* $(,)?) => {
-        $(
-            fn $method(self, v: $ty) -> Result<T::Ok, JsError> {
-                self.put(BigInt::from(<$wide>::from(v)))
-            }
-        )*
-    };
+/// A physical value as its natural JS value.
+fn physical<'e>(env: &'e Env, v: Physical<'_>) -> Result<Unknown<'e>, JsError> {
+    Ok(match v {
+        Physical::Null => Null.into_unknown(env)?,
+        Physical::Bool(b) => b.into_unknown(env)?,
+        // Every integer width surfaces as a BigInt.
+        Physical::Int(i) => match i.to_i128() {
+            Some(v) => BigInt::from(v).into_unknown(env)?,
+            None => BigInt::from(i.to_u128().unwrap_or_default()).into_unknown(env)?,
+        },
+        Physical::Float(Float::F32(f)) => f64::from(f).into_unknown(env)?,
+        Physical::Float(Float::F64(f)) => f.into_unknown(env)?,
+        Physical::Text(s) => s.into_unknown(env)?,
+        Physical::Bytes(b) => Buffer::from(b.to_vec()).into_unknown(env)?,
+    })
+}
+
+fn invalid() -> JsError {
+    JsError(napi::Error::from_reason("value isn't valid for its logical type"))
 }
 
 impl<'e, T: Target<'e>> Sink for JsBuilder<'e, T> {
@@ -231,55 +250,52 @@ impl<'e, T: Target<'e>> Sink for JsBuilder<'e, T> {
     type Seq = JsContainer<'e, T>;
     type Map = JsContainer<'e, T>;
 
-    fn null(self) -> Result<T::Ok, JsError> {
-        self.put(Null)
-    }
-
-    fn undefined(self) -> Result<T::Ok, JsError> {
-        self.put(())
-    }
-
-    fn bool(self, v: bool) -> Result<T::Ok, JsError> {
-        self.put(v)
-    }
-
-    // Every integer kind surfaces as a BigInt.
-    bigint_out! {
-        i8(i8) => i128, i16(i16) => i128, i32(i32) => i128, i64(i64) => i128, i128(i128) => i128,
-        u8(u8) => u128, u16(u16) => u128, u32(u32) => u128, u64(u64) => u128, u128(u128) => u128,
-    }
-
-    fn f32(self, v: f32) -> Result<T::Ok, JsError> {
-        self.put(f64::from(v))
-    }
-
-    fn f64(self, v: f64) -> Result<T::Ok, JsError> {
-        self.put(v)
-    }
-
-    fn date(self, v: NaiveDate) -> Result<T::Ok, JsError> {
-        self.wrapper("date", v.to_string())
-    }
-
-    fn timestamp(self, v: DateTime<Utc>) -> Result<T::Ok, JsError> {
-        if v.timestamp_subsec_nanos().is_multiple_of(1_000_000) && v.timestamp_subsec_nanos() < 1_000_000_000 {
-            let date = self.env.create_date(v.timestamp_millis() as f64)?;
-            self.put(date)
-        } else {
-            self.wrapper("timestamp", v.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true))
+    fn scalar(self, ty: Option<Logical>, v: Physical<'_>) -> Result<T::Ok, JsError> {
+        let env = self.env;
+        let text = |s: String| s.into_unknown(env);
+        match (ty, v) {
+            (None, v) => {
+                let v = physical(env, v)?;
+                self.target.put(env, v)
+            }
+            (Some(Logical::Undefined), _) => self.put(()),
+            (Some(Logical::Timestamp(unit)), Physical::Int(count)) => {
+                let ts = kinds::timestamp(unit, count).ok_or_else(invalid)?;
+                if ts.timestamp_subsec_nanos().is_multiple_of(1_000_000) {
+                    let date = env.create_date(ts.timestamp_millis() as f64)?;
+                    self.put(date)
+                } else {
+                    let iso = ts.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true);
+                    self.object(&[("timestamp", text(iso)?)])
+                }
+            }
+            (Some(Logical::Date), Physical::Int(days)) => {
+                let date = kinds::date(days).ok_or_else(invalid)?;
+                self.object(&[("date", text(date.to_string())?)])
+            }
+            (Some(Logical::Decimal { scale }), Physical::Int(mantissa)) => {
+                let d = kinds::decimal(scale, mantissa).ok_or_else(invalid)?;
+                self.object(&[("decimal", text(d.to_string())?)])
+            }
+            (Some(Logical::Uuid), Physical::Bytes(b)) => {
+                let hex: String = b.iter().map(|b| format!("{b:02x}")).collect();
+                let uuid = format!("{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..]);
+                self.object(&[("uuid", text(uuid)?)])
+            }
+            // A logical type this build doesn't know. Keep the annotation
+            // with the physical value; never hand over the bare physical
+            // value as if it were the logical one (a decimal's mantissa
+            // isn't its value).
+            (Some(ty), v) => {
+                let (id, param) = ty.to_wire();
+                let fields = [
+                    ("logical", u32::from(id).into_unknown(env)?),
+                    ("param", u32::from(param).into_unknown(env)?),
+                    ("value", physical(env, v)?),
+                ];
+                self.object(&fields)
+            }
         }
-    }
-
-    fn decimal(self, v: Decimal) -> Result<T::Ok, JsError> {
-        self.wrapper("decimal", v.to_string())
-    }
-
-    fn str(self, v: &str) -> Result<T::Ok, JsError> {
-        self.put(v)
-    }
-
-    fn bytes(self, v: &[u8]) -> Result<T::Ok, JsError> {
-        self.put(Buffer::from(v.to_vec()))
     }
 
     fn seq(self, _: Option<usize>) -> Result<JsContainer<'e, T>, JsError> {

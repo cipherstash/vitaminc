@@ -10,14 +10,16 @@
 //!   native binding walk a live host object (a JS getter can throw) without
 //!   a snapshot first. It's serde's `ser::Error::custom` pattern.
 //! - **Lengths are optional,** for host iterables that don't know their size.
+//! - **Scalars are physical plus logical.** One `scalar` method takes a
+//!   [`Physical`] value and an optional [`Logical`] type, rather than a
+//!   method per kind. See [`kinds`](crate::kinds) for why.
 //!
 //! There is no `Encrypt` trait. Encryption is a sink, driven by
 //! [`encrypt`](crate::encrypt::encrypt).
 
 use std::fmt;
 
-use chrono::{DateTime, NaiveDate, Utc};
-use rust_decimal::Decimal;
+use crate::kinds::{Logical, Physical};
 
 pub trait Plaintext {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error>;
@@ -52,29 +54,9 @@ pub trait Sink: Sized {
     type Seq: SeqSink<Ok = Self::Ok, Error = Self::Error>;
     type Map: MapSink<Ok = Self::Ok, Error = Self::Error>;
 
-    fn null(self) -> Result<Self::Ok, Self::Error>;
-    fn undefined(self) -> Result<Self::Ok, Self::Error>;
-    fn bool(self, v: bool) -> Result<Self::Ok, Self::Error>;
-
-    fn i8(self, v: i8) -> Result<Self::Ok, Self::Error>;
-    fn i16(self, v: i16) -> Result<Self::Ok, Self::Error>;
-    fn i32(self, v: i32) -> Result<Self::Ok, Self::Error>;
-    fn i64(self, v: i64) -> Result<Self::Ok, Self::Error>;
-    fn i128(self, v: i128) -> Result<Self::Ok, Self::Error>;
-    fn u8(self, v: u8) -> Result<Self::Ok, Self::Error>;
-    fn u16(self, v: u16) -> Result<Self::Ok, Self::Error>;
-    fn u32(self, v: u32) -> Result<Self::Ok, Self::Error>;
-    fn u64(self, v: u64) -> Result<Self::Ok, Self::Error>;
-    fn u128(self, v: u128) -> Result<Self::Ok, Self::Error>;
-    fn f32(self, v: f32) -> Result<Self::Ok, Self::Error>;
-    fn f64(self, v: f64) -> Result<Self::Ok, Self::Error>;
-
-    fn date(self, v: NaiveDate) -> Result<Self::Ok, Self::Error>;
-    fn timestamp(self, v: DateTime<Utc>) -> Result<Self::Ok, Self::Error>;
-    fn decimal(self, v: Decimal) -> Result<Self::Ok, Self::Error>;
-
-    fn str(self, v: &str) -> Result<Self::Ok, Self::Error>;
-    fn bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error>;
+    /// One scalar: a physical value, and the logical type it represents,
+    /// if any. See [`kinds`](crate::kinds).
+    fn scalar(self, ty: Option<Logical>, v: Physical<'_>) -> Result<Self::Ok, Self::Error>;
 
     fn seq(self, len: Option<usize>) -> Result<Self::Seq, Self::Error>;
     fn map(self, len: Option<usize>) -> Result<Self::Map, Self::Error>;

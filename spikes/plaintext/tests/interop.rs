@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{sample, valid};
+use common::{representable, sample};
 use vitaminc_aead::{CipherText, LocalCipherText};
 use vitaminc_aead_value::transport::{self, Reader};
 use vitaminc_encrypt::{Aes256Cipher, AesCipherText, Key};
@@ -24,7 +24,7 @@ fn cipher() -> Aes256Cipher {
 #[test]
 fn the_guest_interoperates_with_today_both_ways() {
     let cipher = cipher();
-    for v in valid() {
+    for v in representable() {
         let new_ct = guest::encrypt(&cipher, AAD, &v.bytes).expect(&v.name);
         let old_ct = today::encrypt(&cipher, AAD, &v.bytes).expect(&v.name);
         assert_eq!(today::decrypt(&cipher, AAD, &new_ct).expect(&v.name), v.bytes, "new to old: {}", v.name);
@@ -36,7 +36,7 @@ fn the_guest_interoperates_with_today_both_ways() {
 #[test]
 fn ciphertext_codec_is_byte_identical_to_transport() {
     let cipher = cipher();
-    for v in valid() {
+    for v in representable() {
         let bytes = today::encrypt(&cipher, AAD, &v.bytes).unwrap();
         let node = codec::decode::<LocalCipherText>(&bytes).expect(&v.name);
         let mut again = Vec::new();
@@ -53,7 +53,7 @@ fn ciphertext_codec_is_byte_identical_to_transport() {
 #[test]
 fn wrong_aad_is_an_auth_failure() {
     let cipher = cipher();
-    for v in valid() {
+    for v in representable() {
         let ct = guest::encrypt(&cipher, AAD, &v.bytes).unwrap();
         let wrong = guest::decrypt(&cipher, b"\x01\x00\x00\x00other", &ct);
         // A passthrough-only value authenticates nothing, by design.

@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{decode, sample, ts, valid};
+use common::{decode, representable, sample, ts};
 use vitaminc_aead_value::canonical::equality_input;
 use vitaminc_aead_value::Value;
 use vitaminc_encrypt::{Aes256Cipher, Key};
@@ -20,7 +20,7 @@ fn key(k: &str) -> PathSeg {
 #[test]
 fn a_scalar_term_matches_canonical_for_every_vector() {
     let cipher = cipher();
-    for v in valid() {
+    for v in representable() {
         let value = decode(&v.bytes);
         let (_, terms) = encrypt_with_terms(Frame::parse(&v.bytes).unwrap(), &cipher, ()).expect(&v.name);
         match (equality_input(&value), terms.first()) {

@@ -1,22 +1,21 @@
 //! Equality terms as an ordinary sink. Encrypt-plus-terms is
 //! `Tee(EncryptSink, Terms)`, with no special wrapper.
 //!
-//! The encodings differ by type: a signed integer gets a sign byte that
-//! depends on its value, an unsigned one always gets `1`. So the sink has to
-//! be told "this is an i32" rather than handed four bytes, which is the
-//! information today's bytes-only `Cipher` drops. Output matches
-//! `canonical::equality_input(&Value)` exactly (tested).
+//! The encodings differ by type: an integer's sign byte depends on its
+//! value, and a timestamp is a timestamp, not the integer it's stored as.
+//! So the sink has to be told what each scalar is rather than handed bytes,
+//! which is the information today's bytes-only `Cipher` drops. Output
+//! matches `canonical::equality_input(&Value)` exactly (tested).
 
 use std::marker::PhantomData;
 
-use chrono::{DateTime, NaiveDate, Utc};
-use rust_decimal::Decimal;
 use vitaminc_aead::IntoAad;
 use vitaminc_aead_value::canonical::{domain, equality_input, text_nfc, CanonicalError, EqualityInput};
 use vitaminc_aead_value::Value;
 use vitaminc_protected::{Controlled, Protected};
 
 use crate::encrypt::{Backend, EncryptError, EncryptSink, Node};
+use crate::kinds::{self, Float, Int, Logical, Physical};
 use crate::model::{Error, MapSink, Plaintext, SeqSink, Sink};
 use crate::tee::Tee;
 
@@ -30,7 +29,7 @@ pub enum PathSeg {
 #[derive(Debug)]
 pub struct Term {
     pub path: Vec<PathSeg>,
-    pub input: Result<EqualityInput, CanonicalError>,
+    pub input: Result<EqualityInput, TermError>,
 }
 
 pub type WithTerms<B> = Result<(Node<<B as Backend>::Leaf>, Vec<Term>), EncryptError<<B as Backend>::Error>>;
@@ -48,24 +47,18 @@ where
 }
 
 /// The canonical integer layout, written natively: sign byte, then the
-/// value as a big-endian u128. Every width shares one domain.
-fn integer(sign: u8, word: u128) -> Result<EqualityInput, CanonicalError> {
+/// value as a big-endian two's-complement u128. Every width shares one
+/// domain, so the width never reaches the term.
+fn integer(i: Int) -> Result<EqualityInput, CanonicalError> {
+    let (negative, word) = i.sign_and_word();
     let word = Protected::new(word.to_be_bytes());
     let mut bytes = Protected::new(Vec::with_capacity(17));
-    bytes.risky_inner_mut().push(sign);
+    bytes.risky_inner_mut().push(u8::from(!negative));
     bytes.risky_inner_mut().extend_from_slice(word.risky_ref());
     Ok(EqualityInput {
         domain: domain::INTEGER,
         bytes,
     })
-}
-
-fn signed(v: i128) -> Result<EqualityInput, CanonicalError> {
-    integer((!(v >> 127) & 1) as u8, v as u128)
-}
-
-fn unsigned(v: u128) -> Result<EqualityInput, CanonicalError> {
-    integer(1, v)
 }
 
 /// SPIKE: the float, date, timestamp, decimal and bytes encodings are
@@ -92,21 +85,54 @@ impl<'t, E> Terms<'t, E> {
             _error: PhantomData,
         }
     }
+}
 
-    fn record(self, input: Result<EqualityInput, CanonicalError>) -> Result<(), E> {
-        self.out.push(Term { path: self.path, input });
-        Ok(())
+/// The equality input for one scalar, or `None` if it has no term.
+///
+/// Logical types are opt-in. Each one the index knows gets its own domain
+/// and its own normalization: a timestamp's unit is folded away here, so a
+/// JS `Date` (milliseconds) matches the same instant from Rust
+/// (nanoseconds). A logical type the index doesn't know is refused, never
+/// indexed as its physical value: a decimal's mantissa isn't its value, and
+/// a date's day count mustn't match the integer it happens to equal.
+pub fn equality(ty: Option<Logical>, v: Physical<'_>) -> Option<Result<EqualityInput, TermError>> {
+    let canonical = |r: Result<EqualityInput, CanonicalError>| Some(r.map_err(TermError::Canonical));
+    let invalid = || Some(Err(TermError::Invalid));
+    match (ty, v) {
+        (None | Some(Logical::Undefined), Physical::Null) | (None, Physical::Bool(_)) => None,
+        (None, Physical::Int(i)) => canonical(integer(i)),
+        (None, Physical::Float(Float::F32(f))) => canonical(via_value(Value::Float32(f))),
+        (None, Physical::Float(Float::F64(f))) => canonical(via_value(Value::Float64(f))),
+        (None, Physical::Text(s)) => canonical(text_nfc(s.as_bytes()).map(|bytes| EqualityInput {
+            domain: domain::TEXT,
+            bytes,
+        })),
+        (None, Physical::Bytes(b)) => canonical(via_value(Value::Bytes(Protected::new(b.to_vec())))),
+        (Some(Logical::Date), Physical::Int(i)) => match kinds::date(i) {
+            Some(d) => canonical(via_value(Value::Date(d))),
+            None => invalid(),
+        },
+        (Some(Logical::Timestamp(unit)), Physical::Int(i)) => match kinds::timestamp(unit, i) {
+            Some(ts) => canonical(via_value(Value::Timestamp(ts))),
+            None => invalid(),
+        },
+        (Some(Logical::Decimal { scale }), Physical::Int(i)) => match kinds::decimal(scale, i) {
+            Some(d) => canonical(via_value(Value::Decimal(d))),
+            None => invalid(),
+        },
+        // Uuid could reuse the bytes encoding under its own domain label.
+        // That's a protocol decision, so it's refused until someone makes it.
+        (Some(ty), _) => Some(Err(TermError::NoDomain(ty))),
     }
 }
 
-macro_rules! term {
-    ($($method:ident($ty:ty) => $f:expr),* $(,)?) => {
-        $(
-            fn $method(self, v: $ty) -> Result<(), E> {
-                self.record($f(v))
-            }
-        )*
-    };
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TermError {
+    Canonical(CanonicalError),
+    /// A logical type this index has no domain for.
+    NoDomain(Logical),
+    /// A value that isn't valid for its logical type.
+    Invalid,
 }
 
 impl<'t, E: Error> Sink for Terms<'t, E> {
@@ -115,44 +141,11 @@ impl<'t, E: Error> Sink for Terms<'t, E> {
     type Seq = TermsSeq<'t, E>;
     type Map = TermsSeq<'t, E>;
 
-    // Null, undefined and booleans have no terms.
-    fn null(self) -> Result<(), E> {
+    fn scalar(self, ty: Option<Logical>, v: Physical<'_>) -> Result<(), E> {
+        if let Some(input) = equality(ty, v) {
+            self.out.push(Term { path: self.path, input });
+        }
         Ok(())
-    }
-
-    fn undefined(self) -> Result<(), E> {
-        Ok(())
-    }
-
-    fn bool(self, _: bool) -> Result<(), E> {
-        Ok(())
-    }
-
-    term! {
-        i8(i8) => |v: i8| signed(v.into()),
-        i16(i16) => |v: i16| signed(v.into()),
-        i32(i32) => |v: i32| signed(v.into()),
-        i64(i64) => |v: i64| signed(v.into()),
-        i128(i128) => signed,
-        u8(u8) => |v: u8| unsigned(v.into()),
-        u16(u16) => |v: u16| unsigned(v.into()),
-        u32(u32) => |v: u32| unsigned(v.into()),
-        u64(u64) => |v: u64| unsigned(v.into()),
-        u128(u128) => unsigned,
-        f32(f32) => |v| via_value(Value::Float32(v)),
-        f64(f64) => |v| via_value(Value::Float64(v)),
-        date(NaiveDate) => |v| via_value(Value::Date(v)),
-        timestamp(DateTime<Utc>) => |v| via_value(Value::Timestamp(v)),
-        decimal(Decimal) => |v| via_value(Value::Decimal(v)),
-        bytes(&[u8]) => |v: &[u8]| via_value(Value::Bytes(Protected::new(v.to_vec()))),
-    }
-
-    fn str(self, v: &str) -> Result<(), E> {
-        let input = text_nfc(v.as_bytes()).map(|bytes| EqualityInput {
-            domain: domain::TEXT,
-            bytes,
-        });
-        self.record(input)
     }
 
     fn seq(self, _: Option<usize>) -> Result<Self::Seq, E> {

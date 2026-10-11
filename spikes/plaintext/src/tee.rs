@@ -5,25 +5,14 @@
 //! sides for an element sink and hands the pair to the source. Any sinks
 //! compose, at any depth.
 
-use chrono::{DateTime, NaiveDate, Utc};
-use rust_decimal::Decimal;
 use vitaminc_protected::Controlled;
 
-use crate::frame_writer::{to_frame, FrameWriteError};
-use crate::model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
 use crate::frame::Frame;
+use crate::frame_writer::{to_frame, FrameWriteError};
+use crate::kinds::{Logical, Physical};
+use crate::model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
 
 pub struct Tee<A, B>(pub A, pub B);
-
-macro_rules! both {
-    ($($method:ident($ty:ty)),* $(,)?) => {
-        $(
-            fn $method(self, v: $ty) -> Result<Self::Ok, A::Error> {
-                Ok((self.0.$method(v)?, self.1.$method(v)?))
-            }
-        )*
-    };
-}
 
 impl<A: Sink, B: Sink<Error = A::Error>> Sink for Tee<A, B> {
     type Ok = (A::Ok, B::Ok);
@@ -31,21 +20,8 @@ impl<A: Sink, B: Sink<Error = A::Error>> Sink for Tee<A, B> {
     type Seq = Tee<A::Seq, B::Seq>;
     type Map = Tee<A::Map, B::Map>;
 
-    fn null(self) -> Result<Self::Ok, A::Error> {
-        Ok((self.0.null()?, self.1.null()?))
-    }
-
-    fn undefined(self) -> Result<Self::Ok, A::Error> {
-        Ok((self.0.undefined()?, self.1.undefined()?))
-    }
-
-    both! {
-        bool(bool),
-        i8(i8), i16(i16), i32(i32), i64(i64), i128(i128),
-        u8(u8), u16(u16), u32(u32), u64(u64), u128(u128),
-        f32(f32), f64(f64),
-        date(NaiveDate), timestamp(DateTime<Utc>), decimal(Decimal),
-        str(&str), bytes(&[u8]),
+    fn scalar(self, ty: Option<Logical>, v: Physical<'_>) -> Result<Self::Ok, A::Error> {
+        Ok((self.0.scalar(ty, v)?, self.1.scalar(ty, v)?))
     }
 
     fn seq(self, len: Option<usize>) -> Result<Self::Seq, A::Error> {

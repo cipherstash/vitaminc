@@ -11,10 +11,10 @@
 
 use std::collections::HashSet;
 
-use vitaminc_aead_value::{tags, transport};
+use vitaminc_aead_value::transport;
 
 use crate::model::{MapSink, Plaintext, SeqSink, Sink};
-use crate::scalar;
+use crate::scalar::{self, Form};
 
 /// Exactly one validated value node.
 #[derive(Clone, Copy, Debug)]
@@ -57,6 +57,17 @@ impl<'a> Cursor<'a> {
         self.pos == self.buf.len()
     }
 
+    pub(crate) fn peek(&self) -> Result<u8, FrameError> {
+        self.buf.get(self.pos).copied().ok_or(FrameError)
+    }
+
+    /// Everything left.
+    pub(crate) fn rest(&mut self) -> &'a [u8] {
+        let rest = &self.buf[self.pos..];
+        self.pos = self.buf.len();
+        rest
+    }
+
     pub(crate) fn byte(&mut self) -> Result<u8, FrameError> {
         let b = *self.buf.get(self.pos).ok_or(FrameError)?;
         self.pos += 1;
@@ -85,18 +96,21 @@ impl<'a> Cursor<'a> {
     }
 }
 
-/// Step over one value node, validating it. Mirrors `decode_value_inner`.
+/// Step over one value node, validating it. Mirrors `decode_value_inner`,
+/// plus the logical envelope.
 fn skip(c: &mut Cursor<'_>, depth: usize) -> Result<(), FrameError> {
     if depth > transport::MAX_DEPTH {
         return Err(FrameError);
     }
-    match c.byte()? {
+    match c.peek()? {
         transport::ARRAY => {
+            c.byte()?;
             for _ in 0..c.count()? {
                 skip(c, depth + 1)?;
             }
         }
         transport::OBJECT => {
+            c.byte()?;
             let count = c.count()?;
             let mut seen = HashSet::new();
             for _ in 0..count {
@@ -108,15 +122,12 @@ fn skip(c: &mut Cursor<'_>, depth: usize) -> Result<(), FrameError> {
                 skip(c, depth + 1)?;
             }
         }
-        transport::PASSTHROUGH => skip(c, depth + 1)?,
-        tag => {
-            let len = match tag {
-                tags::STRING | tags::BYTES => c.count()?,
-                _ => scalar::fixed_len(tag).ok_or(FrameError)?,
-            };
-            if !scalar::valid(tag, c.take(len)?) {
-                return Err(FrameError);
-            }
+        transport::PASSTHROUGH => {
+            c.byte()?;
+            skip(c, depth + 1)?;
+        }
+        _ => {
+            scalar::read(c, Form::Frame)?;
         }
     }
     Ok(())
@@ -129,8 +140,9 @@ pub(crate) const VALIDATED: &str = "frame was validated by Frame::parse";
 impl Plaintext for Frame<'_> {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         let mut c = Cursor::new(self.as_bytes());
-        match c.byte().expect(VALIDATED) {
+        match c.peek().expect(VALIDATED) {
             transport::ARRAY => {
+                c.byte().expect(VALIDATED);
                 let count = c.count().expect(VALIDATED);
                 let mut seq = sink.seq(Some(count))?;
                 for _ in 0..count {
@@ -139,6 +151,7 @@ impl Plaintext for Frame<'_> {
                 seq.end()
             }
             transport::OBJECT => {
+                c.byte().expect(VALIDATED);
                 let count = c.count().expect(VALIDATED);
                 let mut map = sink.map(Some(count))?;
                 for _ in 0..count {
@@ -148,14 +161,13 @@ impl Plaintext for Frame<'_> {
                 }
                 map.end()
             }
-            transport::PASSTHROUGH => sink.passthrough(c.node(0).expect(VALIDATED)),
-            tag @ (tags::STRING | tags::BYTES) => {
-                let len = c.count().expect(VALIDATED);
-                scalar::visit(tag, c.take(len).expect(VALIDATED), sink)
+            transport::PASSTHROUGH => {
+                c.byte().expect(VALIDATED);
+                sink.passthrough(c.node(0).expect(VALIDATED))
             }
-            tag => {
-                let len = scalar::fixed_len(tag).expect(VALIDATED);
-                scalar::visit(tag, c.take(len).expect(VALIDATED), sink)
+            _ => {
+                let (ty, v) = scalar::read(&mut c, Form::Frame).expect(VALIDATED);
+                sink.scalar(ty, v)
             }
         }
     }

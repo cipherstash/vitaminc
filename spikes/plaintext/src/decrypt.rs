@@ -2,7 +2,7 @@
 //! `SeqAccess`, `MapAccess` and `Decrypt for Value` on the dynamic path.
 //!
 //! The ciphertext tree is walked and each opened leaf is fed to the sink as
-//! a typed scalar. Go passes a `FrameWriter`, Node a JS builder, a typed
+//! a scalar, physical plus logical. Go passes a `FrameWriter`, Node a JS builder, a typed
 //! Rust caller a [`Decode`](crate::typed::Decode) sink. The rules (empty
 //! markers, nothing-sealed containers, duplicate keys) are today's, moved
 //! here from `AesDecipher`.
@@ -13,9 +13,10 @@ use vitaminc_aead::{CipherText, Context, IntoAad};
 use vitaminc_protected::Controlled;
 
 use crate::encrypt::{Backend, Node};
-use crate::model::{Error, MapSink, SeqSink, Sink, SourceError};
-use crate::scalar::try_visit;
 use crate::frame::Frame;
+use crate::kinds::Physical;
+use crate::model::{Error, MapSink, SeqSink, Sink, SourceError};
+use crate::scalar;
 
 #[derive(Debug)]
 pub enum DecryptError<E> {
@@ -55,8 +56,8 @@ fn walk<B: Backend, S: Sink>(backend: &B, node: Node<B::Leaf>, aad: &Context<'_>
     match node {
         CipherText::Single(leaf) => {
             let plaintext = open(leaf, aad)?;
-            let (&tag, payload) = plaintext.risky_ref().split_first().ok_or(DecryptError::Malformed)?;
-            Ok(try_visit(tag, payload, sink).ok_or(DecryptError::Malformed)??)
+            let (ty, v) = scalar::read_leaf(plaintext.risky_ref()).map_err(|_| DecryptError::Malformed)?;
+            Ok(sink.scalar(ty, v)?)
             // `plaintext` drops and wipes here.
         }
         CipherText::Sequence(items) => {
@@ -95,7 +96,7 @@ fn walk<B: Backend, S: Sink>(backend: &B, node: Node<B::Leaf>, aad: &Context<'_>
         // has no separate "absent", so it reads as null.
         CipherText::None(leaf) => {
             empty_marker(leaf, aad.for_none())?;
-            Ok(sink.null()?)
+            Ok(sink.scalar(None, Physical::Null)?)
         }
         CipherText::Passthrough(frame) => {
             let frame = Frame::parse(&frame.0).map_err(|_| DecryptError::Malformed)?;
