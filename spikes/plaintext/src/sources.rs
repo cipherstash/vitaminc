@@ -1,11 +1,12 @@
-//! Rust types as sources. The width comes from the static type, as Go's does.
+//! Rust types as sources. Go's frame is in [`crate::frame`], the Node
+//! walker in `hosts::js`.
 
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
-use crate::model::{MapSink, Plaintext, SeqSink, Sink};
+use crate::model::{visit_map, visit_seq, Error, Plaintext, SeqSink, Sink, SourceError};
 
 macro_rules! scalar {
     ($($ty:ty => $method:ident),* $(,)?) => {
@@ -39,7 +40,8 @@ impl Plaintext for &String {
     }
 }
 
-/// Byte strings need a wrapper: `Vec<u8>` is already a sequence of `u8`.
+/// A byte string. `Vec<u8>` and `&[u8]` would clash with the sequence impls.
+#[derive(Clone, Copy, Debug)]
 pub struct Bytes<'a>(pub &'a [u8]);
 
 impl Plaintext for Bytes<'_> {
@@ -48,8 +50,6 @@ impl Plaintext for Bytes<'_> {
     }
 }
 
-/// `None` is a tagged null, as a dynamic host would send it. Rust's static
-/// `Option` impl uses `encrypt_none` instead; see the README.
 impl<T: Plaintext> Plaintext for Option<T> {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         match self {
@@ -61,10 +61,8 @@ impl<T: Plaintext> Plaintext for Option<T> {
 
 impl<T: Plaintext> Plaintext for Vec<T> {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-        let len = self.len();
-        self.into_iter()
-            .try_fold(sink.seq(len)?, SeqSink::element)?
-            .end()
+        let len = Some(self.len());
+        visit_seq(sink, len, self)
     }
 }
 
@@ -73,17 +71,26 @@ where
     &'a T: Plaintext,
 {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-        self.iter()
-            .try_fold(sink.seq(self.len())?, SeqSink::element)?
-            .end()
+        visit_seq(sink, Some(self.len()), self.iter())
     }
 }
 
-impl<V: Plaintext> Plaintext for BTreeMap<String, V> {
+impl<'a, V> Plaintext for &'a BTreeMap<String, V>
+where
+    &'a V: Plaintext,
+{
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-        let len = self.len();
-        self.into_iter()
-            .try_fold(sink.map(len)?, |map, (k, v)| map.entry(&k, v))?
-            .end()
+        visit_map(sink, Some(self.len()), self.iter().map(|(k, v)| (k.as_str(), v)))
+    }
+}
+
+/// A source that fails part way through, to exercise the error channel.
+pub struct Failing<P>(pub P);
+
+impl<P: Plaintext> Plaintext for Failing<P> {
+    fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
+        let mut seq = sink.seq(None)?;
+        self.0.visit(seq.element()?)?;
+        Err(S::Error::source(SourceError::msg("getter threw")))
     }
 }

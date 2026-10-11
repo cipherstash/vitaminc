@@ -9,8 +9,8 @@ use std::collections::HashSet;
 use vitaminc_aead::CipherText;
 use vitaminc_aead_value::transport::{self, CT_EMPTY_MAP, CT_EMPTY_SEQ, CT_MAP, CT_NONE, CT_PASSTHROUGH, CT_SEQ, CT_SINGLE};
 
-use super::encrypt::{Node, PassthroughFrame};
-use crate::sources::frame::{Cursor, FrameError};
+use crate::encrypt::{Node, PassthroughFrame};
+use crate::frame::{Cursor, FrameError};
 
 pub fn encode<L: AsRef<[u8]>>(node: &Node<L>, out: &mut Vec<u8>) -> Result<(), FrameError> {
     let len = |out: &mut Vec<u8>, n: usize| -> Result<(), FrameError> {

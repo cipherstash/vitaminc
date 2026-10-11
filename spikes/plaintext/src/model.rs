@@ -1,43 +1,54 @@
-//! The data model: what a plaintext source can say about itself.
+//! The data model: a source describes itself ([`Plaintext`]) to a consumer
+//! ([`Sink`]), the way serde splits `Serialize` from `Serializer`.
 //!
-//! This is the serde split applied to vitaminc. [`Plaintext`] plays the part
-//! of `serde::Serialize`: a type describes itself once, in terms of typed
-//! scalars and containers. [`Sink`] plays the part of `serde::Serializer`:
-//! something that consumes that description. Encryption, transport framing,
-//! equality terms and building a `Value` are all sinks.
+//! - **Containers are push-style.** `SeqSink::element` returns a sink for the
+//!   next element, rather than taking the element as a value. The source
+//!   drives the whole walk, so any number of sinks can share one walk
+//!   (see [`Tee`](crate::tee::Tee)).
+//! - **Sources can fail.** Every sink error implements [`Error`], so a
+//!   source can stop the walk with [`Error::source`]. That's what lets a
+//!   native binding walk a live host object (a JS getter can throw) without
+//!   a snapshot first. It's serde's `ser::Error::custom` pattern.
+//! - **Lengths are optional,** for host iterables that don't know their size.
 //!
-//! The difference from vitaminc's `Cipher` data model is that scalars stay
-//! typed. `Cipher::encrypt_bytes_array` only ever sees bytes, so `u32` and
-//! `i32` look the same to it. Index terms need to know which one they got,
-//! so the type has to survive to the sink.
+//! There is no `Encrypt` trait. Encryption is a sink, driven by
+//! [`encrypt`](crate::encrypt::encrypt).
 
-use std::convert::Infallible;
-use std::marker::PhantomData;
+use std::fmt;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
-/// A value that can describe itself to any [`Sink`].
-///
-/// Implemented once per source: Rust primitives, `Value`, a borrowed
-/// transport [`Frame`](crate::Frame), and so on.
-///
-/// `visit` is infallible on the source side. A source that can fail part
-/// way through (a live JS object whose getter throws) can't report that
-/// through `S::Error`, because the encrypt sink's error type is the cipher's.
-/// Such sources validate or snapshot first. See the README.
 pub trait Plaintext {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error>;
 }
 
-/// Consumes one value described through the data model.
-///
-/// Every method is required, so adding a kind here is a compile error in
-/// every sink until it decides what to do. That is the exhaustiveness
-/// property `#[non_exhaustive]` on `Value` takes away.
+/// Every sink's error type. A source reports its own failure through
+/// `source`, without knowing which sink it's feeding.
+pub trait Error: Sized {
+    fn source(error: SourceError) -> Self;
+}
+
+/// A failure reading the source: a getter threw, a string had an unpaired
+/// surrogate, a BigInt was out of range.
+#[derive(Debug)]
+pub struct SourceError(pub Box<dyn std::error::Error + Send + Sync>);
+
+impl SourceError {
+    pub fn msg(msg: impl Into<String>) -> Self {
+        Self(msg.into().into())
+    }
+}
+
+impl fmt::Display for SourceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 pub trait Sink: Sized {
     type Ok;
-    type Error;
+    type Error: Error;
     type Seq: SeqSink<Ok = Self::Ok, Error = Self::Error>;
     type Map: MapSink<Ok = Self::Ok, Error = Self::Error>;
 
@@ -65,65 +76,61 @@ pub trait Sink: Sized {
     fn str(self, v: &str) -> Result<Self::Ok, Self::Error>;
     fn bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error>;
 
-    /// Start a sequence of exactly `len` elements.
-    fn seq(self, len: usize) -> Result<Self::Seq, Self::Error>;
-    /// Start a map of exactly `len` entries.
-    fn map(self, len: usize) -> Result<Self::Map, Self::Error>;
+    fn seq(self, len: Option<usize>) -> Result<Self::Seq, Self::Error>;
+    fn map(self, len: Option<usize>) -> Result<Self::Map, Self::Error>;
 
-    /// A subtree that travels in the clear (see `Value::Passthrough`).
+    /// A subtree that travels in the clear. It's walked like anything else;
+    /// the sink decides what "in the clear" means for it.
     fn passthrough<P: Plaintext>(self, value: P) -> Result<Self::Ok, Self::Error>;
 }
 
-/// Elements are passed as values, and the sink decides when to walk them.
-///
-/// This is forced by vitaminc's `SeqCipher::encrypt_next<T: Encrypt>`, which
-/// takes the element as a value and walks it itself. By-value chaining
-/// mirrors the `SeqCipher` idiom.
 pub trait SeqSink: Sized {
     type Ok;
-    type Error;
+    type Error: Error;
+    /// A sink for one element. Its `Ok` is ignored: it writes into `self`.
+    type Element<'s>: Sink<Error = Self::Error>
+    where
+        Self: 's;
 
-    fn element<P: Plaintext>(self, value: P) -> Result<Self, Self::Error>;
+    fn element(&mut self) -> Result<Self::Element<'_>, Self::Error>;
     fn end(self) -> Result<Self::Ok, Self::Error>;
 }
 
 pub trait MapSink: Sized {
     type Ok;
-    type Error;
+    type Error: Error;
+    type Entry<'s>: Sink<Error = Self::Error>
+    where
+        Self: 's;
 
-    fn entry<P: Plaintext>(self, key: &str, value: P) -> Result<Self, Self::Error>;
+    fn entry(&mut self, key: &str) -> Result<Self::Entry<'_>, Self::Error>;
     fn end(self) -> Result<Self::Ok, Self::Error>;
 }
 
-/// Container sinks for a sink that refuses containers, after serde's
-/// `ser::Impossible`. It can't be constructed.
-pub struct Impossible<Ok, E> {
-    never: Infallible,
-    _types: PhantomData<(Ok, E)>,
+/// Walk each item into its own element sink. The loop every container
+/// source writes.
+pub fn visit_seq<S, I>(sink: S, len: Option<usize>, items: I) -> Result<S::Ok, S::Error>
+where
+    S: Sink,
+    I: IntoIterator,
+    I::Item: Plaintext,
+{
+    let mut seq = sink.seq(len)?;
+    for item in items {
+        item.visit(seq.element()?)?;
+    }
+    seq.end()
 }
 
-impl<Ok, E> SeqSink for Impossible<Ok, E> {
-    type Ok = Ok;
-    type Error = E;
-
-    fn element<P: Plaintext>(self, _value: P) -> Result<Self, E> {
-        match self.never {}
+pub fn visit_map<'k, S, I, P>(sink: S, len: Option<usize>, entries: I) -> Result<S::Ok, S::Error>
+where
+    S: Sink,
+    I: IntoIterator<Item = (&'k str, P)>,
+    P: Plaintext,
+{
+    let mut map = sink.map(len)?;
+    for (key, value) in entries {
+        value.visit(map.entry(key)?)?;
     }
-
-    fn end(self) -> Result<Ok, E> {
-        match self.never {}
-    }
-}
-
-impl<Ok, E> MapSink for Impossible<Ok, E> {
-    type Ok = Ok;
-    type Error = E;
-
-    fn entry<P: Plaintext>(self, _key: &str, _value: P) -> Result<Self, E> {
-        match self.never {}
-    }
-
-    fn end(self) -> Result<Ok, E> {
-        match self.never {}
-    }
+    map.end()
 }

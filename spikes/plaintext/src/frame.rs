@@ -6,8 +6,8 @@
 //! built, and no scalar ever leaves the buffer except to go straight to a
 //! sink.
 //!
-//! [`Frame::parse`] validates the whole frame up front. That is what lets
-//! `visit` be infallible (see [`Plaintext`] for why it has to be).
+//! [`Frame::parse`] validates the whole frame up front, so `visit` never
+//! has to report a malformed frame part way through a walk.
 
 use std::collections::HashSet;
 
@@ -125,76 +125,38 @@ fn skip(c: &mut Cursor<'_>, depth: usize) -> Result<(), FrameError> {
 // Everything below runs on a frame `parse` accepted, so a read can't fail.
 pub(crate) const VALIDATED: &str = "frame was validated by Frame::parse";
 
+/// Go's frame, walked in place.
 impl Plaintext for Frame<'_> {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-        let mut c = Cursor {
-            buf: self.bytes,
-            pos: 0,
-        };
-        let tag = c.byte().expect(VALIDATED);
-        match tag {
+        let mut c = Cursor::new(self.as_bytes());
+        match c.byte().expect(VALIDATED) {
             transport::ARRAY => {
                 let count = c.count().expect(VALIDATED);
-                let mut seq = sink.seq(count)?;
+                let mut seq = sink.seq(Some(count))?;
                 for _ in 0..count {
-                    seq = seq.element(c.node(0).expect(VALIDATED))?;
+                    c.node(0).expect(VALIDATED).visit(seq.element()?)?;
                 }
                 seq.end()
             }
             transport::OBJECT => {
                 let count = c.count().expect(VALIDATED);
-                let mut map = sink.map(count)?;
+                let mut map = sink.map(Some(count))?;
                 for _ in 0..count {
                     let len = c.count().expect(VALIDATED);
                     let key = std::str::from_utf8(c.take(len).expect(VALIDATED)).expect(VALIDATED);
-                    map = map.entry(key, c.node(0).expect(VALIDATED))?;
+                    c.node(0).expect(VALIDATED).visit(map.entry(key)?)?;
                 }
                 map.end()
             }
             transport::PASSTHROUGH => sink.passthrough(c.node(0).expect(VALIDATED)),
-            tags::STRING => {
+            tag @ (tags::STRING | tags::BYTES) => {
                 let len = c.count().expect(VALIDATED);
-                sink.str(std::str::from_utf8(c.take(len).expect(VALIDATED)).expect(VALIDATED))
-            }
-            tags::BYTES => {
-                let len = c.count().expect(VALIDATED);
-                sink.bytes(c.take(len).expect(VALIDATED))
+                scalar::visit(tag, c.take(len).expect(VALIDATED), sink)
             }
             tag => {
                 let len = scalar::fixed_len(tag).expect(VALIDATED);
-                visit_fixed(tag, c.take(len).expect(VALIDATED), sink)
+                scalar::visit(tag, c.take(len).expect(VALIDATED), sink)
             }
         }
-    }
-}
-
-fn visit_fixed<S: Sink>(tag: u8, p: &[u8], sink: S) -> Result<S::Ok, S::Error> {
-    macro_rules! le {
-        ($ty:ty) => {
-            <$ty>::from_le_bytes(p.try_into().expect(VALIDATED))
-        };
-    }
-    match tag {
-        tags::NULL => sink.null(),
-        tags::UNDEFINED => sink.undefined(),
-        tags::BOOL_FALSE => sink.bool(false),
-        tags::BOOL_TRUE => sink.bool(true),
-        tags::INT8 => sink.i8(le!(i8)),
-        tags::INT16 => sink.i16(le!(i16)),
-        tags::INT32 => sink.i32(le!(i32)),
-        tags::INT64 => sink.i64(le!(i64)),
-        tags::INT128 => sink.i128(le!(i128)),
-        tags::UINT8 => sink.u8(le!(u8)),
-        tags::UINT16 => sink.u16(le!(u16)),
-        tags::UINT32 => sink.u32(le!(u32)),
-        tags::UINT64 => sink.u64(le!(u64)),
-        tags::UINT128 => sink.u128(le!(u128)),
-        // Raw bit patterns, so signalling NaNs survive.
-        tags::FLOAT32 => sink.f32(f32::from_bits(le!(u32))),
-        tags::FLOAT64 => sink.f64(f64::from_bits(le!(u64))),
-        tags::DATE => sink.date(scalar::date(p).expect(VALIDATED)),
-        tags::TIMESTAMP => sink.timestamp(scalar::timestamp(p).expect(VALIDATED)),
-        tags::DECIMAL => sink.decimal(scalar::decimal(p).expect(VALIDATED)),
-        _ => unreachable!("{VALIDATED}"),
     }
 }

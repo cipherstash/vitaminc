@@ -7,9 +7,9 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 
-use super::decrypt::{decrypt_into, DecryptError};
-use super::encrypt::{Backend, Node};
-use super::model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
+use crate::decrypt::{decrypt_into, DecryptError};
+use crate::encrypt::{Backend, Node};
+use crate::model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
 use vitaminc_aead::IntoAad;
 
 #[derive(Debug)]

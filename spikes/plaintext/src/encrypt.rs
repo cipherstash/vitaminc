@@ -21,8 +21,8 @@ use vitaminc_aead_value::tags;
 use vitaminc_encrypt::{Aes256Cipher, AesCipherText};
 use vitaminc_protected::{Controlled, Protected};
 
-use super::frame_writer::{to_frame, FrameWriteError};
-use super::model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
+use crate::frame_writer::{to_frame, FrameWriteError};
+use crate::model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
 use crate::scalar;
 
 /// Seal and open one leaf. The backend binds the wire version into the AAD

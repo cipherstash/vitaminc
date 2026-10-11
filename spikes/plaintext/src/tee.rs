@@ -1,17 +1,17 @@
 //! Two sinks, one walk. This is what push-style containers buy.
 //!
-//! In the stage-1 model, `SeqCipher::encrypt_next` takes each element as a
-//! value and walks it itself, so only one consumer can drive the walk. Here
-//! a tee asks both sides for an element sink and hands the pair to the
-//! source. Any sinks compose, at any depth.
+//! Today's `SeqCipher::encrypt_next` takes each element as a value and walks
+//! it itself, so only one consumer can drive the walk. Here a tee asks both
+//! sides for an element sink and hands the pair to the source. Any sinks
+//! compose, at any depth.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use vitaminc_protected::Controlled;
 
-use super::frame_writer::{to_frame, FrameWriteError};
-use super::model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
-use crate::sources::frame::Frame;
+use crate::frame_writer::{to_frame, FrameWriteError};
+use crate::model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
+use crate::frame::Frame;
 
 pub struct Tee<A, B>(pub A, pub B);
 

@@ -1,105 +1,112 @@
-//! Decrypt straight to a transport frame, without a `Value` in between.
+//! Decrypt into any sink. Replaces `Decipher`, `DecipherVisitor`,
+//! `SeqAccess`, `MapAccess` and `Decrypt for Value` on the dynamic path.
 //!
-//! This is the decrypt half of the Go path. The visitor gets each sealed
-//! leaf's plaintext, `[tag] ++ payload`, after the AEAD check. For a
-//! fixed-width scalar that is already the frame, so it's copied as is.
-//! STRING and BYTES only need their length prefix put back.
-//!
-//! The decrypt data model (`DecipherVisitor`) is already shape-driven and
-//! hands over raw leaf bytes, so nothing new is needed on this side. It's
-//! the encrypt side that was missing a typed layer.
+//! The ciphertext tree is walked and each opened leaf is fed to the sink as
+//! a typed scalar. Go passes a `FrameWriter`, Node a JS builder, a typed
+//! Rust caller a [`Decode`](crate::typed::Decode) sink. The rules (empty
+//! markers, nothing-sealed containers, duplicate keys) are today's, moved
+//! here from `AesDecipher`.
 
-use vitaminc_aead::{Decipher, DecipherVisitor, Decrypt, IntoAad, MapAccess, SeqAccess, Unspecified};
-use vitaminc_aead_value::{tags, transport, Value};
-use vitaminc_protected::{Controlled, Protected};
+use std::collections::HashSet;
 
-use crate::scalar;
+use vitaminc_aead::{CipherText, Context, IntoAad};
+use vitaminc_protected::Controlled;
 
-/// A decrypted value, as one transport frame.
-pub struct FrameOut(pub Protected<Vec<u8>>);
+use crate::encrypt::{Backend, Node};
+use crate::model::{Error, MapSink, SeqSink, Sink, SourceError};
+use crate::scalar::try_visit;
+use crate::frame::Frame;
 
-impl<'c> Decrypt<'c> for FrameOut {
-    fn decrypt_with_aad<'a, D, A>(decipher: D, aad: A) -> D::Ok<Self>
-    where
-        D: Decipher<'c>,
-        A: IntoAad<'a>,
-    {
-        // As with `Value`, the type comes from the ciphertext and the sealed
-        // tag, not from the caller.
-        decipher.decrypt_any(FrameVisitor, aad)
+#[derive(Debug)]
+pub enum DecryptError<E> {
+    /// Wrong key, wrong AAD, or tampered ciphertext.
+    Auth,
+    /// The tree or a leaf's plaintext isn't well formed.
+    Malformed,
+    /// The sink refused what it was given (a typed sink got the wrong kind).
+    Sink(E),
+}
+
+impl<E> From<E> for DecryptError<E> {
+    fn from(e: E) -> Self {
+        Self::Sink(e)
     }
 }
 
-struct FrameVisitor;
-
-fn write_len(out: &mut Vec<u8>, len: usize) -> Result<(), Unspecified> {
-    let len = u32::try_from(len).map_err(|_| Unspecified)?;
-    out.extend_from_slice(&len.to_le_bytes());
-    Ok(())
+pub fn decrypt_into<'a, B, S, A>(backend: &B, node: Node<B::Leaf>, aad: A, sink: S) -> Result<S::Ok, DecryptError<S::Error>>
+where
+    B: Backend,
+    S: Sink,
+    A: IntoAad<'a>,
+{
+    walk(backend, node, &aad.into_aad(), sink)
 }
 
-fn container(tag: u8, count: usize, body: Protected<Vec<u8>>) -> Result<FrameOut, Unspecified> {
-    let mut out = Protected::new(Vec::with_capacity(5 + body.risky_ref().len()));
-    out.risky_inner_mut().push(tag);
-    write_len(out.risky_inner_mut(), count)?;
-    out.risky_inner_mut().extend_from_slice(body.risky_ref());
-    Ok(FrameOut(out))
+fn sealed_any<L>(nodes: &[&Node<L>]) -> bool {
+    nodes.iter().any(|n| !matches!(n, CipherText::Passthrough(_)))
 }
 
-impl<'c> DecipherVisitor<'c> for FrameVisitor {
-    type Value = FrameOut;
-
-    fn visit_bytes_vec(self, data: Protected<Vec<u8>>) -> Result<FrameOut, Unspecified> {
-        let bytes = data.risky_ref();
-        let (&tag, payload) = bytes.split_first().ok_or(Unspecified)?;
-        // Same check the transport decoder makes. Container tags and unknown
-        // tags fail it.
-        if !scalar::valid(tag, payload) {
-            return Err(Unspecified);
+fn walk<B: Backend, S: Sink>(backend: &B, node: Node<B::Leaf>, aad: &Context<'_>, sink: S) -> Result<S::Ok, DecryptError<S::Error>> {
+    let open = |leaf, aad: &Context<'_>| backend.open(leaf, aad).map_err(|_| DecryptError::Auth);
+    let empty_marker = |leaf, aad: Context<'static>| match open(leaf, &aad)?.risky_ref().is_empty() {
+        true => Ok(()),
+        false => Err(DecryptError::Auth),
+    };
+    match node {
+        CipherText::Single(leaf) => {
+            let plaintext = open(leaf, aad)?;
+            let (&tag, payload) = plaintext.risky_ref().split_first().ok_or(DecryptError::Malformed)?;
+            Ok(try_visit(tag, payload, sink).ok_or(DecryptError::Malformed)??)
+            // `plaintext` drops and wipes here.
         }
-        let mut out = Protected::new(Vec::with_capacity(bytes.len() + 4));
-        let buf = out.risky_inner_mut();
-        buf.push(tag);
-        if matches!(tag, tags::STRING | tags::BYTES) {
-            write_len(buf, payload.len())?;
+        CipherText::Sequence(items) => {
+            if !sealed_any(&items.iter().collect::<Vec<_>>()) {
+                return Err(DecryptError::Malformed);
+            }
+            let element_aad = aad.for_sequence_element();
+            let mut seq = sink.seq(Some(items.len()))?;
+            for item in items {
+                walk(backend, item, &element_aad, seq.element()?)?;
+            }
+            Ok(seq.end()?)
         }
-        buf.extend_from_slice(payload);
-        Ok(FrameOut(out))
-        // `data` drops and wipes here.
-    }
-
-    fn visit_seq<A: SeqAccess<'c>>(self, mut seq: A) -> Result<FrameOut, Unspecified> {
-        let mut body = Protected::new(Vec::new());
-        let mut count = 0;
-        while let Some(FrameOut(item)) = seq.next_element::<FrameOut>().map_err(|_| Unspecified)? {
-            body.risky_inner_mut().extend_from_slice(item.risky_ref());
-            count += 1;
+        CipherText::EmptySequence(leaf) => {
+            empty_marker(leaf, aad.for_empty_sequence())?;
+            Ok(sink.seq(Some(0))?.end()?)
         }
-        container(transport::ARRAY, count, body)
-    }
-
-    fn visit_map<A: MapAccess<'c>>(self, mut map: A) -> Result<FrameOut, Unspecified> {
-        let mut body = Protected::new(Vec::new());
-        let mut count = 0;
-        while let Some(key) = map.next_key().map_err(|_| Unspecified)? {
-            let FrameOut(value) = map.next_value::<FrameOut>().map_err(|_| Unspecified)?;
-            let buf = body.risky_inner_mut();
-            write_len(buf, key.len())?;
-            buf.extend_from_slice(key.as_bytes());
-            buf.extend_from_slice(value.risky_ref());
-            count += 1;
+        CipherText::Map(entries) => {
+            let mut seen = HashSet::new();
+            if !entries.iter().all(|(k, _)| seen.insert(k.clone()))
+                || !sealed_any(&entries.iter().map(|(_, v)| v).collect::<Vec<_>>())
+            {
+                return Err(DecryptError::Malformed);
+            }
+            let mut map = sink.map(Some(entries.len()))?;
+            for (key, value) in entries {
+                walk(backend, value, &aad.for_map_entry(&key), map.entry(&key)?)?;
+            }
+            Ok(map.end()?)
         }
-        container(transport::OBJECT, count, body)
+        CipherText::EmptyMap(leaf) => {
+            empty_marker(leaf, aad.for_empty_map())?;
+            Ok(sink.map(Some(0))?.end()?)
+        }
+        // Only static Rust `Option::None` makes this today. The data model
+        // has no separate "absent", so it reads as null.
+        CipherText::None(leaf) => {
+            empty_marker(leaf, aad.for_none())?;
+            Ok(sink.null()?)
+        }
+        CipherText::Passthrough(frame) => {
+            let frame = Frame::parse(&frame.0).map_err(|_| DecryptError::Malformed)?;
+            Ok(sink.passthrough(frame)?)
+        }
     }
+}
 
-    fn visit_none(self) -> Result<FrameOut, Unspecified> {
-        Ok(FrameOut(Protected::new(vec![tags::NULL])))
-    }
-
-    fn visit_passthrough(self, value: Box<dyn std::any::Any + Send + 'static>) -> Result<FrameOut, Unspecified> {
-        let value = value.downcast::<Value>().map_err(|_| Unspecified)?;
-        let mut out = Protected::new(vec![transport::PASSTHROUGH]);
-        transport::encode_value(*value, out.risky_inner_mut()).map_err(|_| Unspecified)?;
-        Ok(FrameOut(out))
+/// Lets a `?` on a sink error inside `walk` also accept source errors.
+impl<E: Error> Error for DecryptError<E> {
+    fn source(error: SourceError) -> Self {
+        Self::Sink(E::source(error))
     }
 }

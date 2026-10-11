@@ -1,24 +1,16 @@
 #![doc = include_str!("../README.md")]
 
+pub mod codec;
+pub mod decrypt;
+pub mod encrypt;
+pub mod frame;
+pub mod frame_writer;
 pub mod model;
 mod scalar;
-
-pub mod sources {
-    pub mod frame;
-    pub mod rust;
-    pub mod value;
-}
-
-pub mod sinks {
-    pub mod encrypt;
-    pub mod equality;
-    pub mod frame_writer;
-    pub mod terms;
-    pub mod value_builder;
-}
-
-pub mod decrypt;
-pub mod next;
+pub mod sources;
+pub mod tee;
+pub mod terms;
+pub mod typed;
 
 pub mod hosts {
     pub mod go_guest;
@@ -26,12 +18,12 @@ pub mod hosts {
     pub mod js;
 }
 
-pub use decrypt::FrameOut;
-pub use model::{MapSink, Plaintext, SeqSink, Sink};
-pub use sinks::encrypt::Tagged;
-pub use sinks::equality::EqualityTerm;
-pub use sinks::frame_writer::to_frame;
-pub use sinks::terms::{encrypt_with_terms, PathSeg, Term};
-pub use sinks::value_builder::to_value;
-pub use sources::frame::{Frame, FrameError};
-pub use sources::rust::Bytes;
+pub use decrypt::{decrypt_into, DecryptError};
+pub use encrypt::{encrypt, Backend, EncryptError, Node, PassthroughFrame};
+pub use frame::{Frame, FrameError};
+pub use frame_writer::{to_frame, FrameWriter};
+pub use model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
+pub use sources::Bytes;
+pub use tee::Tee;
+pub use terms::{encrypt_with_terms, PathSeg, Term};
+pub use typed::{decrypt_as, Decode, DecodeError};
