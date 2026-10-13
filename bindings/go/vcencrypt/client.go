@@ -78,15 +78,12 @@ func compilationCache() wazero.CompilationCache {
 	return sharedCache
 }
 
-// guestModuleConfig supplies the host's CSPRNG and clocks to WASI. wazero's
-// defaults are deterministic: every new module would otherwise start the
-// same random_get stream, repeating AES-GCM nonces under a reused key.
-// TestGuestModuleConfigUsesHostRandomAndClocks checks these overrides.
+// guestModuleConfig supplies the host's CSPRNG to WASI random_get. wazero's
+// default is a fixed-seed stream, so every new module would otherwise draw
+// the same AES-GCM nonces, repeating them across Clients that share a key.
+// TestSeparateClientsDrawDistinctNonces checks this end to end.
 func guestModuleConfig() wazero.ModuleConfig {
-	return wazero.NewModuleConfig().
-		WithRandSource(rand.Reader).
-		WithSysNanotime().
-		WithSysWalltime()
+	return wazero.NewModuleConfig().WithRandSource(rand.Reader)
 }
 
 // Client wraps one instance of the wasm guest. It is safe for concurrent use;
