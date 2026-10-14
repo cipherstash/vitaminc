@@ -216,6 +216,11 @@ cargo run --example gen_fixture   # only if the fixture value/codec changed
 cd .. && CGO_ENABLED=0 go test ./...
 ```
 
+The Go tests include `TestGuestWASIImports`, which fails if the rebuilt guest
+adds or drops a WASI import. When it fails, check that `guestModuleConfig`
+still gives the guest real host sources for its new imports, then update the
+test's list.
+
 ## Differential fuzzing
 
 `differential_fuzz_test.go` feeds the same bytes to Go's decoder (`vcffi`)

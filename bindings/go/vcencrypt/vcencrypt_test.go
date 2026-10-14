@@ -148,6 +148,36 @@ func TestRepeatedEncryptDrawsFreshNonce(t *testing.T) {
 	}
 }
 
+// Each Client is a fresh guest instance. If the guest drew randomness from
+// wazero's fixed-seed default instead of the host CSPRNG, every Client would
+// start on the same nonce sequence, so two Clients sharing a key would seal
+// the same value to identical bytes. TestRepeatedEncryptDrawsFreshNonce uses
+// one Client and cannot see this.
+func TestSeparateClientsDrawDistinctNonces(t *testing.T) {
+	aad := []byte("nonce-freshness")
+
+	first, err := newCipher(t).Encrypt(t.Context(), "same plaintext", aad)
+	if err != nil {
+		t.Fatalf("Encrypt on first Client: %v", err)
+	}
+	second, err := newCipher(t).Encrypt(t.Context(), "same plaintext", aad)
+	if err != nil {
+		t.Fatalf("Encrypt on second Client: %v", err)
+	}
+
+	a, ok := first.(vcvalue.Sealed)
+	if !ok {
+		t.Fatalf("expected a Sealed leaf, got %T", first)
+	}
+	b, ok := second.(vcvalue.Sealed)
+	if !ok {
+		t.Fatalf("expected a Sealed leaf, got %T", second)
+	}
+	if bytes.Equal(a, b) {
+		t.Fatal("two Clients sharing a key produced identical bytes for the same value — nonce reuse across Clients")
+	}
+}
+
 // Empty composites seal to authenticated marker leaves (an empty container
 // has no element ciphertexts to bind the AAD) and round-trip back to empty
 // containers.
