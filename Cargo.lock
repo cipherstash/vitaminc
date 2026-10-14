@@ -2661,6 +2661,8 @@ version = "0.5.1"
 dependencies = [
  "bytes",
  "chrono",
+ "futures-executor",
+ "futures-util",
  "quickcheck",
  "quickcheck_macros",
  "rust_decimal",
@@ -2670,7 +2672,9 @@ dependencies = [
  "trybuild",
  "uuid",
  "vitaminc-aead-derive",
+ "vitaminc-aead-value",
  "vitaminc-context",
+ "vitaminc-encrypt",
  "vitaminc-prf",
  "vitaminc-protected",
  "vitaminc-random",
