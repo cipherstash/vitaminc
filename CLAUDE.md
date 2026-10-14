@@ -1,5 +1,17 @@
 # Claude Code Guidelines for vitaminc
 
+## Principles
+
+Vitamin C is a suite of crates for cryptography and handling sensitive data. These goals (from `README.md`) guide every design and code change. They describe where the project is heading, not what every crate does today: make each change move toward them, and check the code for the current state. When two goals conflict, call out the trade-off rather than silently picking one.
+
+- **Misuse resistant**: make the secure path the easy path. Prefer types and APIs that make insecure code hard to write or fail to compile.
+- **Verified**: back changes with tests, and with formal methods where practical. Prefer dependencies that are themselves verified.
+- **Vetted**: prefer dependencies that security experts have reviewed. Write code so it is easy for an expert to review.
+- **Minimal**: include only what is necessary, in both code and dependencies. Put optional functionality behind features.
+- **Consistent**: keep interfaces consistent across crates, so everything feels like one library reachable from the `vitaminc` facade.
+- **Compatible**: work toward support for embedded (`no_std`) and WASM targets. Keep the WASM builds that CI checks today passing, and keep core crates and traits-only feature sets free of threads, timers and native-only dependencies. No crate is `no_std` yet, and vendor adapters (AWS, Azure, GCP, Vault) and `aead-napi` are native-only by design. Discuss before removing `std` support to reach `no_std`.
+- **Fast**: speed and security can be friends. Keep performance in mind without trading away security.
+
 ## Commits
 
 - Use conventional commit messages: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`, `perf:`, `ci:`
