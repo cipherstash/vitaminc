@@ -13,8 +13,8 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use vitaminc_aead::IntoAad;
 
-use crate::decrypt::{decrypt_into, DecryptError};
-use crate::encrypt::{Backend, Node};
+use crate::decrypt::{decrypt_into, decrypt_into_async, DecryptError};
+use crate::encrypt::{AsyncBackend, Backend, Node};
 use crate::kinds::{self, Float, Logical, Physical};
 use crate::model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
 use crate::sources::Uuid;
@@ -44,6 +44,15 @@ where
     A: IntoAad<'a>,
 {
     decrypt_into(backend, node, aad, T::sink())
+}
+
+pub async fn decrypt_as_async<'a, T, B, A>(backend: &B, node: Node<B::Leaf>, aad: A) -> Result<T, DecryptError<DecodeError>>
+where
+    T: Decode,
+    B: AsyncBackend,
+    A: IntoAad<'a>,
+{
+    decrypt_into_async(backend, node, aad, T::sink()).await
 }
 
 /// A type that decodes from one scalar.

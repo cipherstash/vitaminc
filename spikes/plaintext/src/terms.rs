@@ -14,7 +14,7 @@ use vitaminc_aead_value::canonical::{domain, equality_input, text_nfc, Canonical
 use vitaminc_aead_value::Value;
 use vitaminc_protected::{Controlled, Protected};
 
-use crate::encrypt::{Backend, EncryptError, EncryptSink, Node};
+use crate::encrypt::{AsyncBackend, Backend, EncryptError, EncryptSink, Node, Pending};
 use crate::kinds::{self, Float, Int, Logical, Physical};
 use crate::model::{Error, MapSink, Plaintext, SeqSink, Sink};
 use crate::tee::Tee;
@@ -34,6 +34,20 @@ pub struct Term {
 
 pub type WithTerms<B> = Result<(Node<<B as Backend>::Leaf>, Vec<Term>), EncryptError<<B as Backend>::Error>>;
 
+pub type WithTermsAsync<B> = Result<(Node<<B as AsyncBackend>::Leaf>, Vec<Term>), EncryptError<<B as AsyncBackend>::Error>>;
+
+/// Plan and collect terms in one walk. No backend yet: the terms are
+/// complete before any leaf is sealed.
+pub fn plan_with_terms<'a, P, E, A>(p: P, aad: A) -> Result<(Node<Pending>, Vec<Term>), EncryptError<E>>
+where
+    P: Plaintext,
+    A: IntoAad<'a>,
+{
+    let mut terms = Vec::new();
+    let (node, ()) = p.visit(Tee(EncryptSink::root(aad), Terms::new(&mut terms)))?;
+    Ok((node, terms))
+}
+
 /// Encrypt and collect terms in one walk.
 pub fn encrypt_with_terms<'a, P, B, A>(p: P, backend: &B, aad: A) -> WithTerms<B>
 where
@@ -41,9 +55,19 @@ where
     B: Backend,
     A: IntoAad<'a>,
 {
-    let mut terms = Vec::new();
-    let (ct, ()) = p.visit(Tee(EncryptSink::root(backend, aad), Terms::new(&mut terms)))?;
-    Ok((ct, terms))
+    let (node, terms) = plan_with_terms(p, aad)?;
+    Ok((crate::encrypt::seal_all(backend, node)?, terms))
+}
+
+/// Encrypt through an async backend and collect terms in one walk.
+pub async fn encrypt_with_terms_async<'a, P, B, A>(p: P, backend: &B, aad: A) -> WithTermsAsync<B>
+where
+    P: Plaintext,
+    B: AsyncBackend,
+    A: IntoAad<'a>,
+{
+    let (node, terms) = plan_with_terms(p, aad)?;
+    Ok((crate::encrypt::seal_all_async(backend, node).await?, terms))
 }
 
 /// The canonical integer layout, written natively: sign byte, then the

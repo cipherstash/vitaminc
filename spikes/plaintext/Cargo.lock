@@ -1060,6 +1060,7 @@ name = "vitaminc-plaintext-spike"
 version = "0.0.0"
 dependencies = [
  "chrono",
+ "futures",
  "napi",
  "rust_decimal",
  "serde_json",

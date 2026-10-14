@@ -20,14 +20,16 @@ pub mod hosts {
     pub mod js;
 }
 
-pub use decrypt::{decrypt_into, DecryptError};
+pub use decrypt::{decrypt_into, decrypt_into_async, open_all, open_all_async, walk, DecryptError, Opened};
 pub use describe::describe;
-pub use encrypt::{encrypt, Backend, EncryptError, Node, PassthroughFrame};
+pub use encrypt::{
+    encrypt, encrypt_async, plan, seal_all, seal_all_async, AsyncBackend, Backend, EncryptError, Node, PassthroughFrame, Pending,
+};
 pub use frame::{Frame, FrameError};
 pub use frame_writer::{to_frame, FrameWriter};
 pub use kinds::{Float, Int, Logical, Physical, TimeUnit};
 pub use model::{Error, MapSink, Plaintext, SeqSink, Sink, SourceError};
 pub use sources::{Bytes, Raw, Uuid};
 pub use tee::Tee;
-pub use terms::{encrypt_with_terms, PathSeg, Term, TermError};
-pub use typed::{decrypt_as, Decode, DecodeError};
+pub use terms::{encrypt_with_terms, encrypt_with_terms_async, plan_with_terms, PathSeg, Term, TermError};
+pub use typed::{decrypt_as, decrypt_as_async, Decode, DecodeError};

@@ -18,6 +18,7 @@ vitaminc-aead = { path = "../../packages/aead" }
 vitaminc-aead-value = { path = "../../packages/aead-value", features = ["chrono", "rust_decimal", "canonical"] }
 vitaminc-encrypt = { path = "../../packages/encrypt" }
 vitaminc-protected = { path = "../../packages/protected" }
+futures = { version = "0.3.31", default-features = false, features = ["std", "executor"] }
 chrono = { version = "0.4.44", default-features = false, features = ["std"] }
 rust_decimal = { version = "1.41", default-features = false, features = ["std"] }
 napi = { version = "3", default-features = false, features = ["napi6"], optional = true }

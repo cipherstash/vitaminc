@@ -51,6 +51,7 @@ Decryption walks the ciphertext tree and feeds any sink:
 | `SeqCipher::encrypt_next(value)` (pull) | `SeqSink::element() -> Sink` (push) |
 | No way for a source to fail | `Sink::Error: Error`, so a source can call `Error::source` |
 | A `Value` variant (and a tag) per kind, 19 scalar kinds | Six physical kinds plus open logical types: `scalar(ty, value)` |
+| `Decipher::Ok<T>`, a GAT that is `Result` or `BoxFuture` per backend | `Backend` (sync) and `AsyncBackend` (`seal_many`, `open_many`). The walk is sync; leaves are sealed after it |
 
 ## Reading order
 
@@ -58,10 +59,12 @@ Decryption walks the ciphertext tree and feeds any sink:
 2. `src/kinds.rs`: physical kinds and logical types.
 3. `src/scalar.rs`: scalars on the wire. Today's tags as shorthand, plus
    the logical envelope.
-4. `src/encrypt.rs`: `Backend`, and `EncryptSink` with today's container
-   rules (element and entry AAD, empty markers, nothing-sealed refusal,
-   duplicate keys) gathered in one place.
-5. `src/decrypt.rs`: one recursive walk that feeds any sink.
+4. `src/encrypt.rs`: `EncryptSink` with today's container rules (element
+   and entry AAD, empty markers, nothing-sealed refusal, duplicate keys)
+   gathered in one place, producing a tree of `Pending` leaves. Then
+   `Backend` and `AsyncBackend`, and `seal_all`, which seals the leaves.
+5. `src/decrypt.rs`: `open_all` opens every leaf, then one recursive walk
+   feeds the opened tree to any sink.
 6. `src/frame.rs`: Go's frame walked in place.
 7. `src/hosts/go_guest.rs`: the wasm guest's `encrypt`/`decrypt`, today and
    spike, side by side.
@@ -71,7 +74,8 @@ Decryption walks the ciphertext tree and feeds any sink:
 9. `src/hosts/js.rs`: walks live JS with no snapshot, and decrypts straight
    into JS values.
 10. `src/typed.rs`: typed decryption for Rust.
-11. `tests/`: the evidence. `tests/kinds.rs` for the kinds.
+11. `tests/`: the evidence. `tests/kinds.rs` for the kinds,
+    `tests/async_backend.rs` for async backends.
 
 To see what any source says, `describe` it:
 
@@ -111,6 +115,12 @@ With real AES-256-GCM:
 - **Lengths can be unknown.** They're patched into the frame at the end.
 - **Typed decryption works.** `u32`, `Vec<String>` and `Vec<Vec<u32>>`
   round-trip, and the wrong target kind is refused.
+- **Async backends work** (`tests/async_backend.rs`). A mock key
+  provider seals and opens a nine-leaf document in one round trip each
+  way; without a batch API the defaults make one call per leaf; a document
+  sealed by the async backend opens with the sync one and vice versa; terms
+  are complete before the first await; a backend that returns the wrong
+  number of leaves, or fails on one, fails the document.
 - **The kinds work** (`tests/kinds.rs`):
   - today's tags read as physical plus logical;
   - a JS-style millisecond timestamp decrypts as a Rust `DateTime` and
@@ -239,6 +249,23 @@ on the way in, and the index folds the unit away.
     static Rust seals untagged leaves (4 bytes for a `u32`). Tagging
     everything costs one byte per leaf and makes every ciphertext
     self-describing.
+
+14. **Async lives in the leaf map, not the walk.** `EncryptSink` never
+    calls a backend: it plans a tree of `Pending` leaves, each with its
+    plaintext and the AAD its position derives. `seal_all` splits the tree
+    into shape and leaves, seals the leaves, and puts them back. So the
+    walk is synchronous whatever the backend is (a JS getter can't be
+    awaited mid-walk), and a remote key provider seals every leaf of a
+    document in one `seal_many` call instead of one await per leaf. Decrypt
+    mirrors it: `open_all`, then a sync walk into the sink. Today's
+    `Decipher::Ok<T>` GAT isn't needed: only the leaf calls are async, so a
+    plain `async fn` trait says it. The cost is that every leaf's plaintext
+    exists at once before sealing, in `Protected`, instead of streaming
+    leaf by leaf.
+15. **`Aes256Cipher` isn't `Sync`.** Its nonce generator is a `RefCell`.
+    An async backend is shared across tasks, so `AsyncBackend: Sync`, and
+    the test mock has to put AES behind a mutex. A real local backend
+    should be `Sync` on its own.
 
 Not tried:
 
