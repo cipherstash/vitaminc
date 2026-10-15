@@ -803,6 +803,7 @@ name = "vitaminc-aead"
 version = "0.5.1"
 dependencies = [
  "bytes",
+ "futures-util",
  "serde",
  "thiserror",
  "vitaminc-aead-derive",

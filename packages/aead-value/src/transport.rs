@@ -24,16 +24,13 @@ use crate::{tags, Value};
 use vitaminc_aead::CipherText;
 use vitaminc_protected::Controlled;
 
-/// Transport-local framing tag for [`Value::Array`].
-pub const ARRAY: u8 = 0xF0;
-/// Transport-local framing tag for [`Value::Object`].
-pub const OBJECT: u8 = 0xF1;
-/// Transport-local framing tag for [`Value::Passthrough`]: the next value
-/// node is a passthrough (unencrypted, unauthenticated) subtree. Like
-/// [`ARRAY`]/[`OBJECT`] this is transport-local — the sealed leaf format has
-/// no passthrough tag; the ciphertext tree carries passthrough via
-/// [`CT_PASSTHROUGH`].
-pub const PASSTHROUGH: u8 = 0xF2;
+// The framing tags and the depth bound live with the frame in
+// `vitaminc_aead::frame`, so this codec and the frame cannot drift apart.
+// `ARRAY`/`OBJECT` frame [`Value::Array`]/[`Value::Object`]; `PASSTHROUGH`
+// marks the next node as a passthrough (unencrypted, unauthenticated)
+// subtree. The sealed leaf format has no container tags; the ciphertext
+// tree carries passthrough via [`CT_PASSTHROUGH`].
+pub use vitaminc_aead::frame::{ARRAY, MAX_DEPTH, OBJECT, PASSTHROUGH};
 
 /// Ciphertext node kind: a single sealed leaf.
 pub const CT_SINGLE: u8 = 0x01;
@@ -75,9 +72,6 @@ impl TransportPassthrough for Value {
         decode_value_inner(reader, depth)
     }
 }
-
-/// Mirrors the hardening bound used by the NAPI conversion layer.
-pub const MAX_DEPTH: usize = 128;
 
 /// Opaque codec error. Like the trait-layer `Unspecified`, it carries no
 /// detail: malformed transport bytes on the decrypt path are
