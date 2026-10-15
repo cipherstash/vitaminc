@@ -120,8 +120,8 @@ where
 /// [`vitaminc_aead::encrypt`] and [`vitaminc_aead::decrypt`] drive this
 /// impl; the container logic (element and entry AAD, empty markers, the
 /// nothing-sealed refusal) lives once in `EncryptSink` and the opening
-/// walk, not here. Same leaf bytes as [`seal_leaf`], so a leaf sealed
-/// through either path opens through the other.
+/// walk, not here. Same leaf bytes as the private `seal_leaf`, so a leaf
+/// sealed through either path opens through the other.
 impl vitaminc_aead::seal::Cipher for Aes256Cipher {
     type Leaf = LocalCipherText;
     type Error = Unspecified;

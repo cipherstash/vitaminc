@@ -74,12 +74,16 @@ impl TransportPassthrough for Value {
 }
 
 /// A [`PassthroughFrame`] is already one value node, so it crosses the
-/// transport as its own bytes: written as they are, and read back by
-/// validating one node at the ciphertext's depth and taking exactly it.
+/// transport as its own bytes: validated as one frame (the field is public,
+/// so a hand-built one could hold zero nodes, two, or a truncated one, and
+/// would misframe the siblings after it) and written as they are, then read
+/// back by validating one node at the ciphertext's depth and taking exactly
+/// it.
 /// This is the payload type of the sink-based ciphertext tree
 /// ([`vitaminc_aead::Node`]).
 impl TransportPassthrough for PassthroughFrame {
     fn encode_node(&self, out: &mut Vec<u8>) -> Result<(), CodecError> {
+        Frame::parse(&self.0).map_err(|_| CodecError)?;
         out.extend_from_slice(&self.0);
         Ok(())
     }
@@ -1249,6 +1253,33 @@ mod tests {
         let mut again = Vec::new();
         encode_ciphertext(&decoded, &mut again).expect("codec");
         assert_eq!(again, out);
+    }
+
+    #[test]
+    fn a_hand_built_frame_payload_is_validated_before_it_is_written() {
+        // The field is public, so a caller can build a payload that is not
+        // one node: empty, two nodes, or truncated. Each would misframe the
+        // sibling after it, so the encoder refuses it instead of writing it.
+        let mut two = Vec::new();
+        encode_value(Value::Int64(1), &mut two).expect("codec");
+        encode_value(Value::Int64(2), &mut two).expect("codec");
+        let mut truncated = Vec::new();
+        encode_value(string("abc"), &mut truncated).expect("codec");
+        truncated.pop();
+        for payload in [Vec::new(), two, truncated] {
+            let node: Node<LocalCipherText> = CipherText::Map(vec![
+                (
+                    "p".into(),
+                    CipherText::Passthrough(PassthroughFrame(payload)),
+                ),
+                ("s".into(), CipherText::Single(vec![9u8; 40].into())),
+            ]);
+            let mut out = Vec::new();
+            assert!(
+                encode_ciphertext(&node, &mut out).is_err(),
+                "a payload that is not one frame must not reach the wire"
+            );
+        }
     }
 
     #[test]
