@@ -261,7 +261,7 @@ mod test {
     // Entry values are sealed against `Context::for_map_entry(aad, key)`, so a
     // stored entry whose cleartext key is renamed (the untrusted-input path a
     // future deserializer would expose) must fail to open — the same key-swap
-    // resistance the dynamic MapCipher enforces.
+    // resistance the encrypting walk enforces.
 
     #[test]
     fn static_entry_with_renamed_key_fails_to_open() {

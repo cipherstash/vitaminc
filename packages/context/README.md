@@ -68,7 +68,7 @@ A cipher or PRF that walks a structure derives the context each part is
 sealed or derived under from the caller's context, with a reserved domain
 label so it can never equal a caller-built composite:
 [`Context::for_map_entry`](https://docs.rs/vitaminc-context/latest/vitaminc_context/struct.Context.html#method.for_map_entry),
-`for_sequence_element`, `for_leaf`, the empty-sequence, empty-map and none
+`for_sequence_element`, `for_leaf`, the empty-sequence and empty-map
 markers, `for_option_some` and `refine`. There is one set, shared by both
 derivations, because a derived context describes the shape of the
 plaintext, not the primitive consuming it.
