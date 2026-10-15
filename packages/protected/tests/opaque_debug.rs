@@ -149,3 +149,46 @@ fn struct_with_lifetime_type_param_and_where_clause() {
     );
     assert!(!out.contains("do-not-print"));
 }
+
+// Field names that match locals the derive uses internally (the formatter `f`
+// and the type-name binding `tn`) must not shadow them.
+#[derive(OpaqueDebug)]
+enum Collides {
+    Named {
+        f: u8,
+        #[non_sensitive]
+        tn: u8,
+    },
+    #[non_sensitive]
+    Shown { f: u8 },
+}
+
+#[derive(OpaqueDebug)]
+struct CollidesStruct {
+    f: u8,
+    #[non_sensitive]
+    tn: u8,
+}
+
+#[test]
+fn enum_field_named_like_derive_locals_does_not_shadow_them() {
+    let tn = type_name::<Collides>();
+
+    let named = Collides::Named { f: 1, tn: 2 };
+    assert_opaque(&named);
+    assert_eq!(
+        format!("{named:?}"),
+        format!("{tn}::Named {{f: \"***\", tn: 2}}")
+    );
+
+    let shown = Collides::Shown { f: 3 };
+    assert_eq!(format!("{shown:?}"), format!("{tn}::Shown {{f: 3}}"));
+}
+
+#[test]
+fn struct_field_named_like_derive_locals_does_not_shadow_them() {
+    let tn = type_name::<CollidesStruct>();
+    let s = CollidesStruct { f: 1, tn: 2 };
+    assert_opaque(&s);
+    assert_eq!(format!("{s:?}"), format!("{tn} {{ f: \"***\", tn: 2 }}"));
+}

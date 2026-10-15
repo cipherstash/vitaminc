@@ -1,5 +1,5 @@
 use proc_macro::TokenStream;
-use quote::{quote, quote_spanned};
+use quote::{format_ident, quote, quote_spanned};
 use syn::{spanned::Spanned, Attribute, Data, DataEnum, DataStruct, DeriveInput, Fields};
 
 pub fn derive_opaque_debug(input: DeriveInput) -> TokenStream {
@@ -206,25 +206,37 @@ fn debug_impl_for_enum(
             }
 
             syn::Fields::Named(fields) => {
-                let ids: Vec<_> = fields
+                // Bind each field to a prefixed local rather than its own name,
+                // as the tuple arm does with `__f0`, `__f1`, ... A field named
+                // `f` or `tn` would otherwise shadow the formatter or the
+                // type-name local used below.
+                let bindings: Vec<(&syn::Ident, syn::Ident)> = fields
                     .named
                     .iter()
-                    .map(|f| f.ident.as_ref().unwrap().clone())
+                    .map(|f| {
+                        let id = f.ident.as_ref().unwrap();
+                        (id, format_ident!("__f_{}", id, span = id.span()))
+                    })
                     .collect();
 
-                let pat_bindings = ids.iter().map(|id| quote!(ref #id));
+                let pat_bindings = bindings.iter().map(|(id, local)| quote!(#id: ref #local));
 
                 // per-field write with key, commas, and masking
-                let writes = fields.named.iter().enumerate().map(|(i, f)| {
-                    let id = f.ident.as_ref().unwrap();
-                    let key = id.to_string();
-                    let prefix = if i == 0 { "" } else { ", " };
-                    if variant_ns || has_non_sensitive(&f.attrs) {
-                        quote! { write!(f, concat!(#prefix, #key, ": {:?}"), #id)?; }
-                    } else {
-                        quote! { write!(f, concat!(#prefix, #key, ": {:?}"), #mask)?; }
-                    }
-                });
+                let writes =
+                    fields
+                        .named
+                        .iter()
+                        .zip(&bindings)
+                        .enumerate()
+                        .map(|(i, (f, (id, local)))| {
+                            let key = id.to_string();
+                            let prefix = if i == 0 { "" } else { ", " };
+                            if variant_ns || has_non_sensitive(&f.attrs) {
+                                quote! { write!(f, concat!(#prefix, #key, ": {:?}"), #local)?; }
+                            } else {
+                                quote! { write!(f, concat!(#prefix, #key, ": {:?}"), #mask)?; }
+                            }
+                        });
 
                 arms.push(quote! {
                     Self::#v_ident { #( #pat_bindings ),* } => {
