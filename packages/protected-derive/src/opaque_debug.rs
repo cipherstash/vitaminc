@@ -155,9 +155,9 @@ fn debug_impl_for_struct(
 fn debug_impl_for_enum(
     ident: &syn::Ident,
     de: &DataEnum,
-    _impl_generics: &impl quote::ToTokens,
+    impl_generics: &impl quote::ToTokens,
     ty_generics: &impl quote::ToTokens,
-    _where_clause: Option<&syn::WhereClause>,
+    where_clause: Option<&syn::WhereClause>,
     mask: &str,
 ) -> proc_macro2::TokenStream {
     let mut arms = Vec::new();
@@ -239,7 +239,7 @@ fn debug_impl_for_enum(
     }
 
     quote! {
-        impl ::core::fmt::Debug for #ident #ty_generics {
+        impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 match self {
                     #(#arms),*
