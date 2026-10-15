@@ -68,8 +68,18 @@ _Avoid_: DEK, plaintext key, wrapped key (for the material itself)
 
 **KeyId**:
 The opaque, backend-encoded handle that retrieves one data key. Each
-backend chooses its own encoding.
-_Avoid_: Ciphertext blob, wrapped key, token
+backend chooses its own encoding. What the handle *is* — wrapped key
+material, or a reference the backend resolves — is its key custody.
+_Avoid_: Ciphertext blob, token. Also "wrapped key" for the handle itself:
+that names what a client-held handle contains, not the handle.
+
+**Key custody**:
+Whether a KeyId is the data key in wrapped form, which the caller holds and
+the backend keeps no copy of, or a reference the backend resolves from
+material it holds. Every vendor backend is the first, ZeroKMS the second. A
+client-held handle is the only copy of its key, so losing it loses the data
+the key sealed.
+_Avoid_: Key ownership, key location
 
 **Key isolation**:
 Whether a batch of data keys holds one distinct key per value or one key

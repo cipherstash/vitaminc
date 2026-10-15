@@ -1,5 +1,7 @@
 use super::{Binding, BindingSupport, DelegatedError, IndexKeyProvider, KeyProvider};
-use crate::{GeneratedDataKey, IndexKeyMaterial, KeyId, KeyIsolation, KeyReconstruction};
+use crate::{
+    GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyIsolation, KeyReconstruction,
+};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use vitaminc_protected::Protected;
@@ -89,6 +91,7 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for CachingKeyProv
     type Error = DelegatedError<T::Error>;
 
     const RECONSTRUCTION: KeyReconstruction = T::RECONSTRUCTION;
+    const CUSTODY: KeyCustody = T::CUSTODY;
     const ISOLATION: KeyIsolation = T::ISOLATION;
     const BINDING: BindingSupport = T::BINDING;
 
@@ -235,6 +238,7 @@ mod tests {
         type Error = Infallible;
 
         const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ClientAndServer;
+        const CUSTODY: KeyCustody = KeyCustody::BackendHeld;
         const ISOLATION: KeyIsolation = KeyIsolation::Pooled;
         const BINDING: BindingSupport = BindingSupport::Bound;
 
@@ -426,6 +430,7 @@ mod tests {
             <Cached as KeyProvider<4>>::RECONSTRUCTION,
             KeyReconstruction::ClientAndServer
         );
+        assert_eq!(<Cached as KeyProvider<4>>::CUSTODY, KeyCustody::BackendHeld);
         assert_eq!(<Cached as KeyProvider<4>>::ISOLATION, KeyIsolation::Pooled);
         assert_eq!(<Cached as KeyProvider<4>>::BINDING, BindingSupport::Bound);
     }

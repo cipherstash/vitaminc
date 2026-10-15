@@ -6,7 +6,8 @@ use super::{b64_decode, b64_encode};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding, BindingSupport,
-    GenerateDataKey, GeneratedDataKey, KeyIsolation, KeyReconstruction, RetrieveDataKey,
+    GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
+    RetrieveDataKey,
 };
 use crate::key_id::KeyId;
 use private::ValidDataKeySize;
@@ -237,6 +238,10 @@ where
     /// material; the caller holds nothing the backend needs.
     const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
 
+    /// Transit hands the data key back as ciphertext (`vault:v1:...`). The
+    /// mount keeps no copy of the data key, so that ciphertext is the only one.
+    const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
+
     /// Transit's only binding-shaped input is the derivation `context`, and
     /// that exists **only on a key created with `derived=true`**. A
     /// non-derived key — the default, and what most Transit mounts hold —
@@ -448,6 +453,16 @@ mod tests {
     use crate::vault::tests::{data, test_client, KEY_NAME};
     use httpmock::prelude::*;
     use serde_json::json;
+
+    /// The key id this source returns is the data key in wrapped form,
+    /// not a reference the backend can resolve: losing it loses the key.
+    #[test]
+    fn the_key_id_is_the_wrapped_key() {
+        assert_eq!(
+            <VaultDataKeySource<32> as RetrieveDataKey<32>>::CUSTODY,
+            KeyCustody::ClientHeld
+        );
+    }
 
     #[tokio::test]
     async fn generate_asks_for_the_right_bit_size_and_decodes_the_plaintext() {

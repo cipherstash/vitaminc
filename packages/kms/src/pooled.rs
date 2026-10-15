@@ -1,6 +1,6 @@
 use crate::data_key::{
     dedup_retrieve, pooled_key_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
-    BindingSupport, GenerateDataKey, GeneratedDataKey, KeyIsolation, KeyReconstruction,
+    BindingSupport, GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
     RetrieveDataKey,
 };
 use crate::key_id::KeyId;
@@ -58,6 +58,9 @@ impl<T: RetrieveDataKey<N>, const N: usize> RetrieveDataKey<N> for PooledDataKey
     type Error = T::Error;
 
     const RECONSTRUCTION: KeyReconstruction = T::RECONSTRUCTION;
+    /// Pooling changes how many keys a batch gets, not what a key id is:
+    /// the pooled id is the inner source's own, repeated.
+    const CUSTODY: KeyCustody = T::CUSTODY;
 
     /// Never `T::BINDING`. The pooled key was minted under
     /// [`Binding::EMPTY`], so retrieving it under anything else would fail
@@ -143,6 +146,7 @@ mod tests {
     impl RetrieveDataKey<4> for CountingSource {
         type Error = std::convert::Infallible;
         const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
+        const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
         const BINDING: BindingSupport = BindingSupport::Bound;
 
         async fn retrieve_data_key(
@@ -219,6 +223,10 @@ mod tests {
         assert_eq!(
             <PooledDataKeySource<CountingSource> as RetrieveDataKey<4>>::RECONSTRUCTION,
             KeyReconstruction::ServerOnly
+        );
+        assert_eq!(
+            <PooledDataKeySource<CountingSource> as RetrieveDataKey<4>>::CUSTODY,
+            KeyCustody::ClientHeld
         );
     }
 

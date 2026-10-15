@@ -107,10 +107,46 @@ pub trait GenerateDataKey<const N: usize> {
 /// `ServerOnly` backend means a server-side compromise plus a stored
 /// identifier is sufficient to recover a key; `ClientAndServer` means it
 /// is not.
+///
+/// This is a threat-model property, not a statement about what the stored
+/// identifier *is*. For that, see [`KeyCustody`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyReconstruction {
     ClientAndServer,
     ServerOnly,
+}
+
+/// What the [`KeyId`] a source hands back actually is: the data key itself
+/// in wrapped form (`ClientHeld`), or a reference the backend resolves from
+/// material it keeps (`BackendHeld`).
+///
+/// Every envelope backend is `ClientHeld`. AWS KMS returns a
+/// `CiphertextBlob`, Google Cloud KMS and Vault Transit return a ciphertext,
+/// and Azure Key Vault returns its wrapped value: in each case the key id
+/// *is* the data key under encryption, and the backend keeps no copy of it.
+/// ZeroKMS is `BackendHeld` — its key id describes a key the service rebuilds
+/// from material it holds.
+///
+/// The difference is a **storage obligation**, which is why a source declares
+/// it instead of leaving a caller to know it. A `ClientHeld` key id is the
+/// only copy of that data key: lose it and the key is unrecoverable, because
+/// nothing server-side remembers the key ever existed. A `BackendHeld` key id
+/// can be re-presented to a backend that still holds the material.
+///
+/// Not to be confused with [`KeyReconstruction`], which asks whether a
+/// server-side compromise plus the stored key id is enough to recover the
+/// key. The two are independent, and every vendor source in this crate is
+/// `ClientHeld` *and*
+/// [`ServerOnly`](KeyReconstruction::ServerOnly): a wrapped key is not a
+/// secret the client withholds, because the backend unwraps it on demand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyCustody {
+    /// The key id is the data key in wrapped form. Store it durably; it is
+    /// the only copy.
+    ClientHeld,
+    /// The key id references a key the backend can resolve from its own
+    /// material.
+    BackendHeld,
 }
 
 /// Capability: re-derive/unwrap a previously generated data key.
@@ -119,6 +155,12 @@ pub trait RetrieveDataKey<const N: usize> {
     type Error: std::error::Error + Send + Sync + 'static;
 
     const RECONSTRUCTION: KeyReconstruction;
+
+    /// See [`KeyCustody`]. Declared beside `RECONSTRUCTION` because it is
+    /// the other half of what a caller must know about a stored key id:
+    /// `RECONSTRUCTION` says who could recover the key, `CUSTODY` says
+    /// whether the caller is holding the key itself or a reference to one.
+    const CUSTODY: KeyCustody;
 
     /// See [`BindingSupport`]. Declared on retrieval because retrieval is
     /// where a binding is enforced: a `Bound` source refuses a key id

@@ -2,7 +2,7 @@ use super::envelope::{Envelope, EnvelopeError};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
-    BindingSupport, GenerateDataKey, GeneratedDataKey, KeyIsolation, KeyReconstruction,
+    BindingSupport, GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
     RetrieveDataKey,
 };
 use crate::key_id::KeyId;
@@ -276,6 +276,10 @@ impl<const N: usize> RetrieveDataKey<N> for AzureDataKeySource<N> {
     /// `KeyId` plus the caller's Entra ID authorization is enough.
     const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
 
+    /// The envelope holds the data key wrapped by the vault key. The vault
+    /// keeps no copy of the data key, so the envelope is the only one.
+    const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
+
     /// A data key here is **wrapped**, not AEAD-encrypted: `wrapKey` and
     /// `unwrapKey` take `RSA-OAEP-256` or `A256KW`, and neither algorithm
     /// has a place to put additional authenticated data. Key Vault only
@@ -457,6 +461,16 @@ mod tests {
     }
 
     // --- zero-network unit tests ------------------------------------------
+
+    /// The key id this source returns is the data key in wrapped form,
+    /// not a reference the backend can resolve: losing it loses the key.
+    #[test]
+    fn the_key_id_is_the_wrapped_key() {
+        assert_eq!(
+            <AzureDataKeySource<32> as RetrieveDataKey<32>>::CUSTODY,
+            KeyCustody::ClientHeld
+        );
+    }
 
     #[tokio::test]
     async fn generate_wraps_locally_minted_material_with_rsa_oaep_256() {
