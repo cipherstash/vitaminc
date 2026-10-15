@@ -38,6 +38,16 @@ run = [
   "cargo mutants",
 ]
 
+[tasks.gate-scope]
+description = "Decide whether this branch's changes need a path-scoped gate (crap, mutants) to run — CI uses it to skip them on docs-only PRs"
+# Usage: mise run gate-scope -- <crap|mutants> [--base origin/main]
+# Needs only python3, so CI runs it with tool auto-install off.
+run = "python3 {{ config_root }}/.github/scripts/gate_scope.py"
+
+[tasks."gate-scope:test"]
+description = "Test the gate-scope decision"
+run = "python3 -m unittest discover -s {{ config_root }}/.github/scripts -p 'test_*.py'"
+
 [tasks.docs]
 dir = "{{ config_root }}/packages/vitaminc"
 description = "Build and generate the docs"

@@ -23,8 +23,8 @@ on:
   #
   # No path filter either: this check is required by the `main` ruleset, and
   # a required check that never reports leaves the PR at "Expected" forever.
-  # A docs-only PR therefore runs the job too; `--in-diff` finds nothing to
-  # mutate and the gate passes quickly.
+  # The `scope` job below decides instead, and skips the gate when no path
+  # it checks changed; GitHub reports a skipped job as passed.
   pull_request:
 
   workflow_dispatch:
@@ -44,7 +44,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    # The paths this gate checks live in .github/scripts/gate_scope.py.
+    # Skipped on a manual dispatch, which runs the gate below.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    name: "🔎 Mutants gate scope"
+    permissions:
+      contents: read
+    outputs:
+      needed: ${{ steps.decide.outputs.needed }}
+    env:
+      # The task needs only the runner's python3. Auto-install would build
+      # every cargo tool in mise.toml, costing more than the gate it skips.
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The diff needs the merge base of the PR and its base branch.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: jdx/mise-action@v5
+        with:
+          version: 2026.10.7
+          # mise only: no `mise install`, and no cache to save.
+          install: false
+          cache: false
+
+      - name: test the scope check
+        run: mise run gate-scope:test
+
+      - name: decide whether the gate runs
+        id: decide
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: mise run gate-scope -- mutants --base "origin/$BASE_REF"
+
   mutants:
+    needs: scope
+    # Fails closed: skip only when the scope job succeeded and said "not
+    # needed". A failed scope job, or one skipped on a manual dispatch, runs
+    # the gate.
+    if: ${{ !cancelled() && !(needs.scope.result == 'success' && needs.scope.outputs.needed == 'false') }}
     runs-on: ubuntu-latest
     name: "🧬 Mutants gate"
 
