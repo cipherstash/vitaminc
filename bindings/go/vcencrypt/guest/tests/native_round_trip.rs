@@ -4,8 +4,8 @@
 //! `vc_decrypt` drive inside the wasm module, minus the linear-memory ABI.
 
 use vitaminc_aead::{
-    decrypt_into, encrypt, to_frame, Context, DecryptError, Frame, FrameWriter, MapSink, Node,
-    Plaintext, SeqSink, Sink,
+    decrypt_to_frame, encrypt, to_frame, Context, DecryptError, Frame, MapSink, Node, Plaintext,
+    SeqSink, Sink,
 };
 use vitaminc_aead_value::transport::{self as codec, Reader};
 use vitaminc_encrypt::{Aes256Cipher, Key, LocalCipherText};
@@ -58,7 +58,7 @@ fn encrypt_frame(cipher: &Aes256Cipher, frame: &[u8], aad: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Decrypt as `vc_decrypt` does: decode, then open into a frame writer.
+/// Decrypt as `vc_decrypt` does: decode, then open into a wiped frame.
 fn decrypt_frame(
     cipher: &Aes256Cipher,
     ct: &[u8],
@@ -66,14 +66,7 @@ fn decrypt_frame(
 ) -> Result<Vec<u8>, DecryptError<vitaminc_aead::frame::FrameWriteError, vitaminc_aead::Unspecified>>
 {
     let node: Node<LocalCipherText> = codec::decode_ciphertext(&mut Reader::new(ct)).unwrap();
-    let mut out = Vec::new();
-    decrypt_into(
-        cipher,
-        node,
-        Context::from_encoded(aad),
-        FrameWriter::new(&mut out),
-    )?;
-    Ok(out)
+    Ok(decrypt_to_frame(cipher, node, Context::from_encoded(aad))?.risky_unwrap())
 }
 
 #[test]
@@ -116,14 +109,7 @@ fn a_frame_sealed_as_an_element_opens_as_a_batch_element() {
     let from_batch = items.remove(0);
 
     for node in [alone, from_batch] {
-        let mut out = Vec::new();
-        decrypt_into(
-            &cipher,
-            node,
-            aad.for_sequence_element(),
-            FrameWriter::new(&mut out),
-        )
-        .unwrap();
-        assert_eq!(out, frame);
+        let out = decrypt_to_frame(&cipher, node, aad.for_sequence_element()).unwrap();
+        assert_eq!(out.risky_unwrap(), frame);
     }
 }

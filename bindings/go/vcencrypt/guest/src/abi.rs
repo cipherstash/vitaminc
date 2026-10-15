@@ -66,16 +66,15 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use vitaminc_aead::{
-    decrypt_into, Context, DecryptError, EncryptError, Frame, FrameWriter, Node, Unencryptable,
-};
+use vitaminc_aead::{decrypt_to_frame, Context, Frame, Node};
 use vitaminc_aead_value::transport as codec;
 use vitaminc_encrypt::{Aes256Cipher, LocalCipherText};
+use vitaminc_protected::Controlled;
 use zeroize::Zeroize;
 
 use crate::sessions::{build_cipher, Sessions};
 pub use crate::status::{
-    STATUS_AUTH, STATUS_BAD_HANDLE, STATUS_ENCODING, STATUS_INTERNAL, STATUS_NOTHING_SEALED,
+    decrypt_status, encrypt_status, STATUS_BAD_HANDLE, STATUS_ENCODING, STATUS_INTERNAL,
 };
 
 thread_local! {
@@ -330,27 +329,12 @@ fn context(aad: &[u8], as_element: bool) -> Context<'_> {
     }
 }
 
-/// What an encryption refusal tells the host. A container with nothing
-/// sealed is the caller's input, reported as its own status (#385); any
-/// other shape the sink refuses is a malformed input; a cipher failure or a
-/// miscounted leaf is internal.
-fn encrypt_status<E>(error: EncryptError<E>) -> u32 {
-    match error {
-        EncryptError::Shape(
-            Unencryptable::SequenceHasNothingSealed | Unencryptable::MapHasNothingSealed,
-        ) => STATUS_NOTHING_SEALED,
-        EncryptError::Shape(_) => STATUS_ENCODING,
-        EncryptError::Source(_) | EncryptError::Cipher(_) | EncryptError::Count(_) => {
-            STATUS_INTERNAL
-        }
-    }
-}
-
 /// Decrypt a transport-encoded ciphertext tree back into a transport-encoded
-/// value (one frame) under the session `handle`, written straight into the
-/// output buffer by a [`FrameWriter`]. The output buffer contains plaintext —
-/// the host must copy it out and immediately release it with [`vc_dealloc`]
-/// (which wipes it).
+/// value (one frame) under the session `handle`. The frame is built inside
+/// `Protected` and wiped if any later leaf fails, so a refusal part way
+/// through leaves no plaintext behind; on success the output buffer
+/// contains plaintext — the host must copy it out and immediately release
+/// it with [`vc_dealloc`] (which wipes it).
 ///
 /// # Safety
 ///
@@ -410,26 +394,8 @@ fn decrypt(handle: u32, aad: &[u8], ct: &[u8], as_element: bool) -> Result<Vec<u
     let node: Node<LocalCipherText> =
         codec::decode_ciphertext(&mut codec::Reader::new(ct)).map_err(|_| STATUS_ENCODING)?;
     with_cipher(handle, |cipher| {
-        let mut out = Vec::new();
-        decrypt_into(
-            cipher,
-            node,
-            context(aad, as_element),
-            FrameWriter::new(&mut out),
-        )
-        .map_err(decrypt_status)?;
-        Ok(out)
+        let out =
+            decrypt_to_frame(cipher, node, context(aad, as_element)).map_err(decrypt_status)?;
+        Ok(out.risky_unwrap())
     })
-}
-
-/// What a decryption failure tells the host. The cipher's refusal, a tampered
-/// empty marker and a leaf that does not parse are all one authentication
-/// failure, so the status says nothing about which. Only the frame writer
-/// refusing what it was given (an output too deep or too long to frame) is
-/// an encoding error.
-fn decrypt_status<E, C>(error: DecryptError<E, C>) -> u32 {
-    match error {
-        DecryptError::Cipher(_) | DecryptError::Auth | DecryptError::Malformed => STATUS_AUTH,
-        DecryptError::Sink(_) => STATUS_ENCODING,
-    }
 }

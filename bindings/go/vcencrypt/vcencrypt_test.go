@@ -306,6 +306,10 @@ func TestNothingSealedIsItsOwnError(t *testing.T) {
 		if errors.Is(err, vcencrypt.ErrInternal) {
 			t.Fatalf("%#v: ErrNothingSealed must not read as ErrInternal", value)
 		}
+		// The element export shares the refusal.
+		if _, err := cipher.EncryptElement(t.Context(), value, []byte("aad")); !errors.Is(err, vcencrypt.ErrNothingSealed) {
+			t.Fatalf("%#v as an element: got %v, want ErrNothingSealed", value, err)
+		}
 	}
 
 	ct, err := cipher.Encrypt(t.Context(), vcvalue.Plain{V: int64(42)}, nil)
@@ -527,8 +531,19 @@ func TestMapSubsetDecrypts(t *testing.T) {
 // guest (RustCrypto backend): the cross-language, cross-backend vector test.
 // The fixture now also carries passthrough fields (id, created_at) — they must
 // arrive intact and be readable from the ciphertext WITHOUT the key path.
+//
+// cross_lang.bin is written by the current encrypt path; cross_lang_pre_adr0001.bin
+// is the same value and key as sealed by the pre-ADR 0001 `Value` path, kept so
+// that a row Go wrote before the model change keeps decrypting. Its value chunk
+// is byte-identical, so one test reads both.
 func TestCrossLanguageFixture(t *testing.T) {
-	raw, err := os.ReadFile("testdata/cross_lang.bin")
+	for _, name := range []string{"cross_lang.bin", "cross_lang_pre_adr0001.bin"} {
+		t.Run(name, func(t *testing.T) { crossLanguageFixture(t, "testdata/"+name) })
+	}
+}
+
+func crossLanguageFixture(t *testing.T, path string) {
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("reading fixture (regenerate with `cargo run --example gen_fixture` in guest/): %v", err)
 	}

@@ -13,6 +13,9 @@
 //!
 //! Regenerate only when the transport encoding or the fixture value
 //! changes; the output is committed at `bindings/go/vcencrypt/testdata/`.
+//! `cross_lang_pre_adr0001.bin` beside it is the same value and key as the
+//! pre-ADR 0001 `Value` path sealed them, and is never regenerated: it pins
+//! that rows written before the model change still decrypt.
 //!
 //! Layout (all lengths u32 LE):
 //! `"VCGO1" ++ key[32] ++ len(aad) ++ aad ++ len(ct) ++ ct ++ len(val) ++ val`
