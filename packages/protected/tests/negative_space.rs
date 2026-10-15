@@ -6,4 +6,7 @@
 fn negative_space() {
     let tests = trybuild::TestCases::new();
     tests.compile_fail("tests/ui/negative_space/*.rs");
+    // Derive hygiene: inputs that must compile and run.
+    tests.pass("tests/ui/opaque_debug/pass/*.rs");
+    tests.pass("tests/ui/timing_safe/pass/*.rs");
 }
