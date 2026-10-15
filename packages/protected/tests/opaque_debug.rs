@@ -1,21 +1,30 @@
-//! `#[derive(OpaqueDebug)]` on generic types.
+//! `#[derive(OpaqueDebug)]` on generic types, and its hygiene.
 //!
 //! The derive must carry the type's lifetimes, type parameters, const
-//! parameters and where clause onto both impls it emits. A type that fails to
+//! parameters and where clause onto both impls it emits, and nothing it
+//! generates may be captured by names at the call site. A type that fails to
 //! compile here is the regression: these tests mostly prove that the derive
 //! expands at all, then pin the masked output shape.
 
 // Masked struct fields are never read: the derived `Debug` writes the mask in
 // their place, which is the point.
 #![allow(dead_code)]
-// The lowercase const parameters below are deliberate. The lint fires again on
-// the derived impls, which copy the parameters and sit outside any item-level
-// `#[allow]`, so it is silenced for the whole file.
+// The lowercase const parameters below are deliberate. On rustc 1.96 the lint
+// also fires on the derived impls, which copy the parameters and sit outside
+// any item-level `#[allow]`; `#[automatically_derived]` on those impls does not
+// silence it. So it is allowed for the whole file.
 #![allow(non_upper_case_globals)]
 
 use core::any::type_name;
 use core::fmt::Debug;
 use vitaminc_protected::OpaqueDebug;
+
+fn assert_opaque<T: OpaqueDebug + Debug>(_: &T) {}
+
+fn assert_opaque_impl<T: OpaqueDebug + Debug + ?Sized>() {}
+
+/// Implements neither `Debug` nor anything else.
+struct NoDebug;
 
 #[derive(OpaqueDebug)]
 enum Physical<'a> {
@@ -27,7 +36,7 @@ enum Physical<'a> {
 #[derive(OpaqueDebug)]
 enum Labelled<T>
 where
-    T: Clone + Debug,
+    T: Clone,
 {
     Secret(T),
     #[non_sensitive]
@@ -64,8 +73,6 @@ where
     hidden: &'a T,
 }
 
-fn assert_opaque<T: OpaqueDebug + Debug>(_: &T) {}
-
 #[test]
 fn enum_with_lifetime_masks_every_variant() {
     let tn = type_name::<Physical<'static>>();
@@ -81,7 +88,7 @@ fn enum_with_lifetime_masks_every_variant() {
     };
     assert_eq!(
         format!("{pair:?}"),
-        format!("{tn}::Pair {{left: \"***\", right: \"***\"}}")
+        format!("{tn}::Pair {{ left: \"***\", right: \"***\" }}")
     );
 
     assert_eq!(format!("{:?}", Physical::Null), format!("{tn}::Null"));
@@ -104,7 +111,7 @@ fn enum_with_type_param_and_where_clause_honours_non_sensitive() {
     };
     assert_eq!(
         format!("{named:?}"),
-        format!("{tn}::Named {{hidden: \"***\", shown: 2}}")
+        format!("{tn}::Named {{ hidden: \"***\", shown: 2 }}")
     );
 }
 
@@ -154,6 +161,117 @@ fn struct_with_lifetime_type_param_and_where_clause() {
     assert!(!out.contains("do-not-print"));
 }
 
+// Enum variants go through `debug_struct`/`debug_tuple`, so `{:#?}` gives the
+// same multi-line layout as a struct.
+#[test]
+fn enum_variant_honours_alternate_flag() {
+    let tn = type_name::<Labelled<u32>>();
+    let named = Labelled::Named {
+        hidden: 1u32,
+        shown: 2u32,
+    };
+    assert_eq!(
+        format!("{named:#?}"),
+        format!("{tn}::Named {{\n    hidden: \"***\",\n    shown: 2,\n}}")
+    );
+
+    let visible = Labelled::Visible(7u32);
+    assert_eq!(
+        format!("{visible:#?}"),
+        format!("{tn}::Visible(\n    7,\n)")
+    );
+}
+
+// The derive adds `FieldTy: Debug` only for fields it formats, so a fully
+// masked generic type takes a non-`Debug` argument, and a `#[non_sensitive]`
+// generic field needs no bound written by hand.
+#[derive(OpaqueDebug)]
+enum MaskedOnly<T> {
+    Tuple(T),
+    Named { inner: T },
+}
+
+#[derive(OpaqueDebug)]
+struct MaskedOnlyStruct<T> {
+    inner: T,
+}
+
+#[derive(OpaqueDebug)]
+struct MaskedOnlyTuple<T>(T);
+
+#[derive(OpaqueDebug)]
+enum ShownUnbounded<T, U> {
+    #[non_sensitive]
+    Visible(T),
+    Mixed {
+        #[non_sensitive]
+        shown: T,
+        hidden: U,
+    },
+}
+
+#[derive(OpaqueDebug)]
+struct ShownUnboundedStruct<T, U> {
+    #[non_sensitive]
+    shown: T,
+    hidden: U,
+}
+
+#[test]
+fn masked_generic_fields_need_no_debug_bound() {
+    let tn = type_name::<MaskedOnly<NoDebug>>();
+
+    let tuple = MaskedOnly::Tuple(NoDebug);
+    assert_opaque(&tuple);
+    assert_eq!(format!("{tuple:?}"), format!("{tn}::Tuple(\"***\")"));
+
+    let named = MaskedOnly::Named { inner: NoDebug };
+    assert_eq!(
+        format!("{named:?}"),
+        format!("{tn}::Named {{ inner: \"***\" }}")
+    );
+
+    let s = MaskedOnlyStruct { inner: NoDebug };
+    assert_opaque(&s);
+    let tn = type_name::<MaskedOnlyStruct<NoDebug>>();
+    assert_eq!(format!("{s:?}"), format!("{tn} {{ inner: \"***\" }}"));
+
+    let t = MaskedOnlyTuple(NoDebug);
+    assert_opaque(&t);
+    let tn = type_name::<MaskedOnlyTuple<NoDebug>>();
+    assert_eq!(format!("{t:?}"), format!("{tn}(\"***\")"));
+}
+
+#[test]
+fn shown_generic_fields_get_a_debug_bound_without_one_written() {
+    // `U` stays non-`Debug`: only the shown parameter is bounded.
+    let tn = type_name::<ShownUnbounded<u32, NoDebug>>();
+
+    let visible: ShownUnbounded<u32, NoDebug> = ShownUnbounded::Visible(7);
+    assert_opaque(&visible);
+    assert_eq!(format!("{visible:?}"), format!("{tn}::Visible(7)"));
+
+    let mixed: ShownUnbounded<u32, NoDebug> = ShownUnbounded::Mixed {
+        shown: 2,
+        hidden: NoDebug,
+    };
+    assert_eq!(
+        format!("{mixed:?}"),
+        format!("{tn}::Mixed {{ shown: 2, hidden: \"***\" }}")
+    );
+
+    let s = ShownUnboundedStruct {
+        shown: 3u32,
+        hidden: NoDebug,
+    };
+    assert_opaque(&s);
+    let tn = type_name::<ShownUnboundedStruct<u32, NoDebug>>();
+    assert_eq!(
+        format!("{s:?}"),
+        format!("{tn} {{ shown: 3, hidden: \"***\" }}")
+    );
+}
+
 // Field names that match locals the derive uses internally (the formatter `f`
 // and the type-name binding `tn`) must not shadow them.
 #[derive(OpaqueDebug)]
@@ -182,11 +300,11 @@ fn enum_field_named_like_derive_locals_does_not_shadow_them() {
     assert_opaque(&named);
     assert_eq!(
         format!("{named:?}"),
-        format!("{tn}::Named {{f: \"***\", tn: 2}}")
+        format!("{tn}::Named {{ f: \"***\", tn: 2 }}")
     );
 
     let shown = Collides::Shown { f: 3 };
-    assert_eq!(format!("{shown:?}"), format!("{tn}::Shown {{f: 3}}"));
+    assert_eq!(format!("{shown:?}"), format!("{tn}::Shown {{ f: 3 }}"));
 }
 
 #[test]
@@ -235,7 +353,7 @@ fn enum_const_param_named_like_derive_local() {
     let named: ConstNamedF<'_, 2> = ConstNamedF::Named { bytes, len: 2 };
     assert_eq!(
         format!("{named:?}"),
-        format!("{tn}::Named {{bytes: \"***\", len: 2}}")
+        format!("{tn}::Named {{ bytes: \"***\", len: 2 }}")
     );
 
     let empty: ConstNamedF<'_, 2> = ConstNamedF::Empty;
@@ -259,4 +377,110 @@ fn struct_const_param_named_like_derive_local() {
     let t = ConstNamedTupleDt::<3>([1, 2, 3]);
     assert_opaque(&t);
     assert_eq!(format!("{t:?}"), format!("{tn}(\"***\")"));
+}
+
+// An empty enum has no values to format, but the derive must still expand:
+// `match self {}` on `&Never` is not exhaustive (E0004).
+#[derive(OpaqueDebug)]
+enum Never {}
+
+#[test]
+fn empty_enum_derives() {
+    assert_opaque_impl::<Never>();
+}
+
+// Raw identifiers print without their `r#`, as `#[derive(Debug)]` does.
+#[derive(OpaqueDebug)]
+struct RawStruct {
+    r#type: u8,
+    #[non_sensitive]
+    r#match: u8,
+}
+
+#[derive(OpaqueDebug)]
+enum RawEnum {
+    V {
+        r#type: u8,
+        #[non_sensitive]
+        r#match: u8,
+    },
+}
+
+#[test]
+fn raw_identifier_fields_print_unraw() {
+    let tn = type_name::<RawStruct>();
+    let s = RawStruct {
+        r#type: 1,
+        r#match: 2,
+    };
+    assert_eq!(
+        format!("{s:?}"),
+        format!("{tn} {{ type: \"***\", match: 2 }}")
+    );
+
+    let tn = type_name::<RawEnum>();
+    let e = RawEnum::V {
+        r#type: 1,
+        r#match: 2,
+    };
+    assert_eq!(
+        format!("{e:?}"),
+        format!("{tn}::V {{ type: \"***\", match: 2 }}")
+    );
+}
+
+// The derive must not pick up same-named macros at the call site.
+mod call_site_hygiene {
+    // The marker trait must be in scope (see the note in the derive). The
+    // derive itself is still named by full path below.
+    use vitaminc_protected::OpaqueDebug;
+
+    // Unused on purpose: the derive must not expand to it.
+    #[allow(unused_macros)]
+    macro_rules! write {
+        ($($t:tt)*) => {
+            compile_error!("user write! was picked up by the derive")
+        };
+    }
+
+    // Unused on purpose: the derive must not expand to it.
+    #[allow(unused_macros)]
+    macro_rules! concat {
+        ($($t:tt)*) => {
+            compile_error!("user concat! was picked up by the derive")
+        };
+    }
+
+    #[derive(vitaminc_protected::OpaqueDebug)]
+    pub enum E {
+        V {
+            a: u8,
+            #[non_sensitive]
+            b: u8,
+        },
+        T(u8),
+        U,
+    }
+
+    #[derive(vitaminc_protected::OpaqueDebug)]
+    pub struct S {
+        pub a: u8,
+    }
+}
+
+#[test]
+fn derive_ignores_call_site_macros() {
+    use call_site_hygiene::{E, S};
+
+    let tn = type_name::<E>();
+    let v = E::V { a: 1, b: 2 };
+    assert_opaque(&v);
+    assert_eq!(format!("{v:?}"), format!("{tn}::V {{ a: \"***\", b: 2 }}"));
+    assert_eq!(format!("{:?}", E::T(3)), format!("{tn}::T(\"***\")"));
+    assert_eq!(format!("{:?}", E::U), format!("{tn}::U"));
+
+    let s = S { a: 1 };
+    assert_opaque(&s);
+    let tn = type_name::<S>();
+    assert_eq!(format!("{s:?}"), format!("{tn} {{ a: \"***\" }}"));
 }

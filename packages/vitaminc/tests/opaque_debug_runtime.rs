@@ -75,9 +75,9 @@ fn enum_variants_masked() {
     assert_eq!(format!("{a:?}"), format!("{tn}::A(\"***\")"));
 
     let b = SecretThing::B { x: 7, y: 9 };
-    assert!(
-        format!("{b:?}") == format!("{tn}::B {{x: \"***\", y: \"***\"}}")
-            || format!("{b:?}") == format!("{tn}::B {{y: \"***\", x: \"***\"}}")
+    assert_eq!(
+        format!("{b:?}"),
+        format!("{tn}::B {{ x: \"***\", y: \"***\" }}")
     );
 
     let c = SecretThing::C;

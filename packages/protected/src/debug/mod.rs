@@ -78,7 +78,7 @@ use zeroize::Zeroize;
 ///
 /// let s = SecretThing::B { x: 7, y: 9 };
 /// let out = format!("{s:?}");
-/// assert!(out.contains("SecretThing::B {x: \"***\", y: \"***\"}"));
+/// assert!(out.contains("SecretThing::B { x: \"***\", y: \"***\" }"));
 /// ```
 ///
 /// ### Marking non-sensitive fields

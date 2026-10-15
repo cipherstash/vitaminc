@@ -1,63 +1,148 @@
+use std::collections::BTreeSet;
+
 use proc_macro::TokenStream;
-use quote::{format_ident, quote, quote_spanned};
-use syn::{spanned::Spanned, Attribute, Data, DataEnum, DataStruct, DeriveInput, Fields};
+use proc_macro2::TokenTree;
+use quote::{format_ident, quote, quote_spanned, ToTokens};
+use syn::{
+    ext::IdentExt, spanned::Spanned, Attribute, Data, DataEnum, DataStruct, DeriveInput, Field,
+    Fields, Type,
+};
 
-// Every local the generated impls introduce (the formatter, the type-name
-// binding, the `DebugStruct`/`DebugTuple` builders) carries an
-// `__opaque_debug_` prefix, and enum fields are bound as `__f_<name>` or
-// `__fN`. The impls carry the input's generics, so a short name like `f` or
-// `tn` would collide with a lowercase const parameter or a field of that name.
+// Hygiene: the generated impls carry the input's generics and sit in the
+// caller's module, so every name they introduce or call must be one the input
+// cannot capture.
+//
+// - The formatter is `__opaque_debug_f`, and enum fields are bound as
+//   `__f_<name>` or `__fN`, so a field or a lowercase const parameter named
+//   `f` cannot collide with them.
+// - Macros and `core` items are called by absolute path (`::core::write!`,
+//   `::core::fmt::Debug`), so a same-named macro at the call site does not
+//   take their place.
+// - The `OpaqueDebug` marker trait is deliberately left unqualified: callers
+//   may reach it through `vitaminc_protected` or through the `vitaminc`
+//   umbrella crate (`vitaminc::protected`), and no single absolute path
+//   resolves for both. It must be in scope where the derive is used.
 pub fn derive_opaque_debug(input: DeriveInput) -> TokenStream {
-    let ident = input.ident.clone();
-    let generics = input.generics.clone();
-    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
-
     // Only config is the mask string (default "***")
-    let mask = parse_mask_attr(&input);
+    let mask = match parse_mask_attr(&input) {
+        Ok(mask) => mask,
+        Err(err) => return err.to_compile_error().into(),
+    };
+
+    let ident = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let marker_impl = quote! {
+        #[automatically_derived]
         impl #impl_generics OpaqueDebug for #ident #ty_generics #where_clause {}
     };
 
-    let dbg_impl = match &input.data {
-        Data::Struct(ds) => debug_impl_for_struct(
-            &ident,
-            ds,
-            &impl_generics,
-            &ty_generics,
-            where_clause,
-            &mask,
-        ),
-        Data::Enum(de) => debug_impl_for_enum(
-            &ident,
-            de,
-            &impl_generics,
-            &ty_generics,
-            where_clause,
-            &mask,
-        ),
-        Data::Union(_) => {
-            // For unions: just print the type name
-            quote! {
-                impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
-                    fn fmt(&self, __opaque_debug_f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
-                        __opaque_debug_f.write_str(__opaque_debug_tn)
-                    }
-                }
-            }
+    // The `Debug` impl needs `FieldTy: Debug` for each field it formats
+    // (`#[non_sensitive]`) whose type mentions a type parameter. Masked fields
+    // are never formatted, so a fully masked generic type keeps working with a
+    // non-`Debug` argument. The bounds go on the `Debug` impl only.
+    let mut debug_generics = input.generics.clone();
+    let type_params: BTreeSet<String> = input
+        .generics
+        .type_params()
+        .map(|p| p.ident.to_string())
+        .collect();
+    {
+        let where_clause = debug_generics.make_where_clause();
+        for ty in shown_field_types(&input.data, &type_params) {
+            where_clause
+                .predicates
+                .push(syn::parse_quote!(#ty: ::core::fmt::Debug));
         }
+    }
+    let (debug_impl_generics, _, debug_where_clause) = debug_generics.split_for_impl();
+
+    let body = match &input.data {
+        Data::Struct(ds) => debug_body_for_struct(ds, &mask),
+        Data::Enum(de) => debug_body_for_enum(de, &mask),
+        // For unions: just print the type name
+        Data::Union(_) => quote! {
+            __opaque_debug_f.write_str(::core::any::type_name::<Self>())
+        },
     };
 
-    quote!(#marker_impl #dbg_impl).into()
+    quote! {
+        #marker_impl
+
+        #[automatically_derived]
+        impl #debug_impl_generics ::core::fmt::Debug
+            for #ident #ty_generics #debug_where_clause
+        {
+            fn fmt(
+                &self,
+                __opaque_debug_f: &mut ::core::fmt::Formatter<'_>,
+            ) -> ::core::fmt::Result {
+                #body
+            }
+        }
+    }
+    .into()
 }
 
 fn has_non_sensitive(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|a| a.path().is_ident("non_sensitive"))
 }
 
+/// The field name as `Debug` should print it: `r#type` prints as `type`.
+fn field_key(field: &Field) -> String {
+    field.ident.as_ref().unwrap().unraw().to_string()
+}
+
+/// Whether `ty` names any of `type_params` anywhere in its tokens.
+///
+/// This is a token-level over-approximation (`other::T` also matches `T`),
+/// which at worst adds a `Debug` bound the field needs anyway.
+fn mentions_type_param(ty: &Type, type_params: &BTreeSet<String>) -> bool {
+    fn walk(tokens: proc_macro2::TokenStream, type_params: &BTreeSet<String>) -> bool {
+        tokens.into_iter().any(|tt| match tt {
+            TokenTree::Ident(id) => type_params.contains(&id.to_string()),
+            TokenTree::Group(g) => walk(g.stream(), type_params),
+            _ => false,
+        })
+    }
+    !type_params.is_empty() && walk(ty.to_token_stream(), type_params)
+}
+
+/// Types of the fields the `Debug` impl formats rather than masks, limited to
+/// those that mention a type parameter, de-duplicated by token string.
+fn shown_field_types(data: &Data, type_params: &BTreeSet<String>) -> Vec<Type> {
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    let mut push = |field: &Field, shown: bool| {
+        if shown
+            && mentions_type_param(&field.ty, type_params)
+            && seen.insert(field.ty.to_token_stream().to_string())
+        {
+            out.push(field.ty.clone());
+        }
+    };
+
+    match data {
+        Data::Struct(ds) => {
+            for field in &ds.fields {
+                push(field, has_non_sensitive(&field.attrs));
+            }
+        }
+        Data::Enum(de) => {
+            for v in &de.variants {
+                let variant_ns = has_non_sensitive(&v.attrs);
+                for field in &v.fields {
+                    push(field, variant_ns || has_non_sensitive(&field.attrs));
+                }
+            }
+        }
+        Data::Union(_) => {}
+    }
+    out
+}
+
 /// Parse `#[opaque_debug(mask = "...")]` using syn v2 `parse_nested_meta`.
-fn parse_mask_attr(input: &DeriveInput) -> String {
+fn parse_mask_attr(input: &DeriveInput) -> syn::Result<String> {
     let mut mask = "***".to_string();
 
     for attr in &input.attrs {
@@ -65,7 +150,7 @@ fn parse_mask_attr(input: &DeriveInput) -> String {
             continue;
         }
         // Accept: #[opaque_debug(mask = "...")]
-        let _ = attr.parse_nested_meta(|meta| {
+        attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("mask") {
                 let lit: syn::LitStr = meta.value()?.parse()?;
                 mask = lit.value();
@@ -73,144 +158,108 @@ fn parse_mask_attr(input: &DeriveInput) -> String {
             }
             // Unknown keys produce a nice error tied to the attribute span
             Err(meta.error("unsupported attribute; expected `mask = \"...\"`"))
-        });
+        })?;
     }
 
-    mask
+    Ok(mask)
 }
 
-fn debug_impl_for_struct(
-    ident: &syn::Ident,
-    ds: &DataStruct,
-    impl_generics: &impl quote::ToTokens,
-    ty_generics: &impl quote::ToTokens,
-    where_clause: Option<&syn::WhereClause>,
-    mask: &str,
-) -> proc_macro2::TokenStream {
+fn debug_body_for_struct(ds: &DataStruct, mask: &str) -> proc_macro2::TokenStream {
     match &ds.fields {
         Fields::Named(named) => {
             // Use DebugStruct and decide per-field based on #[non_sensitive]
-            let field_tokens = named.named.iter().map(|f| {
+            let fields = named.named.iter().map(|f| {
                 let fname = f.ident.as_ref().unwrap();
-                let key = fname.to_string();
+                let key = field_key(f);
                 if has_non_sensitive(&f.attrs) {
                     // show actual value
-                    quote_spanned! { f.span() =>
-                        let _ = __opaque_debug_ds.field(#key, &self.#fname);
-                    }
+                    quote_spanned! { f.span() => .field(#key, &self.#fname) }
                 } else {
                     // mask
-                    quote_spanned! { f.span() =>
-                        let _ = __opaque_debug_ds.field(#key, &#mask);
-                    }
+                    quote_spanned! { f.span() => .field(#key, &#mask) }
                 }
             });
 
             quote! {
-                impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
-                    fn fmt(&self, __opaque_debug_f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
-                        let mut __opaque_debug_ds = __opaque_debug_f.debug_struct(__opaque_debug_tn);
-                        #(#field_tokens)*
-                        __opaque_debug_ds.finish()
-                    }
-                }
+                __opaque_debug_f
+                    .debug_struct(::core::any::type_name::<Self>())
+                    #(#fields)*
+                    .finish()
             }
         }
         Fields::Unnamed(unnamed) => {
             // Use DebugTuple and decide per-field based on #[non_sensitive]
-            let field_tokens = unnamed.unnamed.iter().enumerate().map(|(i, f)| {
+            let fields = unnamed.unnamed.iter().enumerate().map(|(i, f)| {
                 let idx = syn::Index::from(i);
                 if has_non_sensitive(&f.attrs) {
-                    quote_spanned! { f.span() =>
-                        let _ = __opaque_debug_dt.field(&self.#idx);
-                    }
+                    quote_spanned! { f.span() => .field(&self.#idx) }
                 } else {
-                    quote_spanned! { f.span() =>
-                        let _ = __opaque_debug_dt.field(&#mask);
-                    }
+                    quote_spanned! { f.span() => .field(&#mask) }
                 }
             });
 
             quote! {
-                impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
-                    fn fmt(&self, __opaque_debug_f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
-                        let mut __opaque_debug_dt = __opaque_debug_f.debug_tuple(__opaque_debug_tn);
-                        #(#field_tokens)*
-                        __opaque_debug_dt.finish()
-                    }
-                }
+                __opaque_debug_f
+                    .debug_tuple(::core::any::type_name::<Self>())
+                    #(#fields)*
+                    .finish()
             }
         }
-        Fields::Unit => {
-            // Type
-            quote! {
-                impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
-                    fn fmt(&self, __opaque_debug_f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
-                        __opaque_debug_f.write_str(__opaque_debug_tn)
-                    }
-                }
-            }
-        }
+        Fields::Unit => quote! {
+            __opaque_debug_f.write_str(::core::any::type_name::<Self>())
+        },
     }
 }
 
-fn debug_impl_for_enum(
-    ident: &syn::Ident,
-    de: &DataEnum,
-    impl_generics: &impl quote::ToTokens,
-    ty_generics: &impl quote::ToTokens,
-    where_clause: Option<&syn::WhereClause>,
-    mask: &str,
-) -> proc_macro2::TokenStream {
-    let mut arms = Vec::new();
-
-    for v in &de.variants {
+/// Each arm prints `path::Enum::` and then formats the variant through
+/// `debug_struct`/`debug_tuple`, so enum output matches struct output
+/// (`path::E::V { a: "***" }`) and honours `{:#?}`.
+fn debug_body_for_enum(de: &DataEnum, mask: &str) -> proc_macro2::TokenStream {
+    let arms = de.variants.iter().map(|v| {
         let v_ident = &v.ident;
         let variant_ns = has_non_sensitive(&v.attrs);
+        let prefix = quote! {
+            ::core::write!(
+                __opaque_debug_f,
+                "{}::",
+                ::core::any::type_name::<Self>(),
+            )?;
+        };
 
         match &v.fields {
-            syn::Fields::Unit => {
-                arms.push(quote! {
-                    Self::#v_ident => {
-                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
-                        write!(__opaque_debug_f, "{}::{}", __opaque_debug_tn, ::core::stringify!(#v_ident))
-                    }
-                });
-            }
+            Fields::Unit => quote! {
+                Self::#v_ident => {
+                    #prefix
+                    __opaque_debug_f.write_str(::core::stringify!(#v_ident))
+                }
+            },
 
-            syn::Fields::Unnamed(fields) => {
+            Fields::Unnamed(fields) => {
                 // bind each field by ref
                 let bind_ids: Vec<syn::Ident> = (0..fields.unnamed.len())
-                    .map(|i| syn::Ident::new(&format!("__f{i}"), v.span()))
+                    .map(|i| format_ident!("__f{}", i, span = v.span()))
                     .collect();
 
-                let pat = quote! { #( ref #bind_ids ),* };
-
-                // per-field write with commas and masking
-                let writes = bind_ids.iter().enumerate().map(|(i, ident_i)| {
-                    let comma = if i == 0 { "" } else { ", " };
-                    let field_attrs = &fields.unnamed[i].attrs;
-                    if variant_ns || has_non_sensitive(field_attrs) {
-                        quote! { write!(__opaque_debug_f, concat!(#comma, "{:?}"), #ident_i)?; }
+                let writes = fields.unnamed.iter().zip(&bind_ids).map(|(f, local)| {
+                    if variant_ns || has_non_sensitive(&f.attrs) {
+                        quote_spanned! { f.span() => .field(#local) }
                     } else {
-                        quote! { write!(__opaque_debug_f, concat!(#comma, "{:?}"), #mask)?; }
+                        quote_spanned! { f.span() => .field(&#mask) }
                     }
                 });
 
-                arms.push(quote! {
-                    Self::#v_ident( #pat ) => {
-                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
-                        write!(__opaque_debug_f, "{}::{}(", __opaque_debug_tn, ::core::stringify!(#v_ident))?;
-                        #(#writes)*
-                        write!(__opaque_debug_f, ")")
+                quote! {
+                    Self::#v_ident( #( ref #bind_ids ),* ) => {
+                        #prefix
+                        __opaque_debug_f
+                            .debug_tuple(::core::stringify!(#v_ident))
+                            #(#writes)*
+                            .finish()
                     }
-                });
+                }
             }
 
-            syn::Fields::Named(fields) => {
+            Fields::Named(fields) => {
                 // Bind each field to a prefixed local rather than its own name,
                 // as the tuple arm does with `__f0`, `__f1`, ... so a field
                 // cannot shadow the generated locals.
@@ -225,42 +274,33 @@ fn debug_impl_for_enum(
 
                 let pat_bindings = bindings.iter().map(|(id, local)| quote!(#id: ref #local));
 
-                // per-field write with key, commas, and masking
-                let writes =
-                    fields
-                        .named
-                        .iter()
-                        .zip(&bindings)
-                        .enumerate()
-                        .map(|(i, (f, (id, local)))| {
-                            let key = id.to_string();
-                            let prefix = if i == 0 { "" } else { ", " };
-                            if variant_ns || has_non_sensitive(&f.attrs) {
-                                quote! { write!(__opaque_debug_f, concat!(#prefix, #key, ": {:?}"), #local)?; }
-                            } else {
-                                quote! { write!(__opaque_debug_f, concat!(#prefix, #key, ": {:?}"), #mask)?; }
-                            }
-                        });
-
-                arms.push(quote! {
-                    Self::#v_ident { #( #pat_bindings ),* } => {
-                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
-                        write!(__opaque_debug_f, "{}::{} {{", __opaque_debug_tn, ::core::stringify!(#v_ident))?;
-                        #(#writes)*
-                        write!(__opaque_debug_f, "}}")
+                let writes = fields.named.iter().zip(&bindings).map(|(f, (_, local))| {
+                    let key = field_key(f);
+                    if variant_ns || has_non_sensitive(&f.attrs) {
+                        quote_spanned! { f.span() => .field(#key, #local) }
+                    } else {
+                        quote_spanned! { f.span() => .field(#key, &#mask) }
                     }
                 });
-            }
-        }
-    }
 
-    quote! {
-        impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
-            fn fmt(&self, __opaque_debug_f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                match self {
-                    #(#arms),*
+                quote! {
+                    Self::#v_ident { #( #pat_bindings ),* } => {
+                        #prefix
+                        __opaque_debug_f
+                            .debug_struct(::core::stringify!(#v_ident))
+                            #(#writes)*
+                            .finish()
+                    }
                 }
             }
+        }
+    });
+
+    // `*self` rather than `self`, so an empty enum's `match {}` is exhaustive.
+    // Every binding is `ref`, so nothing is moved out.
+    quote! {
+        match *self {
+            #(#arms)*
         }
     }
 }
