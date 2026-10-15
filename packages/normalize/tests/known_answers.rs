@@ -432,6 +432,40 @@ fn paths_follow_the_nesting() {
     assert_eq!(terms[0].normalized.domain, domain::BYTES);
 }
 
+/// Every container on a path shares one buffer of keys, and each starts
+/// over where its own keys begin, so a path names only its own keys
+/// however many siblings went before it.
+#[test]
+fn sibling_paths_name_only_their_own_keys() {
+    let mut first = BTreeMap::new();
+    first.insert("x", vec!["1", "2"]);
+    first.insert("yy", vec!["3"]);
+    let mut second = BTreeMap::new();
+    second.insert("zzz", vec!["4"]);
+    let mut doc = BTreeMap::new();
+    doc.insert("a", vec![first.clone(), second]);
+    doc.insert("bb", vec![first]);
+    for found in [
+        plan_with_terms::<_, Refused, _>(doc.clone(), "ctx")
+            .expect("plans")
+            .1,
+        terms(doc).expect("walks"),
+    ] {
+        assert_eq!(
+            paths(&found),
+            [
+                ".a[0].x[0]",
+                ".a[0].x[1]",
+                ".a[0].yy[0]",
+                ".a[1].zzz[0]",
+                ".bb[0].x[0]",
+                ".bb[0].x[1]",
+                ".bb[0].yy[0]",
+            ]
+        );
+    }
+}
+
 #[test]
 fn an_unassigned_code_point_stops_the_walk_with_the_normalize_error() {
     let err = plan_with_terms::<_, Refused, _>("\u{378}", "ctx")

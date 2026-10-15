@@ -127,15 +127,88 @@ impl Error for TermsError {
 /// [`EncryptError::Source`], and `source.inner().downcast_ref::<TermError>()`
 /// recovers it. Alone, through [`terms`], it is [`TermsError::term`].
 /// Either way the [`NormalizeError`] is on the `source()` chain.
+///
+/// # Cost
+///
+/// A path costs nothing until a term is pushed or a refusal is built. Each
+/// child sink holds a link to its container's place and its own index, or
+/// the position of its key in one buffer of the keys on the path being
+/// walked, which the whole walk shares and reuses. So the walk allocates
+/// that buffer, as long as the keys on the longest path, and otherwise
+/// only what each pushed term needs.
 pub struct Terms<'t, E> {
     out: &'t mut Vec<Term>,
-    /// The path of the container this sink is a child of, borrowed from
-    /// that container's sink, and the step from it to this value. Owned
-    /// only when a term is pushed, so a child that produces none costs no
-    /// allocation.
-    parent: &'t [Step],
-    step: Option<Step>,
+    keys: Keys<'t>,
+    at: Place<'t>,
     _error: PhantomData<E>,
+}
+
+/// The map keys on the path being walked, end to end. The root owns the
+/// buffer and every sink below it borrows it. A container truncates it
+/// back to where its own keys begin before each child, so it holds only
+/// the keys of the current path.
+enum Keys<'t> {
+    Own(String),
+    Lent(&'t mut String),
+}
+
+impl Keys<'_> {
+    fn get(&mut self) -> &mut String {
+        match self {
+            Keys::Own(keys) => keys,
+            Keys::Lent(keys) => keys,
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        match self {
+            Keys::Own(keys) => keys,
+            Keys::Lent(keys) => keys,
+        }
+    }
+}
+
+/// Where a node sits: a link to its container's place and its own step.
+/// A key is named by its position in [`Keys`].
+#[derive(Clone, Copy)]
+enum Place<'t> {
+    Root,
+    Element {
+        parent: &'t Place<'t>,
+        index: usize,
+    },
+    Entry {
+        parent: &'t Place<'t>,
+        key: (usize, usize),
+    },
+}
+
+impl Place<'_> {
+    /// Append the steps from the root to this node, reading keys from
+    /// `keys`.
+    fn locate(&self, keys: &str, steps: &mut Vec<Step>) {
+        match *self {
+            Place::Root => {}
+            Place::Element { parent, index } => {
+                parent.locate(keys, steps);
+                steps.push(Step::Index(index));
+            }
+            Place::Entry {
+                parent,
+                key: (start, end),
+            } => {
+                parent.locate(keys, steps);
+                steps.extend(keys.get(start..end).map(|key| Step::Key(key.to_owned())));
+            }
+        }
+    }
+
+    /// The path from the root to this node.
+    fn path(&self, keys: &str) -> Path {
+        let mut steps = Vec::new();
+        self.locate(keys, &mut steps);
+        Path::new(steps)
+    }
 }
 
 impl<'t, E> Terms<'t, E> {
@@ -143,17 +216,14 @@ impl<'t, E> Terms<'t, E> {
     pub fn new(out: &'t mut Vec<Term>) -> Self {
         Self {
             out,
-            parent: &[],
-            step: None,
+            keys: Keys::Own(String::new()),
+            at: Place::Root,
             _error: PhantomData,
         }
     }
 
-    fn path(&self) -> Vec<Step> {
-        let mut path = Vec::with_capacity(self.parent.len() + usize::from(self.step.is_some()));
-        path.extend_from_slice(self.parent);
-        path.extend(self.step.iter().cloned());
-        path
+    fn path(&self) -> Path {
+        self.at.path(self.keys.as_str())
     }
 }
 
@@ -166,7 +236,7 @@ impl<'t, E: Error> Sink for Terms<'t, E> {
     fn scalar(self, ty: Option<Logical>, value: Physical<'_>) -> Result<(), E> {
         match normalize(ty, value) {
             Ok(normalized) => {
-                let path = Path::new(self.path());
+                let path = self.path();
                 self.out.push(Term { path, normalized });
                 Ok(())
             }
@@ -176,7 +246,7 @@ impl<'t, E: Error> Sink for Terms<'t, E> {
                 Ok(())
             }
             Err(error) => Err(E::source(SourceError::new(TermError {
-                path: Path::new(self.path()),
+                path: self.path(),
                 error,
             }))),
         }
@@ -184,8 +254,10 @@ impl<'t, E: Error> Sink for Terms<'t, E> {
 
     fn seq(self, _: Option<usize>) -> Result<Self::Seq, E> {
         Ok(TermsSeq {
-            path: self.path(),
+            mark: self.keys.as_str().len(),
             out: self.out,
+            keys: self.keys,
+            at: self.at,
             next: 0,
             _error: PhantomData,
         })
@@ -193,8 +265,10 @@ impl<'t, E: Error> Sink for Terms<'t, E> {
 
     fn map(self, _: Option<usize>) -> Result<Self::Map, E> {
         Ok(TermsMap {
-            path: self.path(),
+            mark: self.keys.as_str().len(),
             out: self.out,
+            keys: self.keys,
+            at: self.at,
             _error: PhantomData,
         })
     }
@@ -208,7 +282,11 @@ impl<'t, E: Error> Sink for Terms<'t, E> {
 /// plus its index.
 pub struct TermsSeq<'t, E> {
     out: &'t mut Vec<Term>,
-    path: Vec<Step>,
+    keys: Keys<'t>,
+    /// Where this sequence's own keys would begin: the length of `keys`
+    /// at its start.
+    mark: usize,
+    at: Place<'t>,
     next: usize,
     _error: PhantomData<E>,
 }
@@ -222,12 +300,17 @@ impl<E: Error> SeqSink for TermsSeq<'_, E> {
         Self: 's;
 
     fn element(&mut self) -> Result<Terms<'_, E>, E> {
-        let step = Step::Index(self.next);
+        let keys = self.keys.get();
+        keys.truncate(self.mark);
+        let index = self.next;
         self.next += 1;
         Ok(Terms {
             out: self.out,
-            parent: &self.path,
-            step: Some(step),
+            keys: Keys::Lent(keys),
+            at: Place::Element {
+                parent: &self.at,
+                index,
+            },
             _error: PhantomData,
         })
     }
@@ -241,7 +324,11 @@ impl<E: Error> SeqSink for TermsSeq<'_, E> {
 /// key.
 pub struct TermsMap<'t, E> {
     out: &'t mut Vec<Term>,
-    path: Vec<Step>,
+    keys: Keys<'t>,
+    /// Where this map's keys begin in `keys`: its length at the map's
+    /// start. Each entry's key replaces the last one there.
+    mark: usize,
+    at: Place<'t>,
     _error: PhantomData<E>,
 }
 
@@ -254,10 +341,17 @@ impl<E: Error> MapSink for TermsMap<'_, E> {
         Self: 's;
 
     fn entry(&mut self, key: &str) -> Result<Terms<'_, E>, E> {
+        let keys = self.keys.get();
+        keys.truncate(self.mark);
+        keys.push_str(key);
+        let key = (self.mark, keys.len());
         Ok(Terms {
             out: self.out,
-            parent: &self.path,
-            step: Some(Step::Key(key.to_owned())),
+            keys: Keys::Lent(keys),
+            at: Place::Entry {
+                parent: &self.at,
+                key,
+            },
             _error: PhantomData,
         })
     }
