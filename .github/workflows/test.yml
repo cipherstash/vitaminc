@@ -14,6 +14,48 @@ defaults:
     shell: bash -l {0}
 
 jobs:
+  # Enforces the declared rust-version: the workspace MSRV (root Cargo.toml)
+  # and vitaminc-kms's own, higher floor (the AWS SDK moves faster than the
+  # rest, so kms declares its own rust-version and is checked separately).
+  # This job only runs `cargo check`. Tests stay on the pinned release in the
+  # `test` job below, because the trybuild `.stderr` snapshots match one
+  # compiler's diagnostics verbatim and would fail on any other.
+  # `--locked` makes it check the dependency graph we actually ship.
+  msrv:
+    runs-on: ubuntu-latest
+    name: "🦀 MSRV (${{ matrix.toolchain }}, ${{ matrix.name }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: workspace
+            toolchain: 1.88.0
+            args: --workspace --all-targets --exclude vitaminc-kms
+          - name: vitaminc-kms
+            toolchain: 1.94.1
+            args: -p vitaminc-kms --all-targets
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-msrv-${{ matrix.toolchain }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.toolchain }}
+
+      - name: cargo check
+        run: cargo check --locked ${{ matrix.args }}
+
   test:
     runs-on: ubuntu-latest
     name: "🧪 Test"
