@@ -85,12 +85,41 @@ func corpusTransports(f *testing.F) [][]byte {
 	if err != nil {
 		f.Fatal(err)
 	}
-	var corpus struct{ Vectors, Malformed []struct{ Transport string } }
+	var corpus struct {
+		Vectors, Malformed, Normalized []struct{ Transport string }
+	}
 	if err := json.Unmarshal(data, &corpus); err != nil {
 		f.Fatal(err)
 	}
 	var out [][]byte
-	for _, row := range append(corpus.Vectors, corpus.Malformed...) {
+	// The normalized vectors too: they are the ones where the guest and the
+	// codec must agree on a re-encoding that differs from the input.
+	rows := append(append(corpus.Vectors, corpus.Malformed...), corpus.Normalized...)
+	for _, row := range rows {
+		raw, err := hex.DecodeString(row.Transport)
+		if err != nil {
+			f.Fatal(err)
+		}
+		out = append(out, raw)
+	}
+	return out
+}
+
+// corpusCiphertexts are the corpus's malformed ciphertext transports, seeds
+// for the ciphertext fuzz targets beside the real ciphertexts they build.
+func corpusCiphertexts(f *testing.F) [][]byte {
+	data, err := os.ReadFile("../../../testdata/value-conformance.json")
+	if err != nil {
+		f.Fatal(err)
+	}
+	var corpus struct {
+		CiphertextMalformed []struct{ Transport string } `json:"ciphertext_malformed"`
+	}
+	if err := json.Unmarshal(data, &corpus); err != nil {
+		f.Fatal(err)
+	}
+	var out [][]byte
+	for _, row := range corpus.CiphertextMalformed {
 		raw, err := hex.DecodeString(row.Transport)
 		if err != nil {
 			f.Fatal(err)
@@ -319,6 +348,9 @@ func FuzzDifferentialCipherText(f *testing.F) {
 		if ct, err := client.call(ctx, client.encrypt, cipher.handle, differentialAAD, raw); err == nil {
 			f.Add(ct)
 		}
+	}
+	for _, raw := range corpusCiphertexts(f) {
+		f.Add(raw)
 	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {

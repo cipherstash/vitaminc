@@ -25,16 +25,30 @@ func addCorpusSeeds(f *testing.F, wrap func([]byte) []byte) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	var corpus struct{ Vectors, Malformed []struct{ Transport string } }
+	var corpus struct {
+		Vectors, Malformed, Normalized []struct{ Transport string }
+		CiphertextMalformed            []struct{ Transport string } `json:"ciphertext_malformed"`
+	}
 	if err := json.Unmarshal(data, &corpus); err != nil {
 		f.Fatal(err)
 	}
-	for _, row := range append(corpus.Vectors, corpus.Malformed...) {
+	rows := append(append(corpus.Vectors, corpus.Malformed...), corpus.Normalized...)
+	for _, row := range rows {
 		raw, err := hex.DecodeString(row.Transport)
 		if err != nil {
 			f.Fatal(err)
 		}
 		f.Add(wrap(raw))
+	}
+	// The malformed ciphertext transports are seeds as they are: the
+	// ciphertext targets must refuse them, and the value targets must not
+	// read them as a value either.
+	for _, row := range corpus.CiphertextMalformed {
+		raw, err := hex.DecodeString(row.Transport)
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(raw)
 	}
 }
 
