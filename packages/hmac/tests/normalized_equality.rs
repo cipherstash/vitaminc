@@ -161,7 +161,7 @@ fn every_equality_domain_has_a_known_answer() {
     // Every domain the normalizer knows has a vector above, and the labels
     // themselves are pinned, not only through the HMAC outputs.
     for domain in domain::ALL {
-        assert!(covered.contains(&domain), "{domain}");
+        assert!(covered.contains(domain), "{domain}");
     }
     assert_eq!(
         domain::ALL,
@@ -251,4 +251,33 @@ fn normalized_equivalence_keeps_the_legacy_domains_apart() {
             .into_result()
             .expect("derives")
     );
+}
+
+/// A term that fails to normalize inside a container fails the whole
+/// derivation: the container driver keeps the first child error, so a
+/// caller never gets fewer terms than it gave with no error.
+#[test]
+fn a_normalize_error_inside_a_container_fails_the_whole_derivation() {
+    let prf = HmacSha256Prf::new(Protected::new([0x0b; 32]));
+    let terms = vec![
+        EqualityTerm::new(None, Physical::Int(Int::I64(7))),
+        EqualityTerm::new(None, Physical::Bool(true)),
+    ];
+    assert!(matches!(
+        terms.prf(&prf).into_result(),
+        Err(PrfError::Normalize(NormalizeError::NoDomain))
+    ));
+    let mut fields = std::collections::BTreeMap::new();
+    let joined = EqualityTerm::new(Some(Logical::Date), Physical::Text("1970-01-01"));
+    fields.insert("joined", joined);
+    assert!(matches!(
+        fields.prf(&prf).into_result(),
+        Err(PrfError::Normalize(NormalizeError::Invalid))
+    ));
+    assert!(matches!(
+        Some(EqualityTerm::new(None, Physical::Null))
+            .prf(&prf)
+            .into_result(),
+        Err(PrfError::Normalize(NormalizeError::NoDomain))
+    ));
 }
