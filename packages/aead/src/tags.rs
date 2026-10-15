@@ -1,10 +1,15 @@
-//! Leaf type tags — the cross-language wire commitment.
+//! Leaf type tags: the cross-language wire commitment.
 //!
-//! Every scalar [`Value`](crate::Value) seals as `[tag] ++ payload`
-//! **inside** the AEAD envelope, so the tag is authenticated: flipping a
-//! value's type requires forging the AEAD authentication tag. Containers
-//! (arrays, objects) are structural — they use the cipher's sequence and map
-//! modes and carry no tag.
+//! Every scalar seals as `[tag] ++ payload` **inside** the AEAD envelope, so
+//! the tag is authenticated: flipping a value's type requires forging the
+//! AEAD authentication tag. Containers (sequences, maps) are structural;
+//! they use the ciphertext tree's shape and carry no tag.
+//!
+//! Each tag is read as shorthand for a physical kind plus a logical type:
+//! `UINT32` is a plain int with a 32-bit width hint, `DATE` is
+//! [`Logical::Date`](crate::Logical) over an int, and so on. A logical type
+//! with no tag of its own travels in the [`LOGICAL`] envelope. See
+//! [`leaf`](crate::leaf).
 //!
 //! # ⚠️ Frozen wire format
 //!
@@ -65,14 +70,33 @@ pub const UINT16: u8 = 0x0F;
 pub const INT128: u8 = 0x10;
 /// 128-bit unsigned integer: 16 bytes, little-endian.
 pub const UINT128: u8 = 0x11;
-/// Date: `i32` days from CE (0001-01-01 is day 1), little-endian.
+/// Date: `i32` days from CE (0001-01-01 is day 1), little-endian. Read as
+/// [`Logical::Date`](crate::Logical) over an int holding days since
+/// 1970-01-01.
 pub const DATE: u8 = 0x12;
 /// UTC timestamp: `i64` Unix seconds, then `u32` nanoseconds, little-endian.
-/// Uses chrono's leap-second representation: nanos may exceed 999,999,999
-/// only at a leap second (seconds modulo 60 is 59), and must be < 2,000,000,000.
+/// The nanoseconds are below 2,000,000,000; values of 1,000,000,000 and
+/// above are chrono's leap-second representation. `vitaminc-aead-value`
+/// writes and reads those; `vitaminc-aead`'s codec reads this tag as
+/// [`Logical::Timestamp`](crate::Logical) in nanoseconds and refuses a leap
+/// second, which has no count in any unit (see [`crate::leaf`]).
 pub const TIMESTAMP: u8 = 0x13;
 /// Decimal: rust_decimal's 16-byte `serialize()` layout, preserving scale.
 /// Little-endian flags (sign bit 31, scale in bits 16–23, at most 28), then
 /// low, middle and high `u32` words of the 96-bit mantissa. Other flag bits
-/// must be zero. This finite format has no NaN or infinity.
+/// must be zero. This finite format has no NaN or infinity. The sign bit
+/// may be set on a zero mantissa. `vitaminc-aead`'s codec reads this tag as
+/// [`Logical::Decimal`](crate::Logical) over an int holding the mantissa,
+/// so a negative zero reads as zero (see [`crate::leaf`]).
 pub const DECIMAL: u8 = 0x14;
+
+/// The generic logical-type envelope: `LOGICAL, id, param`, then the plain
+/// physical scalar. Carries any logical type that has no tag of its own.
+/// An envelope is refused where a shorthand tag exists, so every value has
+/// one encoding. Sits next to the transport frame's container tags
+/// (`0xF0`–`0xF2`).
+pub const LOGICAL: u8 = 0xF3;
+/// Reserved for a logical-type envelope with a length-prefixed parameter,
+/// should a logical type ever need more than one byte of parameter. Not
+/// written, and refused on read.
+pub const LOGICAL_LONG: u8 = 0xF4;
