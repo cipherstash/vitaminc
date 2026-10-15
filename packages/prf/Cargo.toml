@@ -14,7 +14,7 @@ rust-version.workspace = true
 
 [features]
 default = []
-# `PrfValue` for `vitaminc_normalize::Normalized` and `Equality`: equality
+# `PrfValue` for `vitaminc_normalize::Normalized` and `EqualityTerm`: equality
 # terms over the plaintext data model. Off, this crate depends on neither
 # `vitaminc-normalize` nor its Unicode tables.
 normalize = ["dep:vitaminc-normalize", "dep:vitaminc-aead"]

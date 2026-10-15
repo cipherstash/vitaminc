@@ -7,11 +7,17 @@
 //! has a physical value and its logical type in hand rather than a walk.
 
 use vitaminc_aead::{Logical, Physical};
-use vitaminc_normalize::{normalize, Normalized};
+use vitaminc_normalize::{normalize, NormalizeError, Normalized};
+use vitaminc_protected::OpaqueDebug;
 
 use crate::{IntoPrfContext, Prf, PrfEncoding, PrfError, PrfValue, PrfVisitor};
 
 /// Derive under the term's own domain, over its normalized bytes.
+///
+/// The fields of a `Normalized` are public, so its domain is caller input
+/// here: an empty one, which no frozen domain is, fails with
+/// [`NormalizeError::NoDomain`] rather than reaching the encoding's
+/// non-empty assertion.
 impl PrfValue for Normalized {
     fn prf_visit_with_context<'a, P, V, C>(self, prf: &P, context: C, visitor: V) -> P::Ok<V::Value>
     where
@@ -19,6 +25,9 @@ impl PrfValue for Normalized {
         V: PrfVisitor<P::Block, P::Passthrough>,
         C: IntoPrfContext<'a>,
     {
+        if self.domain.is_empty() {
+            return no_domain(prf);
+        }
         prf.prf_bytes_vec(
             self.bytes,
             PrfEncoding::new(self.domain),
@@ -36,6 +45,9 @@ impl PrfValue for &Normalized {
         V: PrfVisitor<P::Block, P::Passthrough>,
         C: IntoPrfContext<'a>,
     {
+        if self.domain.is_empty() {
+            return no_domain(prf);
+        }
         prf.prf_bytes_vec(
             self.bytes.clone(),
             PrfEncoding::new(self.domain),
@@ -43,6 +55,11 @@ impl PrfValue for &Normalized {
             visitor,
         )
     }
+}
+
+/// The refusal for a term with an empty domain.
+fn no_domain<P: Prf, T: Send + 'static>(prf: &P) -> P::Ok<T> {
+    prf.failure(PrfError::Normalize(NormalizeError::NoDomain))
 }
 
 /// One scalar to derive an equality term for: a physical value and the
@@ -73,8 +90,11 @@ impl PrfValue for &Normalized {
 /// EqualityTerm::new(Some(Logical::Date), Physical::Int(Int::I32(19_000))).prf(prf)
 /// # }
 /// ```
-#[derive(Clone, Copy)]
+///
+/// `Debug` shows the logical type and masks the value.
+#[derive(Clone, Copy, OpaqueDebug)]
 pub struct EqualityTerm<'a> {
+    #[non_sensitive]
     logical: Option<Logical>,
     value: Physical<'a>,
 }
@@ -201,5 +221,32 @@ mod tests {
             error.to_string(),
             "cannot derive an equality term: no equality domain for this kind of value"
         );
+    }
+
+    /// A `Normalized` built by hand with an empty domain is refused like
+    /// any term with no domain, owned or borrowed, instead of panicking.
+    #[test]
+    fn an_empty_domain_is_refused_not_a_panic() {
+        let backend = MockPrf;
+        let empty = || Normalized {
+            domain: "",
+            bytes: vitaminc_protected::Protected::new(vec![1]),
+        };
+        assert!(matches!(
+            (&empty()).prf(&backend).into_result(),
+            Err(PrfError::Normalize(NormalizeError::NoDomain))
+        ));
+        assert!(matches!(
+            empty().prf(&backend).into_result(),
+            Err(PrfError::Normalize(NormalizeError::NoDomain))
+        ));
+    }
+
+    #[test]
+    fn debug_shows_the_logical_type_and_masks_the_value() {
+        let term = EqualityTerm::new(Some(Logical::Date), Physical::Text("secret"));
+        let shown = format!("{term:?}");
+        assert!(shown.contains("Date") && shown.contains("***"), "{shown}");
+        assert!(!shown.contains("secret"), "{shown}");
     }
 }
