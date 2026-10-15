@@ -2660,10 +2660,14 @@ name = "vitaminc-aead"
 version = "0.5.1"
 dependencies = [
  "bytes",
+ "chrono",
  "quickcheck",
  "quickcheck_macros",
+ "rust_decimal",
  "serde",
+ "thiserror",
  "trybuild",
+ "uuid",
  "vitaminc-aead-derive",
  "vitaminc-context",
  "vitaminc-prf",

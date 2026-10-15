@@ -819,6 +819,7 @@ version = "0.5.1"
 dependencies = [
  "bytes",
  "serde",
+ "thiserror",
  "vitaminc-aead-derive",
  "vitaminc-context",
  "vitaminc-protected",

@@ -142,6 +142,16 @@ jobs:
           cargo test -p vitaminc-aead-value --features rust_decimal &&
           cargo test -p vitaminc-aead-value --all-features
 
+      - name: test (aead optional scalar features)
+        # No workspace member enables these on vitaminc-aead, so the default
+        # run skips the tests that pin the chrono, rust_decimal and uuid
+        # conversions and range constants. Run each alone and together.
+        run: |
+          cargo test -p vitaminc-aead --features chrono &&
+          cargo test -p vitaminc-aead --features rust_decimal &&
+          cargo test -p vitaminc-aead --features uuid &&
+          cargo test -p vitaminc-aead --all-features
+
       - name: test (canonical equality features)
         # The workspace run unifies hmac's dev-dependency features, so test
         # prf alone without `value` as well as with each optional feature.
