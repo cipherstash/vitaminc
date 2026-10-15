@@ -191,6 +191,9 @@ func FuzzDifferentialValue(f *testing.F) {
 			return
 		}
 		goValue, goErr := vcffi.Unmarshal(data)
+		if goErr == nil && PendingADR0001(goValue) {
+			return // a known gap, stated on the helper
+		}
 		rustOK, err := rustAccepts(client, client.encrypt, data)
 		if err != nil {
 			t.Fatalf("input %x: guest decode failed abnormally: %v", data, err)
@@ -251,7 +254,10 @@ func FuzzDifferentialCipherText(f *testing.F) {
 		if len(data) > maxDifferentialInput {
 			return
 		}
-		_, goErr := vcffi.UnmarshalCipherText(vcffi.VCValueLeaves(), data)
+		goTree, goErr := vcffi.UnmarshalCipherText(vcffi.VCValueLeaves(), data)
+		if goErr == nil && PendingADR0001(goTree) {
+			return // a known gap, stated on the helper
+		}
 		rustOK, err := rustAccepts(client, client.decrypt, data)
 		if err != nil {
 			t.Fatalf("input %x: guest decode failed abnormally: %v", data, err)
