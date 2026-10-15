@@ -28,7 +28,7 @@
 //! back to JavaScript as that error: see [`JsFault`].
 
 use napi::bindgen_prelude::{
-    Array, BigInt, FromNapiValue, JsObjectValue, JsValue, Object, Uint8Array, Unknown,
+    Array, BigInt, FromNapiValue, JsObjectValue, JsValue, Object, Uint8ArraySlice, Unknown,
 };
 use napi::{Env, Error, Status, ValueType};
 use vitaminc_aead::frame::FrameWriteError;
@@ -53,6 +53,7 @@ pub struct JsRef<'e> {
 }
 
 impl<'e> JsRef<'e> {
+    /// The value to walk, as the root of the structure.
     pub fn new(value: Unknown<'e>) -> Self {
         Self { value, depth: 0 }
     }
@@ -168,9 +169,14 @@ fn object<S: Sink>(value: Unknown<'_>, depth: usize, sink: S) -> Result<S::Ok, S
 /// `Uint8ClampedArray` would seal as its raw bytes and silently decrypt
 /// as a `Buffer`, so the cast, which checks the element type, refuses
 /// them. A `Buffer` is a `Uint8Array` and passes.
+///
+/// The view is borrowed as a slice, which holds no reference. napi-rs's
+/// `Uint8Array` takes a reference before it checks the element type and
+/// never releases it when the check fails, so every refused array would
+/// stay alive until the environment exits.
 fn bytes<S: Sink>(value: Unknown<'_>, sink: S) -> Result<S::Ok, S::Error> {
-    let arr =
-        Uint8Array::from_unknown(value).map_err(|_| fault::<S>(not_bytes_error("typed array")))?;
+    let arr = Uint8ArraySlice::from_unknown(value)
+        .map_err(|_| fault::<S>(not_bytes_error("typed array")))?;
     sink.scalar(None, Physical::Bytes(&arr))
 }
 
@@ -197,13 +203,14 @@ fn date<S: Sink>(value: Unknown<'_>, sink: S) -> Result<S::Ok, S::Error> {
 fn classify(value: Unknown<'_>) -> napi::Result<Option<Wrapper>> {
     let env = Env::from_raw(value.value().env);
     let wrappers = Wrappers::get(&env)?;
-    if let Some(wrapper) = wrappers.classify(&value)? {
-        return Ok(Some(wrapper));
-    }
+    // Most objects are plain, and a plain object has no wrapper prototype
+    // in its chain, so it is asked first and the class checks are skipped.
     if wrappers.is_plain(value)? {
-        Ok(None)
-    } else {
-        Err(not_plain_error())
+        return Ok(None);
+    }
+    match wrappers.classify(&value)? {
+        Some(wrapper) => Ok(Some(wrapper)),
+        None => Err(not_plain_error()),
     }
 }
 

@@ -382,6 +382,25 @@ pub fn kind_inventory<'e>(env: &'e Env) -> Result<Object<'e>> {
     Ok(exports)
 }
 
+/// A known logical type over a value it does not admit, sent straight to
+/// the build, which must refuse it rather than show the physical value. A
+/// frame never gets this far: `Frame::parse` checks what each type admits.
+#[napi]
+pub fn build_mismatched<'e>(env: &'e Env, case: String) -> Result<Unknown<'e>> {
+    let (ty, value) = match case.as_str() {
+        "date-over-text" => (Logical::Date, Physical::Text("2024-02-29")),
+        "date-out-of-range" => (Logical::Date, Physical::Int(Int::I128(i128::MAX))),
+        "timestamp-out-of-range" => (
+            Logical::Timestamp(TimeUnit::Nanos),
+            Physical::Int(Int::I128(i128::MAX)),
+        ),
+        "uuid-short" => (Logical::Uuid, Physical::Bytes(&[0; 15])),
+        "decimal-scale" => (Logical::Decimal { scale: 29 }, Physical::Int(Int::I128(1))),
+        other => return Err(Error::from_reason(format!("no such case: {other}"))),
+    };
+    Ok(JsBuilder::new(env).scalar(Some(ty), value)?)
+}
+
 /// A frame carrying a logical type this binding does not know, to pin that
 /// the build refuses it rather than dropping the type.
 #[napi]

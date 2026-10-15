@@ -22,16 +22,25 @@ use napi::bindgen_prelude::{Function, JsObjectValue, JsValue, Object, ObjectRef,
 use napi::{Env, Error, Result, Status};
 
 /// Which wrapper class a value is an instance of.
+///
+/// A logical type JavaScript has no value for needs a new class, so more
+/// variants may come.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Wrapper {
+    /// `VcDate`: a calendar date as `YYYY-MM-DD`.
     Date,
+    /// `VcTimestamp`: an instant as RFC 3339 text, to the nanosecond.
     Timestamp,
+    /// `VcDecimal`: a fixed-point decimal as text.
     Decimal,
+    /// `VcUuid`: a UUID as hyphenated hexadecimal.
     Uuid,
 }
 
 impl Wrapper {
-    pub const ALL: [Wrapper; 4] = [
+    /// Every wrapper class, in the order the walk asks them.
+    pub const ALL: &'static [Wrapper] = &[
         Wrapper::Date,
         Wrapper::Timestamp,
         Wrapper::Decimal,
@@ -109,7 +118,7 @@ impl<'e> Wrappers<'e> {
     pub fn exports(env: &'e Env) -> Result<Object<'e>> {
         let wrappers = Self::get(env)?;
         let mut exports = Object::new(env)?;
-        for wrapper in Wrapper::ALL {
+        for &wrapper in Wrapper::ALL {
             exports.set_named_property(wrapper.class_name(), wrappers.constructor(wrapper)?)?;
         }
         Ok(exports)
@@ -121,7 +130,7 @@ impl<'e> Wrappers<'e> {
 
     /// Which wrapper class `value` is an instance of, if any.
     pub fn classify(&self, value: &Unknown<'e>) -> Result<Option<Wrapper>> {
-        for wrapper in Wrapper::ALL {
+        for &wrapper in Wrapper::ALL {
             if value.instanceof(self.constructor(wrapper)?)? {
                 return Ok(Some(wrapper));
             }
@@ -137,15 +146,27 @@ impl<'e> Wrappers<'e> {
     /// `Set`'s contents enumerate as `{}`, a `RegExp` drops its pattern and
     /// flags, an `ArrayBuffer` or `DataView` its bytes. Encrypting such a
     /// value would destroy the payload with no error at either end, so the
-    /// walk refuses it instead, once it has checked for the wrapper classes.
+    /// walk refuses it instead, unless it is an instance of a wrapper class.
     /// The question is put to the `Object.getPrototypeOf` captured when the
     /// script was evaluated, which runs a `Proxy`'s trap; `napi_get_prototype`
     /// reports `null` for every proxy, which would pass a proxied `Map` as
     /// `Object.create(null)`.
+    ///
+    /// A trap that throws leaves its exception pending, so the caller hands
+    /// back the very value thrown, as it would for a getter that throws.
     pub fn is_plain(&self, value: Unknown<'e>) -> Result<bool> {
         let is_plain: Function<'e, Unknown<'e>, bool> =
             self.classes.get_named_property(IS_PLAIN)?;
-        is_plain.call(value)
+        // napi-rs clears the exception a called function throws and keeps
+        // it inside the error, which a `JsFault` cannot carry, so it is
+        // thrown again here.
+        is_plain.call(value).map_err(|error| {
+            let reason = error.reason.clone();
+            match Env::from_raw(self.classes.value().env).throw(error) {
+                Ok(()) => Error::new(Status::PendingException, reason),
+                Err(error) => error,
+            }
+        })
     }
 
     /// The text a wrapper instance holds. The class keeps `value` as an
@@ -192,7 +213,7 @@ mod tests {
     fn every_wrapper_has_the_class_name_javascript_sees() {
         let names: Vec<&str> = Wrapper::ALL.iter().map(|w| w.class_name()).collect();
         assert_eq!(names, ["VcDate", "VcTimestamp", "VcDecimal", "VcUuid"]);
-        for wrapper in Wrapper::ALL {
+        for &wrapper in Wrapper::ALL {
             assert_eq!(wrapper.class_name(), format!("Vc{wrapper:?}"));
         }
     }

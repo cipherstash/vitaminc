@@ -56,6 +56,27 @@ assert.throws(() => addon.encryptValue([{ get a() { throw boom; } }], aad), (e) 
 assert.throws(() => addon.encryptValue('\ud800', aad), /unpaired surrogate/);
 assert.throws(() => addon.encryptValue({ s: 'a\udc00b' }, aad), /unpaired surrogate/);
 assert.throws(() => addon.encryptValue({ '\ud800': 1 }, aad), /unpaired surrogate/);
+// A valid surrogate pair is one character and is kept; only an unpaired
+// half is refused. The empty string is the smallest read.
+for (const s of ['', '😀', 'a😀', '😀b', '\u{10FFFF}', 'José']) {
+  assert.equal(addon.decryptValue(addon.encryptValue(s, aad), aad), s, JSON.stringify(s));
+  assert.deepEqual(addon.decryptValue(addon.encryptValue({ [s]: s }, aad), aad), { [s]: s });
+}
+// A Proxy trap that throws is like a getter that throws: the walk stops and
+// encryption rejects with that same error.
+const trapError = new RangeError('the trap threw');
+for (const handler of [
+  { getPrototypeOf() { throw trapError; } },
+  { ownKeys() { throw trapError; } },
+  { get() { throw trapError; } },
+]) {
+  const trap = Object.keys(handler)[0];
+  assert.throws(() => addon.encryptValue(new Proxy({ a: 1 }, handler), aad), (e) => e === trapError, trap);
+}
+// A value with no place in the mapping is refused, wherever it sits.
+for (const value of [Symbol('s'), () => 1, { f() {} }, [Symbol.iterator]]) {
+  assert.throws(() => addon.encryptValue(value, aad), /JS type cannot be encrypted/, String(typeof value));
+}
 
 // Nesting past the limit and the forbidden keys are refused on the way in.
 const MAX_DEPTH = 128;

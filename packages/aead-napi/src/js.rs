@@ -107,7 +107,7 @@ pub(crate) fn get_own<'e>(obj: &Object<'e>, key: &OwnKey<'e>) -> Result<Unknown<
 }
 
 /// A JS string as Rust text. Fetched as UTF-16 (JS's native representation)
-/// and converted with `String::from_utf16`, which errors on unpaired
+/// and decoded with `char::decode_utf16`, which errors on unpaired
 /// surrogates. The UTF-8 fetch (`napi_get_value_string_utf8`) would silently
 /// replace them with U+FFFD, so a value would seal *mutated* and a key would
 /// stop naming its property; refuse loudly instead.
@@ -134,13 +134,30 @@ pub(crate) fn lossless_string(value: Unknown<'_>, what: &str) -> Result<Zeroizin
         sys::napi_get_value_string_utf16(env, raw, units.as_mut_ptr(), len + 1, &mut written)
     };
     check_status!(status, "failed to read a {what}")?;
-    let text = String::from_utf16(&units[..written.min(len)]).map_err(|_| {
+    from_utf16(&units[..written.min(len)]).ok_or_else(|| {
         Error::new(
             Status::InvalidArg,
             format!("{what} contains an unpaired surrogate and cannot be encrypted losslessly"),
         )
-    })?;
-    Ok(Zeroizing::new(text))
+    })
+}
+
+/// UTF-16 code units as UTF-8 text, or `None` if any surrogate is unpaired.
+///
+/// The UTF-8 length is measured first, so the text is built in a wiped
+/// buffer of its final size: a `String` that grows leaves its old buffer
+/// unwiped, as `String::from_utf16` does for any text outside ASCII.
+fn from_utf16(units: &[u16]) -> Option<Zeroizing<String>> {
+    let mut utf8_len = 0usize;
+    for c in char::decode_utf16(units.iter().copied()) {
+        utf8_len += c.ok()?.len_utf8();
+    }
+    let mut text = Zeroizing::new(String::with_capacity(utf8_len));
+    // Every unit was checked above, so `flatten` drops nothing.
+    for c in char::decode_utf16(units.iter().copied()).flatten() {
+        text.push(c);
+    }
+    Some(text)
 }
 
 /// Fetch a property as the raw JS value, without [`Object::get`]'s
@@ -202,7 +219,7 @@ pub(crate) fn new_array<'e>(env: &'e Env, len: usize) -> Result<Object<'e>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{eager_capacity, forbidden_key, MAX_EAGER_CAPACITY};
+    use super::{eager_capacity, forbidden_key, from_utf16, MAX_EAGER_CAPACITY};
 
     #[test]
     fn forbidden_keys_are_rejected() {
@@ -232,5 +249,23 @@ mod tests {
             MAX_EAGER_CAPACITY
         );
         assert_eq!(eager_capacity(u32::MAX), MAX_EAGER_CAPACITY);
+    }
+
+    #[test]
+    fn utf16_text_is_built_at_its_final_size() {
+        for text in ["", "a", "José", "😀b", "\u{10FFFF}"] {
+            let units: Vec<u16> = text.encode_utf16().collect();
+            let built = from_utf16(&units).expect("well formed");
+            assert_eq!(built.as_str(), text);
+            // A buffer that grew would have left a smaller one unwiped.
+            assert_eq!(built.capacity(), text.len(), "{text}");
+        }
+    }
+
+    #[test]
+    fn an_unpaired_surrogate_is_refused() {
+        for units in [&[0xD800][..], &[0x61, 0xDC00, 0x62], &[0xD83D, 0x61]] {
+            assert!(from_utf16(units).is_none(), "{units:x?}");
+        }
     }
 }

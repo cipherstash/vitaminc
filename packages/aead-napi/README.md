@@ -146,10 +146,19 @@ coverage; the pure functions beside them stay scored.
   `unsafe_op_in_unsafe_fn` and `clippy::undocumented_unsafe_blocks`, so
   each unsafe block states why it is sound.
 - The original copies of encrypted values in the V8 heap are owned by the
-  JS engine and cannot be wiped from Rust. Every copy Rust makes of a
-  string (the UTF-16 code units and the UTF-8 text, for values and for the
-  wrapper classes' text) is wiped on drop, and a frame snapshot is
-  `Protected` and wiped on drop.
+  JS engine and cannot be wiped from Rust. On the way in, every copy Rust
+  makes of a string is wiped on drop: the UTF-16 code units and the UTF-8
+  text of each value, key and wrapper class's text. The UTF-8 text is built
+  in a buffer of its final size, so no smaller buffer is left behind, and
+  the wrapper text is parsed in place without further copies. The one
+  exception is an error message, which names a property a getter removed
+  while the walk was reading it. A frame snapshot is `Protected` and wiped
+  on drop.
+- On the way out, the build hands decrypted text and bytes to JavaScript,
+  where the engine owns them. The Rust copies made along the way are not
+  wiped: the text of each wrapper class (formatted by `chrono`,
+  `rust_decimal` or the binding), each map key, and the bytes copied into a
+  `Buffer`.
 - Property names that would touch the prototype chain (`__proto__`,
   `constructor`, `prototype`) are rejected in both directions. Nesting is
   limited to 128 levels in both directions too, counted as the frame counts

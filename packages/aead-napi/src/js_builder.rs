@@ -82,6 +82,7 @@ pub struct JsBuilder<'e, O = Root> {
 }
 
 impl<'e> JsBuilder<'e> {
+    /// A build of a root value in `env`.
     pub fn new(env: &'e Env) -> Self {
         Self::at_depth(env, 0)
     }

@@ -372,4 +372,24 @@ assert.throws(() => addon.ciphertextWithPayload(60, HUGE), /nested too deeply/);
   });
   assert.equal(reply, '2024-02-29');
   assert.equal(roundTrip(new addon.VcDate('2024-02-29')).value, '2024-02-29');
+
+  // A value the binding refuses is not kept alive by the refusal: once
+  // nothing in JavaScript holds it, a collection frees it.
+  require('node:v8').setFlagsFromString('--expose-gc');
+  const gc = require('node:vm').runInNewContext('gc');
+  const refused = (() => {
+    const views = [new Float64Array([1.5]), new Int16Array([-1]), new Uint8ClampedArray([1])];
+    for (const view of views) {
+      assert.throws(() => addon.encode(view), /only a Buffer or a Uint8Array/, view.constructor.name);
+    }
+    const leaf = { not: 'bytes' };
+    assert.throws(() => addon.ciphertextRoundTrip({ t: 'ct', v: leaf }));
+    return [...views, leaf].map((value) => new WeakRef(value));
+  })();
+  // A WeakRef keeps its target alive until the current job ends.
+  await new Promise(setImmediate);
+  gc();
+  for (const [i, ref] of refused.entries()) {
+    assert.equal(ref.deref(), undefined, `refused value ${i} is still alive`);
+  }
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -78,6 +78,11 @@ const nested = {items:[1n, new VcDate('2024-02-29'), new VcDecimal('1.50'), new 
 assert.deepEqual(addon.decode(addon.encode(nested)), nested);
 assert.throws(() => addon.encode(new Map([['a',1]])));
 assert.throws(() => addon.encode([,1]));
+// The reported length is not trusted: the walk refuses the first hole
+// without reserving room for 2^32 - 1 elements.
+const maximumSparse = new Array(2 ** 32 - 1);
+assert.throws(() => addon.encode(maximumSparse), /sparse arrays are not supported/);
+assert.throws(() => addon.encryptValue(maximumSparse, 'aad'), /sparse arrays are not supported/);
 assert.throws(() => addon.encode('\ud800'));
 // A wrapper takes a string and nothing else; the text itself is checked
 // when the value is encrypted, so one rule applies however it was made.

@@ -28,10 +28,15 @@ impl JsFault {
         }
     }
 
+    /// The napi status of the failure. [`Status::PendingException`] means a
+    /// JavaScript exception is still pending: return this error to
+    /// JavaScript before running any more JavaScript, so the exception
+    /// surfaces as it was thrown.
     pub fn status(&self) -> Status {
         self.status
     }
 
+    /// The failure's message.
     pub fn reason(&self) -> &str {
         &self.reason
     }

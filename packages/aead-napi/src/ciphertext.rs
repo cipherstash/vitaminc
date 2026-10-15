@@ -34,7 +34,8 @@
 //! [`Node`]: vitaminc_aead::Node
 
 use napi::bindgen_prelude::{
-    Array, Buffer, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue, TypeName, Unknown,
+    Array, Buffer, BufferSlice, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue,
+    TypeName, Unknown,
 };
 use napi::{sys, Env, Error, Result, Status, ValueType};
 use vitaminc_aead::{CipherText, Frame, PassthroughFrame};
@@ -302,7 +303,10 @@ where
     let t = String::from_unknown(own_field(obj, T_KEY)?)?;
     match t.as_str() {
         T_CIPHERTEXT | T_NONE | T_EMPTY_SEQ | T_EMPTY_MAP => {
-            let buf = Buffer::from_unknown(own_field(obj, V_KEY)?)?;
+            // Borrowed as a slice, which holds no reference: napi-rs's
+            // `Buffer` takes one before it checks the value and never
+            // releases it when the check fails.
+            let buf = BufferSlice::from_unknown(own_field(obj, V_KEY)?)?;
             let leaf = Leaf::from(buf.to_vec());
             Ok(match t.as_str() {
                 T_CIPHERTEXT => CipherText::Single(leaf),

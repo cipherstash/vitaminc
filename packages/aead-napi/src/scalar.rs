@@ -4,6 +4,8 @@
 //!
 //! Nothing here touches a `napi_env`, so it is all unit-tested natively.
 
+use std::fmt;
+
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use vitaminc_aead::plaintext::kinds::{chrono as kinds_chrono, decimal as kinds_decimal};
@@ -113,10 +115,25 @@ fn nanos_int(nanos: i128) -> Int {
 pub(crate) fn date(text: &str) -> Result<Int, ConversionError> {
     let value =
         NaiveDate::parse_from_str(text, "%Y-%m-%d").map_err(|_| ConversionError::InvalidDate)?;
-    if value.to_string() != text {
+    if !displays_as(&value, text) {
         return Err(ConversionError::InvalidDate);
     }
     Ok(Int::I32(kinds_chrono::date_days(value)))
+}
+
+/// Whether `value` displays as exactly `text`. The display is compared as it
+/// is written rather than collected into a `String`, so no unwiped copy of
+/// the plaintext is left behind.
+fn displays_as(value: &impl fmt::Display, text: &str) -> bool {
+    struct Rest<'a>(&'a str);
+    impl fmt::Write for Rest<'_> {
+        fn write_str(&mut self, part: &str) -> fmt::Result {
+            self.0 = self.0.strip_prefix(part).ok_or(fmt::Error)?;
+            Ok(())
+        }
+    }
+    let mut rest = Rest(text);
+    fmt::write(&mut rest, format_args!("{value}")).is_ok() && rest.0.is_empty()
 }
 
 /// A day count as `YYYY-MM-DD`, if it is a date chrono can represent.
@@ -178,14 +195,14 @@ pub(crate) fn timestamp_text(unit: TimeUnit, count: Int) -> Option<String> {
 
 /// Fixed-point decimal text as a scale and mantissa.
 pub(crate) fn decimal(text: &str) -> Result<(u8, Int), ConversionError> {
-    match text.to_ascii_lowercase().as_str() {
-        "nan" | "+nan" | "-nan" | "inf" | "+inf" | "-inf" | "infinity" | "+infinity"
-        | "-infinity" => return Err(ConversionError::NonFiniteDecimal),
-        _ => {}
+    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
+    // Compared in place, without a lowercase copy of the plaintext.
+    let non_finite = ["nan", "inf", "infinity"];
+    if non_finite.iter().any(|s| unsigned.eq_ignore_ascii_case(s)) {
+        return Err(ConversionError::NonFiniteDecimal);
     }
     // Fixed-point only, matching Go. Refuse separators/exponents rather than
     // letting a library parser choose rounding or representation policy.
-    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
     let mut parts = unsigned.split('.');
     let integral = parts.next().unwrap_or("");
     let fraction = parts.next();
@@ -346,6 +363,15 @@ mod tests {
             );
         }
         assert_eq!(date_text(Int::I128(i128::MAX)), None);
+    }
+
+    #[test]
+    fn a_value_displays_as_text_only_when_every_byte_matches() {
+        assert!(displays_as(&"2024-02-29", "2024-02-29"));
+        assert!(displays_as(&"", ""));
+        assert!(!displays_as(&"2024-02-29", "2024-02-2"), "text too short");
+        assert!(!displays_as(&"2024-02-29", "2024-02-290"), "text too long");
+        assert!(!displays_as(&"2024-02-29", "2024-02-28"), "a byte differs");
     }
 
     #[test]
