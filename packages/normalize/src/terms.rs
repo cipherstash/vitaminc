@@ -36,6 +36,10 @@ pub struct Term {
 
 /// A scalar [`Terms`] refused: why, and where in the value.
 ///
+/// This is the type to downcast a refusal to. Its
+/// [`source`](core::error::Error::source) is the [`NormalizeError`], so a
+/// reporter that walks the error chain reaches the reason too.
+///
 /// `Display` shows only the reason, because the path can hold map keys and
 /// map keys can be user data. `Debug` shows the reason and the path's
 /// shape, with every key masked. Read the path with
@@ -46,6 +50,7 @@ pub struct TermError {
     #[non_sensitive]
     path: Path,
     #[non_sensitive]
+    #[source]
     error: NormalizeError,
 }
 
@@ -114,6 +119,7 @@ impl Error for TermsError {
 /// (`Invalid`). Beside [`EncryptSink`] that arrives as
 /// [`EncryptError::Source`], and `source.inner().downcast_ref::<TermError>()`
 /// recovers it. Alone, through [`terms`], it is [`TermsError::term`].
+/// Either way the [`NormalizeError`] is on the `source()` chain.
 pub struct Terms<'t, E> {
     out: &'t mut Vec<Term>,
     /// The path of the container this sink is a child of, borrowed from

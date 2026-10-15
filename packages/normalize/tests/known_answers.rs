@@ -480,6 +480,47 @@ fn a_refusal_names_the_field_only_on_request() {
     }
 }
 
+/// Every error in a chain, from `err` down through each `source()`.
+fn chain<'e>(
+    err: &'e (dyn core::error::Error + 'static),
+) -> Vec<&'e (dyn core::error::Error + 'static)> {
+    core::iter::successors(Some(err), |e| e.source()).collect()
+}
+
+/// A reporter that walks `source()` reaches the `NormalizeError` behind a
+/// refusal, whether it arrived through encryption or through `terms`.
+#[test]
+fn the_normalize_error_is_on_the_source_chain() {
+    let reason = |err: &(dyn core::error::Error + 'static)| {
+        chain(err)
+            .into_iter()
+            .find_map(|e| e.downcast_ref::<NormalizeError>().copied())
+    };
+    let encrypting = plan_with_terms::<_, &str, _>(vec!["\u{378}"], "ctx")
+        .err()
+        .expect("refused");
+    assert_eq!(
+        reason(&encrypting),
+        Some(NormalizeError::UnassignedCodePoint)
+    );
+    let alone = terms(vec!["\u{378}"]).expect_err("refused");
+    assert_eq!(reason(&alone), Some(NormalizeError::UnassignedCodePoint));
+    // The chain ends at the reason, which says why and nothing more.
+    let last = chain(&alone).pop().expect("a chain");
+    assert!(last.source().is_none());
+    assert_eq!(
+        last.to_string(),
+        "text contains a code point unassigned in Unicode 16"
+    );
+    // `TermError` itself names its reason as its source.
+    let term = alone.term().expect("refused by Terms");
+    let source = core::error::Error::source(term).expect("a source");
+    assert_eq!(
+        source.downcast_ref::<NormalizeError>(),
+        Some(&NormalizeError::UnassignedCodePoint)
+    );
+}
+
 #[test]
 fn terms_collects_every_term_without_encrypting() {
     let found = terms(user()).expect("walks");

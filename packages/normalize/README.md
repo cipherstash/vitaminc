@@ -94,9 +94,11 @@ client, stops the walk: encrypting it with no term and no error would leave
 an index silently incomplete. That refusal, an unassigned code point and a
 value invalid for its logical type all arrive as `EncryptError::Source`
 carrying a `TermError` (from `terms`, as a `TermsError`), which holds the
-`NormalizeError` and the path to the refused field. Its message names
-neither the field nor the value, because map keys can be user data; read
-the path with `TermError::path`.
+`NormalizeError` and the path to the refused field. Downcast to
+`TermError`; the `NormalizeError` is also its `source()`, so a reporter
+that walks the error chain reaches it. The message names neither the
+field nor the value, because map keys can be user data; read the path
+with `TermError::path`.
 
 ## Encodings
 
