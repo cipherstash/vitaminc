@@ -19,7 +19,7 @@ import "github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 
 The cross-language contract is the frozen sealed-leaf tag table
 (`[tag] ++ payload`, sealed **inside** the AEAD envelope, defined in the Rust
-crate `vitaminc-aead-value`) — not any language's types. This package's types
+crate `vitaminc-aead`'s leaf codec) — not any language's types. This package's types
 *implement* that model; they are not the contract. A new tag is added only
 when a value class cannot be represented in the existing model, and needs a
 defined decode mapping in every supported language before it ships.

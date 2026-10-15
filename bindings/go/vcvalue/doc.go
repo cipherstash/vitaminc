@@ -34,7 +34,7 @@
 // codec in vcffi for the same reason.
 //
 // The cross-language contract is the frozen tag table plus the sealed leaf
-// encodings defined in the Rust crate vitaminc-aead-value — the model, not
+// encodings defined in the Rust crate vitaminc-aead's leaf codec — the model, not
 // any package. A new tag is added only when a value class cannot be
 // represented in the existing model, and requires a defined decode mapping
 // for every supported language before it ships.

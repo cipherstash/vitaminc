@@ -37,6 +37,9 @@ import (
 // or marshal where the other belongs.
 
 // Ciphertext node tags in the transport encoding (mirrors the Rust codec).
+// ctNone is the absence marker ADR 0001 retires: the Rust codec no longer
+// writes it and refuses it on read, and #414 removes it here with the
+// SealedNone leaf it carries.
 const (
 	ctSingle      byte = 0x01
 	ctNone        byte = 0x02
