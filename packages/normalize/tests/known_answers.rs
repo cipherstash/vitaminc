@@ -11,14 +11,14 @@ use vitaminc_aead::plaintext::kinds::chrono as conv;
 use vitaminc_aead::plaintext::render;
 use vitaminc_aead::seal::{AsyncCipher, Cipher};
 use vitaminc_aead::{
-    Context, EncryptError, Float, Int, Logical, Physical, Plaintext, SeqSink, Sink, SourceError,
-    TimeUnit,
+    Context, EncryptError, Float, Int, Logical, Physical, Plaintext, Refusal, SeqSink, Sink,
+    SourceError, TimeUnit, Unencryptable,
 };
 use vitaminc_aead_value::canonical::equality_input;
 use vitaminc_aead_value::Value;
 use vitaminc_normalize::{
     domain, encrypt_with_terms, encrypt_with_terms_async, normalize, plan_with_terms, terms,
-    NormalizeError, Term, TermError,
+    NormalizeError, Path, Term, TermError,
 };
 use vitaminc_protected::{Controlled, Protected};
 
@@ -569,17 +569,30 @@ fn terms_collects_every_term_without_encrypting() {
 
 #[test]
 fn terms_says_which_field_it_refused() {
+    let mut doc = BTreeMap::new();
+    doc.insert("x", "\u{378}");
+    let err = terms(doc).expect_err("refused");
+    let term = err.term().expect("refused by Terms");
+    assert!(err.refusal().is_none());
+    assert_eq!(term.error(), NormalizeError::UnassignedCodePoint);
+    assert_eq!(render(term.path()), ".x");
+    assert_eq!(
+        err.to_string(),
+        "no equality term: text contains a code point unassigned in Unicode 16"
+    );
+
+    // A value invalid for its logical type cannot be encrypted, so it is
+    // refused for its shape, as encryption refuses it, before it is
+    // normalized.
     let invalid = vitaminc_aead::Raw(Some(Logical::Undefined), Physical::Int(Int::I32(1)));
     let mut doc = BTreeMap::new();
     doc.insert("x", invalid);
     let err = terms(doc).expect_err("refused");
-    let term = err.term().expect("refused by Terms");
-    assert_eq!(term.error(), NormalizeError::Invalid);
-    assert_eq!(render(term.path()), ".x");
-    assert_eq!(
-        err.to_string(),
-        "no equality term: the value is not valid for its logical type"
-    );
+    assert!(err.term().is_none());
+    let refusal = err.refusal().expect("refused for its shape");
+    assert_eq!(refusal.reason(), Unencryptable::InvalidValue);
+    assert_eq!(render(refusal.path()), ".x");
+    assert_eq!(err.to_string(), "value is not valid for its logical type");
 }
 
 #[test]
@@ -686,8 +699,10 @@ fn a_refused_walk_never_reaches_the_cipher() {
     assert!(is_unassigned(&err), "{err:?}");
 }
 
-/// `Terms` is public and works without `EncryptSink` in front of it, and is
-/// then the sink that refuses a value invalid for its logical type.
+/// `Terms` is public and works without `EncryptSink` in front of it, and
+/// then refuses a value invalid for its logical type itself, as
+/// encryption would. The refusal arrives through its partner's error type
+/// as a source error.
 #[test]
 fn terms_alone_refuses_a_value_invalid_for_its_logical_type() {
     use vitaminc_aead::Raw;
@@ -704,7 +719,15 @@ fn terms_alone_refuses_a_value_invalid_for_its_logical_type() {
     let err = Raw(Some(Logical::Undefined), Physical::Int(Int::I32(1)))
         .visit(sink)
         .expect_err("refused");
-    assert_eq!(term_error(&err), refused(NormalizeError::Invalid, ""));
+    let EncryptError::Source(source) = &err else {
+        panic!("{err:?}")
+    };
+    let refusal = source
+        .inner()
+        .downcast_ref::<Refusal>()
+        .expect("refused for its shape");
+    assert_eq!(refusal.reason(), Unencryptable::InvalidValue);
+    assert_eq!(refusal.path(), &Path::default());
     assert!(out.is_empty());
 }
 
