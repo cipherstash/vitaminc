@@ -8,15 +8,17 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, NaiveDate, Utc};
 use futures_executor::block_on;
 use vitaminc_aead::plaintext::kinds::chrono as conv;
+use vitaminc_aead::plaintext::render;
 use vitaminc_aead::seal::{AsyncCipher, Cipher};
 use vitaminc_aead::{
-    Context, EncryptError, Float, Int, Logical, Physical, Plaintext, Sink, TimeUnit,
+    Context, EncryptError, Float, Int, Logical, Physical, Plaintext, Refusal, SeqSink, Sink,
+    SourceError, TimeUnit, Unencryptable,
 };
 use vitaminc_aead_value::canonical::equality_input;
 use vitaminc_aead_value::Value;
 use vitaminc_normalize::{
-    domain, encrypt_with_terms, encrypt_with_terms_async, normalize, plan_with_terms,
-    NormalizeError, Step, Term,
+    domain, encrypt_with_terms, encrypt_with_terms_async, normalize, plan_with_terms, terms,
+    NormalizeError, Path, Term, TermError,
 };
 use vitaminc_protected::{Controlled, Protected};
 
@@ -335,20 +337,29 @@ fn user() -> BTreeMap<&'static str, Vec<Option<u32>>> {
     m
 }
 
-fn paths(terms: &[Term]) -> Vec<Vec<Step>> {
-    terms.iter().map(|t| t.path.clone()).collect()
+fn paths(terms: &[Term]) -> Vec<String> {
+    terms.iter().map(|t| render(&t.path)).collect()
+}
+
+/// What `Terms` refused inside an encryption error, and where.
+fn term_error(err: &EncryptError<Refused>) -> Option<(NormalizeError, String)> {
+    match err {
+        EncryptError::Source(source) => source
+            .inner()
+            .downcast_ref::<TermError>()
+            .map(|t| (t.error(), render(t.path()))),
+        _ => None,
+    }
+}
+
+fn refused(error: NormalizeError, at: &str) -> Option<(NormalizeError, String)> {
+    Some((error, at.to_owned()))
 }
 
 #[test]
 fn plan_with_terms_has_every_term_without_a_cipher() {
     let (planned, terms) = plan_with_terms::<_, Refused, _>(user(), "ctx").expect("plans");
-    assert_eq!(
-        paths(&terms),
-        [
-            vec![Step::Key("ages".into()), Step::Index(0)],
-            vec![Step::Key("ages".into()), Step::Index(2)],
-        ]
-    );
+    assert_eq!(paths(&terms), [".ages[0]", ".ages[2]"]);
     assert_eq!(terms[0].normalized.domain, domain::INTEGER);
     assert_eq!(
         terms[1].normalized.bytes.risky_ref(),
@@ -391,7 +402,7 @@ fn scalars_without_a_domain_and_passthroughs_get_no_term() {
         }
     }
     let (_, terms) = plan_with_terms::<_, Refused, _>(Doc, "ctx").expect("plans");
-    assert_eq!(paths(&terms), [vec![Step::Key("name".into())]]);
+    assert_eq!(paths(&terms), [".name"]);
     assert_eq!(terms[0].normalized.domain, domain::TEXT);
 }
 
@@ -406,13 +417,7 @@ fn an_unknown_logical_type_stops_the_walk() {
     let err = plan_with_terms::<_, Refused, _>(vec![newer], "ctx")
         .err()
         .expect("refused");
-    match err {
-        EncryptError::Source(source) => assert_eq!(
-            source.inner().downcast_ref::<NormalizeError>().copied(),
-            Some(NormalizeError::NoDomain)
-        ),
-        other => panic!("{other:?}"),
-    }
+    assert_eq!(term_error(&err), refused(NormalizeError::NoDomain, "[0]"));
 }
 
 /// Nested paths are the container's path plus the step, at every depth.
@@ -423,16 +428,42 @@ fn paths_follow_the_nesting() {
     let mut outer = BTreeMap::new();
     outer.insert("m", vec![inner]);
     let (_, terms) = plan_with_terms::<_, Refused, _>(outer, "ctx").expect("plans");
-    assert_eq!(
-        paths(&terms),
-        [vec![
-            Step::Key("m".into()),
-            Step::Index(0),
-            Step::Key("k".into()),
-            Step::Index(0),
-        ]]
-    );
+    assert_eq!(paths(&terms), [".m[0].k[0]"]);
     assert_eq!(terms[0].normalized.domain, domain::BYTES);
+}
+
+/// Every container on a path shares one buffer of keys, and each starts
+/// over where its own keys begin, so a path names only its own keys
+/// however many siblings went before it.
+#[test]
+fn sibling_paths_name_only_their_own_keys() {
+    let mut first = BTreeMap::new();
+    first.insert("x", vec!["1", "2"]);
+    first.insert("yy", vec!["3"]);
+    let mut second = BTreeMap::new();
+    second.insert("zzz", vec!["4"]);
+    let mut doc = BTreeMap::new();
+    doc.insert("a", vec![first.clone(), second]);
+    doc.insert("bb", vec![first]);
+    for found in [
+        plan_with_terms::<_, Refused, _>(doc.clone(), "ctx")
+            .expect("plans")
+            .1,
+        terms(doc).expect("walks"),
+    ] {
+        assert_eq!(
+            paths(&found),
+            [
+                ".a[0].x[0]",
+                ".a[0].x[1]",
+                ".a[0].yy[0]",
+                ".a[1].zzz[0]",
+                ".bb[0].x[0]",
+                ".bb[0].x[1]",
+                ".bb[0].yy[0]",
+            ]
+        );
+    }
 }
 
 #[test]
@@ -440,15 +471,146 @@ fn an_unassigned_code_point_stops_the_walk_with_the_normalize_error() {
     let err = plan_with_terms::<_, Refused, _>("\u{378}", "ctx")
         .err()
         .expect("refused");
-    match err {
-        EncryptError::Source(source) => {
-            assert_eq!(
-                source.inner().downcast_ref::<NormalizeError>().copied(),
-                Some(NormalizeError::UnassignedCodePoint)
-            );
-        }
-        other => panic!("{other:?}"),
+    assert_eq!(
+        term_error(&err),
+        refused(NormalizeError::UnassignedCodePoint, "")
+    );
+}
+
+/// The refusal names the field, nested at any depth, through an accessor
+/// only: neither the message nor `Debug` shows a key.
+#[test]
+fn a_refusal_names_the_field_only_on_request() {
+    let mut inner = BTreeMap::new();
+    inner.insert("ada@example.com", vec!["ok", "\u{378}"]);
+    let mut outer = BTreeMap::new();
+    outer.insert("emails", vec![inner]);
+    let err = plan_with_terms::<_, Refused, _>(outer, "ctx")
+        .err()
+        .expect("refused");
+    assert_eq!(
+        term_error(&err),
+        refused(
+            NormalizeError::UnassignedCodePoint,
+            ".emails[0].ada@example.com[1]"
+        )
+    );
+    let EncryptError::Source(source) = &err else {
+        panic!("{err:?}")
+    };
+    let term = source
+        .inner()
+        .downcast_ref::<TermError>()
+        .expect("a term error");
+    assert_eq!(
+        term.to_string(),
+        "no equality term: text contains a code point unassigned in Unicode 16"
+    );
+    for shown in [format!("{term:?}"), format!("{err:?}")] {
+        assert!(!shown.contains("ada"), "{shown}");
+        assert!(!shown.contains("emails"), "{shown}");
+        assert!(shown.contains("UnassignedCodePoint"), "{shown}");
+        assert!(shown.contains("Index(1)"), "{shown}");
     }
+}
+
+/// Every error in a chain, from `err` down through each `source()`.
+fn chain<'e>(
+    err: &'e (dyn core::error::Error + 'static),
+) -> Vec<&'e (dyn core::error::Error + 'static)> {
+    core::iter::successors(Some(err), |e| e.source()).collect()
+}
+
+/// A reporter that walks `source()` reaches the `NormalizeError` behind a
+/// refusal, whether it arrived through encryption or through `terms`.
+#[test]
+fn the_normalize_error_is_on_the_source_chain() {
+    let reason = |err: &(dyn core::error::Error + 'static)| {
+        chain(err)
+            .into_iter()
+            .find_map(|e| e.downcast_ref::<NormalizeError>().copied())
+    };
+    let encrypting = plan_with_terms::<_, &str, _>(vec!["\u{378}"], "ctx")
+        .err()
+        .expect("refused");
+    assert_eq!(
+        reason(&encrypting),
+        Some(NormalizeError::UnassignedCodePoint)
+    );
+    let alone = terms(vec!["\u{378}"]).expect_err("refused");
+    assert_eq!(reason(&alone), Some(NormalizeError::UnassignedCodePoint));
+    // The chain ends at the reason, which says why and nothing more.
+    let last = chain(&alone).pop().expect("a chain");
+    assert!(last.source().is_none());
+    assert_eq!(
+        last.to_string(),
+        "text contains a code point unassigned in Unicode 16"
+    );
+    // `TermError` itself names its reason as its source.
+    let term = alone.term().expect("refused by Terms");
+    let source = core::error::Error::source(term).expect("a source");
+    assert_eq!(
+        source.downcast_ref::<NormalizeError>(),
+        Some(&NormalizeError::UnassignedCodePoint)
+    );
+}
+
+#[test]
+fn terms_collects_every_term_without_encrypting() {
+    let found = terms(user()).expect("walks");
+    assert_eq!(paths(&found), [".ages[0]", ".ages[2]"]);
+    assert_eq!(found[1].normalized.domain, domain::INTEGER);
+    // A borrowed value walks too, and a scalar at the root has no steps.
+    let name = String::from("Ada");
+    let found = terms(&name).expect("walks");
+    assert_eq!(paths(&found), [""]);
+    assert!(terms(Vec::<u32>::new()).expect("walks").is_empty());
+}
+
+#[test]
+fn terms_says_which_field_it_refused() {
+    let mut doc = BTreeMap::new();
+    doc.insert("x", "\u{378}");
+    let err = terms(doc).expect_err("refused");
+    let term = err.term().expect("refused by Terms");
+    assert!(err.refusal().is_none());
+    assert_eq!(term.error(), NormalizeError::UnassignedCodePoint);
+    assert_eq!(render(term.path()), ".x");
+    assert_eq!(
+        err.to_string(),
+        "no equality term: text contains a code point unassigned in Unicode 16"
+    );
+
+    // A value invalid for its logical type cannot be encrypted, so it is
+    // refused for its shape, as encryption refuses it, before it is
+    // normalized.
+    let invalid = vitaminc_aead::Raw(Some(Logical::Undefined), Physical::Int(Int::I32(1)));
+    let mut doc = BTreeMap::new();
+    doc.insert("x", invalid);
+    let err = terms(doc).expect_err("refused");
+    assert!(err.term().is_none());
+    let refusal = err.refusal().expect("refused for its shape");
+    assert_eq!(refusal.reason(), Unencryptable::InvalidValue);
+    assert_eq!(render(refusal.path()), ".x");
+    assert_eq!(err.to_string(), "value is not valid for its logical type");
+}
+
+#[test]
+fn terms_passes_a_source_failure_through() {
+    struct Throws;
+    impl Plaintext for Throws {
+        fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
+            let mut seq = sink.seq(None)?;
+            1u32.visit(seq.element()?)?;
+            Err(<S::Error as vitaminc_aead::plaintext::Error>::source(
+                SourceError::msg("getter threw"),
+            ))
+        }
+    }
+    let err = terms(Throws).expect_err("refused");
+    assert!(err.term().is_none());
+    assert_eq!(err.to_string(), "getter threw");
+    assert_eq!(err.source_error().to_string(), "getter threw");
 }
 
 /// Seals through an await, and checks that the source's walk had finished
@@ -497,7 +659,7 @@ fn encrypt_with_terms_async_has_every_term_before_its_first_await() {
         t
     }
     let (sealed, terms) = block_on(assert_send(future)).expect("encrypts");
-    assert_eq!(paths(&terms), [vec![Step::Index(0)], vec![Step::Index(1)]]);
+    assert_eq!(paths(&terms), ["[0]", "[1]"]);
     let back: Vec<u32> =
         block_on(vitaminc_aead::decrypt_async(&remote, sealed, "ctx")).expect("decrypts");
     assert_eq!(back, [1, 2]);
@@ -520,8 +682,7 @@ impl AsyncCipher for Never {
 }
 
 fn is_unassigned(err: &EncryptError<Refused>) -> bool {
-    matches!(err, EncryptError::Source(s)
-        if s.inner().downcast_ref::<NormalizeError>() == Some(&NormalizeError::UnassignedCodePoint))
+    term_error(err) == refused(NormalizeError::UnassignedCodePoint, "[1]")
 }
 
 /// The walk ends before any leaf is sealed, so a value `Terms` refuses
@@ -538,8 +699,10 @@ fn a_refused_walk_never_reaches_the_cipher() {
     assert!(is_unassigned(&err), "{err:?}");
 }
 
-/// `Terms` is public and works without `EncryptSink` in front of it, and is
-/// then the sink that refuses a value invalid for its logical type.
+/// `Terms` is public and works without `EncryptSink` in front of it, and
+/// then refuses a value invalid for its logical type itself, as
+/// encryption would. The refusal arrives through its partner's error type
+/// as a source error.
 #[test]
 fn terms_alone_refuses_a_value_invalid_for_its_logical_type() {
     use vitaminc_aead::Raw;
@@ -549,20 +712,22 @@ fn terms_alone_refuses_a_value_invalid_for_its_logical_type() {
     let mut out = Vec::new();
     let sink: Terms<'_, EncryptError<Refused>> = Terms::new(&mut out);
     "Ada".visit(sink).expect("walks");
-    assert_eq!(paths(&out), [Vec::<Step>::new()]);
+    assert_eq!(paths(&out), [""]);
 
     let mut out = Vec::new();
     let sink: Terms<'_, EncryptError<Refused>> = Terms::new(&mut out);
     let err = Raw(Some(Logical::Undefined), Physical::Int(Int::I32(1)))
         .visit(sink)
         .expect_err("refused");
-    match err {
-        EncryptError::Source(source) => assert_eq!(
-            source.inner().downcast_ref::<NormalizeError>().copied(),
-            Some(NormalizeError::Invalid)
-        ),
-        other => panic!("{other:?}"),
-    }
+    let EncryptError::Source(source) = &err else {
+        panic!("{err:?}")
+    };
+    let refusal = source
+        .inner()
+        .downcast_ref::<Refusal>()
+        .expect("refused for its shape");
+    assert_eq!(refusal.reason(), Unencryptable::InvalidValue);
+    assert_eq!(refusal.path(), &Path::default());
     assert!(out.is_empty());
 }
 

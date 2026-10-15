@@ -77,22 +77,36 @@ user.insert("name", "Ada");
 
 let (ciphertext, terms) = encrypt_with_terms(user, &cipher, "users/v1")?;
 assert_eq!(terms.len(), 2);
-assert_eq!(terms[0].path, [Step::Key("email".into())]);
+assert_eq!(terms[0].path.steps(), [Step::Key("email".into())]);
 assert_eq!(terms[0].normalized.domain, domain::TEXT);
 # Ok::<(), vitaminc_aead::EncryptError<core::convert::Infallible>>(())
 ```
 
 `encrypt_with_terms_async` does the same through an async cipher and has
 every term before its first await. `plan_with_terms` walks without
-sealing at all.
+sealing at all, and `terms` collects the terms with no encryption in the
+walk.
+
+`terms` refuses every value encryption refuses, for the same reason and
+at the same path, so an index never holds terms for a value that cannot
+be stored. It keeps the same shape rules, through the same code: no
+duplicate key, no value nested too deep, every scalar valid for its
+logical type, every passthrough framable, and something sealed in every
+container with children, even though it seals nothing itself. Read such a
+refusal with `TermsError::refusal`; encryption reports the same one as
+`EncryptError::Shape`.
 
 A scalar whose kind has no domain (a null, a boolean, an `undefined`)
 produces no term and does not stop the walk; passthrough subtrees get none
 either. A scalar whose *logical type* has no domain, one from a newer
 client, stops the walk: encrypting it with no term and no error would leave
-an index silently incomplete. That refusal, an unassigned code point and a
-value invalid for its logical type all arrive as `EncryptError::Source`
-carrying a `NormalizeError`.
+an index silently incomplete. That refusal and an unassigned code point
+arrive as `EncryptError::Source` carrying a `TermError` (from `terms`, as
+`TermsError::term`), which holds the `NormalizeError` and the path to the
+refused field. Downcast to `TermError`; the `NormalizeError` is also its
+`source()`, so a reporter that walks the error chain reaches it. The
+message names neither the field nor the value, because map keys can be
+user data; read the path with `TermError::path`.
 
 ## Encodings
 
