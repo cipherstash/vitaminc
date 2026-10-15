@@ -43,7 +43,9 @@ version = "=1.1.0"
 # every term against today's `canonical` encoders, byte for byte, until
 # those are removed.
 vitaminc-aead-value = { path = "../aead-value", features = ["canonical", "chrono", "rust_decimal"] }
-vitaminc-aead = { path = "../aead", features = ["chrono", "rust_decimal", "uuid"] }
+# `test-support` for `plaintext::render`, the path notation the tests
+# assert against, so there is one copy of it.
+vitaminc-aead = { path = "../aead", features = ["chrono", "rust_decimal", "uuid", "test-support"] }
 chrono = { version = "0.4.44", default-features = false, features = ["std"] }
 uuid = { version = "1", default-features = false }
 quickcheck = "1.1.0"

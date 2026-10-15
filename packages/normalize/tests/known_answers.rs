@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, NaiveDate, Utc};
 use futures_executor::block_on;
 use vitaminc_aead::plaintext::kinds::chrono as conv;
+use vitaminc_aead::plaintext::render;
 use vitaminc_aead::seal::{AsyncCipher, Cipher};
 use vitaminc_aead::{
     Context, EncryptError, Float, Int, Logical, Physical, Plaintext, SeqSink, Sink, SourceError,
@@ -17,7 +18,7 @@ use vitaminc_aead_value::canonical::equality_input;
 use vitaminc_aead_value::Value;
 use vitaminc_normalize::{
     domain, encrypt_with_terms, encrypt_with_terms_async, normalize, plan_with_terms, terms,
-    NormalizeError, Path, Step, Term, TermError,
+    NormalizeError, Term, TermError,
 };
 use vitaminc_protected::{Controlled, Protected};
 
@@ -334,18 +335,6 @@ fn user() -> BTreeMap<&'static str, Vec<Option<u32>>> {
     m.insert("ages", vec![Some(36), None, Some(41)]);
     m.insert("empty", vec![]);
     m
-}
-
-/// A path written out for an assertion: `.key` for an entry and `[i]` for
-/// an element.
-fn render(path: &Path) -> String {
-    path.steps()
-        .iter()
-        .map(|step| match step {
-            Step::Index(i) => format!("[{i}]"),
-            Step::Key(k) => format!(".{k}"),
-        })
-        .collect()
 }
 
 fn paths(terms: &[Term]) -> Vec<String> {
