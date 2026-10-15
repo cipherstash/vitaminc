@@ -1,5 +1,7 @@
 use super::{Binding, BindingSupport, DelegatedError, IndexKeyProvider, KeyProvider};
-use crate::{GeneratedDataKey, IndexKeyMaterial, KeyId, KeyIsolation, KeyReconstruction};
+use crate::{
+    GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyIsolation, KeyReconstruction,
+};
 use vitaminc_protected::Protected;
 
 /// Pairs any [`KeyProvider`] with the one fixed, persisted [`KeyId`] its
@@ -65,6 +67,7 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for FixedIndexKeyS
     type Error = T::Error;
 
     const RECONSTRUCTION: KeyReconstruction = T::RECONSTRUCTION;
+    const CUSTODY: KeyCustody = T::CUSTODY;
     const ISOLATION: KeyIsolation = T::ISOLATION;
     const BINDING: BindingSupport = T::BINDING;
 
@@ -95,6 +98,7 @@ mod tests {
     impl KeyProvider<4> for Misbehaving {
         type Error = std::convert::Infallible;
         const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
+        const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
         const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
         const BINDING: BindingSupport = BindingSupport::Unbound;
 

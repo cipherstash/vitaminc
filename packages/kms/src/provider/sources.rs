@@ -18,8 +18,8 @@
 
 use super::{Binding, BindingSupport, KeyProvider};
 use crate::{
-    BatchGenerateDataKey, BatchRetrieveDataKey, GenerateDataKey, GeneratedDataKey, KeyId,
-    KeyIsolation, KeyReconstruction, RetrieveDataKey,
+    BatchGenerateDataKey, BatchRetrieveDataKey, GenerateDataKey, GeneratedDataKey, KeyCustody,
+    KeyId, KeyIsolation, KeyReconstruction, RetrieveDataKey,
 };
 use vitaminc_protected::Protected;
 
@@ -28,6 +28,7 @@ macro_rules! key_provider_body {
         type Error = <Self as GenerateDataKey<$n>>::Error;
 
         const RECONSTRUCTION: KeyReconstruction = <Self as RetrieveDataKey<$n>>::RECONSTRUCTION;
+        const CUSTODY: KeyCustody = <Self as RetrieveDataKey<$n>>::CUSTODY;
         const ISOLATION: KeyIsolation = <Self as BatchGenerateDataKey<$n>>::ISOLATION;
         const BINDING: BindingSupport = <Self as RetrieveDataKey<$n>>::BINDING;
 

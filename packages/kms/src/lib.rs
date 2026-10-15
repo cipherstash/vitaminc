@@ -26,8 +26,8 @@ pub use algorithm::{DigestLengthError, SignatureAlgorithm};
 pub use crypt::{DecryptWithKey, EncryptWithKey};
 pub use data_key::{
     dedup_retrieve, fan_out_generate, pooled_key_generate, BatchGenerateDataKey,
-    BatchRetrieveDataKey, GenerateDataKey, GeneratedDataKey, KeyIsolation, KeyReconstruction,
-    RetrieveDataKey,
+    BatchRetrieveDataKey, GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation,
+    KeyReconstruction, RetrieveDataKey,
 };
 pub use index_key::{load_index_key, IndexKeyMaterial};
 pub use key_id::KeyId;
