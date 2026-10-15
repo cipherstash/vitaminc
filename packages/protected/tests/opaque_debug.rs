@@ -226,17 +226,19 @@ fn enum_const_param_named_like_derive_local() {
     let tn = type_name::<ConstNamedF<'static, 2>>();
     let bytes = [1u8, 2];
 
-    let borrowed = ConstNamedF::<'_, 2>::Borrowed(&bytes);
+    // Type ascription, not a turbofish on the variant: rustc 1.96 rejects a
+    // lifetime argument there (E0109).
+    let borrowed: ConstNamedF<'_, 2> = ConstNamedF::Borrowed(&bytes);
     assert_opaque(&borrowed);
     assert_eq!(format!("{borrowed:?}"), format!("{tn}::Borrowed(\"***\")"));
 
-    let named = ConstNamedF::<'_, 2>::Named { bytes, len: 2 };
+    let named: ConstNamedF<'_, 2> = ConstNamedF::Named { bytes, len: 2 };
     assert_eq!(
         format!("{named:?}"),
         format!("{tn}::Named {{bytes: \"***\", len: 2}}")
     );
 
-    let empty = ConstNamedF::<'_, 2>::Empty;
+    let empty: ConstNamedF<'_, 2> = ConstNamedF::Empty;
     assert_eq!(format!("{empty:?}"), format!("{tn}::Empty"));
 }
 
