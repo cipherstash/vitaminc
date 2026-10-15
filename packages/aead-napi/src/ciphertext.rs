@@ -8,7 +8,6 @@
 //!
 //! ```text
 //! Single(leaf)        ↦ { t: "ct",   v: Buffer }
-//! None(leaf)          ↦ { t: "none", v: Buffer }
 //! Sequence(...)       ↦ { t: "seq",  v: [node, ...] }
 //! EmptySequence(leaf) ↦ { t: "eseq", v: Buffer }
 //! Map(entries)        ↦ { t: "map",  v: { key: node, ... } }
@@ -49,7 +48,6 @@ use crate::js_builder::JsBuilder;
 use crate::js_ref::{frame_error, JsRef};
 
 const T_CIPHERTEXT: &str = "ct";
-const T_NONE: &str = "none";
 const T_SEQ: &str = "seq";
 const T_EMPTY_SEQ: &str = "eseq";
 const T_MAP: &str = "map";
@@ -62,9 +60,8 @@ const T_PASSTHROUGH: &str = "pt";
 /// `Leaf` needs only byte-level accessors (`AsRef<[u8]>` out,
 /// `From<Vec<u8>>` in); the passthrough payload `P` converts through
 /// [`NapiPassthrough`], implemented for [`PassthroughFrame`] (the
-/// sink-based tree's payload) and `()`. For a cipher whose passthrough
-/// payload type is something else, re-home the tree first with
-/// [`CipherText::map_passthrough`].
+/// sink-based tree's payload) and `()`. A cipher whose passthrough
+/// payload type is something else needs its own `NapiPassthrough` impl.
 pub struct JsCipherText<Leaf, P>(pub CipherText<Leaf, P>);
 
 /// A ciphertext passthrough payload's conversion to and from JS.
@@ -193,7 +190,6 @@ where
     };
     let (tag, value) = match node {
         CipherText::Single(l) => leaf(T_CIPHERTEXT, l)?,
-        CipherText::None(l) => leaf(T_NONE, l)?,
         CipherText::EmptySequence(l) => leaf(T_EMPTY_SEQ, l)?,
         CipherText::EmptyMap(l) => leaf(T_EMPTY_MAP, l)?,
         CipherText::Sequence(items) => {
@@ -302,7 +298,7 @@ where
     }
     let t = String::from_unknown(own_field(obj, T_KEY)?)?;
     match t.as_str() {
-        T_CIPHERTEXT | T_NONE | T_EMPTY_SEQ | T_EMPTY_MAP => {
+        T_CIPHERTEXT | T_EMPTY_SEQ | T_EMPTY_MAP => {
             // Borrowed as a slice, which holds no reference: napi-rs's
             // `Buffer` takes one before it checks the value and never
             // releases it when the check fails.
@@ -310,7 +306,6 @@ where
             let leaf = Leaf::from(buf.to_vec());
             Ok(match t.as_str() {
                 T_CIPHERTEXT => CipherText::Single(leaf),
-                T_NONE => CipherText::None(leaf),
                 T_EMPTY_SEQ => CipherText::EmptySequence(leaf),
                 _ => CipherText::EmptyMap(leaf),
             })
@@ -419,7 +414,7 @@ mod tests {
 
     fn map<P>(node: Node<P>) -> Node<P> {
         CipherText::Map(vec![
-            ("a".into(), CipherText::None(vec![1])),
+            ("a".into(), CipherText::EmptySequence(vec![1])),
             ("k".into(), node),
         ])
     }

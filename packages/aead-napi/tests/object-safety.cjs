@@ -126,13 +126,15 @@ const ct = {
   t: 'map',
   v: {
     a: { t: 'ct', v: leaf },
-    'k\0': { t: 'seq', v: [{ t: 'none', v: leaf }, { t: 'pt', v: 5n }, { t: 'pt', v: { a: [new addon.VcDecimal('1.50')] } }] },
+    'k\0': { t: 'seq', v: [{ t: 'eseq', v: leaf }, { t: 'pt', v: 5n }, { t: 'pt', v: { a: [new addon.VcDecimal('1.50')] } }] },
     e: { t: 'eseq', v: leaf },
     m: { t: 'emap', v: leaf },
     u: { t: 'pt', v: undefined },
   },
 };
 assert.deepEqual(addon.ciphertextRoundTrip(ct), ct);
+// The retired absent marker is no node kind: a `None` is a sealed null leaf.
+assert.throws(() => addon.ciphertextRoundTrip({ t: 'none', v: leaf }), /malformed ciphertext/);
 
 // A ciphertext map reads own keys only and writes own properties.
 const map = Object.create({ inherited: { t: 'ct', v: leaf } });

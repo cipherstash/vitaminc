@@ -457,10 +457,9 @@ mod test {
         let cipher = cipher(&Key::from([54u8; 32]));
         fn versions(node: &Node<LocalCipherText>) -> Vec<Option<u8>> {
             match node {
-                CipherText::Single(l)
-                | CipherText::None(l)
-                | CipherText::EmptySequence(l)
-                | CipherText::EmptyMap(l) => vec![l.wire_version()],
+                CipherText::Single(l) | CipherText::EmptySequence(l) | CipherText::EmptyMap(l) => {
+                    vec![l.wire_version()]
+                }
                 CipherText::Sequence(items) => items.iter().flat_map(versions).collect(),
                 CipherText::Map(entries) => entries.iter().flat_map(|(_, v)| versions(v)).collect(),
                 CipherText::Passthrough(_) => vec![],

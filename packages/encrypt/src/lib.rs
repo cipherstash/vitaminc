@@ -13,19 +13,17 @@ pub use key::Key;
 /// The sink-based cipher trait [`Aes256Cipher`] implements, and the entry
 /// points that drive it.
 pub use vitaminc_aead::seal::Cipher;
-/// The derives for the data model: `Plaintext` for values going in, and the
-/// sink-based `Decrypt` for typed values coming out. Inlined so the derives'
-/// `#[aead(...)]` reference renders here too.
-#[doc(inline)]
-pub use vitaminc_aead::typed::Decrypt;
 #[allow(deprecated)]
 pub use vitaminc_aead::Aad;
-#[doc(inline)]
-pub use vitaminc_aead::Plaintext;
 pub use vitaminc_aead::{
     decrypt, decrypt_into, encrypt, CipherText, DecodeError, DecryptError, EncryptError, Node,
 };
 pub use vitaminc_aead::{Context, IntoAad, IntoContext, LocalCipherText, Nonce, Unspecified};
+/// The derives for the data model: `Plaintext` for values going in, and
+/// `Decrypt` for typed values coming out. Inlined so the derives'
+/// `#[aead(...)]` reference renders here too.
+#[doc(inline)]
+pub use vitaminc_aead::{Decrypt, Plaintext};
 
 /// The ciphertext tree [`Aes256Cipher`] produces: one sealed leaf per
 /// scalar, with the shape of the value around them.

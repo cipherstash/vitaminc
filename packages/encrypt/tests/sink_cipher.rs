@@ -5,9 +5,8 @@
 
 use std::collections::BTreeMap;
 
-use vitaminc_aead::typed::Decrypt;
 use vitaminc_aead::{
-    decrypt, encrypt, CipherText, DecryptError, EncryptError, MapSink, Plaintext, Sink,
+    decrypt, encrypt, CipherText, Decrypt, DecryptError, EncryptError, MapSink, Plaintext, Sink,
     Unencryptable,
 };
 use vitaminc_encrypt::{Aes256Cipher, Key};
