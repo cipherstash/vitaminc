@@ -161,6 +161,9 @@ arrives in the `0xF3` envelope in seconds, milliseconds or microseconds
 decodes to `time.Time` too, and so re-encodes in the nanosecond form. A leap
 second is refused in both directions, and a decimal negative zero reads back
 as zero (ADR 0001). `UUID` and `Tagged` travel in the `0xF3` envelope.
+Another UUID type, such as `github.com/google/uuid.UUID`, is a plain
+`[16]byte` and is written as bytes: convert it with `vcvalue.UUID(id)` first
+so that Rust and Node read it as a UUID.
 Matching explicit Encoder channels are available for custom `Encryptable`
 implementations.
 

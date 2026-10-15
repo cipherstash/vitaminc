@@ -107,7 +107,10 @@ func TestUUIDSpelling(t *testing.T) {
 	if upper, err := ParseUUID("123E4567-E89B-12D3-A456-426614174000"); err != nil || upper != u {
 		t.Fatalf("upper case: %v", err)
 	}
-	for _, bad := range []string{"", "123e4567e89b12d3a456426614174000", "{123e4567-e89b-12d3-a456-426614174000}", "123e4567-e89b-12d3-a456-42661417400g", "123e4567-e89b-12d3-a456-4266141740000"} {
+	for _, bad := range []string{"", "123e4567e89b12d3a456426614174000", "{123e4567-e89b-12d3-a456-426614174000}", "123e4567-e89b-12d3-a456-42661417400g", "123e4567-e89b-12d3-a456-4266141740000",
+		"123e4567-e89b-12d3-a456-42661417400-", // a fifth hyphen at the end
+		"123e4567-e89b-12d3-a456-4266-4174000", // a fifth hyphen inside the last group
+	} {
 		if _, err := ParseUUID(bad); !errors.Is(err, ErrInvalidUUID) {
 			t.Fatalf("accepted %q", bad)
 		}

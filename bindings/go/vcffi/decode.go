@@ -243,39 +243,62 @@ func envelopeTimestamp(unit byte, physical any) (any, error) {
 	default:
 		return nil, ErrMalformed
 	}
-	count, ok := integerOf(physical)
-	if !ok {
-		return nil, ErrMalformed
+	var t vcvalue.Timestamp
+	if count, ok := smallIntegerOf(physical); ok {
+		// Most counts fit an int64, among them every Date that Node writes,
+		// so they skip math/big. The count splits into whole seconds and a
+		// remainder that is never negative, as DivMod does below.
+		perSecond := 1_000_000_000 / per
+		seconds, rem := count/perSecond, count%perSecond
+		if rem < 0 {
+			seconds, rem = seconds-1, rem+perSecond
+		}
+		t = vcvalue.Timestamp{Seconds: seconds, Nanoseconds: uint32(rem * per)}
+	} else {
+		count, ok := wideIntegerOf(physical)
+		if !ok {
+			return nil, ErrMalformed
+		}
+		nanos := new(big.Int).Mul(count, big.NewInt(per))
+		seconds, sub := new(big.Int).DivMod(nanos, big.NewInt(1_000_000_000), new(big.Int))
+		if !seconds.IsInt64() {
+			return nil, ErrMalformed
+		}
+		t = vcvalue.Timestamp{Seconds: seconds.Int64(), Nanoseconds: uint32(sub.Int64())}
 	}
-	nanos := new(big.Int).Mul(count, big.NewInt(per))
-	seconds, sub := new(big.Int).DivMod(nanos, big.NewInt(1_000_000_000), new(big.Int))
-	if !seconds.IsInt64() {
-		return nil, ErrMalformed
-	}
-	t := vcvalue.Timestamp{Seconds: seconds.Int64(), Nanoseconds: uint32(sub.Int64())}
 	if t.Validate() != nil {
 		return nil, ErrMalformed
 	}
 	return time.Unix(t.Seconds, int64(t.Nanoseconds)).UTC(), nil
 }
 
-// integerOf is the value of a decoded int of any width.
-func integerOf(v any) (*big.Int, bool) {
+// smallIntegerOf is the value of a decoded int that fits an int64.
+func smallIntegerOf(v any) (int64, bool) {
 	switch x := v.(type) {
 	case int8:
-		return big.NewInt(int64(x)), true
+		return int64(x), true
 	case int16:
-		return big.NewInt(int64(x)), true
+		return int64(x), true
 	case int32:
-		return big.NewInt(int64(x)), true
+		return int64(x), true
 	case int64:
-		return big.NewInt(x), true
+		return x, true
 	case uint8:
-		return new(big.Int).SetUint64(uint64(x)), true
+		return int64(x), true
 	case uint16:
-		return new(big.Int).SetUint64(uint64(x)), true
+		return int64(x), true
 	case uint32:
-		return new(big.Int).SetUint64(uint64(x)), true
+		return int64(x), true
+	case uint64:
+		return int64(x), x <= math.MaxInt64
+	}
+	return 0, false
+}
+
+// wideIntegerOf is the value of a decoded int that smallIntegerOf does not
+// take: a uint64 above math.MaxInt64, an Int128 or a Uint128.
+func wideIntegerOf(v any) (*big.Int, bool) {
+	switch x := v.(type) {
 	case uint64:
 		return new(big.Int).SetUint64(x), true
 	case vcvalue.Int128:

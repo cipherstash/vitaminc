@@ -124,6 +124,11 @@ func (e Encoder) physical(v any) bool {
 		e.Int64(x)
 	case uint64:
 		e.UInt64(x)
+	case int:
+		// As Encode writes int and uint everywhere else.
+		e.Int64(int64(x))
+	case uint:
+		e.UInt64(uint64(x))
 	case vcvalue.Int128:
 		e.Int128(x)
 	case vcvalue.Uint128:

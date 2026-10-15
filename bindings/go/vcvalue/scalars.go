@@ -126,8 +126,14 @@ func (t Timestamp) Validate() error {
 // UUID is sixteen bytes under the Uuid logical type: it travels in the
 // 0xF3 envelope, since the type has no shorthand tag. ParseUUID reads the
 // hyphenated hexadecimal spelling and String writes it in lower case.
+//
+// Another UUID type, such as github.com/google/uuid.UUID, is a plain
+// [16]byte to the codec and is written as bytes. Convert it first, with
+// vcvalue.UUID(id), so that Rust and Node read it as a UUID.
 type UUID [16]byte
 
+// ParseUUID reads the hyphenated spelling, 8-4-4-4-12 hexadecimal digits in
+// either case, and returns ErrInvalidUUID for anything else.
 func ParseUUID(s string) (UUID, error) {
 	var u UUID
 	if len(s) != 36 || s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
@@ -160,6 +166,7 @@ func hexDigit(c byte) (byte, bool) {
 	return 0, false
 }
 
+// String is the hyphenated spelling in lower case.
 func (u UUID) String() string {
 	const digits = "0123456789abcdef"
 	var out [36]byte
@@ -181,7 +188,9 @@ func (u UUID) String() string {
 // of its kind. A value from a newer client is read and re-encoded unchanged
 // rather than dropped or mistaken for its bare physical value. V must be a
 // physical scalar (nil, bool, an integer or float width, Int128, Uint128,
-// string or []byte); ID must be above the ids this build knows.
+// string or []byte); ID must be above the ids this build knows. An int or
+// uint is written as Int64 or UInt64, as everywhere else in the codec, so
+// it reads back as int64 or uint64.
 type Tagged struct {
 	ID    uint8
 	Param uint8

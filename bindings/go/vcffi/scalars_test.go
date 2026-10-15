@@ -96,31 +96,118 @@ func TestEnvelopeTimestampsDecodeToTime(t *testing.T) {
 		{"f3030205c8ff ffffffffffff", time.Unix(0, -56_000).UTC()},                             // -56 µs, as an i64
 		{"f303000c0a", time.Unix(10, 0).UTC()},                                                 // 10 s, as an i8
 		{"f3030210" + "00f1" + "ffffffffffffffffffffffffffff", time.Unix(0, -3_840_000).UTC()}, // -3840 µs, as an i128
+		{"f30300057f6b0a9a77070000", time.Unix(8210266876799, 0).UTC()},                        // the last second chrono can hold, as an i64
 	} {
-		raw, err := hex.DecodeString(strings.ReplaceAll(tc.wire, " ", ""))
-		if err != nil {
-			t.Fatal(err)
-		}
-		got, err := Unmarshal(raw)
-		if err != nil {
-			t.Fatalf("%s: %v", tc.wire, err)
-		}
-		if ts, ok := got.(time.Time); !ok || !ts.Equal(tc.want) {
-			t.Fatalf("%s: got %#v, want %v", tc.wire, got, tc.want)
-		}
+		t.Run(tc.wire, func(t *testing.T) {
+			raw, err := hex.DecodeString(strings.ReplaceAll(tc.wire, " ", ""))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := Unmarshal(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ts, ok := got.(time.Time); !ok || !ts.Equal(tc.want) {
+				t.Fatalf("got %#v, want %v", got, tc.want)
+			}
+		})
 	}
 	for _, wire := range []string{
 		"f3030305" + "0000000000000000",                 // nanoseconds: the shorthand tag exists
 		"f3030405" + "0000000000000000",                 // no such unit
 		"f303010a" + "00000000",                         // a count that is not an int
 		"f3030010" + "0000000000000000000000000000ff7f", // out of chrono's range
+		"f3030005" + "806b0a9a77070000",                 // one second past chrono's range, as an i64
+		"f3030107" + "18fcffffffffffff",                 // 2^64 - 1000 ms, a u64 above the i64 range
 	} {
-		raw, err := hex.DecodeString(wire)
+		t.Run(wire, func(t *testing.T) {
+			raw, err := hex.DecodeString(wire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Unmarshal(raw); err != ErrMalformed {
+				t.Fatalf("got %v, want ErrMalformed", err)
+			}
+		})
+	}
+}
+
+// Every integer width is a valid count for an envelope timestamp.
+func TestEnvelopeTimestampAcceptsEveryIntegerWidth(t *testing.T) {
+	i128, err := vcvalue.ParseInt128("1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u128, err := vcvalue.ParseUint128("1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []any{int8(1), int16(1), int32(1), int64(1), uint8(1), uint16(1), uint32(1), uint64(1), i128, u128} {
+		got, err := envelopeTimestamp(unitSeconds, value)
+		ts, ok := got.(time.Time)
+		if err != nil || !ok || !ts.Equal(time.Unix(1, 0).UTC()) {
+			t.Errorf("%T: got %#v, err %v", value, got, err)
+		}
+	}
+}
+
+// A decimal negative zero built as a struct literal is written without its
+// sign: Go never writes the sign bit of a zero (ADR 0001).
+func TestDecimalNegativeZeroIsWrittenUnsigned(t *testing.T) {
+	encoded, err := Marshal(vcvalue.Decimal{Negative: true, Scale: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := hex.EncodeToString(encoded), "1400000200000000000000000000000000"; got != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+}
+
+// Every physical scalar travels under an unknown id and reads back as the
+// same Tagged value.
+func TestTaggedRoundTripsEveryPhysicalScalar(t *testing.T) {
+	i128, err := vcvalue.ParseInt128("-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u128, err := vcvalue.ParseUint128("1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []any{nil, true, int8(-1), uint8(1), int16(-1), uint16(1), int32(-1), uint32(1), int64(-1), uint64(1), i128, u128, float32(1.5), float64(1.5), "text", []byte{1}} {
+		want := vcvalue.Tagged{ID: 200, Param: 9, V: value}
+		wire, err := Marshal(want)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Unmarshal(raw); err != ErrMalformed {
-			t.Fatalf("%s: got %v, want ErrMalformed", wire, err)
+		got, err := Unmarshal(wire)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("%T: got %#v, err %v", value, got, err)
+		}
+	}
+}
+
+// A Go int or uint in a Tagged value is written as Int64 or UInt64, as Encode
+// writes it everywhere else, and reads back at that width.
+func TestTaggedWritesIntAndUintAtSixtyFourBits(t *testing.T) {
+	for _, tc := range []struct {
+		value any
+		wire  string
+		back  any
+	}{
+		{-34, "f3c80905deffffffffffffff", int64(-34)},
+		{uint(34), "f3c809072200000000000000", uint64(34)},
+	} {
+		wire, err := Marshal(vcvalue.Tagged{ID: 200, Param: 9, V: tc.value})
+		if err != nil {
+			t.Fatalf("%T: %v", tc.value, err)
+		}
+		if got := hex.EncodeToString(wire); got != tc.wire {
+			t.Errorf("%T: got %s, want %s", tc.value, got, tc.wire)
+		}
+		got, err := Unmarshal(wire)
+		if want := (vcvalue.Tagged{ID: 200, Param: 9, V: tc.back}); err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("%T: got %#v, err %v", tc.value, got, err)
 		}
 	}
 }
