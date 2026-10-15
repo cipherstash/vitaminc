@@ -8,6 +8,10 @@
 // Masked struct fields are never read: the derived `Debug` writes the mask in
 // their place, which is the point.
 #![allow(dead_code)]
+// The lowercase const parameters below are deliberate. The lint fires again on
+// the derived impls, which copy the parameters and sit outside any item-level
+// `#[allow]`, so it is silenced for the whole file.
+#![allow(non_upper_case_globals)]
 
 use core::any::type_name;
 use core::fmt::Debug;
@@ -191,4 +195,66 @@ fn struct_field_named_like_derive_locals_does_not_shadow_them() {
     let s = CollidesStruct { f: 1, tn: 2 };
     assert_opaque(&s);
     assert_eq!(format!("{s:?}"), format!("{tn} {{ f: \"***\", tn: 2 }}"));
+}
+
+// The impls carry the input's generics, so a lowercase const parameter named
+// like a derive local (`f`, `tn`) is in scope inside `fmt` and must not
+// collide with it.
+#[derive(OpaqueDebug)]
+enum ConstNamedF<'a, const f: usize> {
+    Borrowed(&'a [u8; f]),
+    Named {
+        bytes: [u8; f],
+        #[non_sensitive]
+        len: usize,
+    },
+    Empty,
+}
+
+#[derive(OpaqueDebug)]
+struct ConstNamedTn<const tn: usize> {
+    bytes: [u8; tn],
+    #[non_sensitive]
+    len: usize,
+}
+
+#[derive(OpaqueDebug)]
+struct ConstNamedTupleDt<const dt: usize>([u8; dt]);
+
+#[test]
+fn enum_const_param_named_like_derive_local() {
+    let tn = type_name::<ConstNamedF<'static, 2>>();
+    let bytes = [1u8, 2];
+
+    let borrowed = ConstNamedF::<'_, 2>::Borrowed(&bytes);
+    assert_opaque(&borrowed);
+    assert_eq!(format!("{borrowed:?}"), format!("{tn}::Borrowed(\"***\")"));
+
+    let named = ConstNamedF::<'_, 2>::Named { bytes, len: 2 };
+    assert_eq!(
+        format!("{named:?}"),
+        format!("{tn}::Named {{bytes: \"***\", len: 2}}")
+    );
+
+    let empty = ConstNamedF::<'_, 2>::Empty;
+    assert_eq!(format!("{empty:?}"), format!("{tn}::Empty"));
+}
+
+#[test]
+fn struct_const_param_named_like_derive_local() {
+    let tn = type_name::<ConstNamedTn<3>>();
+    let s = ConstNamedTn::<3> {
+        bytes: [1, 2, 3],
+        len: 3,
+    };
+    assert_opaque(&s);
+    assert_eq!(
+        format!("{s:?}"),
+        format!("{tn} {{ bytes: \"***\", len: 3 }}")
+    );
+
+    let tn = type_name::<ConstNamedTupleDt<3>>();
+    let t = ConstNamedTupleDt::<3>([1, 2, 3]);
+    assert_opaque(&t);
+    assert_eq!(format!("{t:?}"), format!("{tn}(\"***\")"));
 }

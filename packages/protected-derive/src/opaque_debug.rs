@@ -2,6 +2,11 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote, quote_spanned};
 use syn::{spanned::Spanned, Attribute, Data, DataEnum, DataStruct, DeriveInput, Fields};
 
+// Every local the generated impls introduce (the formatter, the type-name
+// binding, the `DebugStruct`/`DebugTuple` builders) carries an
+// `__opaque_debug_` prefix, and enum fields are bound as `__f_<name>` or
+// `__fN`. The impls carry the input's generics, so a short name like `f` or
+// `tn` would collide with a lowercase const parameter or a field of that name.
 pub fn derive_opaque_debug(input: DeriveInput) -> TokenStream {
     let ident = input.ident.clone();
     let generics = input.generics.clone();
@@ -35,9 +40,9 @@ pub fn derive_opaque_debug(input: DeriveInput) -> TokenStream {
             // For unions: just print the type name
             quote! {
                 impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
-                    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                        let tn = ::core::any::type_name::<#ident #ty_generics>();
-                        f.write_str(tn)
+                    fn fmt(&self, __opaque_debug_f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
+                        __opaque_debug_f.write_str(__opaque_debug_tn)
                     }
                 }
             }
@@ -91,23 +96,23 @@ fn debug_impl_for_struct(
                 if has_non_sensitive(&f.attrs) {
                     // show actual value
                     quote_spanned! { f.span() =>
-                        let _ = ds.field(#key, &self.#fname);
+                        let _ = __opaque_debug_ds.field(#key, &self.#fname);
                     }
                 } else {
                     // mask
                     quote_spanned! { f.span() =>
-                        let _ = ds.field(#key, &#mask);
+                        let _ = __opaque_debug_ds.field(#key, &#mask);
                     }
                 }
             });
 
             quote! {
                 impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
-                    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                        let tn = ::core::any::type_name::<#ident #ty_generics>();
-                        let mut ds = f.debug_struct(tn);
+                    fn fmt(&self, __opaque_debug_f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
+                        let mut __opaque_debug_ds = __opaque_debug_f.debug_struct(__opaque_debug_tn);
                         #(#field_tokens)*
-                        ds.finish()
+                        __opaque_debug_ds.finish()
                     }
                 }
             }
@@ -118,22 +123,22 @@ fn debug_impl_for_struct(
                 let idx = syn::Index::from(i);
                 if has_non_sensitive(&f.attrs) {
                     quote_spanned! { f.span() =>
-                        let _ = dt.field(&self.#idx);
+                        let _ = __opaque_debug_dt.field(&self.#idx);
                     }
                 } else {
                     quote_spanned! { f.span() =>
-                        let _ = dt.field(&#mask);
+                        let _ = __opaque_debug_dt.field(&#mask);
                     }
                 }
             });
 
             quote! {
                 impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
-                    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                        let tn = ::core::any::type_name::<#ident #ty_generics>();
-                        let mut dt = f.debug_tuple(tn);
+                    fn fmt(&self, __opaque_debug_f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
+                        let mut __opaque_debug_dt = __opaque_debug_f.debug_tuple(__opaque_debug_tn);
                         #(#field_tokens)*
-                        dt.finish()
+                        __opaque_debug_dt.finish()
                     }
                 }
             }
@@ -142,9 +147,9 @@ fn debug_impl_for_struct(
             // Type
             quote! {
                 impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
-                    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                        let tn = ::core::any::type_name::<#ident #ty_generics>();
-                        f.write_str(tn)
+                    fn fmt(&self, __opaque_debug_f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
+                        __opaque_debug_f.write_str(__opaque_debug_tn)
                     }
                 }
             }
@@ -170,8 +175,8 @@ fn debug_impl_for_enum(
             syn::Fields::Unit => {
                 arms.push(quote! {
                     Self::#v_ident => {
-                        let tn = ::core::any::type_name::<#ident #ty_generics>();
-                        write!(f, "{}::{}", tn, ::core::stringify!(#v_ident))
+                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
+                        write!(__opaque_debug_f, "{}::{}", __opaque_debug_tn, ::core::stringify!(#v_ident))
                     }
                 });
             }
@@ -189,27 +194,26 @@ fn debug_impl_for_enum(
                     let comma = if i == 0 { "" } else { ", " };
                     let field_attrs = &fields.unnamed[i].attrs;
                     if variant_ns || has_non_sensitive(field_attrs) {
-                        quote! { write!(f, concat!(#comma, "{:?}"), #ident_i)?; }
+                        quote! { write!(__opaque_debug_f, concat!(#comma, "{:?}"), #ident_i)?; }
                     } else {
-                        quote! { write!(f, concat!(#comma, "{:?}"), #mask)?; }
+                        quote! { write!(__opaque_debug_f, concat!(#comma, "{:?}"), #mask)?; }
                     }
                 });
 
                 arms.push(quote! {
                     Self::#v_ident( #pat ) => {
-                        let tn = ::core::any::type_name::<#ident #ty_generics>();
-                        write!(f, "{}::{}(", tn, ::core::stringify!(#v_ident))?;
+                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
+                        write!(__opaque_debug_f, "{}::{}(", __opaque_debug_tn, ::core::stringify!(#v_ident))?;
                         #(#writes)*
-                        write!(f, ")")
+                        write!(__opaque_debug_f, ")")
                     }
                 });
             }
 
             syn::Fields::Named(fields) => {
                 // Bind each field to a prefixed local rather than its own name,
-                // as the tuple arm does with `__f0`, `__f1`, ... A field named
-                // `f` or `tn` would otherwise shadow the formatter or the
-                // type-name local used below.
+                // as the tuple arm does with `__f0`, `__f1`, ... so a field
+                // cannot shadow the generated locals.
                 let bindings: Vec<(&syn::Ident, syn::Ident)> = fields
                     .named
                     .iter()
@@ -232,18 +236,18 @@ fn debug_impl_for_enum(
                             let key = id.to_string();
                             let prefix = if i == 0 { "" } else { ", " };
                             if variant_ns || has_non_sensitive(&f.attrs) {
-                                quote! { write!(f, concat!(#prefix, #key, ": {:?}"), #local)?; }
+                                quote! { write!(__opaque_debug_f, concat!(#prefix, #key, ": {:?}"), #local)?; }
                             } else {
-                                quote! { write!(f, concat!(#prefix, #key, ": {:?}"), #mask)?; }
+                                quote! { write!(__opaque_debug_f, concat!(#prefix, #key, ": {:?}"), #mask)?; }
                             }
                         });
 
                 arms.push(quote! {
                     Self::#v_ident { #( #pat_bindings ),* } => {
-                        let tn = ::core::any::type_name::<#ident #ty_generics>();
-                        write!(f, "{}::{} {{", tn, ::core::stringify!(#v_ident))?;
+                        let __opaque_debug_tn = ::core::any::type_name::<#ident #ty_generics>();
+                        write!(__opaque_debug_f, "{}::{} {{", __opaque_debug_tn, ::core::stringify!(#v_ident))?;
                         #(#writes)*
-                        write!(f, "}}")
+                        write!(__opaque_debug_f, "}}")
                     }
                 });
             }
@@ -252,7 +256,7 @@ fn debug_impl_for_enum(
 
     quote! {
         impl #impl_generics ::core::fmt::Debug for #ident #ty_generics #where_clause {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+            fn fmt(&self, __opaque_debug_f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 match self {
                     #(#arms),*
                 }
