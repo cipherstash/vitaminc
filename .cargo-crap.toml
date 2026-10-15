@@ -51,29 +51,64 @@ exclude = ["tests/**", "src/test_support.rs"]
 #     and llvm-cov scores like any other function. Splitting these two the same
 #     way would let them come off this list.
 #
-#   * The `vitaminc-aead-napi` modules that walk and build live JavaScript
-#     values (`js_ref.rs`, `js_builder.rs`, `wrappers.rs`) and the ciphertext
-#     projection's `node_to_js`/`node_from_js`, with the object helpers they
-#     share (`own_enumerable_keys`, `get_property_unknown`, `is_plain_object`):
-#     each takes a live `napi_env`/`Unknown`/`Object`, which only exists
-#     inside a running V8 isolate. The Node suites run by `tests/node.rs` do
-#     exercise them, but inside a separately built test addon loaded by
-#     `node`, which llvm-cov does not instrument; the `napi/noop`
-#     dev-dependency only lets the crate itself *link* for unit tests. So
-#     llvm-cov always reads them as 0%. The three modules hold nothing else,
-#     so they are listed by file; the helpers are named so the rest of
-#     `js.rs` and `ciphertext.rs` — `forbidden_key`, `eager_capacity`, the
-#     depth measuring and friends — stays scored. The mutation gate does not
+#   * The `vitaminc-aead-napi` functions that walk and build live JavaScript
+#     values (`js_ref.rs`, `js_builder.rs`, `wrappers.rs`), the ciphertext
+#     projection's `node_to_js`/`node_from_js`, and the object helpers they
+#     share in `js.rs`: each takes a live `napi_env`/`Unknown`/`Object`,
+#     which only exists inside a running V8 isolate. The Node suites run by
+#     `tests/node.rs` do exercise them, but inside a separately built test
+#     addon loaded by `node`, which llvm-cov does not instrument; the
+#     `napi/noop` dev-dependency only lets the crate itself *link* for unit
+#     tests. So llvm-cov always reads them as 0%. They are named one by one
+#     rather than by file, so the pure functions beside them (`forbidden_key`,
+#     `eager_capacity`, `capacity`, `bigint`, `check_depth`, `class_name`,
+#     `frame_error` and friends) stay scored. The mutation gate does not
 #     exempt them: it rebuilds that addon from the mutated source.
 allow = [
     "**/random-derives/**",
     "**/protected-derive/**",
-    "**/aead-napi/src/js_ref.rs",
-    "**/aead-napi/src/js_builder.rs",
-    "**/aead-napi/src/wrappers.rs",
+    # ciphertext.rs
     "node_to_js",
     "node_from_js",
+    # js.rs
     "own_enumerable_keys",
+    "get_own",
+    "lossless_string",
     "get_property_unknown",
-    "is_plain_object",
+    "own_property",
+    "define_own_properties",
+    "new_array",
+    # js_ref.rs
+    "JsRef::to_frame",
+    "JsRef::visit",
+    "fault",
+    "conversion",
+    "walk",
+    "object",
+    "bytes",
+    "date",
+    "classify",
+    "map",
+    "array",
+    "wrapped",
+    # js_builder.rs
+    "JsBuilder::build",
+    "JsBuilder::scalar",
+    "JsBuilder::seq",
+    "JsBuilder::map",
+    "JsBuilder::passthrough",
+    "JsSeq::element",
+    "JsSeq::end",
+    "JsMap::entry",
+    "JsMap::end",
+    "scalar_to_js",
+    # wrappers.rs
+    "Wrappers::get",
+    "Wrappers::exports",
+    "Wrappers::constructor",
+    "Wrappers::classify",
+    "Wrappers::is_plain",
+    "Wrappers::text",
+    "Wrappers::construct",
+    "release",
 ]

@@ -267,7 +267,7 @@ fn scalar_to_js<'e>(
     };
     let wrap = |wrapper: Wrapper, text: Option<String>| -> napi::Result<Unknown<'e>> {
         let text = text.ok_or_else(|| malformed(wrapper.class_name()))?;
-        Wrappers::get(env)?.construct(env, wrapper, &text)
+        Wrappers::get(env)?.construct(wrapper, &text)
     };
     match (ty, value) {
         (Logical::Undefined, Physical::Null) => ().into_unknown(env),
@@ -298,5 +298,49 @@ fn bigint(int: Int) -> BigInt {
         Some(v) => BigInt::from(v),
         // Only a u128 above i128::MAX has no i128.
         None => BigInt::from(int.to_u128().unwrap_or(u128::MAX)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::js::MAX_DEPTH;
+
+    #[test]
+    fn a_length_hint_buys_a_bounded_reservation() {
+        assert_eq!(capacity(None), 0);
+        assert_eq!(capacity(Some(0)), 0);
+        assert_eq!(capacity(Some(37)), 37);
+        assert_eq!(capacity(Some(usize::MAX)), eager_capacity(u32::MAX));
+        assert_eq!(capacity(Some(1 << 40)), eager_capacity(u32::MAX));
+    }
+
+    #[test]
+    fn every_int_width_becomes_a_bigint_of_its_sign_and_magnitude() {
+        // Every width goes through i128 when it fits, so two words always.
+        let big = bigint(Int::I8(-1));
+        assert!(big.sign_bit, "negative");
+        assert_eq!(big.words, [1, 0]);
+        let big = bigint(Int::U64(u64::MAX));
+        assert!(!big.sign_bit);
+        assert_eq!(big.words, [u64::MAX, 0]);
+        let big = bigint(Int::I128(i128::MIN));
+        assert!(big.sign_bit);
+        assert_eq!(big.words, [0, 1 << 63]);
+        // Above i128::MAX there is no i128, so the u128 path carries it.
+        let big = bigint(Int::U128(u128::MAX));
+        assert!(!big.sign_bit);
+        assert_eq!(big.words, [u64::MAX, u64::MAX]);
+    }
+
+    #[test]
+    fn the_depth_check_refuses_one_past_the_limit() {
+        let env = Env::from_raw(std::ptr::null_mut());
+        assert!(JsBuilder::at_depth(&env, MAX_DEPTH).check_depth().is_ok());
+        let error = JsBuilder::at_depth(&env, MAX_DEPTH + 1)
+            .check_depth()
+            .expect_err("past the limit");
+        assert_eq!(error.status, Status::InvalidArg);
+        assert!(error.reason.contains("nested too deeply"), "{error}");
     }
 }

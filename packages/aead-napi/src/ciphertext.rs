@@ -345,11 +345,11 @@ where
                 if forbidden_key(&key.name) {
                     return Err(Error::new(
                         Status::InvalidArg,
-                        format!("ciphertext map key is not allowed: {}", key.name),
+                        format!("ciphertext map key is not allowed: {}", *key.name),
                     ));
                 }
                 let value = node_object(get_own(&map, &key)?)?;
-                entries.push((key.name, node_from_js(&value, depth + 1)?));
+                entries.push((key.name.to_string(), node_from_js(&value, depth + 1)?));
             }
             Ok(CipherText::Map(entries))
         }

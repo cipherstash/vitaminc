@@ -12,7 +12,7 @@
 //! | `number`               | `scalar(None, Float(F64))`                      |
 //! | `bigint`               | `scalar(None, Int(narrowest fitting width))`    |
 //! | `string`               | `scalar(None, Text)`                            |
-//! | `Buffer`, `Uint8Array` | `scalar(None, Bytes)`                           |
+//! | `Buffer`, `Uint8Array` | `scalar(None, Bytes)`; any other view is refused |
 //! | `Date`                 | `scalar(Some(Timestamp(Millis)), Int(I64(ms)))` |
 //! | `Array`                | `seq`, then `element()` per index               |
 //! | plain object           | `map`, then `entry(key)` per own property       |
@@ -28,7 +28,7 @@
 //! back to JavaScript as that error: see [`JsFault`].
 
 use napi::bindgen_prelude::{
-    Array, BigInt, Buffer, FromNapiValue, JsObjectValue, JsValue, Object, Uint8Array, Unknown,
+    Array, BigInt, FromNapiValue, JsObjectValue, JsValue, Object, Uint8Array, Unknown,
 };
 use napi::{Env, Error, Status, ValueType};
 use vitaminc_aead::frame::FrameWriteError;
@@ -40,8 +40,8 @@ use vitaminc_protected::Protected;
 
 use crate::error::JsFault;
 use crate::js::{
-    depth_error, forbidden_key, forbidden_key_error, get_own, is_plain_object, lossless_string,
-    not_plain_error, own_enumerable_keys, MAX_DEPTH,
+    depth_error, forbidden_key, forbidden_key_error, get_own, lossless_string, not_plain_error,
+    own_enumerable_keys, MAX_DEPTH,
 };
 use crate::scalar::{self, ConversionError};
 use crate::wrappers::{Wrapper, Wrappers};
@@ -142,11 +142,14 @@ fn walk<S: Sink>(value: Unknown<'_>, depth: usize, sink: S) -> Result<S::Ok, S::
 /// costs is the recursion's own and a document at the depth limit walks
 /// in a debug build too.
 fn object<S: Sink>(value: Unknown<'_>, depth: usize, sink: S) -> Result<S::Ok, S::Error> {
-    if value.is_buffer().map_err(fault::<S>)? {
-        return buffer(value, sink);
-    }
+    // Typed arrays before anything else: `napi_is_buffer` is true for every
+    // `ArrayBufferView`, so a `Buffer` check first would take a
+    // `Float64Array` as raw bytes.
     if value.is_typedarray().map_err(fault::<S>)? {
-        return typed_array(value, sink);
+        return bytes(value, sink);
+    }
+    if value.is_dataview().map_err(fault::<S>)? {
+        return Err(fault::<S>(not_bytes_error("DataView")));
     }
     if value.is_array().map_err(fault::<S>)? {
         return array(value, depth, sink);
@@ -160,16 +163,22 @@ fn object<S: Sink>(value: Unknown<'_>, depth: usize, sink: S) -> Result<S::Ok, S
     }
 }
 
-fn buffer<S: Sink>(value: Unknown<'_>, sink: S) -> Result<S::Ok, S::Error> {
-    let buf = Buffer::from_unknown(value).map_err(fault::<S>)?;
-    sink.scalar(None, Physical::Bytes(&buf))
+/// A `Buffer` or `Uint8Array` as bytes. Only byte views are meaningful
+/// plaintext: a `Float64Array`, an `Int16Array`, a `BigInt64Array` or a
+/// `Uint8ClampedArray` would seal as its raw bytes and silently decrypt
+/// as a `Buffer`, so the cast, which checks the element type, refuses
+/// them. A `Buffer` is a `Uint8Array` and passes.
+fn bytes<S: Sink>(value: Unknown<'_>, sink: S) -> Result<S::Ok, S::Error> {
+    let arr =
+        Uint8Array::from_unknown(value).map_err(|_| fault::<S>(not_bytes_error("typed array")))?;
+    sink.scalar(None, Physical::Bytes(&arr))
 }
 
-/// Only byte views are meaningful plaintext; other typed arrays
-/// (Float64Array, …) are rejected by the cast.
-fn typed_array<S: Sink>(value: Unknown<'_>, sink: S) -> Result<S::Ok, S::Error> {
-    let arr = Uint8Array::from_unknown(value).map_err(fault::<S>)?;
-    sink.scalar(None, Physical::Bytes(&arr))
+fn not_bytes_error(what: &str) -> Error {
+    Error::new(
+        Status::InvalidArg,
+        format!("only a Buffer or a Uint8Array can be encrypted as bytes, not a {what}"),
+    )
 }
 
 fn date<S: Sink>(value: Unknown<'_>, sink: S) -> Result<S::Ok, S::Error> {
@@ -187,11 +196,11 @@ fn date<S: Sink>(value: Unknown<'_>, sink: S) -> Result<S::Ok, S::Error> {
 /// object. Anything else is refused.
 fn classify(value: Unknown<'_>) -> napi::Result<Option<Wrapper>> {
     let env = Env::from_raw(value.value().env);
-    let obj = Object::from_unknown(value)?;
-    if let Some(wrapper) = Wrappers::get(&env)?.classify(&env, &value)? {
+    let wrappers = Wrappers::get(&env)?;
+    if let Some(wrapper) = wrappers.classify(&value)? {
         return Ok(Some(wrapper));
     }
-    if is_plain_object(&obj)? {
+    if wrappers.is_plain(value)? {
         Ok(None)
     } else {
         Err(not_plain_error())
@@ -278,5 +287,28 @@ fn wrapped<S: Sink>(value: Unknown<'_>, wrapper: Wrapper, sink: S) -> Result<S::
             let bytes = scalar::uuid(&text).map_err(convert)?;
             sink.scalar(Some(Logical::Uuid), Physical::Bytes(&bytes))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_frame_writers_refusal_becomes_the_napi_error_the_host_expects() {
+        let too_deep = frame_error(FrameWriteError::TooDeep);
+        assert_eq!(too_deep.status, Status::InvalidArg);
+        assert!(too_deep.reason.contains("nested too deeply"), "{too_deep}");
+
+        let too_long = frame_error(FrameWriteError::TooLong);
+        assert_eq!(too_long.status, Status::InvalidArg);
+        assert_eq!(too_long.reason, FrameWriteError::TooLong.to_string());
+
+        // A getter that threw comes back as the error it threw.
+        let thrown = Error::new(Status::PendingException, "the getter threw");
+        let source = FrameWriteError::Source(SourceError::new(JsFault::from(thrown)));
+        let back = frame_error(source);
+        assert_eq!(back.status, Status::PendingException);
+        assert_eq!(back.reason, "the getter threw");
     }
 }

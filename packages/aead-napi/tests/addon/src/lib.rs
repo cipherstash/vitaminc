@@ -26,6 +26,14 @@ fn init(mut exports: Object<'_>, env: Env) -> Result<()> {
     Ok(())
 }
 
+/// Take the environment's instance data for the addon itself, as an addon
+/// author may: the binding must not depend on that slot.
+#[napi]
+pub fn claim_instance_data(env: Env) -> Result<()> {
+    struct Mine;
+    env.set_instance_data(Mine, (), |_| {})
+}
+
 fn fixed_cipher() -> Result<Aes256Cipher> {
     // Test data, not a secret.
     Aes256Cipher::new(&Key::from([42u8; 32]))

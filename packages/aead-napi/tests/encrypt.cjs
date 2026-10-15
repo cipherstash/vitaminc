@@ -67,7 +67,9 @@ for (const wrap of [(v) => [v], (v) => ({ k: v })]) {
 assert.throws(() => addon.encryptValue(JSON.parse('{"__proto__": 1}'), aad), /not allowed/);
 assert.throws(() => addon.encryptValue({ constructor: 1 }, aad), /not allowed/);
 assert.throws(() => addon.encryptValue({ prototype: 1 }, aad), /not allowed/);
-// And on the way out: a ciphertext map key is attacker-writable.
+// And on the way out: a ciphertext map key is attacker-writable. This is
+// the ciphertext reader's refusal; the build's own, from a frame, is pinned
+// in object-safety.cjs.
 {
   const ct = addon.encryptValue({ a: 1n }, aad);
   const v = JSON.parse('{"__proto__": null}');

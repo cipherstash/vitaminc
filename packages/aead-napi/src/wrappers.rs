@@ -7,12 +7,18 @@
 //! language wrote as an ordinary one-key object (#382).
 //!
 //! The classes are defined by the JavaScript in `wrappers.js`, evaluated
-//! once per environment, and their constructors are kept in the
-//! environment's instance data. An addon exports them with
-//! [`Wrappers::exports`] so applications can construct them; the walk
-//! recognises instances with `instanceof`, and the build constructs them.
+//! once per environment. The object it returns (the classes and the
+//! plain-object check, frozen) is kept in a registry keyed by the
+//! environment and released by an environment cleanup hook, so the
+//! addon's own instance data (`napi_set_instance_data`) is never touched.
+//! An addon exports the classes with [`Wrappers::exports`] so applications
+//! can construct them; the walk recognises instances with `instanceof`,
+//! and the build constructs them.
 
-use napi::bindgen_prelude::{Function, FunctionRef, JsObjectValue, JsValue, Object, Unknown};
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+
+use napi::bindgen_prelude::{Function, JsObjectValue, JsValue, Object, ObjectRef, Unknown};
 use napi::{Env, Error, Result, Status};
 
 /// Which wrapper class a value is an instance of.
@@ -43,81 +49,110 @@ impl Wrapper {
     }
 }
 
-/// A wrapper class constructor: one string argument, the text.
-type Constructor = FunctionRef<String, Unknown<'static>>;
-
-/// The constructors of the wrapper classes for one environment.
-pub struct Wrappers {
-    constructors: [Constructor; 4],
-}
-
 const SOURCE: &str = include_str!("wrappers.js");
 
 /// The own property a wrapper instance holds its text in.
 const VALUE: &str = "value";
 
-impl Wrappers {
+/// The property of the script's result that answers the plain-object check.
+const IS_PLAIN: &str = "isPlain";
+
+/// One environment's evaluated `wrappers.js`, by the environment's raw
+/// handle. An entry is added on first use and removed by the cleanup hook
+/// registered then, so a handle a later environment reuses starts fresh.
+/// The reference is dropped without the leak warning: it is released by
+/// the hook while the environment is still live.
+static REALMS: LazyLock<Mutex<HashMap<usize, ObjectRef<false>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn registry_poisoned() -> Error {
+    Error::new(Status::GenericFailure, "wrapper class registry is poisoned")
+}
+
+/// The wrapper classes of one environment, for one call: a borrowed view
+/// that cannot outlive the environment it was taken from.
+pub struct Wrappers<'e> {
+    classes: Object<'e>,
+}
+
+impl<'e> Wrappers<'e> {
     /// The wrapper classes of `env`, defined on first use.
-    ///
-    /// They live in the environment's instance data
-    /// (`napi_set_instance_data`), which an addon that uses this crate
-    /// must leave to it.
-    pub fn get(env: &Env) -> Result<&'static Wrappers> {
-        if let Some(wrappers) = env.get_instance_data::<Wrappers>()? {
-            return Ok(&*wrappers);
-        }
-        let classes: Object<'_> = env.run_script(SOURCE)?;
-        let mut constructors = Vec::with_capacity(Wrapper::ALL.len());
-        for wrapper in Wrapper::ALL {
-            let constructor: Function<'_, String, Unknown<'_>> =
-                classes.get_named_property(wrapper.class_name())?;
-            constructors.push(constructor.create_ref()?);
-        }
-        let constructors: [Constructor; 4] = constructors
-            .try_into()
-            .map_err(|_| Error::new(Status::GenericFailure, "wrapper classes did not define"))?;
-        env.set_instance_data(Wrappers { constructors }, (), |_| {})?;
-        let retained = env.get_instance_data::<Wrappers>()?.ok_or_else(|| {
-            Error::new(Status::GenericFailure, "wrapper classes were not retained")
-        })?;
-        Ok(&*retained)
+    pub fn get(env: &'e Env) -> Result<Self> {
+        let key = env.raw() as usize;
+        let existing = REALMS
+            .lock()
+            .map_err(|_| registry_poisoned())?
+            .get(&key)
+            .map(|classes| classes.get_value(env))
+            .transpose()?;
+        let classes = match existing {
+            Some(classes) => classes,
+            // The script runs outside the lock: it is self-contained, but
+            // nothing that runs JavaScript should hold a lock the
+            // JavaScript thread may take again.
+            None => {
+                let classes: Object<'e> = env.run_script(SOURCE)?;
+                let reference = classes.create_ref::<false>()?;
+                REALMS
+                    .lock()
+                    .map_err(|_| registry_poisoned())?
+                    .insert(key, reference);
+                env.add_env_cleanup_hook(key, release)?;
+                classes
+            }
+        };
+        Ok(Self { classes })
     }
 
     /// An object holding every class under its name, for an addon to
     /// re-export: `VcDate`, `VcTimestamp`, `VcDecimal` and `VcUuid`.
-    pub fn exports<'e>(env: &'e Env) -> Result<Object<'e>> {
+    pub fn exports(env: &'e Env) -> Result<Object<'e>> {
         let wrappers = Self::get(env)?;
         let mut exports = Object::new(env)?;
         for wrapper in Wrapper::ALL {
-            exports
-                .set_named_property(wrapper.class_name(), wrappers.constructor(env, wrapper)?)?;
+            exports.set_named_property(wrapper.class_name(), wrappers.constructor(wrapper)?)?;
         }
         Ok(exports)
     }
 
-    fn constructor<'e>(
-        &self,
-        env: &'e Env,
-        wrapper: Wrapper,
-    ) -> Result<Function<'e, String, Unknown<'e>>> {
-        self.constructors[wrapper as usize].borrow_back(env)
+    fn constructor(&self, wrapper: Wrapper) -> Result<Function<'e, String, Unknown<'e>>> {
+        self.classes.get_named_property(wrapper.class_name())
     }
 
     /// Which wrapper class `value` is an instance of, if any.
-    pub fn classify(&self, env: &Env, value: &Unknown<'_>) -> Result<Option<Wrapper>> {
+    pub fn classify(&self, value: &Unknown<'e>) -> Result<Option<Wrapper>> {
         for wrapper in Wrapper::ALL {
-            if value.instanceof(self.constructor(env, wrapper)?)? {
+            if value.instanceof(self.constructor(wrapper)?)? {
                 return Ok(Some(wrapper));
             }
         }
         Ok(None)
     }
 
+    /// Whether `value` is a plain object: prototype `Object.prototype` or
+    /// `null` (`Object.create(null)`).
+    ///
+    /// Anything else stores its state in internal slots or carries class
+    /// behaviour that key/value enumeration silently loses: a `Map`'s or
+    /// `Set`'s contents enumerate as `{}`, a `RegExp` drops its pattern and
+    /// flags, an `ArrayBuffer` or `DataView` its bytes. Encrypting such a
+    /// value would destroy the payload with no error at either end, so the
+    /// walk refuses it instead, once it has checked for the wrapper classes.
+    /// The question is put to the `Object.getPrototypeOf` captured when the
+    /// script was evaluated, which runs a `Proxy`'s trap; `napi_get_prototype`
+    /// reports `null` for every proxy, which would pass a proxied `Map` as
+    /// `Object.create(null)`.
+    pub fn is_plain(&self, value: Unknown<'e>) -> Result<bool> {
+        let is_plain: Function<'e, Unknown<'e>, bool> =
+            self.classes.get_named_property(IS_PLAIN)?;
+        is_plain.call(value)
+    }
+
     /// The text a wrapper instance holds. The class keeps `value` as an
     /// own, read-only string, but an instance can be made without the
     /// constructor (`Object.create`), so the property is read as an own
     /// property and its type checked.
-    pub fn text<'e>(&self, instance: &Object<'e>) -> Result<Option<Unknown<'e>>> {
+    pub fn text(&self, instance: &Object<'e>) -> Result<Option<Unknown<'e>>> {
         if !instance.has_own_property(VALUE)? {
             return Ok(None);
         }
@@ -126,8 +161,35 @@ impl Wrappers {
     }
 
     /// A new instance of `wrapper` holding `text`.
-    pub fn construct<'e>(&self, env: &'e Env, wrapper: Wrapper, text: &str) -> Result<Unknown<'e>> {
-        self.constructor(env, wrapper)?
-            .new_instance(text.to_owned())
+    pub fn construct(&self, wrapper: Wrapper, text: &str) -> Result<Unknown<'e>> {
+        self.constructor(wrapper)?.new_instance(text.to_owned())
+    }
+}
+
+/// The environment cleanup hook: delete the reference while the
+/// environment can still do so, and forget the entry.
+fn release(key: usize) {
+    let Ok(mut realms) = REALMS.lock() else {
+        return;
+    };
+    if let Some(reference) = realms.remove(&key) {
+        let env = Env::from_raw(key as napi::sys::napi_env);
+        // A failure here leaves a reference the environment is about to
+        // reclaim anyway; there is nobody to report it to.
+        let _ = reference.unref(&env);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_wrapper_has_the_class_name_javascript_sees() {
+        let names: Vec<&str> = Wrapper::ALL.iter().map(|w| w.class_name()).collect();
+        assert_eq!(names, ["VcDate", "VcTimestamp", "VcDecimal", "VcUuid"]);
+        for wrapper in Wrapper::ALL {
+            assert_eq!(wrapper.class_name(), format!("Vc{wrapper:?}"));
+        }
     }
 }

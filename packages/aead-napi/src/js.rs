@@ -5,9 +5,10 @@
 
 use napi::bindgen_prelude::{
     FromNapiValue, JsObjectValue, JsValue, KeyCollectionMode, KeyConversion, KeyFilter, Object,
-    ToNapiValue, Unknown, Utf16String,
+    ToNapiValue, Unknown,
 };
-use napi::{Env, Error, Property, Result, Status, ValueType};
+use napi::{check_status, sys, Env, Error, Property, Result, Status, ValueType};
+use zeroize::Zeroizing;
 
 /// Maximum nesting depth, in both directions: walking a JavaScript value
 /// and building one. Bounds recursion so a deeply nested input cannot
@@ -51,7 +52,7 @@ pub(crate) fn eager_capacity(reported_len: u32) -> usize {
 /// exactly, and its text.
 pub(crate) struct OwnKey<'e> {
     handle: Unknown<'e>,
-    pub(crate) name: String,
+    pub(crate) name: Zeroizing<String>,
 }
 
 /// Own, enumerable, string-keyed properties of `obj`.
@@ -96,7 +97,10 @@ pub(crate) fn get_own<'e>(obj: &Object<'e>, key: &OwnKey<'e>) -> Result<Unknown<
     if !obj.has_own_property_js(key.handle)? {
         return Err(Error::new(
             Status::InvalidArg,
-            format!("property was removed while it was being read: {}", key.name),
+            format!(
+                "property was removed while it was being read: {}",
+                *key.name
+            ),
         ));
     }
     obj.get_property_unchecked(key.handle)
@@ -107,14 +111,36 @@ pub(crate) fn get_own<'e>(obj: &Object<'e>, key: &OwnKey<'e>) -> Result<Unknown<
 /// surrogates. The UTF-8 fetch (`napi_get_value_string_utf8`) would silently
 /// replace them with U+FFFD, so a value would seal *mutated* and a key would
 /// stop naming its property; refuse loudly instead.
-pub(crate) fn lossless_string(value: Unknown<'_>, what: &str) -> Result<String> {
-    let utf16 = Utf16String::from_unknown(value)?;
-    String::from_utf16(&utf16).map_err(|_| {
+///
+/// The text may be plaintext, so both Rust copies, the code units and the
+/// UTF-8, are wiped on drop. The V8 original cannot be wiped from here. The
+/// code units are read straight from Node-API rather than through
+/// napi-rs's `Utf16String`, whose buffer cannot be reached to wipe.
+pub(crate) fn lossless_string(value: Unknown<'_>, what: &str) -> Result<Zeroizing<String>> {
+    let env = value.value().env;
+    let raw = value.raw();
+    let mut len = 0usize;
+    // SAFETY: `value` is a live string handle of `env` (the caller checked
+    // its type), and a null buffer with size 0 asks for the length only.
+    let status =
+        unsafe { sys::napi_get_value_string_utf16(env, raw, std::ptr::null_mut(), 0, &mut len) };
+    check_status!(status, "failed to measure a {what}")?;
+    // Room for the terminating NUL Node-API writes.
+    let mut units = Zeroizing::new(vec![0u16; len + 1]);
+    let mut written = 0usize;
+    // SAFETY: as above, and `units` holds `len + 1` code units, which is the
+    // size passed, so the write stays inside the buffer.
+    let status = unsafe {
+        sys::napi_get_value_string_utf16(env, raw, units.as_mut_ptr(), len + 1, &mut written)
+    };
+    check_status!(status, "failed to read a {what}")?;
+    let text = String::from_utf16(&units[..written.min(len)]).map_err(|_| {
         Error::new(
             Status::InvalidArg,
             format!("{what} contains an unpaired surrogate and cannot be encrypted losslessly"),
         )
-    })
+    })?;
+    Ok(Zeroizing::new(text))
 }
 
 /// Fetch a property as the raw JS value, without [`Object::get`]'s
@@ -131,27 +157,8 @@ pub(crate) fn get_property_unknown<'e>(obj: &Object<'e>, key: &str) -> Result<Un
     obj.get_property_unchecked(js_key)
 }
 
-/// Whether `obj` is a plain object — prototype `Object.prototype` (compared
-/// against a fresh `{}` from the same realm) or `null`
-/// (`Object.create(null)`).
-///
-/// Anything else stores its state in internal slots or carries class
-/// behaviour that key/value enumeration silently loses: a `Map`'s or
-/// `Set`'s contents enumerate as `{}`, a `RegExp` drops its pattern and
-/// flags, an `ArrayBuffer` or `DataView` its bytes. Encrypting such a
-/// value would destroy the payload with no error at either end, so the
-/// walk refuses it instead, once it has checked for the wrapper classes.
-pub(crate) fn is_plain_object(obj: &Object<'_>) -> Result<bool> {
-    let proto = obj.get_prototype()?;
-    if proto.get_type()? == ValueType::Null {
-        return Ok(true);
-    }
-    let env = Env::from_raw(obj.value().env);
-    let baseline = Object::new(&env)?;
-    let object_prototype = baseline.get_prototype()?;
-    env.strict_equals(proto, object_prototype)
-}
-
+/// The refusal of anything but a plain object or a wrapper instance; the
+/// check itself is [`Wrappers::is_plain`](crate::Wrappers::is_plain).
 pub(crate) fn not_plain_error() -> Error {
     Error::new(
         Status::InvalidArg,

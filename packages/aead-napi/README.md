@@ -25,7 +25,9 @@ nothing sits in between. This crate supplies the JavaScript side of both:
   applies the tree's nesting limit to the payload too.
 - **`Wrappers`** — the wrapper classes `VcDate`, `VcTimestamp`,
   `VcDecimal` and `VcUuid`, defined once per environment and exported by an
-  addon with `Wrappers::exports`.
+  addon with `Wrappers::exports`. The crate keeps them in its own registry,
+  keyed by the environment and released by an environment cleanup hook; the
+  addon's instance data is untouched.
 
 ## The mapping
 
@@ -37,7 +39,7 @@ nothing sits in between. This crate supplies the JavaScript side of both:
 | `number`                            | float (`F64`)                            |
 | `bigint`                            | int, at the narrowest fitting width      |
 | `string`                            | text                                     |
-| `Buffer`, `Uint8Array`              | bytes                                    |
+| `Buffer`, `Uint8Array`              | bytes (any other view is refused)        |
 | `Date`                              | `Timestamp(Millis)` over the `i64` count |
 | `VcDate("YYYY-MM-DD")`              | `Date` over the day count                |
 | `VcTimestamp("RFC 3339, ns")`       | `Timestamp(Nanos)` over the count        |
@@ -70,7 +72,13 @@ string and nothing else; the text is checked, and the scalar built from
 it, when the value is encrypted, so one rule applies however the instance
 was made. `value` is an own, read-only, enumerable property, so
 `JSON.stringify` (which gives the bare text through `toJSON`),
-`structuredClone` and a deep equality all see it.
+`structuredClone` and a deep equality all see it. A clone, or a wrapper
+posted to a Worker, is a plain `{ value }` object and encrypts as a map;
+rebuild it with the constructor on the other side. The classes, their
+prototypes and every instance are frozen, and construction uses what the
+class captured when it was defined, so a polluted `Object.prototype` or a
+later edit of a class cannot make `value` writable, break a decrypt, or
+turn a plain `{ value }` object back into a wrapper.
 
 An instance is not a plain object, so it is never confused with data
 another language wrote as an ordinary one-key object: Go's
@@ -84,10 +92,6 @@ expanded year (`+12000-01-01T00:00:00.000000001Z`), on both sides.
 Scalar failures throw a `TypeError` with a stable code: `ERR_INTEGER_RANGE`,
 `ERR_INVALID_DATE`, `ERR_INVALID_TIMESTAMP`, `ERR_INVALID_DECIMAL`,
 `ERR_NON_FINITE_DECIMAL` and `ERR_INVALID_UUID`.
-
-The classes live in the environment's instance data
-(`napi_set_instance_data`), which an addon that uses this crate must leave
-to it.
 
 ## Errors
 
@@ -129,20 +133,23 @@ The functions that walk and build live JavaScript values take a
 isolate, so Rust unit tests cannot reach them. The Node suites do:
 `tests/node.rs` rebuilds the test addon from the crate's source, so the
 mutation gate tests these functions like any other code. Only the CRAP gate
-still exempts them, by file and by name in `.cargo-crap.toml`, because they
-run inside the separately built addon, where `cargo llvm-cov` cannot
-measure their coverage.
+still exempts them, by name in `.cargo-crap.toml`, because they run inside
+the separately built addon, where `cargo llvm-cov` cannot measure their
+coverage; the pure functions beside them stay scored.
 
 ## Safety notes
 
 - Unsafe code is limited to the conversion trait methods napi-rs requires
-  (`FromNapiValue`/`ToNapiValue` for `JsCipherText`). Everything else uses
-  napi-rs's safe API. The crate denies `unsafe_op_in_unsafe_fn` and
-  `clippy::undocumented_unsafe_blocks`, so each unsafe block states why it
-  is sound.
+  (`FromNapiValue`/`ToNapiValue` for `JsCipherText`) and the one Node-API
+  call that reads a string's code units into a buffer the crate owns.
+  Everything else uses napi-rs's safe API. The crate denies
+  `unsafe_op_in_unsafe_fn` and `clippy::undocumented_unsafe_blocks`, so
+  each unsafe block states why it is sound.
 - The original copies of encrypted values in the V8 heap are owned by the
-  JS engine and cannot be wiped from Rust. A frame snapshot is `Protected`
-  and wiped on drop.
+  JS engine and cannot be wiped from Rust. Every copy Rust makes of a
+  string (the UTF-16 code units and the UTF-8 text, for values and for the
+  wrapper classes' text) is wiped on drop, and a frame snapshot is
+  `Protected` and wiped on drop.
 - Property names that would touch the prototype chain (`__proto__`,
   `constructor`, `prototype`) are rejected in both directions. Nesting is
   limited to 128 levels in both directions too, counted as the frame counts
@@ -154,7 +161,11 @@ measure their coverage.
   wrapper classes are accepted for encryption. `Map`, `Set`, `RegExp`,
   `DataView`, class instances and other exotic objects keep their state in
   internal slots and would silently encrypt as `{}` — they are rejected with
-  an error instead.
+  an error instead. The prototype is asked through `Object.getPrototypeOf`,
+  which runs a `Proxy`'s trap, so a proxied `Map` or `Date` reports its
+  target's prototype and is refused; a proxy over a plain object walks
+  through its traps. Typed arrays other than `Uint8Array` (and `Buffer`),
+  and `DataView`, are refused rather than sealed as their raw bytes.
 - Object enumeration reads **own, enumerable, string-keyed** properties
   only, so a polluted `Object.prototype` (or inherited enumerable getters)
   can never leak keys into — or run code during — encryption. An own
