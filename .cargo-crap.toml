@@ -51,27 +51,29 @@ exclude = ["tests/**", "src/test_support.rs"]
 #     and llvm-cov scores like any other function. Splitting these two the same
 #     way would let them come off this list.
 #
-#   * The `vitaminc-aead-napi` conversion functions and their JS-boundary
-#     helpers (`own_enumerable_keys`, `get_property_unknown`,
-#     `ensure_plain_object`, `wrapper_text`, `wrapper_to_js`): each takes a live `napi_env`/`Unknown`/`Object`,
-#     which only exists inside a running V8 isolate. The Node suites run by
-#     `tests/node.rs` do exercise them, but inside a separately built test
-#     addon loaded by `node`, which llvm-cov does not instrument; the
-#     `napi/noop` dev-dependency only lets the crate itself *link* for unit
-#     tests. So llvm-cov always reads them as 0%. They are named individually
-#     rather than by file so the rest of those modules — `forbidden_key`,
-#     `eager_capacity` and friends — stays scored. The mutation gate does not
+#   * The `vitaminc-aead-napi` modules that walk and build live JavaScript
+#     values (`js_ref.rs`, `js_builder.rs`, `wrappers.rs`) and the ciphertext
+#     projection's `node_to_js`/`node_from_js`, with the object helpers they
+#     share (`own_enumerable_keys`, `get_property_unknown`, `is_plain_object`):
+#     each takes a live `napi_env`/`Unknown`/`Object`, which only exists
+#     inside a running V8 isolate. The Node suites run by `tests/node.rs` do
+#     exercise them, but inside a separately built test addon loaded by
+#     `node`, which llvm-cov does not instrument; the `napi/noop`
+#     dev-dependency only lets the crate itself *link* for unit tests. So
+#     llvm-cov always reads them as 0%. The three modules hold nothing else,
+#     so they are listed by file; the helpers are named so the rest of
+#     `js.rs` and `ciphertext.rs` — `forbidden_key`, `eager_capacity`, the
+#     depth measuring and friends — stays scored. The mutation gate does not
 #     exempt them: it rebuilds that addon from the mutated source.
 allow = [
     "**/random-derives/**",
     "**/protected-derive/**",
-    "js_to_value",
-    "value_to_js",
+    "**/aead-napi/src/js_ref.rs",
+    "**/aead-napi/src/js_builder.rs",
+    "**/aead-napi/src/wrappers.rs",
     "node_to_js",
     "node_from_js",
     "own_enumerable_keys",
     "get_property_unknown",
-    "ensure_plain_object",
-    "wrapper_text",
-    "wrapper_to_js",
+    "is_plain_object",
 ]

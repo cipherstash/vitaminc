@@ -2700,7 +2700,6 @@ dependencies = [
  "rust_decimal",
  "thiserror",
  "vitaminc-aead",
- "vitaminc-aead-value",
  "vitaminc-protected",
  "zeroize",
 ]

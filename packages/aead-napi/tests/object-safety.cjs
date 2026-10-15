@@ -60,8 +60,10 @@ assert.deepEqual(Object.getOwnPropertyDescriptor(roundTrip({ k: 1 }), 'k'), {
 assert.throws(() => addon.encode(JSON.parse('{"__proto__": 1}')));
 assert.throws(() => addon.encode({ constructor: 1 }));
 
-// Scalar wrappers are written as own properties too.
-assert.deepEqual(roundTrip({ date: '2026-10-09' }), { date: '2026-10-09' });
+// A wrapper instance is built by its constructor, so it is a real instance.
+const date = roundTrip(new addon.VcDate('2026-10-09'));
+assert.ok(date instanceof addon.VcDate);
+assert.equal(date.value, '2026-10-09');
 
 // The ciphertext node projection survives a trip through Rust.
 const leaf = Buffer.from('a1b2', 'hex');
@@ -69,7 +71,7 @@ const ct = {
   t: 'map',
   v: {
     a: { t: 'ct', v: leaf },
-    'k\0': { t: 'seq', v: [{ t: 'none', v: leaf }, { t: 'pt', v: 5n }] },
+    'k\0': { t: 'seq', v: [{ t: 'none', v: leaf }, { t: 'pt', v: 5n }, { t: 'pt', v: { a: [new addon.VcDecimal('1.50')] } }] },
     e: { t: 'eseq', v: leaf },
     m: { t: 'emap', v: leaf },
     u: { t: 'pt', v: undefined },
@@ -120,20 +122,19 @@ for (const wrap of [(v) => ({ t: 'seq', v: [v] }), (v) => ({ t: 'map', v: { k: v
   );
 }
 
-// A leap second cannot be a JS Date, even when it is millisecond-aligned.
-assert.deepEqual(roundTrip({ timestamp: '2016-12-31T23:59:60Z' }), {
-  timestamp: '2016-12-31T23:59:60.000000000Z',
-});
+// A leap second has no count since the epoch, so it is refused rather than
+// shown as a Date (ADR 0001 section 3).
+assert.throws(() => addon.encode(new addon.VcTimestamp('2016-12-31T23:59:60Z')), { code: 'ERR_INVALID_TIMESTAMP' });
 
 // A passthrough value decodes to its plain JS value, at the root and nested.
 assert.equal(addon.decode(Buffer.from('f203', 'hex')), true);
 assert.deepEqual(addon.decode(Buffer.from('f0010000' + '00f20a0100000061', 'hex')), ['a']);
 
-// Building JS from Rust is limited to the same depth, so a tree built in Rust
-// fails cleanly instead of overflowing the stack.
+// Building JS from Rust is limited to the same depth. A frame cannot nest
+// past it, so a tree that deep fails when it is framed, before any JS is built.
 for (const wrap of ['array', 'object', 'passthrough']) {
   addon.nestedValue(MAX_DEPTH, wrap);
-  assert.throws(() => addon.nestedValue(MAX_DEPTH + 1, wrap), /nested too deeply/, wrap);
+  assert.throws(() => addon.nestedValue(MAX_DEPTH + 1, wrap), /nests deeper than 128 levels/, wrap);
 }
 assert.equal(nest(MAX_DEPTH, (v) => v[0], addon.nestedValue(MAX_DEPTH, 'array')), true);
 for (const wrap of ['seq', 'map']) {
@@ -291,7 +292,7 @@ assert.throws(
 // step can overflow the stack and abort Node.
 const HUGE = 1_000_000;
 for (const wrap of ['array', 'object', 'passthrough']) {
-  assert.throws(() => addon.nestedValue(HUGE, wrap), /nested too deeply/, wrap);
+  assert.throws(() => addon.nestedValue(HUGE, wrap), /nests deeper than 128 levels/, wrap);
 }
 for (const wrap of ['seq', 'map']) {
   assert.throws(() => addon.nestedCiphertext(HUGE, wrap), /nested too deeply/, wrap);

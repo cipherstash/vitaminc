@@ -29,7 +29,12 @@ fn node_value_conformance() {
     ));
     let module = target.join("addon.node");
     std::fs::copy(library, &module).expect("copy Node module");
-    for suite in ["tests/value-conformance.cjs", "tests/object-safety.cjs"] {
+    for suite in [
+        "tests/value-conformance.cjs",
+        "tests/object-safety.cjs",
+        "tests/kind_inventory.cjs",
+        "tests/encrypt.cjs",
+    ] {
         let result = Command::new("node")
             .arg(package.join(suite))
             .arg(&module)

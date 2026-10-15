@@ -169,9 +169,13 @@ jobs:
         run: cargo test -p vitaminc-encrypt --features _test-rust-crypto-backend
 
       - name: test (Node conversion kind inventory)
+        # `cargo test -p vitaminc-aead-napi` above runs this suite too, with
+        # the others, against the test addon it builds; this step runs it on
+        # its own so a missing kind fails with the inventory's own message.
         run: |
-          cargo build --locked -p vitaminc-aead-napi --example kind_inventory
-          node packages/aead-napi/tests/kind_inventory.cjs target/debug/examples/libkind_inventory.so
+          cargo build --locked --manifest-path packages/aead-napi/tests/addon/Cargo.toml &&
+          cp packages/aead-napi/tests/addon/target/debug/libvitaminc_napi_test_addon.so packages/aead-napi/tests/addon/addon.node &&
+          node packages/aead-napi/tests/kind_inventory.cjs packages/aead-napi/tests/addon/addon.node
 
       - name: test (hlist static-ciphertext feature)
         # The `hlist` feature gates the static-ciphertext API and is NOT in the

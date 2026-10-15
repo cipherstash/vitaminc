@@ -1,40 +1,41 @@
+// Every scalar kind the build can produce, from one Sink::scalar call each,
+// converts to its expected JavaScript value, and containers and passthrough
+// build through the whole walk. Run by tests/node.rs with the test addon's
+// path.
 const assert = require('node:assert/strict');
-const { copyFileSync, mkdtempSync, rmSync } = require('node:fs');
-const { tmpdir } = require('node:os');
-const { join, resolve } = require('node:path');
-
-// Cargo names the cdylib for the platform; Node requires a .node extension.
-const directory = mkdtempSync(join(tmpdir(), 'vitaminc-kind-inventory-'));
-try {
-  const addon = join(directory, 'kind_inventory.node');
-  copyFileSync(resolve(process.argv[2]), addon);
-  const samples = require(addon);
-  assert.deepStrictEqual(samples, {
-    bool: true,
-    int32: -32n,
-    int64: -(1n << 63n),
-    uint32: 0xffffffffn,
-    uint64: (1n << 64n) - 1n,
-    float32: 1.5,
-    float64: 2.5,
-    string: 'hello',
-    bytes: Buffer.from([0, 255]),
-    int8: -128n,
-    uint8: 255n,
-    int16: -32768n,
-    uint16: 65535n,
-    int128: -(1n << 127n),
-    uint128: (1n << 128n) - 1n,
-    date: { date: '2024-02-29' },
-    timestamp: new Date(0),
-    decimal: { decimal: '1.50' },
-    array: [true],
-    object: { answer: 42n },
-    null: null,
-    undefined: undefined,
-    passthrough: true,
-  });
-  console.log('Every ValueKind converts to its expected JavaScript value');
-} finally {
-  rmSync(directory, { recursive: true, force: true });
-}
+const path = require('node:path');
+const addon = require(path.resolve(process.argv[2]));
+const { VcDate, VcTimestamp, VcDecimal, VcUuid } = addon;
+assert.deepStrictEqual(addon.kindInventory(), {
+  null: null,
+  undefined: undefined,
+  bool: true,
+  int8: -128n,
+  uint8: 255n,
+  int16: -32768n,
+  uint16: 65535n,
+  int32: -32n,
+  uint32: 0xffffffffn,
+  int64: -(1n << 63n),
+  uint64: (1n << 64n) - 1n,
+  int128: -(1n << 127n),
+  uint128: (1n << 128n) - 1n,
+  float32: 1.5,
+  float64: 2.5,
+  string: 'hello',
+  bytes: Buffer.from([0, 255]),
+  date: new VcDate('2024-02-29'),
+  timestamp: new Date(0),
+  timestampMillis: new Date(-1),
+  timestampMicros: new VcTimestamp('1970-01-01T00:00:00.000001000Z'),
+  timestampNanos: new VcTimestamp('1969-12-31T23:59:59.999999999Z'),
+  decimal: new VcDecimal('1.50'),
+  uuid: new VcUuid('123e4567-e89b-12d3-a456-426614174000'),
+  array: [true],
+  object: { k: true },
+  passthrough: true,
+});
+// A logical type this binding does not know has no JavaScript value and is
+// refused, rather than shown as its physical value with the type dropped.
+assert.throws(() => addon.decode(addon.unknownLogicalFrame()), /not known to this binding/);
+console.log('Every scalar kind converts to its expected JavaScript value');
