@@ -115,6 +115,34 @@ where
         .read()
 }
 
+/// The sink-based cipher of ADR 0001: one tagged leaf in, one sealed leaf
+/// out, under the AAD the walk derived for the leaf's place in the tree.
+/// [`vitaminc_aead::encrypt`] and [`vitaminc_aead::decrypt`] drive this
+/// impl; the container logic (element and entry AAD, empty markers, the
+/// nothing-sealed refusal) lives once in `EncryptSink` and the opening
+/// walk, not here. Same leaf bytes as [`seal_leaf`], so a leaf sealed
+/// through either path opens through the other.
+impl vitaminc_aead::seal::Cipher for Aes256Cipher {
+    type Leaf = LocalCipherText;
+    type Error = Unspecified;
+
+    fn seal(
+        &self,
+        plaintext: Protected<Vec<u8>>,
+        aad: &Context<'_>,
+    ) -> Result<LocalCipherText, Unspecified> {
+        seal_leaf(self, plaintext, aad.clone())
+    }
+
+    fn open(
+        &self,
+        leaf: LocalCipherText,
+        aad: &Context<'_>,
+    ) -> Result<Protected<Vec<u8>>, Unspecified> {
+        open_leaf(self, leaf, aad.clone())
+    }
+}
+
 impl<'c> Cipher for &'c Aes256Cipher {
     type Ok = AesCipherText;
     type Error = Unspecified;
@@ -811,6 +839,46 @@ mod test {
     use quickcheck_macros::quickcheck;
     use std::collections::HashMap;
     use vitaminc_aead::{Element, Encrypt};
+
+    mod sink_cipher {
+        //! The sink-based `Cipher` seals the same leaf bytes as `seal_leaf`,
+        //! so a leaf from either path opens through the other.
+        use super::*;
+        use vitaminc_aead::seal::Cipher as SinkCipher;
+
+        #[test]
+        fn a_leaf_sealed_by_the_sink_cipher_opens_through_open_leaf() {
+            let cipher = Aes256Cipher::new(&Key::from([3u8; 32])).unwrap();
+            let aad = Context::from_encoded(b"ctx".as_slice());
+            let leaf = SinkCipher::seal(&cipher, Protected::new(b"\x04hi".to_vec()), &aad).unwrap();
+            let opened = open_leaf(&cipher, leaf, aad).unwrap();
+            assert_eq!(opened.risky_unwrap(), b"\x04hi");
+        }
+
+        #[test]
+        fn a_leaf_sealed_by_seal_leaf_opens_through_the_sink_cipher() {
+            let cipher = Aes256Cipher::new(&Key::from([3u8; 32])).unwrap();
+            let aad = Context::from_encoded(b"ctx".as_slice());
+            let leaf = seal_leaf(&cipher, Protected::new(b"\x04hi".to_vec()), aad.clone()).unwrap();
+            let opened = SinkCipher::open(&cipher, leaf, &aad).unwrap();
+            assert_eq!(opened.risky_unwrap(), b"\x04hi");
+        }
+
+        #[test]
+        fn the_sink_cipher_refuses_a_leaf_under_another_aad() {
+            let cipher = Aes256Cipher::new(&Key::from([3u8; 32])).unwrap();
+            let leaf = SinkCipher::seal(
+                &cipher,
+                Protected::new(b"\x04hi".to_vec()),
+                &Context::from_encoded(b"right".as_slice()),
+            )
+            .unwrap();
+            assert!(
+                SinkCipher::open(&cipher, leaf, &Context::from_encoded(b"wrong".as_slice()))
+                    .is_err()
+            );
+        }
+    }
 
     #[quickcheck]
     fn roundtrip_byte_array(key: Key, plaintext: [u8; 16]) -> bool {
