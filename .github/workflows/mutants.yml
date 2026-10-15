@@ -88,7 +88,7 @@ jobs:
     # Fails closed: skip only when the `changes` job succeeded and found no
     # Rust changes. A failed `changes` job, or one skipped on a manual
     # dispatch, runs the gate.
-    if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.has_no_rust_changes == 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.has_no_rust_changes != 'true') }}
     runs-on: ubuntu-latest
     name: "🧬 Mutants gate"
 
