@@ -502,3 +502,77 @@ fn encrypt_with_terms_async_has_every_term_before_its_first_await() {
         block_on(vitaminc_aead::decrypt_async(&remote, sealed, "ctx")).expect("decrypts");
     assert_eq!(back, [1, 2]);
 }
+
+/// A cipher that must never be reached.
+struct Never;
+
+impl AsyncCipher for Never {
+    type Leaf = Leaf;
+    type Error = Refused;
+
+    async fn seal(&self, _: Protected<Vec<u8>>, _: Context<'static>) -> Result<Leaf, Refused> {
+        panic!("sealed after the walk was refused")
+    }
+
+    async fn open(&self, _: Leaf, _: Context<'static>) -> Result<Protected<Vec<u8>>, Refused> {
+        Err(Refused)
+    }
+}
+
+fn is_unassigned(err: &EncryptError<Refused>) -> bool {
+    matches!(err, EncryptError::Source(s)
+        if s.inner().downcast_ref::<NormalizeError>() == Some(&NormalizeError::UnassignedCodePoint))
+}
+
+/// The walk ends before any leaf is sealed, so a value `Terms` refuses
+/// reaches no cipher, even when its first element was fine; the async
+/// future holds the refusal and returns it on its first poll.
+#[test]
+fn a_refused_walk_never_reaches_the_cipher() {
+    let doc = || vec!["ok", "\u{378}"];
+    let cipher = Counting::default();
+    let err = encrypt_with_terms(doc(), &cipher, "ctx").expect_err("refused");
+    assert!(is_unassigned(&err), "{err:?}");
+    assert_eq!(cipher.calls.load(Ordering::SeqCst), 0);
+    let err = block_on(encrypt_with_terms_async(doc(), &Never, "ctx")).expect_err("refused");
+    assert!(is_unassigned(&err), "{err:?}");
+}
+
+/// `Terms` is public and works without `EncryptSink` in front of it, and is
+/// then the sink that refuses a value invalid for its logical type.
+#[test]
+fn terms_alone_refuses_a_value_invalid_for_its_logical_type() {
+    use vitaminc_aead::Raw;
+    use vitaminc_normalize::Terms;
+
+    // A scalar at the root has an empty path.
+    let mut out = Vec::new();
+    let sink: Terms<'_, EncryptError<Refused>> = Terms::new(&mut out);
+    "Ada".visit(sink).expect("walks");
+    assert_eq!(paths(&out), [Vec::<Step>::new()]);
+
+    let mut out = Vec::new();
+    let sink: Terms<'_, EncryptError<Refused>> = Terms::new(&mut out);
+    let err = Raw(Some(Logical::Undefined), Physical::Int(Int::I32(1)))
+        .visit(sink)
+        .expect_err("refused");
+    match err {
+        EncryptError::Source(source) => assert_eq!(
+            source.inner().downcast_ref::<NormalizeError>().copied(),
+            Some(NormalizeError::Invalid)
+        ),
+        other => panic!("{other:?}"),
+    }
+    assert!(out.is_empty());
+}
+
+/// `EncryptSink` runs first in the `Tee`, so a value invalid for its
+/// logical type is a shape error from encryption, not a normalize error.
+#[test]
+fn an_invalid_logical_value_is_refused_by_the_encrypt_sink_first() {
+    let invalid = vitaminc_aead::Raw(Some(Logical::Date), Physical::Text("2024-01-01"));
+    let err = plan_with_terms::<_, Refused, _>(invalid, "ctx")
+        .err()
+        .expect("refused");
+    assert!(matches!(err, EncryptError::Shape(_)), "{err:?}");
+}

@@ -433,6 +433,37 @@ fn orderable_f64_agrees_with_orderable_bytes(bits: u64) -> bool {
 }
 
 #[test]
+fn timestamps_one_past_chronos_range_are_invalid() {
+    use vitaminc_aead::plaintext::kinds::{MAX_TIMESTAMP_NANOS, MIN_TIMESTAMP_NANOS};
+    let ns = Logical::Timestamp(TimeUnit::Nanos);
+    assert!(timestamp(TimeUnit::Nanos, Int::I128(MAX_TIMESTAMP_NANOS)).is_some());
+    assert!(timestamp(TimeUnit::Nanos, Int::I128(MIN_TIMESTAMP_NANOS)).is_some());
+    for nanos in [MAX_TIMESTAMP_NANOS + 1, MIN_TIMESTAMP_NANOS - 1] {
+        assert!(timestamp(TimeUnit::Nanos, Int::I128(nanos)).is_none());
+        assert_eq!(
+            normalize(Some(ns), Physical::Int(Int::I128(nanos))).expect_err("invalid"),
+            NormalizeError::Invalid
+        );
+    }
+}
+
+/// A `Vec` that grows frees its old buffer without wiping it, so the
+/// encoders that append in steps must start at their final size.
+#[test]
+fn incremental_encoders_never_outgrow_their_buffer() {
+    for value in [Int::I8(-1), Int::U128(u128::MAX), Int::I128(i128::MIN)] {
+        let bytes = integer(value);
+        assert_eq!(bytes.risky_ref().len(), 17);
+        assert_eq!(bytes.risky_ref().capacity(), 17);
+    }
+    for count in [Int::I64(-1), Int::I64(1_700_000_000_123)] {
+        let bytes = timestamp(TimeUnit::Millis, count).expect("in range");
+        assert_eq!(bytes.risky_ref().len(), 12);
+        assert_eq!(bytes.risky_ref().capacity(), 12);
+    }
+}
+
+#[test]
 fn debug_output_does_not_show_the_normalized_bytes() {
     let n = normalize(None, Physical::Text("secret")).expect("text");
     let v = format!("{n:?}");
@@ -440,4 +471,46 @@ fn debug_output_does_not_show_the_normalized_bytes() {
     assert!(v.contains("***"), "{v}");
     // "secret" as a `Vec<u8>` would print as [115, 101, 99, ...].
     assert!(!v.contains("secret") && !v.contains("115, 101, 99"), "{v}");
+}
+
+/// The widths an `i16` fits, each holding `n`.
+fn every_width(n: i16) -> Vec<Int> {
+    let mut widths = vec![
+        Int::I16(n),
+        Int::I32(n.into()),
+        Int::I64(n.into()),
+        Int::I128(n.into()),
+    ];
+    if let Ok(v) = i8::try_from(n) {
+        widths.push(Int::I8(v));
+    }
+    if let Ok(v) = u16::try_from(n) {
+        widths.extend([
+            Int::U16(v),
+            Int::U32(v.into()),
+            Int::U64(v.into()),
+            Int::U128(v.into()),
+        ]);
+    }
+    if let Ok(v) = u8::try_from(n) {
+        widths.push(Int::U8(v));
+    }
+    widths
+}
+
+/// A logical term is over the number, not the width that carried it, as
+/// the plain integer term is.
+#[quickcheck]
+fn a_logical_term_is_the_same_at_every_integer_width(n: i16) -> bool {
+    [
+        Logical::Date,
+        Logical::Timestamp(TimeUnit::Seconds),
+        Logical::Decimal { scale: 2 },
+    ]
+    .into_iter()
+    .all(|ty| {
+        let widths = every_width(n);
+        let first = int(Some(ty), widths[0]);
+        widths.iter().all(|&w| int(Some(ty), w) == first)
+    })
 }
