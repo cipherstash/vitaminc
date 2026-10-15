@@ -265,7 +265,7 @@ impl<E: Error> MapSink for TermsMap<'_, E> {
 /// let mut user = BTreeMap::new();
 /// user.insert("name", "Ada");
 /// let found = terms(&user)?;
-/// assert!(matches!(found[0].path.steps(), [Step::Key(k)] if k == "name"));
+/// assert_eq!(found[0].path.steps(), [Step::Key("name".into())]);
 /// assert_eq!(found[0].normalized.domain, domain::TEXT);
 ///
 /// // U+0378 is unassigned in Unicode 16, so the name has no term.
@@ -273,7 +273,7 @@ impl<E: Error> MapSink for TermsMap<'_, E> {
 /// let refused = terms(&user).unwrap_err();
 /// let term = refused.term().expect("refused by Terms");
 /// assert_eq!(term.error(), NormalizeError::UnassignedCodePoint);
-/// assert!(matches!(term.path().steps(), [Step::Key(k)] if k == "name"));
+/// assert_eq!(term.path().steps(), [Step::Key("name".into())]);
 /// // The message names neither the field nor its value.
 /// assert_eq!(
 ///     refused.to_string(),

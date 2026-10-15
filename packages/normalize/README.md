@@ -77,7 +77,7 @@ user.insert("name", "Ada");
 
 let (ciphertext, terms) = encrypt_with_terms(user, &cipher, "users/v1")?;
 assert_eq!(terms.len(), 2);
-assert!(matches!(terms[0].path.steps(), [Step::Key(k)] if k == "email"));
+assert_eq!(terms[0].path.steps(), [Step::Key("email".into())]);
 assert_eq!(terms[0].normalized.domain, domain::TEXT);
 # Ok::<(), vitaminc_aead::EncryptError<core::convert::Infallible>>(())
 ```
