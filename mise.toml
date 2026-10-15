@@ -38,14 +38,14 @@ run = [
   "cargo mutants",
 ]
 
-[tasks.gate-scope]
-description = "Decide whether this branch's changes need a path-scoped gate (crap, mutants) to run — CI uses it to skip them on docs-only PRs"
-# Usage: mise run gate-scope -- <crap|mutants> [--base origin/main]
+[tasks."pr:gate:has_no_rust_changes"]
+description = "Report whether this branch has no Rust changes for a gate (crap, mutants) — CI skips the gate when it has none"
+# Usage: mise run pr:gate:has_no_rust_changes -- <crap|mutants> [--base origin/main]
 # Needs only python3, so CI runs it with tool auto-install off.
-run = "python3 {{ config_root }}/.github/scripts/gate_scope.py"
+run = "python3 {{ config_root }}/.github/scripts/has_no_rust_changes.py"
 
-[tasks."gate-scope:test"]
-description = "Test the gate-scope decision"
+[tasks."pr:gate:has_no_rust_changes:test"]
+description = "Test the has-no-Rust-changes check"
 run = "python3 -m unittest discover -s {{ config_root }}/.github/scripts -p 'test_*.py'"
 
 [tasks.docs]

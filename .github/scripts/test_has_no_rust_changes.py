@@ -1,4 +1,4 @@
-"""Tests for gate_scope.py. Run with `mise run gate-scope:test`."""
+"""Tests for has_no_rust_changes.py. Run with `mise run pr:gate:has_no_rust_changes:test`."""
 
 from __future__ import annotations
 
@@ -11,71 +11,71 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-import gate_scope
-from gate_scope import REPO_ROOT, SCOPES, changed_paths, gate_needed
+import has_no_rust_changes as script
+from has_no_rust_changes import REPO_ROOT, RUST_PATHS, changed_paths, has_no_rust_changes
 
-CRAP = SCOPES["crap"]
-MUTANTS = SCOPES["mutants"]
+CRAP = RUST_PATHS["crap"]
+MUTANTS = RUST_PATHS["mutants"]
 
 
-class GateNeededTest(unittest.TestCase):
-    def test_rust_source_needs_both_gates(self):
-        for scope in (CRAP, MUTANTS):
-            self.assertTrue(gate_needed(scope, ["packages/aead/src/lib.rs"]))
+class HasNoRustChangesTest(unittest.TestCase):
+    def test_rust_source_is_a_rust_change_for_both_gates(self):
+        for rust_paths in (CRAP, MUTANTS):
+            self.assertFalse(has_no_rust_changes(rust_paths, ["packages/aead/src/lib.rs"]))
 
-    def test_workspace_manifests_need_both_gates(self):
-        for scope in (CRAP, MUTANTS):
-            self.assertTrue(gate_needed(scope, ["Cargo.toml"]))
-            self.assertTrue(gate_needed(scope, ["Cargo.lock"]))
+    def test_workspace_manifests_are_rust_changes_for_both_gates(self):
+        for rust_paths in (CRAP, MUTANTS):
+            self.assertFalse(has_no_rust_changes(rust_paths, ["Cargo.toml"]))
+            self.assertFalse(has_no_rust_changes(rust_paths, ["Cargo.lock"]))
 
-    def test_this_script_needs_both_gates(self):
-        for scope in (CRAP, MUTANTS):
-            self.assertTrue(gate_needed(scope, [gate_scope.SELF]))
+    def test_this_script_is_a_rust_change_for_both_gates(self):
+        for rust_paths in (CRAP, MUTANTS):
+            self.assertFalse(has_no_rust_changes(rust_paths, [script.SELF]))
 
-    def test_docs_only_needs_neither_gate(self):
+    def test_docs_only_has_no_rust_changes(self):
         paths = ["README.md", "docs/design.md", "packages/aead/README.md"]
-        for scope in (CRAP, MUTANTS):
-            self.assertFalse(gate_needed(scope, paths))
+        for rust_paths in (CRAP, MUTANTS):
+            self.assertTrue(has_no_rust_changes(rust_paths, paths))
 
-    def test_unrelated_files_need_neither_gate(self):
+    def test_unrelated_files_have_no_rust_changes(self):
         paths = [".github/workflows/go.yml", "bindings/go/vcencrypt/go.mod", "LICENSE"]
-        for scope in (CRAP, MUTANTS):
-            self.assertFalse(gate_needed(scope, paths))
+        for rust_paths in (CRAP, MUTANTS):
+            self.assertTrue(has_no_rust_changes(rust_paths, paths))
 
-    def test_one_rust_file_among_docs_needs_the_gate(self):
-        self.assertTrue(gate_needed(CRAP, ["README.md", "packages/hmac/src/lib.rs"]))
+    def test_one_rust_file_among_docs_is_a_rust_change(self):
+        self.assertFalse(has_no_rust_changes(CRAP, ["README.md", "packages/hmac/src/lib.rs"]))
 
     def test_each_gate_owns_its_config_and_workflow(self):
         crap_only = [".cargo-crap.toml", ".github/workflows/crap.yml"]
         mutants_only = [".cargo/mutants.toml", ".github/workflows/mutants.yml"]
         for path in crap_only:
-            self.assertTrue(gate_needed(CRAP, [path]), path)
-            self.assertFalse(gate_needed(MUTANTS, [path]), path)
+            self.assertFalse(has_no_rust_changes(CRAP, [path]), path)
+            self.assertTrue(has_no_rust_changes(MUTANTS, [path]), path)
         for path in mutants_only:
-            self.assertTrue(gate_needed(MUTANTS, [path]), path)
-            self.assertFalse(gate_needed(CRAP, [path]), path)
+            self.assertFalse(has_no_rust_changes(MUTANTS, [path]), path)
+            self.assertTrue(has_no_rust_changes(CRAP, [path]), path)
 
     def test_directory_match_needs_a_path_separator(self):
-        self.assertFalse(gate_needed(CRAP, ["packagesextra/lib.rs"]))
+        self.assertTrue(has_no_rust_changes(CRAP, ["packagesextra/lib.rs"]))
 
     def test_manifests_match_only_at_the_root(self):
-        self.assertFalse(gate_needed(CRAP, ["bindings/go/Cargo.toml"]))
-        self.assertTrue(gate_needed(CRAP, ["packages/aead/Cargo.toml"]))
+        self.assertTrue(has_no_rust_changes(CRAP, ["bindings/go/Cargo.toml"]))
+        self.assertFalse(has_no_rust_changes(CRAP, ["packages/aead/Cargo.toml"]))
 
-    def test_empty_diff_runs_the_gate(self):
-        for scope in (CRAP, MUTANTS):
-            self.assertTrue(gate_needed(scope, []))
+    def test_empty_diff_does_not_count_as_no_rust_changes(self):
+        for rust_paths in (CRAP, MUTANTS):
+            self.assertFalse(has_no_rust_changes(rust_paths, []))
 
 
-class ScopesMatchTheRepoTest(unittest.TestCase):
-    """A renamed config file would otherwise drop out of scope silently."""
+class RustPathsMatchTheRepoTest(unittest.TestCase):
+    """A renamed config file would otherwise drop out of the list silently."""
 
-    def test_every_scoped_path_exists(self):
-        for gate, scope in SCOPES.items():
-            for d in scope.dirs:
+    def test_every_listed_path_exists(self):
+        for gate, rust_paths in RUST_PATHS.items():
+            for d in rust_paths.dirs:
                 self.assertTrue(d.endswith("/"), f"{gate}: {d!r} needs a trailing /")
                 self.assertTrue((REPO_ROOT / d).is_dir(), f"{gate}: {d} is missing")
-            for f in scope.files:
+            for f in rust_paths.files:
                 self.assertTrue((REPO_ROOT / f).is_file(), f"{gate}: {f} is missing")
 
 
@@ -123,7 +123,7 @@ class ChangedPathsTest(unittest.TestCase):
         self.git("mv", "packages/aead/src/lib.rs", "docs/lib.rs")
         self.commit("move")
         self.assertEqual(self.changed(), ["docs/lib.rs", "packages/aead/src/lib.rs"])
-        self.assertTrue(gate_needed(CRAP, self.changed()))
+        self.assertFalse(has_no_rust_changes(CRAP, self.changed()))
 
     def test_ignores_changes_made_on_the_base_after_the_fork(self):
         self.write("README.md", "# changed\n")
@@ -150,22 +150,24 @@ class MainTest(unittest.TestCase):
             output = Path(tmp) / "github_output"
             with (
                 mock.patch.dict(os.environ, {"GITHUB_OUTPUT": str(output)}),
-                mock.patch.object(gate_scope, "changed_paths", return_value=paths),
+                mock.patch.object(script, "changed_paths", return_value=paths),
                 redirect_stdout(io.StringIO()),
             ):
-                self.assertEqual(gate_scope.main([gate]), 0)
+                self.assertEqual(script.main([gate]), 0)
             return output.read_text()
 
-    def test_writes_needed_true_for_rust_changes(self):
-        self.assertEqual(self.run_main(["packages/aead/src/lib.rs"]), "needed=true\n")
+    def test_writes_false_for_rust_changes(self):
+        self.assertEqual(
+            self.run_main(["packages/aead/src/lib.rs"]), "has_no_rust_changes=false\n"
+        )
 
-    def test_writes_needed_false_for_docs_only(self):
-        self.assertEqual(self.run_main(["README.md"]), "needed=false\n")
+    def test_writes_true_for_docs_only(self):
+        self.assertEqual(self.run_main(["README.md"]), "has_no_rust_changes=true\n")
 
     def test_rejects_an_unknown_gate(self):
         with self.assertRaises(SystemExit), redirect_stdout(io.StringIO()):
             with mock.patch("sys.stderr", io.StringIO()):
-                gate_scope.main(["clippy"])
+                script.main(["clippy"])
 
 
 if __name__ == "__main__":

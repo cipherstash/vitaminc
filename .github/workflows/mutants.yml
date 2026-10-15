@@ -23,8 +23,8 @@ on:
   #
   # No path filter either: this check is required by the `main` ruleset, and
   # a required check that never reports leaves the PR at "Expected" forever.
-  # The `scope` job below decides instead, and skips the gate when no path
-  # it checks changed; GitHub reports a skipped job as passed.
+  # The `changes` job below decides instead, and skips the gate when the PR
+  # has no Rust changes; GitHub reports a skipped job as passed.
   pull_request:
 
   workflow_dispatch:
@@ -44,16 +44,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  scope:
-    # The paths this gate checks live in .github/scripts/gate_scope.py.
+  changes:
+    # What counts as a Rust change for this gate lives in
+    # .github/scripts/has_no_rust_changes.py.
     # Skipped on a manual dispatch, which runs the gate below.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    name: "🔎 Mutants gate scope"
+    name: "🔎 Mutants gate: Rust changes"
     permissions:
       contents: read
     outputs:
-      needed: ${{ steps.decide.outputs.needed }}
+      has_no_rust_changes: ${{ steps.check.outputs.has_no_rust_changes }}
     env:
       # The task needs only the runner's python3. Auto-install would build
       # every cargo tool in mise.toml, costing more than the gate it skips.
@@ -73,21 +74,21 @@ jobs:
           install: false
           cache: false
 
-      - name: test the scope check
-        run: mise run gate-scope:test
+      - name: test the Rust changes check
+        run: mise run pr:gate:has_no_rust_changes:test
 
-      - name: decide whether the gate runs
-        id: decide
+      - name: check for Rust changes
+        id: check
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: mise run gate-scope -- mutants --base "origin/$BASE_REF"
+        run: mise run pr:gate:has_no_rust_changes -- mutants --base "origin/$BASE_REF"
 
   mutants:
-    needs: scope
-    # Fails closed: skip only when the scope job succeeded and said "not
-    # needed". A failed scope job, or one skipped on a manual dispatch, runs
-    # the gate.
-    if: ${{ !cancelled() && !(needs.scope.result == 'success' && needs.scope.outputs.needed == 'false') }}
+    needs: changes
+    # Fails closed: skip only when the `changes` job succeeded and found no
+    # Rust changes. A failed `changes` job, or one skipped on a manual
+    # dispatch, runs the gate.
+    if: ${{ !cancelled() && !(needs.changes.result == 'success' && needs.changes.outputs.has_no_rust_changes == 'true') }}
     runs-on: ubuntu-latest
     name: "🧬 Mutants gate"
 
