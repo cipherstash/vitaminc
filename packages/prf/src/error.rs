@@ -34,10 +34,11 @@ pub enum PrfVisitorError {
 #[derive(Debug, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum PrfError<E> {
-    /// A `Value` with no equality term (requires the `value` feature).
-    #[cfg(feature = "value")]
+    /// A scalar with no equality term, or one that could not be normalized
+    /// (requires the `normalize` feature).
+    #[cfg(feature = "normalize")]
     #[error("cannot derive an equality term: {0}")]
-    Canonical(#[from] crate::CanonicalError),
+    Normalize(#[from] vitaminc_normalize::NormalizeError),
     #[error("failed to build PRF operation: {0}")]
     Build(#[from] PrfBuildError),
     #[error("failed to interpret PRF result: {0}")]

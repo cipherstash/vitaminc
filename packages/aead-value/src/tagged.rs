@@ -43,11 +43,13 @@
 //!
 //! Each alias exposes its tag as the associated const
 //! [`TaggedFixed::TAG`] / [`TaggedVariable::TAG`]. A schema-aware caller (one
-//! that knows the expected type up front) can mix that tag into AAD via
-//! [`LeafTypeAad`](crate::LeafTypeAad) at both encrypt and decrypt so a wrong
-//! type hypothesis fails authentication. The self-describing
-//! [`Value`](crate::Value) path does **not** use that — it relies on the
-//! inner authenticated tag, which is known only *after* decryption.
+//! that knows the expected type up front) can bind the type into the AAD via
+//! [`LeafTypeAad`](vitaminc_aead::LeafTypeAad) at both encrypt and decrypt so
+//! a wrong type hypothesis fails authentication. That binding takes the
+//! physical kind and the logical type, not the tag: `TaggedDate` binds as
+//! `(Kind::Int, Some(Logical::Date))`. The self-describing
+//! [`Value`](crate::Value) path does **not** use it — it relies on the inner
+//! authenticated tag, which is known only *after* decryption.
 
 use crate::tags;
 use vitaminc_aead::Encrypt;
@@ -69,8 +71,7 @@ use vitaminc_protected::{Controlled, Protected};
 pub struct TaggedFixed<const HDR: u8, const N: usize>(Protected<[u8; N]>);
 
 impl<const HDR: u8, const N: usize> TaggedFixed<HDR, N> {
-    /// The leaf type tag this plaintext carries — used by schema-aware callers
-    /// for [`LeafTypeAad`](crate::LeafTypeAad) binding.
+    /// The leaf type tag this plaintext carries.
     pub const TAG: u8 = HDR;
 
     /// Assemble from the raw little-endian payload bytes, writing the header
@@ -259,8 +260,7 @@ pub type TaggedBytes = TaggedVariable<{ tags::BYTES }>;
 mod tests {
     use super::*;
 
-    // The associated `TAG` const must equal the underlying tag byte — this is
-    // what a schema-aware caller reads for `LeafTypeAad` binding.
+    // The associated `TAG` const must equal the underlying tag byte.
     #[test]
     fn tag_consts_match_the_table() {
         assert_eq!(TaggedNull::TAG, tags::NULL);

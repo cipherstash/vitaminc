@@ -143,24 +143,25 @@ jobs:
           cargo test -p vitaminc-aead-value --all-features
 
       - name: test (aead optional scalar features)
-        # No workspace member enables these on vitaminc-aead, so the default
-        # run skips the tests that pin the chrono, rust_decimal and uuid
-        # conversions and range constants. Run each alone and together.
+        # Only dev-dependencies enable these on vitaminc-aead, so a build
+        # of the crate alone skips the tests that pin the chrono,
+        # rust_decimal and uuid conversions and range constants. Run each
+        # alone and together.
         run: |
           cargo test -p vitaminc-aead --features chrono &&
           cargo test -p vitaminc-aead --features rust_decimal &&
           cargo test -p vitaminc-aead --features uuid &&
           cargo test -p vitaminc-aead --all-features
 
-      - name: test (canonical equality features)
+      - name: test (equality term feature)
         # The workspace run unifies hmac's dev-dependency features, so test
-        # prf alone without `value` as well as with each optional feature.
+        # prf alone without `normalize` as well as with it, and check that
+        # the facade's `normalize` feature forwards to prf on its own.
         run: |
           cargo test -p vitaminc-prf &&
-          cargo test -p vitaminc-prf --features chrono &&
-          cargo test -p vitaminc-prf --features rust_decimal &&
-          cargo test -p vitaminc-prf --all-features &&
-          cargo test -p vitaminc-hmac --test value_equality
+          cargo test -p vitaminc-prf --features normalize &&
+          cargo test -p vitaminc-hmac --test normalized_equality &&
+          cargo test -p vitaminc --features prf,normalize --test prf_normalize
 
       - name: test (vitaminc-encrypt, RustCrypto backend on native)
         # Forces the RustCrypto path that wasm32 uses, so the same property

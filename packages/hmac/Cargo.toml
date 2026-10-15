@@ -20,10 +20,12 @@ vitaminc-protected = { version = "0.5.1", path = "../protected" }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-vitaminc-prf = { path = "../prf", features = ["value", "chrono", "rust_decimal"] }
-vitaminc-aead-value = { path = "../aead-value", features = ["canonical", "chrono", "rust_decimal"] }
+vitaminc-prf = { path = "../prf", features = ["normalize"] }
+vitaminc-aead = { path = "../aead", features = ["chrono", "rust_decimal", "uuid"] }
+vitaminc-normalize = { path = "../normalize" }
 chrono = { version = "0.4.44", default-features = false, features = ["std"] }
 rust_decimal = { version = "1.41", default-features = false, features = ["std"] }
+uuid = { version = "1", default-features = false }
 futures = "0.3.31"
 quickcheck = "1.1.0"
 quickcheck_macros = "1.2.0"

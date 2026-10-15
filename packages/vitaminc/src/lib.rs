@@ -17,6 +17,10 @@ pub use vitaminc_context as context;
 #[cfg_attr(docsrs, doc(cfg(feature = "encrypt")))]
 pub use vitaminc_encrypt as encrypt;
 
+#[cfg(feature = "normalize")]
+#[cfg_attr(docsrs, doc(cfg(feature = "normalize")))]
+pub use vitaminc_normalize as normalize;
+
 #[cfg(feature = "aws-kms")]
 #[cfg_attr(docsrs, doc(cfg(feature = "aws-kms")))]
 pub use vitaminc_kms as aws_kms;
