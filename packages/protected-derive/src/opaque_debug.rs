@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::crate_path::{parse_crate_value, protected_crate_path};
 use proc_macro::TokenStream;
-use proc_macro2::TokenTree;
+use proc_macro2::{Span, TokenTree};
 use quote::{format_ident, quote, quote_spanned, ToTokens};
 use syn::{
     ext::IdentExt, spanned::Spanned, Attribute, Data, DataEnum, DataStruct, DeriveInput, Field,
@@ -16,6 +16,14 @@ use syn::{
 // - The formatter is `__opaque_debug_f`, and enum fields are bound as
 //   `__f_<name>` or `__fN`, so a field or a lowercase const parameter named
 //   `f` cannot collide with them.
+// - The input's generic parameters are in scope inside `fmt`, so a generated
+//   local that shares a name with one is renamed with a `_N` suffix (`Locals`).
+// - A unit struct, tuple struct or constant in the caller's module would turn
+//   a binding of the same name into a pattern against that item. A derive
+//   cannot see module items, so the impls sit in a `const _: () = { ... };`
+//   block that declares a dummy `fn` for every generated local. The dummies
+//   shadow such items in the value namespace, and a binding may shadow a
+//   `fn`. Type-namespace lookups such as the input's own ident are unaffected.
 // - Macros and `core` items are called by absolute path (`::core::write!`,
 //   `::core::fmt::Debug`), so a same-named macro at the call site does not
 //   take their place.
@@ -62,30 +70,105 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     }
     let (debug_impl_generics, _, debug_where_clause) = debug_generics.split_for_impl();
 
+    let mut locals = Locals::new(&input.generics);
+    let formatter = locals.pick("__opaque_debug_f", Span::call_site(), &BTreeSet::new());
+
     let body = match &input.data {
-        Data::Struct(ds) => debug_body_for_struct(ds, &mask),
-        Data::Enum(de) => debug_body_for_enum(de, &mask),
+        Data::Struct(ds) => debug_body_for_struct(ds, &mask, &formatter),
+        Data::Enum(de) => debug_body_for_enum(de, &mask, &formatter, &mut locals),
         // For unions: just print the type name
         Data::Union(_) => quote! {
-            __opaque_debug_f.write_str(::core::any::type_name::<Self>())
+            #formatter.write_str(::core::any::type_name::<Self>())
         },
     };
 
-    Ok(quote! {
-        #marker_impl
+    let shadows = locals.shadows();
 
-        #[automatically_derived]
-        impl #debug_impl_generics ::core::fmt::Debug
-            for #ident #ty_generics #debug_where_clause
-        {
-            fn fmt(
-                &self,
-                __opaque_debug_f: &mut ::core::fmt::Formatter<'_>,
-            ) -> ::core::fmt::Result {
-                #body
+    Ok(quote! {
+        const _: () = {
+            #shadows
+
+            #marker_impl
+
+            #[automatically_derived]
+            impl #debug_impl_generics ::core::fmt::Debug
+                for #ident #ty_generics #debug_where_clause
+            {
+                fn fmt(
+                    &self,
+                    #formatter: &mut ::core::fmt::Formatter<'_>,
+                ) -> ::core::fmt::Result {
+                    #body
+                }
             }
-        }
+        };
     })
+}
+
+/// Names for the generated locals. See the hygiene note above.
+struct Locals {
+    /// The input's generic parameter names, which no local may reuse.
+    reserved: BTreeSet<String>,
+    /// Every name handed out, each of which gets a shadowing dummy `fn`.
+    used: BTreeSet<String>,
+}
+
+impl Locals {
+    fn new(generics: &syn::Generics) -> Self {
+        let reserved = generics
+            .params
+            .iter()
+            .map(|param| match param {
+                syn::GenericParam::Type(p) => p.ident.unraw().to_string(),
+                syn::GenericParam::Const(p) => p.ident.unraw().to_string(),
+                syn::GenericParam::Lifetime(p) => p.lifetime.ident.unraw().to_string(),
+            })
+            .collect();
+        Self {
+            reserved,
+            used: BTreeSet::new(),
+        }
+    }
+
+    /// `preferred`, or `preferred_N` if that is a generic parameter or already
+    /// taken in the same scope.
+    fn pick(&mut self, preferred: &str, span: Span, taken: &BTreeSet<String>) -> syn::Ident {
+        let mut name = preferred.to_owned();
+        let mut suffix = 0;
+        while self.reserved.contains(&name) || taken.contains(&name) {
+            suffix += 1;
+            name = format!("{preferred}_{suffix}");
+        }
+        self.used.insert(name.clone());
+        format_ident!("{}", name, span = span)
+    }
+
+    /// A scope for one match arm's bindings. Arms cannot see each other's
+    /// bindings, so each starts with only the formatter taken.
+    fn arm(&mut self, formatter: &syn::Ident) -> ArmLocals<'_> {
+        ArmLocals {
+            locals: self,
+            taken: BTreeSet::from([formatter.to_string()]),
+        }
+    }
+
+    fn shadows(&self) -> proc_macro2::TokenStream {
+        let names = self.used.iter().map(|name| format_ident!("{}", name));
+        quote! { #( #[allow(dead_code, non_snake_case)] fn #names() {} )* }
+    }
+}
+
+struct ArmLocals<'a> {
+    locals: &'a mut Locals,
+    taken: BTreeSet<String>,
+}
+
+impl ArmLocals<'_> {
+    fn bind(&mut self, preferred: &str, span: Span) -> syn::Ident {
+        let ident = self.locals.pick(preferred, span, &self.taken);
+        self.taken.insert(ident.to_string());
+        ident
+    }
 }
 
 fn has_non_sensitive(attrs: &[Attribute]) -> bool {
@@ -182,7 +265,11 @@ fn parse_attrs(input: &DeriveInput) -> syn::Result<OpaqueDebugAttrs> {
     Ok(attrs)
 }
 
-fn debug_body_for_struct(ds: &DataStruct, mask: &str) -> proc_macro2::TokenStream {
+fn debug_body_for_struct(
+    ds: &DataStruct,
+    mask: &str,
+    formatter: &syn::Ident,
+) -> proc_macro2::TokenStream {
     match &ds.fields {
         Fields::Named(named) => {
             // Use DebugStruct and decide per-field based on #[non_sensitive]
@@ -199,7 +286,7 @@ fn debug_body_for_struct(ds: &DataStruct, mask: &str) -> proc_macro2::TokenStrea
             });
 
             quote! {
-                __opaque_debug_f
+                #formatter
                     .debug_struct(::core::any::type_name::<Self>())
                     #(#fields)*
                     .finish()
@@ -217,14 +304,14 @@ fn debug_body_for_struct(ds: &DataStruct, mask: &str) -> proc_macro2::TokenStrea
             });
 
             quote! {
-                __opaque_debug_f
+                #formatter
                     .debug_tuple(::core::any::type_name::<Self>())
                     #(#fields)*
                     .finish()
             }
         }
         Fields::Unit => quote! {
-            __opaque_debug_f.write_str(::core::any::type_name::<Self>())
+            #formatter.write_str(::core::any::type_name::<Self>())
         },
     }
 }
@@ -232,13 +319,18 @@ fn debug_body_for_struct(ds: &DataStruct, mask: &str) -> proc_macro2::TokenStrea
 /// Each arm prints `path::Enum::` and then formats the variant through
 /// `debug_struct`/`debug_tuple`, so enum output matches struct output
 /// (`path::E::V { a: "***" }`) and honours `{:#?}`.
-fn debug_body_for_enum(de: &DataEnum, mask: &str) -> proc_macro2::TokenStream {
+fn debug_body_for_enum(
+    de: &DataEnum,
+    mask: &str,
+    formatter: &syn::Ident,
+    locals: &mut Locals,
+) -> proc_macro2::TokenStream {
     let arms = de.variants.iter().map(|v| {
         let v_ident = &v.ident;
         let variant_ns = has_non_sensitive(&v.attrs);
         let prefix = quote! {
             ::core::write!(
-                __opaque_debug_f,
+                #formatter,
                 "{}::",
                 ::core::any::type_name::<Self>(),
             )?;
@@ -248,14 +340,15 @@ fn debug_body_for_enum(de: &DataEnum, mask: &str) -> proc_macro2::TokenStream {
             Fields::Unit => quote! {
                 Self::#v_ident => {
                     #prefix
-                    __opaque_debug_f.write_str(::core::stringify!(#v_ident))
+                    #formatter.write_str(::core::stringify!(#v_ident))
                 }
             },
 
             Fields::Unnamed(fields) => {
                 // bind each field by ref
+                let mut arm = locals.arm(formatter);
                 let bind_ids: Vec<syn::Ident> = (0..fields.unnamed.len())
-                    .map(|i| format_ident!("__f{}", i, span = v.span()))
+                    .map(|i| arm.bind(&format!("__f{i}"), v.span()))
                     .collect();
 
                 let writes = fields.unnamed.iter().zip(&bind_ids).map(|(f, local)| {
@@ -269,7 +362,7 @@ fn debug_body_for_enum(de: &DataEnum, mask: &str) -> proc_macro2::TokenStream {
                 quote! {
                     Self::#v_ident( #( ref #bind_ids ),* ) => {
                         #prefix
-                        __opaque_debug_f
+                        #formatter
                             .debug_tuple(::core::stringify!(#v_ident))
                             #(#writes)*
                             .finish()
@@ -281,12 +374,13 @@ fn debug_body_for_enum(de: &DataEnum, mask: &str) -> proc_macro2::TokenStream {
                 // Bind each field to a prefixed local rather than its own name,
                 // as the tuple arm does with `__f0`, `__f1`, ... so a field
                 // cannot shadow the generated locals.
+                let mut arm = locals.arm(formatter);
                 let bindings: Vec<(&syn::Ident, syn::Ident)> = fields
                     .named
                     .iter()
-                    .map(|f| {
-                        let id = f.ident.as_ref().unwrap();
-                        (id, format_ident!("__f_{}", id, span = id.span()))
+                    .map(|field| {
+                        let id = field.ident.as_ref().unwrap();
+                        (id, arm.bind(&format!("__f_{}", id.unraw()), id.span()))
                     })
                     .collect();
 
@@ -304,7 +398,7 @@ fn debug_body_for_enum(de: &DataEnum, mask: &str) -> proc_macro2::TokenStream {
                 quote! {
                     Self::#v_ident { #( #pat_bindings ),* } => {
                         #prefix
-                        __opaque_debug_f
+                        #formatter
                             .debug_struct(::core::stringify!(#v_ident))
                             #(#writes)*
                             .finish()
