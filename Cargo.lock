@@ -2665,6 +2665,7 @@ dependencies = [
  "quickcheck_macros",
  "rust_decimal",
  "serde",
+ "thiserror",
  "trybuild",
  "uuid",
  "vitaminc-aead-derive",
