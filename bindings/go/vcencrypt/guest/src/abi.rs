@@ -67,7 +67,7 @@ use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use vitaminc_aead::{decrypt_to_frame, Context, Frame, Node};
-use vitaminc_aead_value::transport as codec;
+use vitaminc_aead_frame::transport as codec;
 use vitaminc_encrypt::{Aes256Cipher, LocalCipherText};
 use vitaminc_protected::Controlled;
 use zeroize::Zeroize;

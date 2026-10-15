@@ -133,15 +133,6 @@ jobs:
           echo "RLIMIT_MEMLOCK soft: $(ulimit -l) KiB"
           cargo test
 
-      - name: test (aead-value optional scalar features)
-        # Exercise each feature separately as well as together: default tests
-        # reject these tags, while enabled tests pin exact date/time/decimal
-        # payloads and reject malformed encodings without normalization.
-        run: |
-          cargo test -p vitaminc-aead-value --features chrono &&
-          cargo test -p vitaminc-aead-value --features rust_decimal &&
-          cargo test -p vitaminc-aead-value --all-features
-
       - name: test (aead optional scalar features)
         # Only dev-dependencies enable these on vitaminc-aead, so a build
         # of the crate alone skips the tests that pin the chrono,

@@ -24,7 +24,7 @@
 use std::fs;
 
 use vitaminc_aead::{encrypt, to_frame, Context, MapSink, Plaintext, SeqSink, Sink};
-use vitaminc_aead_value::transport as codec;
+use vitaminc_aead_frame::transport as codec;
 use vitaminc_encrypt::{Aes256Cipher, Key};
 use vitaminc_protected::{Controlled, Protected};
 

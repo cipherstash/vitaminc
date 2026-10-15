@@ -7,7 +7,7 @@ use vitaminc_aead::{
     decrypt_to_frame, encrypt, to_frame, Context, DecryptError, Frame, MapSink, Node, Plaintext,
     SeqSink, Sink,
 };
-use vitaminc_aead_value::transport::{self as codec, Reader};
+use vitaminc_aead_frame::transport::{self as codec, Reader};
 use vitaminc_encrypt::{Aes256Cipher, Key, LocalCipherText};
 use vitaminc_protected::Controlled;
 

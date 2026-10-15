@@ -1,11 +1,15 @@
-//! Every term this crate produces, checked against today's `canonical`
-//! encoders in `vitaminc-aead-value` byte for byte, and the terms sink
-//! beside encryption.
+//! Known answers for every term: the bytes and the domain label each scalar
+//! normalizes to, pinned as literals. These are the terms the `canonical`
+//! encoders of `vitaminc-aead-value` produced before ADR 0001, captured
+//! from them when that crate held them, so an index written then still
+//! matches one written now. A change here is a change to a frozen domain.
+//!
+//! The second half is the terms sink beside encryption.
 
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::NaiveDate;
 use futures_executor::block_on;
 use vitaminc_aead::plaintext::kinds::chrono as conv;
 use vitaminc_aead::plaintext::render;
@@ -14,8 +18,6 @@ use vitaminc_aead::{
     Context, EncryptError, Float, Int, Logical, Physical, Plaintext, Refusal, SeqSink, Sink,
     SourceError, TimeUnit, Unencryptable,
 };
-use vitaminc_aead_value::canonical::equality_input;
-use vitaminc_aead_value::Value;
 use vitaminc_normalize::{
     domain, encrypt_with_terms, encrypt_with_terms_async, normalize, plan_with_terms, terms,
     NormalizeError, Path, Term, TermError,
@@ -26,137 +28,699 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// The new term for a scalar must be the old term for the equivalent
-/// `Value`, domain and bytes.
 #[track_caller]
-fn same(ty: Option<Logical>, v: Physical<'_>, value: Value) {
-    let new = normalize(ty, v).expect("normalizes");
-    let old = equality_input(&value).expect("has a term");
-    assert_eq!(new.domain, old.domain);
-    assert_eq!(
-        hex(new.bytes.risky_ref()),
-        hex(old.bytes.risky_ref()),
-        "{}",
-        old.domain
+fn pin(ty: Option<Logical>, v: Physical<'_>, domain: &str, bytes: &str) {
+    let term = normalize(ty, v).expect("normalizes");
+    assert_eq!(term.domain, domain, "{ty:?} {v:?}");
+    assert_eq!(hex(term.bytes.risky_ref()), bytes, "{ty:?} {v:?}");
+}
+
+#[test]
+fn every_integer_width_normalizes_to_its_pinned_term() {
+    pin(
+        None,
+        Physical::Int(Int::I8(0)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U8(0)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I16(0)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U16(0)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I32(0)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U32(0)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I64(0)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U64(0)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I128(0)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U128(0)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I8(1)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000001",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U8(1)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000001",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I16(1)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000001",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U16(1)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000001",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I32(1)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000001",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U32(1)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000001",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I64(1)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000001",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U64(1)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000001",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I128(1)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000001",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U128(1)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000001",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I8(5)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000005",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U8(5)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000005",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I16(5)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000005",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U16(5)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000005",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I32(5)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000005",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U32(5)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000005",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I64(5)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000005",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U64(5)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000005",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I128(5)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000005",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U128(5)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000000005",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I8(-7)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00fffffffffffffffffffffffffffffff9",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I16(-7)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00fffffffffffffffffffffffffffffff9",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I32(-7)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00fffffffffffffffffffffffffffffff9",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I64(-7)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00fffffffffffffffffffffffffffffff9",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I128(-7)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00fffffffffffffffffffffffffffffff9",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I8(127)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000007f",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U8(127)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000007f",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I16(127)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000007f",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U16(127)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000007f",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I32(127)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000007f",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U32(127)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000007f",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I64(127)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000007f",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U64(127)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000007f",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I128(127)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000007f",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U128(127)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000007f",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I8(-128)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00ffffffffffffffffffffffffffffff80",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I16(-128)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00ffffffffffffffffffffffffffffff80",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I32(-128)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00ffffffffffffffffffffffffffffff80",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I64(-128)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00ffffffffffffffffffffffffffffff80",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I128(-128)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00ffffffffffffffffffffffffffffff80",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U8(255)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "01000000000000000000000000000000ff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I16(255)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "01000000000000000000000000000000ff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U16(255)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "01000000000000000000000000000000ff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I32(255)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "01000000000000000000000000000000ff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U32(255)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "01000000000000000000000000000000ff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I64(255)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "01000000000000000000000000000000ff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U64(255)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "01000000000000000000000000000000ff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I128(255)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "01000000000000000000000000000000ff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U128(255)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "01000000000000000000000000000000ff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U16(65535)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000ffff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I32(65535)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000ffff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U32(65535)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000ffff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I64(65535)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000ffff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U64(65535)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000ffff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I128(65535)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000ffff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U128(65535)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000000000ffff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I16(-32768)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00ffffffffffffffffffffffffffff8000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I32(-32768)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00ffffffffffffffffffffffffffff8000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I64(-32768)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00ffffffffffffffffffffffffffff8000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I128(-32768)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00ffffffffffffffffffffffffffff8000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I128(-170141183460469231731687303715884105728)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0080000000000000000000000000000000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I128(170141183460469231731687303715884105727)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "017fffffffffffffffffffffffffffffff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I16(32767)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000000000000000007fff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I32(-2147483648)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00ffffffffffffffffffffffff80000000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I32(2147483647)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000000000007fffffff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I64(-9223372036854775808)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "00ffffffffffffffff8000000000000000",
+    );
+    pin(
+        None,
+        Physical::Int(Int::I64(9223372036854775807)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "0100000000000000007fffffffffffffff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U32(4294967295)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "01000000000000000000000000ffffffff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U64(18446744073709551615)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "010000000000000000ffffffffffffffff",
+    );
+    pin(
+        None,
+        Physical::Int(Int::U128(340282366920938463463374607431768211455)),
+        "vitaminc/prf/value/integer-orderable/v1",
+        "01ffffffffffffffffffffffffffffffff",
     );
 }
 
 #[test]
-fn every_integer_width_matches_todays_term() {
-    for n in [0i128, 1, 5, -7, 127, -128, 255, 65_535, -32_768] {
-        if let Ok(v) = i8::try_from(n) {
-            same(None, Physical::Int(Int::I8(v)), Value::Int8(v));
-        }
-        if let Ok(v) = u8::try_from(n) {
-            same(None, Physical::Int(Int::U8(v)), Value::UInt8(v));
-        }
-        if let Ok(v) = i16::try_from(n) {
-            same(None, Physical::Int(Int::I16(v)), Value::Int16(v));
-        }
-        if let Ok(v) = u16::try_from(n) {
-            same(None, Physical::Int(Int::U16(v)), Value::UInt16(v));
-        }
-        if let Ok(v) = i32::try_from(n) {
-            same(None, Physical::Int(Int::I32(v)), Value::Int32(v));
-        }
-        if let Ok(v) = u32::try_from(n) {
-            same(None, Physical::Int(Int::U32(v)), Value::UInt32(v));
-        }
-        if let Ok(v) = i64::try_from(n) {
-            same(None, Physical::Int(Int::I64(v)), Value::Int64(v));
-        }
-        if let Ok(v) = u64::try_from(n) {
-            same(None, Physical::Int(Int::U64(v)), Value::UInt64(v));
-        }
-        same(None, Physical::Int(Int::I128(n)), Value::Int128(n));
-        if let Ok(v) = u128::try_from(n) {
-            same(None, Physical::Int(Int::U128(v)), Value::UInt128(v));
-        }
-    }
-    for v in [i128::MIN, i128::MAX] {
-        same(None, Physical::Int(Int::I128(v)), Value::Int128(v));
-    }
-    for v in [i8::MIN, i8::MAX] {
-        same(None, Physical::Int(Int::I8(v)), Value::Int8(v));
-    }
-    for v in [i16::MIN, i16::MAX] {
-        same(None, Physical::Int(Int::I16(v)), Value::Int16(v));
-    }
-    for v in [i32::MIN, i32::MAX] {
-        same(None, Physical::Int(Int::I32(v)), Value::Int32(v));
-    }
-    for v in [i64::MIN, i64::MAX] {
-        same(None, Physical::Int(Int::I64(v)), Value::Int64(v));
-    }
-    same(None, Physical::Int(Int::U8(u8::MAX)), Value::UInt8(u8::MAX));
-    same(
+fn both_float_widths_normalize_to_their_pinned_terms() {
+    pin(
         None,
-        Physical::Int(Int::U16(u16::MAX)),
-        Value::UInt16(u16::MAX),
+        Physical::Float(Float::F32(f32::from_bits(0x0))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "8000000000000000",
     );
-    same(
+    pin(
         None,
-        Physical::Int(Int::U32(u32::MAX)),
-        Value::UInt32(u32::MAX),
+        Physical::Float(Float::F32(f32::from_bits(0x80000000))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "8000000000000000",
     );
-    same(
+    pin(
         None,
-        Physical::Int(Int::U64(u64::MAX)),
-        Value::UInt64(u64::MAX),
+        Physical::Float(Float::F32(f32::from_bits(0x3fc00000))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "bff8000000000000",
     );
-    same(
+    pin(
         None,
-        Physical::Int(Int::U128(u128::MAX)),
-        Value::UInt128(u128::MAX),
+        Physical::Float(Float::F32(f32::from_bits(0xbfc00000))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "4007ffffffffffff",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F32(f32::from_bits(0x3dcccccd))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "bfb99999a0000000",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F32(f32::from_bits(0x7f7fffff))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "c7efffffe0000000",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F32(f32::from_bits(0x800000))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "b810000000000000",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F32(f32::from_bits(0x7f800000))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "fff0000000000000",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F32(f32::from_bits(0xff800000))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "000fffffffffffff",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F32(f32::from_bits(0x7fc00000))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "fff8000000000000",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F32(f32::from_bits(0xff800001))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "fff8000000000000",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F32(f32::from_bits(0x1))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "b6a0000000000000",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F64(f64::from_bits(0x0))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "8000000000000000",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F64(f64::from_bits(0x8000000000000000))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "8000000000000000",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F64(f64::from_bits(0x3ff8000000000000))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "bff8000000000000",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F64(f64::from_bits(0x3fb999999999999a))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "bfb999999999999a",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F64(f64::from_bits(0x7fefffffffffffff))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "ffefffffffffffff",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F64(f64::from_bits(0x10000000000000))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "8010000000000000",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F64(f64::from_bits(0x7ff0000000000000))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "fff0000000000000",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F64(f64::from_bits(0xfff0000000000000))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "000fffffffffffff",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F64(f64::from_bits(0x7ff8000000000000))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "fff8000000000000",
+    );
+    pin(
+        None,
+        Physical::Float(Float::F64(f64::from_bits(0xfff0000000000001))),
+        "vitaminc/prf/value/float-orderable/v1",
+        "fff8000000000000",
     );
 }
 
 #[test]
-fn both_float_widths_match_todays_term() {
-    for v in [
-        0.0f32,
-        -0.0,
-        1.5,
-        -1.5,
-        0.1,
-        f32::MAX,
-        f32::MIN_POSITIVE,
-        f32::INFINITY,
-        f32::NEG_INFINITY,
-        f32::NAN,
-        f32::from_bits(0xff80_0001),
-        f32::from_bits(1),
-    ] {
-        same(None, Physical::Float(Float::F32(v)), Value::Float32(v));
-    }
-    for v in [
-        0.0f64,
-        -0.0,
-        1.5,
-        0.1,
-        f64::MAX,
-        f64::MIN_POSITIVE,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        f64::NAN,
-        f64::from_bits(0xfff0_0000_0000_0001),
-    ] {
-        same(None, Physical::Float(Float::F64(v)), Value::Float64(v));
-    }
-}
-
-#[test]
-fn text_and_bytes_match_todays_term() {
-    for s in ["", "Ada", "e\u{301}", "\u{344}", "a\0b", "日本語"] {
-        same(None, Physical::Text(s), Value::String(s.into()));
-    }
-    for b in [&[][..], &[0], &[1, 2, 3], &[0xff; 40]] {
-        same(
-            None,
-            Physical::Bytes(b),
-            Value::Bytes(Protected::new(b.to_vec())),
-        );
-    }
+fn text_and_bytes_normalize_to_their_pinned_terms() {
+    pin(
+        None,
+        Physical::Text(""),
+        "vitaminc/prf/value/text-nfc/unicode-16/v1",
+        "",
+    );
+    pin(
+        None,
+        Physical::Text("Ada"),
+        "vitaminc/prf/value/text-nfc/unicode-16/v1",
+        "416461",
+    );
+    pin(
+        None,
+        Physical::Text("e\u{301}"),
+        "vitaminc/prf/value/text-nfc/unicode-16/v1",
+        "c3a9",
+    );
+    pin(
+        None,
+        Physical::Text("\u{344}"),
+        "vitaminc/prf/value/text-nfc/unicode-16/v1",
+        "cc88cc81",
+    );
+    pin(
+        None,
+        Physical::Text("a\0b"),
+        "vitaminc/prf/value/text-nfc/unicode-16/v1",
+        "610062",
+    );
+    pin(
+        None,
+        Physical::Text("日本語"),
+        "vitaminc/prf/value/text-nfc/unicode-16/v1",
+        "e697a5e69cace8aa9e",
+    );
+    pin(
+        None,
+        Physical::Bytes(&[]),
+        "vitaminc/prf/value/bytes/v1",
+        "",
+    );
+    pin(
+        None,
+        Physical::Bytes(&[0x00]),
+        "vitaminc/prf/value/bytes/v1",
+        "00",
+    );
+    pin(
+        None,
+        Physical::Bytes(&[0x01, 0x02, 0x03]),
+        "vitaminc/prf/value/bytes/v1",
+        "010203",
+    );
+    pin(
+        None,
+        Physical::Bytes(&[
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        ]),
+        "vitaminc/prf/value/bytes/v1",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    );
     assert_eq!(
         normalize(None, Physical::Text("\u{378}")).expect_err("unassigned"),
         NormalizeError::UnassignedCodePoint
@@ -164,95 +728,278 @@ fn text_and_bytes_match_todays_term() {
 }
 
 #[test]
-fn dates_match_todays_term() {
-    for date in [
-        NaiveDate::MIN,
-        NaiveDate::from_ymd_opt(1, 1, 1).expect("date"),
-        NaiveDate::from_ymd_opt(1969, 12, 31).expect("date"),
-        NaiveDate::from_ymd_opt(1970, 1, 1).expect("date"),
-        NaiveDate::from_ymd_opt(2024, 2, 29).expect("date"),
-        NaiveDate::MAX,
-    ] {
-        same(
-            Some(Logical::Date),
-            Physical::Int(Int::I32(conv::date_days(date))),
-            Value::Date(date),
-        );
-    }
+fn dates_normalize_to_their_pinned_terms() {
+    // NaiveDate::MIN, 0001-01-01, 1969-12-31, 1970-01-01, 2024-02-29, NaiveDate::MAX.
+    pin(
+        Some(Logical::Date),
+        Physical::Int(Int::I32(-96465292)),
+        "vitaminc/prf/value/date-orderable/v1",
+        "7a4b07af",
+    );
+    pin(
+        Some(Logical::Date),
+        Physical::Int(Int::I32(-719162)),
+        "vitaminc/prf/value/date-orderable/v1",
+        "80000001",
+    );
+    pin(
+        Some(Logical::Date),
+        Physical::Int(Int::I32(-1)),
+        "vitaminc/prf/value/date-orderable/v1",
+        "800af93a",
+    );
+    pin(
+        Some(Logical::Date),
+        Physical::Int(Int::I32(0)),
+        "vitaminc/prf/value/date-orderable/v1",
+        "800af93b",
+    );
+    pin(
+        Some(Logical::Date),
+        Physical::Int(Int::I32(19782)),
+        "vitaminc/prf/value/date-orderable/v1",
+        "800b4681",
+    );
+    pin(
+        Some(Logical::Date),
+        Physical::Int(Int::I32(95026236)),
+        "vitaminc/prf/value/date-orderable/v1",
+        "85b4f577",
+    );
 }
 
 #[test]
-fn timestamps_in_every_unit_match_todays_term() {
-    for (seconds, nanos) in [
-        (0, 0),
-        (-1, 123_456_789),
-        (59, 999_999_999),
-        (1_700_000_000, 123_456_789),
-        (-62_000_000_000, 5_000),
-    ] {
-        let ts = DateTime::<Utc>::from_timestamp(seconds, nanos).expect("timestamp");
-        let nanos = conv::timestamp_nanos(ts).expect("not a leap second");
-        same(
-            Some(Logical::Timestamp(TimeUnit::Nanos)),
-            Physical::Int(Int::I128(nanos)),
-            Value::Timestamp(ts),
-        );
-        // Coarser units truncate the same way, so they match the old term
-        // of the instant at that precision.
-        for (unit, per) in [
-            (TimeUnit::Micros, 1_000i128),
-            (TimeUnit::Millis, 1_000_000),
-            (TimeUnit::Seconds, 1_000_000_000),
-        ] {
-            let count = nanos.div_euclid(per);
-            let truncated = DateTime::<Utc>::from_timestamp(
-                (count * per).div_euclid(1_000_000_000) as i64,
-                ((count * per).rem_euclid(1_000_000_000)) as u32,
-            )
-            .expect("timestamp");
-            same(
-                Some(Logical::Timestamp(unit)),
-                Physical::Int(Int::I64(i64::try_from(count).expect("fits"))),
-                Value::Timestamp(truncated),
-            );
-        }
-    }
-    for ts in [DateTime::<Utc>::MIN_UTC, DateTime::<Utc>::MAX_UTC] {
-        let nanos = conv::timestamp_nanos(ts).expect("not a leap second");
-        same(
-            Some(Logical::Timestamp(TimeUnit::Nanos)),
-            Physical::Int(Int::I128(nanos)),
-            Value::Timestamp(ts),
-        );
-    }
+fn timestamps_in_every_unit_normalize_to_their_pinned_terms() {
+    // Five instants as nanoseconds, each then truncated to micros, millis
+    // and seconds (a coarser unit matches the term of the instant at that
+    // precision), then chrono's MIN_UTC and MAX_UTC.
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Nanos)),
+        Physical::Int(Int::I128(0)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "800000000000000000000000",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Micros)),
+        Physical::Int(Int::I64(0)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "800000000000000000000000",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Millis)),
+        Physical::Int(Int::I64(0)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "800000000000000000000000",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Seconds)),
+        Physical::Int(Int::I64(0)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "800000000000000000000000",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Nanos)),
+        Physical::Int(Int::I128(-876543211)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "7fffffffffffffff075bca00",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Micros)),
+        Physical::Int(Int::I64(-876544)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "7fffffffffffffff075bca00",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Millis)),
+        Physical::Int(Int::I64(-877)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "7fffffffffffffff0754d4c0",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Seconds)),
+        Physical::Int(Int::I64(-1)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "7fffffffffffffff00000000",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Nanos)),
+        Physical::Int(Int::I128(59999999999)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "800000000000003b3b9ac618",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Micros)),
+        Physical::Int(Int::I64(59999999)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "800000000000003b3b9ac618",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Millis)),
+        Physical::Int(Int::I64(59999)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "800000000000003b3b8b87c0",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Seconds)),
+        Physical::Int(Int::I64(59)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "800000000000003b00000000",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Nanos)),
+        Physical::Int(Int::I128(1700000000123456789)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "800000006553f100075bca00",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Micros)),
+        Physical::Int(Int::I64(1700000000123456)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "800000006553f100075bca00",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Millis)),
+        Physical::Int(Int::I64(1700000000123)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "800000006553f1000754d4c0",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Seconds)),
+        Physical::Int(Int::I64(1700000000)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "800000006553f10000000000",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Nanos)),
+        Physical::Int(Int::I128(-61999999999999995000)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "7ffffff19083140000001388",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Micros)),
+        Physical::Int(Int::I64(-61999999999999995)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "7ffffff19083140000001388",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Millis)),
+        Physical::Int(Int::I64(-62000000000000)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "7ffffff19083140000000000",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Seconds)),
+        Physical::Int(Int::I64(-62000000000)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "7ffffff19083140000000000",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Nanos)),
+        Physical::Int(Int::I128(-8334601228800000000000)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "7ffff86b730dee0000000000",
+    );
+    pin(
+        Some(Logical::Timestamp(TimeUnit::Nanos)),
+        Physical::Int(Int::I128(8210266876799999999999)),
+        "vitaminc/prf/value/timestamp-micros-orderable/v1",
+        "800007779a0a6b7f3b9ac618",
+    );
 }
 
 #[test]
-fn decimals_match_todays_term() {
-    for s in [
-        "0",
-        "0.0",
-        "-0.00",
-        "1",
-        "1.0",
-        "1.50",
-        "1.5",
-        "-1.5",
-        "0.001",
-        "123456789.987654321",
-        "79228162514264337593543950335",
-        "-79228162514264337593543950335",
-        "0.0000000000000000000000000001",
-    ] {
-        let d: rust_decimal::Decimal = s.parse().expect("decimal");
-        same(
-            Some(Logical::Decimal {
-                scale: d.scale() as u8,
-            }),
-            Physical::Int(Int::I128(d.mantissa())),
-            Value::Decimal(d),
-        );
-    }
+fn decimals_normalize_to_their_pinned_terms() {
+    // 0
+    pin(
+        Some(Logical::Decimal { scale: 0 }),
+        Physical::Int(Int::I128(0)),
+        "vitaminc/prf/value/decimal-orderable/v1",
+        "8000000000000000000000000000",
+    );
+    // 0.0
+    pin(
+        Some(Logical::Decimal { scale: 1 }),
+        Physical::Int(Int::I128(0)),
+        "vitaminc/prf/value/decimal-orderable/v1",
+        "8000000000000000000000000000",
+    );
+    // -0.00
+    pin(
+        Some(Logical::Decimal { scale: 2 }),
+        Physical::Int(Int::I128(0)),
+        "vitaminc/prf/value/decimal-orderable/v1",
+        "8000000000000000000000000000",
+    );
+    // 1
+    pin(
+        Some(Logical::Decimal { scale: 0 }),
+        Physical::Int(Int::I128(1)),
+        "vitaminc/prf/value/decimal-orderable/v1",
+        "c000204fce5e3e25026110000000",
+    );
+    // 1.0
+    pin(
+        Some(Logical::Decimal { scale: 1 }),
+        Physical::Int(Int::I128(10)),
+        "vitaminc/prf/value/decimal-orderable/v1",
+        "c000204fce5e3e25026110000000",
+    );
+    // 1.50
+    pin(
+        Some(Logical::Decimal { scale: 2 }),
+        Physical::Int(Int::I128(150)),
+        "vitaminc/prf/value/decimal-orderable/v1",
+        "c0003077b58d5d37839198000000",
+    );
+    // 1.5
+    pin(
+        Some(Logical::Decimal { scale: 1 }),
+        Physical::Int(Int::I128(15)),
+        "vitaminc/prf/value/decimal-orderable/v1",
+        "c0003077b58d5d37839198000000",
+    );
+    // -1.5
+    pin(
+        Some(Logical::Decimal { scale: 1 }),
+        Physical::Int(Int::I128(-15)),
+        "vitaminc/prf/value/decimal-orderable/v1",
+        "3fffcf884a72a2c87c6e67ffffff",
+    );
+    // 0.001
+    pin(
+        Some(Logical::Decimal { scale: 3 }),
+        Physical::Int(Int::I128(1)),
+        "vitaminc/prf/value/decimal-orderable/v1",
+        "bd00204fce5e3e25026110000000",
+    );
+    // 123456789.987654321
+    pin(
+        Some(Logical::Decimal { scale: 9 }),
+        Physical::Int(Int::I128(123456789987654321)),
+        "vitaminc/prf/value/decimal-orderable/v1",
+        "c80027e41b37904205f388c66800",
+    );
+    // 79228162514264337593543950335
+    pin(
+        Some(Logical::Decimal { scale: 0 }),
+        Physical::Int(Int::I128(79228162514264337593543950335)),
+        "vitaminc/prf/value/decimal-orderable/v1",
+        "dc00ffffffffffffffffffffffff",
+    );
+    // -79228162514264337593543950335
+    pin(
+        Some(Logical::Decimal { scale: 0 }),
+        Physical::Int(Int::I128(-79228162514264337593543950335)),
+        "vitaminc/prf/value/decimal-orderable/v1",
+        "23ff000000000000000000000000",
+    );
+    // 0.0000000000000000000000000001
+    pin(
+        Some(Logical::Decimal { scale: 28 }),
+        Physical::Int(Int::I128(1)),
+        "vitaminc/prf/value/decimal-orderable/v1",
+        "a400204fce5e3e25026110000000",
+    );
 }
 
 #[test]

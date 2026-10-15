@@ -672,12 +672,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "vitaminc-aead-value"
+name = "vitaminc-aead-frame"
 version = "0.5.1"
 dependencies = [
  "vitaminc-aead",
- "vitaminc-protected",
- "zeroize",
 ]
 
 [[package]]
@@ -752,7 +750,7 @@ name = "vitaminc-wasi-guest"
 version = "0.0.0"
 dependencies = [
  "vitaminc-aead",
- "vitaminc-aead-value",
+ "vitaminc-aead-frame",
  "vitaminc-encrypt",
  "vitaminc-protected",
  "zeroize",

@@ -39,8 +39,7 @@ exclude_globs = [
 
 exclude_re = [
     # Equivalent mutants, not missing tests: `widen_f32` (vitaminc-normalize
-    # scalar.rs, and vitaminc-aead-value canonical.rs until it is removed)
-    # assembles an f64 by OR-ing bit fields that are disjoint by
+    # scalar.rs) assembles an f64 by OR-ing bit fields that are disjoint by
     # construction — complementary masks, or fields shifted into separate bit
     # ranges — and for operands with no common set bit `a | b == a ^ b`, so no
     # input can tell the two apart. Only that one operator swap in that one

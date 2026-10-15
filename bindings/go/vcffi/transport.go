@@ -7,8 +7,8 @@ import (
 	"unicode/utf8"
 )
 
-// Transport framing tags. The scalar tags mirror vitaminc-aead-value's
-// frozen sealed-leaf tag table so the two tables can't drift apart on
+// Transport framing tags. The scalar tags mirror vitaminc-aead's frozen
+// sealed-leaf tag table so the two tables can't drift apart on
 // meaning; the ARRAY/OBJECT container tags are transport-local (the sealed
 // format has no container tags — container shape rides on the ciphertext
 // tree). See the package doc: this transport encoding is NOT a storage

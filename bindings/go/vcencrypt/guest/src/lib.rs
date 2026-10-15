@@ -17,7 +17,7 @@
 //! arrives as one [`Frame`] and is encrypted in place, walking its bytes
 //! into the encrypting sink; a ciphertext is decrypted into a
 //! [`FrameWriter`], so no value tree is built on either path. The ciphertext
-//! transport lives in `vitaminc_aead_value::transport` (transport-only — the
+//! transport lives in `vitaminc_aead_frame::transport` (transport-only — the
 //! sealed leaf format inside the envelope is the only frozen byte format).
 //!
 //! [`Frame`]: vitaminc_aead::Frame
