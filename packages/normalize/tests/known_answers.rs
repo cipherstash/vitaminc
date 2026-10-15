@@ -563,7 +563,7 @@ fn terms_passes_a_source_failure_through() {
     let err = terms(Throws).expect_err("refused");
     assert!(err.term().is_none());
     assert_eq!(err.to_string(), "getter threw");
-    assert_eq!(err.0.to_string(), "getter threw");
+    assert_eq!(err.source_error().to_string(), "getter threw");
 }
 
 /// Seals through an await, and checks that the source's walk had finished

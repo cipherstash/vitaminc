@@ -73,15 +73,22 @@ impl TermError {
 /// both arrive as a [`SourceError`]. [`term`](TermsError::term) recovers a
 /// [`TermError`] from it, the same downcast a caller makes on
 /// [`EncryptError::Source`] when `Terms` runs beside encryption.
+/// [`source_error`](TermsError::source_error) is the error as it arrived.
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
-pub struct TermsError(pub SourceError);
+pub struct TermsError(SourceError);
 
 impl TermsError {
     /// The scalar [`Terms`] refused, or `None` if the source failed on its
     /// own.
     pub fn term(&self) -> Option<&TermError> {
         self.0.inner().downcast_ref()
+    }
+
+    /// The failure as the walk reported it: what [`Terms`] refused, or the
+    /// source's own error.
+    pub fn source_error(&self) -> &SourceError {
+        &self.0
     }
 }
 
