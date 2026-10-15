@@ -10,6 +10,8 @@ license.workspace = true
 authors.workspace = true
 keywords.workspace = true
 categories.workspace = true
+# Own floor, above the workspace MSRV: the AWS SDK (aws-config, aws-sdk-kms) needs 1.94.1.
+rust-version = "1.94.1"
 
 [dependencies]
 vitaminc-async-traits = { version = "0.5.1", path = "../async-traits" }

@@ -10,6 +10,7 @@ license.workspace = true
 authors.workspace = true
 keywords.workspace = true
 categories.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 vitaminc-protected = { version = "0.5.1", path = "../protected", features = ["bitvec"] }

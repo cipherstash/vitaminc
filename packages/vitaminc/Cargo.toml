@@ -10,6 +10,7 @@ homepage.workspace = true
 authors.workspace = true
 keywords.workspace = true
 categories.workspace = true
+rust-version.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
@@ -36,6 +37,7 @@ prf = ["dep:vitaminc-prf", "context"]
 hmac = ["dep:vitaminc-hmac", "prf"]
 traits = ["dep:vitaminc-traits"]
 async-traits = ["dep:vitaminc-async-traits", "traits"]
+# Needs Rust 1.94.1, above the workspace MSRV: vitaminc-kms carries the AWS SDK floor.
 aws-kms = ["traits", "dep:vitaminc-kms"]
 aead = ["dep:vitaminc-aead", "context"]
 encrypt = ["traits", "aead", "dep:vitaminc-encrypt"]
