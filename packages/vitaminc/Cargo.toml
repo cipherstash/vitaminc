@@ -54,6 +54,11 @@ name = "opaque_debug_runtime"
 path = "tests/opaque_debug_runtime.rs"
 required-features = ["protected"]
 
+[[test]]
+name = "prf_normalize"
+path = "tests/prf_normalize.rs"
+required-features = ["prf", "normalize"]
+
 [dev-dependencies.vitaminc]
 path = "./"
 features = ["protected"]
