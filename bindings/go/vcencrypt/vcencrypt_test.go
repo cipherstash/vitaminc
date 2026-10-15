@@ -294,22 +294,28 @@ func TestPassthroughRoundTrip(t *testing.T) {
 // container and travels in the clear as before.
 func TestNothingSealedIsItsOwnError(t *testing.T) {
 	cipher := newCipher(t)
-	for _, value := range []any{
-		map[string]any{"id": vcvalue.Plain{V: int64(42)}},
-		[]any{vcvalue.Plain{V: "a"}, vcvalue.Plain{V: "b"}},
-		map[string]any{"row": []any{vcvalue.Plain{V: int64(1)}}, "ok": "sealed"},
-	} {
-		_, err := cipher.Encrypt(t.Context(), value, []byte("aad"))
-		if !errors.Is(err, vcencrypt.ErrNothingSealed) {
-			t.Fatalf("%#v: got %v, want ErrNothingSealed", value, err)
-		}
-		if errors.Is(err, vcencrypt.ErrInternal) {
-			t.Fatalf("%#v: ErrNothingSealed must not read as ErrInternal", value)
-		}
-		// The element export shares the refusal.
-		if _, err := cipher.EncryptElement(t.Context(), value, []byte("aad")); !errors.Is(err, vcencrypt.ErrNothingSealed) {
-			t.Fatalf("%#v as an element: got %v, want ErrNothingSealed", value, err)
-		}
+	cases := []struct {
+		name  string
+		value any
+	}{
+		{"flat map", map[string]any{"id": vcvalue.Plain{V: int64(42)}}},
+		{"sequence", []any{vcvalue.Plain{V: "a"}, vcvalue.Plain{V: "b"}}},
+		{"nested sequence beside a sealed value", map[string]any{"row": []any{vcvalue.Plain{V: int64(1)}}, "ok": "sealed"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := cipher.Encrypt(t.Context(), tc.value, []byte("aad"))
+			if !errors.Is(err, vcencrypt.ErrNothingSealed) {
+				t.Fatalf("Encrypt: got %v, want ErrNothingSealed", err)
+			}
+			if errors.Is(err, vcencrypt.ErrInternal) {
+				t.Fatal("ErrNothingSealed must not read as ErrInternal")
+			}
+			// The element export shares the refusal.
+			if _, err := cipher.EncryptElement(t.Context(), tc.value, []byte("aad")); !errors.Is(err, vcencrypt.ErrNothingSealed) {
+				t.Fatalf("EncryptElement: got %v, want ErrNothingSealed", err)
+			}
+		})
 	}
 
 	ct, err := cipher.Encrypt(t.Context(), vcvalue.Plain{V: int64(42)}, nil)
@@ -318,6 +324,33 @@ func TestNothingSealedIsItsOwnError(t *testing.T) {
 	}
 	if _, ok := ct.(vcvalue.Plain); !ok {
 		t.Fatalf("a bare Plain scalar travels as Plain, got %#v", ct)
+	}
+}
+
+// An empty container seals as an authenticated marker, so a Plain value
+// beside one is not a container with nothing sealed.
+func TestPlainBesideAnEmptyContainerIsSealed(t *testing.T) {
+	cipher := newCipher(t)
+	aad := []byte("aad")
+	value := map[string]any{"id": vcvalue.Plain{V: int64(42)}, "tags": []any{}}
+
+	ct, err := cipher.Encrypt(t.Context(), value, aad)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	if _, ok := ct.(map[string]any)["tags"].(vcvalue.SealedEmptySeq); !ok {
+		t.Fatalf("expected tags to be a SealedEmptySeq marker, got %#v", ct)
+	}
+	got, err := cipher.Decrypt(t.Context(), ct, aad)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	want := vcvalue.Object{
+		{Key: "id", Value: vcvalue.Plain{V: int64(42)}},
+		{Key: "tags", Value: []any{}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }
 
@@ -537,15 +570,18 @@ func TestMapSubsetDecrypts(t *testing.T) {
 // that a row Go wrote before the model change keeps decrypting. Its value chunk
 // is byte-identical, so one test reads both.
 func TestCrossLanguageFixture(t *testing.T) {
-	for _, name := range []string{"cross_lang.bin", "cross_lang_pre_adr0001.bin"} {
-		t.Run(name, func(t *testing.T) { crossLanguageFixture(t, "testdata/"+name) })
+	for _, fx := range []struct{ name, restore string }{
+		{"cross_lang.bin", "regenerate with `cargo run --example gen_fixture` in guest/"},
+		{"cross_lang_pre_adr0001.bin", "restore it from git; it cannot be regenerated"},
+	} {
+		t.Run(fx.name, func(t *testing.T) { crossLanguageFixture(t, "testdata/"+fx.name, fx.restore) })
 	}
 }
 
-func crossLanguageFixture(t *testing.T, path string) {
+func crossLanguageFixture(t *testing.T, path, restore string) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("reading fixture (regenerate with `cargo run --example gen_fixture` in guest/): %v", err)
+		t.Fatalf("reading fixture (%s): %v", restore, err)
 	}
 
 	const magic = "VCGO1"

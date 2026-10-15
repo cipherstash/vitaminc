@@ -28,9 +28,8 @@
 //!   the output pointer and the low 32 bits its length; for
 //!   [`vc_cipher_init`] they are the handle and the low bits are unused.
 //! - **error** — the high 32 bits are zero and the low 32 bits are a status
-//!   code ([`STATUS_AUTH`](crate::status::STATUS_AUTH), [`STATUS_ENCODING`],
-//!   [`STATUS_BAD_HANDLE`], [`STATUS_INTERNAL`],
-//!   [`STATUS_NOTHING_SEALED`](crate::status::STATUS_NOTHING_SEALED)). A valid output pointer
+//!   code ([`STATUS_AUTH`], [`STATUS_ENCODING`], [`STATUS_BAD_HANDLE`],
+//!   [`STATUS_INTERNAL`], [`STATUS_NOTHING_SEALED`]). A valid output pointer
 //!   / handle is never zero, so the two spaces never collide.
 //!
 //! This packing embeds 32-bit pointers, and the bounds checks below read the
@@ -74,8 +73,9 @@ use vitaminc_protected::Controlled;
 use zeroize::Zeroize;
 
 use crate::sessions::{build_cipher, Sessions};
+use crate::status::{decrypt_status, encrypt_status};
 pub use crate::status::{
-    decrypt_status, encrypt_status, STATUS_BAD_HANDLE, STATUS_ENCODING, STATUS_INTERNAL,
+    STATUS_AUTH, STATUS_BAD_HANDLE, STATUS_ENCODING, STATUS_INTERNAL, STATUS_NOTHING_SEALED,
 };
 
 thread_local! {
