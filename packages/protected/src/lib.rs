@@ -1,6 +1,11 @@
 #![doc = include_str!("../README.md")]
 #![warn(unused_results)]
 #![cfg_attr(test, allow(unused_results))]
+// The derives name this crate as `::vitaminc_protected` when they expand
+// inside it (`Protected` derives `OpaqueDebug`); this alias makes that path
+// resolve here as it does for the crate's tests and doc tests.
+extern crate self as vitaminc_protected;
+
 mod as_protected_ref;
 mod controlled;
 mod conversions;

@@ -66,6 +66,24 @@ use subtle::ConstantTimeEq;
 /// assert!(!bool::from(k1.ts_eq(&k3)));
 /// ```
 ///
+/// ### Naming the crate
+///
+/// The generated impls name `TimingSafeEq` and `Choice` by path, so no `use`
+/// is needed where the derive is applied. The derive finds that path in your
+/// `Cargo.toml`: a dependency on `vitaminc-protected` (under any name), or on
+/// `vitaminc` with the `protected` feature (`vitaminc::protected`). If you
+/// reach the crate some other way, such as a re-export, name it yourself:
+///
+/// ```
+/// mod reexport { pub mod protected { pub use vitaminc_protected::*; } }
+///
+/// #[derive(vitaminc_protected::TimingSafeEq)]
+/// #[timing_safe(crate = "reexport::protected")]
+/// struct Key([u8; 4]);
+///
+/// assert!(Key([1, 2, 3, 4]) == Key([1, 2, 3, 4]));
+/// ```
+///
 /// ## Notes
 ///
 /// * The derive performs a field-wise AND of all `ts_eq` results; if any field differs, the result is `Choice(0)`.

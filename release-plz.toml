@@ -77,3 +77,22 @@ version_group = "vitaminc"
 [[package]]
 name = "vitaminc-traits"
 version_group = "vitaminc"
+
+# Test-only workspace members under packages/derive-tests/ (`publish = false`).
+# Each pins one way a caller can depend on the vitaminc-protected derives. They
+# are never released and are deliberately not in the version group above.
+[[package]]
+name = "derive-tests-direct"
+release = false
+
+[[package]]
+name = "derive-tests-override"
+release = false
+
+[[package]]
+name = "derive-tests-renamed"
+release = false
+
+[[package]]
+name = "derive-tests-umbrella-only"
+release = false

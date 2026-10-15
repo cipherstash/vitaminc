@@ -792,6 +792,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive-tests-direct"
+version = "0.0.0"
+dependencies = [
+ "vitaminc-protected",
+]
+
+[[package]]
+name = "derive-tests-override"
+version = "0.0.0"
+dependencies = [
+ "vitaminc",
+]
+
+[[package]]
+name = "derive-tests-renamed"
+version = "0.0.0"
+dependencies = [
+ "vitaminc-protected",
+]
+
+[[package]]
+name = "derive-tests-umbrella-only"
+version = "0.0.0"
+dependencies = [
+ "vitaminc",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2811,9 +2839,11 @@ dependencies = [
 name = "vitaminc-protected-derive"
 version = "0.5.1"
 dependencies = [
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 3.0.8",
+ "trybuild",
 ]
 
 [[package]]

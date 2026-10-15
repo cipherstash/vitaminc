@@ -1,0 +1,5 @@
+error: `crate` must be a path to the protected crate, such as `crate = "vitaminc::protected"`
+ --> tests/ui/negative_space/timing_safe_rejects_non_path_crate.rs:7:23
+  |
+7 | #[timing_safe(crate = "not a path")]
+  |                       ^^^^^^^^^^^^

@@ -78,7 +78,7 @@ use zeroize::Zeroize;
 ///
 /// let s = SecretThing::B { x: 7, y: 9 };
 /// let out = format!("{s:?}");
-/// assert!(out.contains("SecretThing::B {x: \"***\", y: \"***\"}"));
+/// assert!(out.contains("SecretThing::B { x: \"***\", y: \"***\" }"));
 /// ```
 ///
 /// ### Marking non-sensitive fields
@@ -105,6 +105,24 @@ use zeroize::Zeroize;
 ///     }
 /// );
 /// assert!(out.contains("HasNonSensitiveField { sensitive: \"***\", value: \"ok-to-print\" }"));
+/// ```
+///
+/// ### Naming the crate
+///
+/// The generated marker impl names `OpaqueDebug` by path, so no `use` is
+/// needed where the derive is applied. The derive finds that path in your
+/// `Cargo.toml`: a dependency on `vitaminc-protected` (under any name), or on
+/// `vitaminc` with the `protected` feature (`vitaminc::protected`). If you
+/// reach the crate some other way, such as a re-export, name it yourself:
+///
+/// ```rust
+/// mod reexport { pub mod protected { pub use vitaminc_protected::*; } }
+///
+/// #[derive(vitaminc_protected::OpaqueDebug)]
+/// #[opaque_debug(crate = "reexport::protected")]
+/// struct ApiToken([u8; 32]);
+///
+/// assert!(format!("{:?}", ApiToken([0; 32])).ends_with("ApiToken(\"***\")"));
 /// ```
 ///
 /// ### Using with Redacted wrapper (optional)

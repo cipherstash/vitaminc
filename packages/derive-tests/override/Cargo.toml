@@ -1,0 +1,16 @@
+[package]
+name = "derive-tests-override"
+description = "Test-only crate, never published: the vitaminc-protected derives from a crate that depends only on vitaminc and reaches the protected crate through its own re-export, named with a crate override."
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# `vitaminc` must stay the only dependency. The tests name the protected crate through a local re-export with `crate = "..."`.
+[dependencies]
+vitaminc = { path = "../../vitaminc", default-features = false, features = ["protected"] }
+
+[[test]]
+name = "derives"
+path = "tests/derives.rs"

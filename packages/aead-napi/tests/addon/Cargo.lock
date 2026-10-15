@@ -886,6 +886,7 @@ dependencies = [
 name = "vitaminc-protected-derive"
 version = "0.5.1"
 dependencies = [
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 3.0.6",

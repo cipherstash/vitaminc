@@ -1,0 +1,5 @@
+error: unsupported attribute; expected `crate = "..."`
+ --> tests/ui/negative_space/timing_safe_rejects_unknown_attribute.rs:6:15
+  |
+6 | #[timing_safe(bogus = "x")]
+  |               ^^^^^
