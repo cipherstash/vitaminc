@@ -1,13 +1,17 @@
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
-use syn::{Data, DataEnum, DataStruct, DeriveInput, Fields, Path, Type};
+use proc_macro2::Span;
+use quote::quote;
+use syn::{ext::IdentExt, Data, DataEnum, DataStruct, DeriveInput, Fields, Path, Type};
 
 use crate::crate_path::{parse_crate_value, protected_crate_path};
+use crate::hygiene::{Locals, Scope};
 
 // Hygiene: the impls carry the input's generics and expand in the caller's
-// module. Every local and parameter they introduce is `__ts_`-prefixed so a
-// lowercase const parameter (`const acc: usize`, `const other: usize`) cannot
-// collide with it. The protected crate's items (`TimingSafeEq`, `Choice`) are
+// module. Every local and parameter they introduce is `__ts_`-prefixed, and
+// `crate::hygiene::Locals` keeps those names clear of const parameters and of
+// items in the caller's scope (the `other` parameter's dummy `fn` sits in the
+// `const _: () = { ... };` block around the impls, the bindings' dummies at
+// the top of `ts_eq`). The protected crate's items (`TimingSafeEq`, `Choice`) are
 // named through its path, resolved per invocation by
 // `crate_path::protected_crate_path`, so the derive works without a `use`
 // whether the caller depends on `vitaminc-protected` (under any name) or on the
@@ -39,7 +43,7 @@ fn parse_crate_attr(input: &DeriveInput) -> syn::Result<Option<Path>> {
 
 fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let krate = protected_crate_path(parse_crate_attr(input)?, "timing_safe")?;
-    let ident = input.ident.clone();
+    let ident = &input.ident;
     let mut generics = input.generics.clone();
 
     // Collect all field types so we can require `TimingSafeEq` bounds on them.
@@ -57,54 +61,48 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
-    // --- impl TimingSafeEq ---
-    let ts_impl = match &input.data {
-        Data::Struct(ds) => ts_impl_struct(
-            &krate,
-            &ident,
-            ds,
-            &impl_generics,
-            &ty_generics,
-            where_clause,
-        ),
-        Data::Enum(de) => ts_impl_enum(
-            &krate,
-            &ident,
-            de,
-            &impl_generics,
-            &ty_generics,
-            where_clause,
-        ),
-        Data::Union(_) => {
-            // For unions, provide a conservative implementation: only equal by reference identity is impossible here;
-            // so we treat unions as unequal unless the type has no fields (which unions don't). Safer to refuse:
-            // But to keep it compiling, return false (0). Adjust if you decide to support unions later.
-            quote! {
-                #[automatically_derived]
-                impl #impl_generics #krate::TimingSafeEq for #ident #ty_generics #where_clause {
-                    #[inline]
-                    fn ts_eq(&self, __ts_other: &Self) -> #krate::Choice {
-                        #krate::Choice::from(0u8)
-                    }
+    let mut locals = Locals::new(input);
+    let other = locals.param("__ts_other", Span::call_site());
+
+    // --- body of TimingSafeEq::ts_eq ---
+    let ts_body = match &input.data {
+        Data::Struct(ds) => ts_body_struct(&krate, ds, &other, &mut locals),
+        Data::Enum(de) => ts_body_enum(&krate, de, &other, &mut locals),
+        // Unions are never equal: the derive cannot tell which field is live.
+        Data::Union(_) => quote! {
+            let _ = #other;
+            #krate::Choice::from(0u8)
+        },
+    };
+    let body_shadows = locals.body_shadows();
+    let param_shadows = locals.param_shadows();
+
+    Ok(quote! {
+        const _: () = {
+            #param_shadows
+
+            #[automatically_derived]
+            impl #impl_generics #krate::TimingSafeEq for #ident #ty_generics #where_clause {
+                #[inline]
+                fn ts_eq(&self, #other: &Self) -> #krate::Choice {
+                    #body_shadows
+                    #ts_body
                 }
             }
-        }
-    };
 
-    // --- impl PartialEq / Eq based on ts_eq ---
-    let pe_impl = quote! {
-        #[automatically_derived]
-        impl #impl_generics ::core::cmp::PartialEq for #ident #ty_generics #where_clause {
-            #[inline]
-            fn eq(&self, __ts_other: &Self) -> bool {
-                #krate::TimingSafeEq::ts_eq(self, __ts_other).into()
+            // --- impl PartialEq / Eq based on ts_eq ---
+            #[automatically_derived]
+            impl #impl_generics ::core::cmp::PartialEq for #ident #ty_generics #where_clause {
+                #[inline]
+                fn eq(&self, #other: &Self) -> bool {
+                    #krate::TimingSafeEq::ts_eq(self, #other).into()
+                }
             }
-        }
-        #[automatically_derived]
-        impl #impl_generics ::core::cmp::Eq for #ident #ty_generics #where_clause {}
-    };
 
-    Ok(quote!(#ts_impl #pe_impl))
+            #[automatically_derived]
+            impl #impl_generics ::core::cmp::Eq for #ident #ty_generics #where_clause {}
+        };
+    })
 }
 
 fn collect_field_types(data: &syn::Data) -> Vec<Type> {
@@ -162,143 +160,136 @@ fn collect_field_types(data: &syn::Data) -> Vec<Type> {
     out
 }
 
-fn ts_impl_struct(
+/// `let mut acc = 1; acc &= ts_eq(l, r); ...; acc` over the bound pairs.
+fn fold_compares(
     krate: &Path,
-    ident: &syn::Ident,
-    ds: &DataStruct,
-    impl_generics: &impl quote::ToTokens,
-    ty_generics: &impl quote::ToTokens,
-    where_clause: Option<&syn::WhereClause>,
+    scope: &mut Scope<'_>,
+    lhs: &[syn::Ident],
+    rhs: &[syn::Ident],
 ) -> proc_macro2::TokenStream {
+    let acc = scope.bind("__ts_acc", Span::call_site());
+    let compares = lhs
+        .iter()
+        .zip(rhs)
+        .map(|(l, r)| quote!( #acc &= #krate::TimingSafeEq::ts_eq(#l, #r); ));
+    quote! {
+        let mut #acc = #krate::Choice::from(1u8);
+        #(#compares)*
+        #acc
+    }
+}
+
+/// Binds each field on both sides in one scope: `__ts_lhs_<key>`,
+/// `__ts_rhs_<key>`.
+fn bind_pairs(
+    scope: &mut Scope<'_>,
+    keys: impl Iterator<Item = String>,
+) -> (Vec<syn::Ident>, Vec<syn::Ident>) {
+    keys.map(|key| {
+        (
+            scope.bind(&format!("__ts_lhs_{key}"), Span::call_site()),
+            scope.bind(&format!("__ts_rhs_{key}"), Span::call_site()),
+        )
+    })
+    .unzip()
+}
+
+fn named_keys(named: &syn::FieldsNamed) -> impl Iterator<Item = String> + '_ {
+    named
+        .named
+        .iter()
+        .map(|f| f.ident.as_ref().unwrap().unraw().to_string())
+}
+
+fn ts_body_struct(
+    krate: &Path,
+    ds: &DataStruct,
+    other: &syn::Ident,
+    locals: &mut Locals,
+) -> proc_macro2::TokenStream {
+    let mut scope = locals.scope();
     match &ds.fields {
         Fields::Named(named) => {
-            // Bind each field by reference on both sides: { a: ref a1, b: ref b1 } vs { a: ref a2, b: ref b2 }
-            let mut lhs_bind = Vec::new();
-            let mut rhs_bind = Vec::new();
-            let mut compares = Vec::new();
-
-            for f in &named.named {
-                let name = f.ident.as_ref().unwrap();
-                let l = format_ident!("__ts_lhs_{}", name);
-                let r = format_ident!("__ts_rhs_{}", name);
-                lhs_bind.push(quote!( #name: ref #l ));
-                rhs_bind.push(quote!( #name: ref #r ));
-                compares.push(quote!( __ts_acc &= #krate::TimingSafeEq::ts_eq(#l, #r); ));
-            }
-
+            // Bind each field by reference on both sides: { a: ref l_a } vs { a: ref r_a }
+            let names: Vec<_> = named
+                .named
+                .iter()
+                .map(|f| f.ident.as_ref().unwrap())
+                .collect();
+            let (lhs, rhs) = bind_pairs(&mut scope, named_keys(named));
+            let fold = fold_compares(krate, &mut scope, &lhs, &rhs);
             quote! {
-                #[automatically_derived]
-                impl #impl_generics #krate::TimingSafeEq for #ident #ty_generics #where_clause {
-                    #[inline]
-                    fn ts_eq(&self, __ts_other: &Self) -> #krate::Choice {
-                        match (self, __ts_other) {
-                            (
-                                Self { #(#lhs_bind,)* },
-                                Self { #(#rhs_bind,)* },
-                            ) => {
-                                let mut __ts_acc = #krate::Choice::from(1u8);
-                                #(#compares)*
-                                __ts_acc
-                            }
-                        }
+                match (self, #other) {
+                    (
+                        Self { #(#names: ref #lhs,)* },
+                        Self { #(#names: ref #rhs,)* },
+                    ) => {
+                        #fold
                     }
                 }
             }
         }
         Fields::Unnamed(unnamed) => {
-            // Tuple struct: (ref f0, ref f1, ...)
-            let n = unnamed.unnamed.len();
-            let lhs: Vec<_> = (0..n).map(|i| format_ident!("__ts_lhs_{}", i)).collect();
-            let rhs: Vec<_> = (0..n).map(|i| format_ident!("__ts_rhs_{}", i)).collect();
-
-            let compares: Vec<_> = lhs
-                .iter()
-                .zip(rhs.iter())
-                .map(|(l, r)| quote!( __ts_acc &= #krate::TimingSafeEq::ts_eq(#l, #r); ))
-                .collect();
-
+            // Tuple struct: (ref l_0, ref l_1, ...)
+            let (lhs, rhs) = bind_pairs(
+                &mut scope,
+                (0..unnamed.unnamed.len()).map(|i| i.to_string()),
+            );
+            let fold = fold_compares(krate, &mut scope, &lhs, &rhs);
             quote! {
-                #[automatically_derived]
-                impl #impl_generics #krate::TimingSafeEq for #ident #ty_generics #where_clause {
-                    #[inline]
-                    fn ts_eq(&self, __ts_other: &Self) -> #krate::Choice {
-                        let Self( #(ref #lhs),* ) = self;
-                        let Self( #(ref #rhs),* ) = __ts_other;
-                        let mut __ts_acc = #krate::Choice::from(1u8);
-                        #(#compares)*
-                        __ts_acc
-                    }
-                }
+                let Self( #(ref #lhs),* ) = self;
+                let Self( #(ref #rhs),* ) = #other;
+                #fold
             }
         }
-        Fields::Unit => {
-            // Always equal (no secret-bearing fields)
-            quote! {
-                #[automatically_derived]
-                impl #impl_generics #krate::TimingSafeEq for #ident #ty_generics #where_clause {
-                    #[inline]
-                    fn ts_eq(&self, __ts_other: &Self) -> #krate::Choice {
-                        #krate::Choice::from(1u8)
-                    }
-                }
-            }
-        }
+        // Always equal (no secret-bearing fields)
+        Fields::Unit => quote! {
+            let _ = #other;
+            #krate::Choice::from(1u8)
+        },
     }
 }
 
-fn ts_impl_enum(
+fn ts_body_enum(
     krate: &Path,
-    ident: &syn::Ident,
     de: &DataEnum,
-    impl_generics: &impl quote::ToTokens,
-    ty_generics: &impl quote::ToTokens,
-    where_clause: Option<&syn::WhereClause>,
+    other: &syn::Ident,
+    locals: &mut Locals,
 ) -> proc_macro2::TokenStream {
     // For each variant, generate a match arm that compares same-variant fields.
+    // Arms cannot see each other's bindings, so each gets its own scope.
     let mut arms = Vec::new();
 
-    for (vi, v) in de.variants.iter().enumerate() {
+    for v in &de.variants {
         let v_ident = &v.ident;
+        let mut scope = locals.scope();
         match &v.fields {
             Fields::Named(named) => {
-                let mut lbind = Vec::new();
-                let mut rbind = Vec::new();
-                let mut compares = Vec::new();
-
-                for f in &named.named {
-                    let fname = f.ident.as_ref().unwrap();
-                    let l = format_ident!("__ts_lhs_{}_{}", vi, fname);
-                    let r = format_ident!("__ts_rhs_{}_{}", vi, fname);
-                    lbind.push(quote!( #fname: ref #l ));
-                    rbind.push(quote!( #fname: ref #r ));
-                    compares.push(quote!( __ts_acc &= #krate::TimingSafeEq::ts_eq(#l, #r); ));
-                }
+                let names: Vec<_> = named
+                    .named
+                    .iter()
+                    .map(|f| f.ident.as_ref().unwrap())
+                    .collect();
+                let (lhs, rhs) = bind_pairs(&mut scope, named_keys(named));
+                let fold = fold_compares(krate, &mut scope, &lhs, &rhs);
                 arms.push(quote! {
-                    (Self::#v_ident { #(#lbind,)* }, Self::#v_ident { #(#rbind,)* }) => {
-                        let mut __ts_acc = #krate::Choice::from(1u8);
-                        #(#compares)*
-                        __ts_acc
+                    (
+                        Self::#v_ident { #(#names: ref #lhs,)* },
+                        Self::#v_ident { #(#names: ref #rhs,)* },
+                    ) => {
+                        #fold
                     }
                 });
             }
             Fields::Unnamed(unnamed) => {
-                let n = unnamed.unnamed.len();
-                let lhs: Vec<_> = (0..n)
-                    .map(|fi| format_ident!("__ts_lhs_{}_{}", vi, fi))
-                    .collect();
-                let rhs: Vec<_> = (0..n)
-                    .map(|fi| format_ident!("__ts_rhs_{}_{}", vi, fi))
-                    .collect();
-                let compares: Vec<_> = lhs
-                    .iter()
-                    .zip(rhs.iter())
-                    .map(|(l, r)| quote!( __ts_acc &= #krate::TimingSafeEq::ts_eq(#l, #r); ))
-                    .collect();
+                let (lhs, rhs) = bind_pairs(
+                    &mut scope,
+                    (0..unnamed.unnamed.len()).map(|i| i.to_string()),
+                );
+                let fold = fold_compares(krate, &mut scope, &lhs, &rhs);
                 arms.push(quote! {
                     (Self::#v_ident( #(ref #lhs),* ), Self::#v_ident( #(ref #rhs),* )) => {
-                        let mut __ts_acc = #krate::Choice::from(1u8);
-                        #(#compares)*
-                        __ts_acc
+                        #fold
                     }
                 });
             }
@@ -314,14 +305,8 @@ fn ts_impl_enum(
     arms.push(quote! { _ => #krate::Choice::from(0u8) });
 
     quote! {
-        #[automatically_derived]
-        impl #impl_generics #krate::TimingSafeEq for #ident #ty_generics #where_clause {
-            #[inline]
-            fn ts_eq(&self, __ts_other: &Self) -> #krate::Choice {
-                match (self, __ts_other) {
-                    #(#arms),*
-                }
-            }
+        match (self, #other) {
+            #(#arms),*
         }
     }
 }

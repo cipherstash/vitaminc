@@ -1,9 +1,10 @@
 use std::collections::BTreeSet;
 
 use crate::crate_path::{parse_crate_value, protected_crate_path};
+use crate::hygiene::Locals;
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenTree};
-use quote::{format_ident, quote, quote_spanned, ToTokens};
+use quote::{quote, quote_spanned, ToTokens};
 use syn::{
     ext::IdentExt, spanned::Spanned, Attribute, Data, DataEnum, DataStruct, DeriveInput, Field,
     Fields, Type,
@@ -16,14 +17,12 @@ use syn::{
 // - The formatter is `__opaque_debug_f`, and enum fields are bound as
 //   `__f_<name>` or `__fN`, so a field or a lowercase const parameter named
 //   `f` cannot collide with them.
-// - The input's generic parameters are in scope inside `fmt`, so a generated
-//   local that shares a name with one is renamed with a `_N` suffix (`Locals`).
-// - A unit struct, tuple struct or constant in the caller's module would turn
-//   a binding of the same name into a pattern against that item. A derive
-//   cannot see module items, so the impls sit in a `const _: () = { ... };`
-//   block that declares a dummy `fn` for every generated local. The dummies
-//   shadow such items in the value namespace, and a binding may shadow a
-//   `fn`. Type-namespace lookups such as the input's own ident are unaffected.
+// - Const parameters and items in the caller's scope must not capture the
+//   formatter parameter or the field bindings. `crate::hygiene::Locals` names
+//   them clear of every identifier in the input and emits dummy `fn`s that
+//   shadow such items: the formatter's in the `const _: () = { ... };` block
+//   around the impls, the field bindings' at the top of `fmt`. See that
+//   module for what each placement can and cannot capture.
 // - Macros and `core` items are called by absolute path (`::core::write!`,
 //   `::core::fmt::Debug`), so a same-named macro at the call site does not
 //   take their place.
@@ -70,8 +69,8 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     }
     let (debug_impl_generics, _, debug_where_clause) = debug_generics.split_for_impl();
 
-    let mut locals = Locals::new(&input.generics);
-    let formatter = locals.pick("__opaque_debug_f", Span::call_site(), &BTreeSet::new());
+    let mut locals = Locals::new(input);
+    let formatter = locals.param("__opaque_debug_f", Span::call_site());
 
     let body = match &input.data {
         Data::Struct(ds) => debug_body_for_struct(ds, &mask, &formatter),
@@ -82,11 +81,12 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         },
     };
 
-    let shadows = locals.shadows();
+    let param_shadows = locals.param_shadows();
+    let body_shadows = locals.body_shadows();
 
     Ok(quote! {
         const _: () = {
-            #shadows
+            #param_shadows
 
             #marker_impl
 
@@ -98,77 +98,12 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     &self,
                     #formatter: &mut ::core::fmt::Formatter<'_>,
                 ) -> ::core::fmt::Result {
+                    #body_shadows
                     #body
                 }
             }
         };
     })
-}
-
-/// Names for the generated locals. See the hygiene note above.
-struct Locals {
-    /// The input's generic parameter names, which no local may reuse.
-    reserved: BTreeSet<String>,
-    /// Every name handed out, each of which gets a shadowing dummy `fn`.
-    used: BTreeSet<String>,
-}
-
-impl Locals {
-    fn new(generics: &syn::Generics) -> Self {
-        let reserved = generics
-            .params
-            .iter()
-            .map(|param| match param {
-                syn::GenericParam::Type(p) => p.ident.unraw().to_string(),
-                syn::GenericParam::Const(p) => p.ident.unraw().to_string(),
-                syn::GenericParam::Lifetime(p) => p.lifetime.ident.unraw().to_string(),
-            })
-            .collect();
-        Self {
-            reserved,
-            used: BTreeSet::new(),
-        }
-    }
-
-    /// `preferred`, or `preferred_N` if that is a generic parameter or already
-    /// taken in the same scope.
-    fn pick(&mut self, preferred: &str, span: Span, taken: &BTreeSet<String>) -> syn::Ident {
-        let mut name = preferred.to_owned();
-        let mut suffix = 0;
-        while self.reserved.contains(&name) || taken.contains(&name) {
-            suffix += 1;
-            name = format!("{preferred}_{suffix}");
-        }
-        self.used.insert(name.clone());
-        format_ident!("{}", name, span = span)
-    }
-
-    /// A scope for one match arm's bindings. Arms cannot see each other's
-    /// bindings, so each starts with only the formatter taken.
-    fn arm(&mut self, formatter: &syn::Ident) -> ArmLocals<'_> {
-        ArmLocals {
-            locals: self,
-            taken: BTreeSet::from([formatter.to_string()]),
-        }
-    }
-
-    fn shadows(&self) -> proc_macro2::TokenStream {
-        let names = self.used.iter().map(|name| format_ident!("{}", name));
-        quote! { #( #[allow(dead_code, non_snake_case)] fn #names() {} )* }
-    }
-}
-
-struct ArmLocals<'a> {
-    locals: &'a mut Locals,
-    taken: BTreeSet<String>,
-}
-
-impl ArmLocals<'_> {
-    fn bind(&mut self, preferred: &str, span: Span) -> syn::Ident {
-        let ident = self.locals.pick(preferred, span, &self.taken);
-        self.taken.insert(ident.to_string());
-        ident
-    }
 }
 
 fn has_non_sensitive(attrs: &[Attribute]) -> bool {
@@ -346,7 +281,7 @@ fn debug_body_for_enum(
 
             Fields::Unnamed(fields) => {
                 // bind each field by ref
-                let mut arm = locals.arm(formatter);
+                let mut arm = locals.scope();
                 let bind_ids: Vec<syn::Ident> = (0..fields.unnamed.len())
                     .map(|i| arm.bind(&format!("__f{i}"), v.span()))
                     .collect();
@@ -374,7 +309,7 @@ fn debug_body_for_enum(
                 // Bind each field to a prefixed local rather than its own name,
                 // as the tuple arm does with `__f0`, `__f1`, ... so a field
                 // cannot shadow the generated locals.
-                let mut arm = locals.arm(formatter);
+                let mut arm = locals.scope();
                 let bindings: Vec<(&syn::Ident, syn::Ident)> = fields
                     .named
                     .iter()
