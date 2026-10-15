@@ -84,7 +84,8 @@ assert_eq!(terms[0].normalized.domain, domain::TEXT);
 
 `encrypt_with_terms_async` does the same through an async cipher and has
 every term before its first await. `plan_with_terms` walks without
-sealing at all.
+sealing at all, and `terms` collects the terms with no encryption in the
+walk.
 
 A scalar whose kind has no domain (a null, a boolean, an `undefined`)
 produces no term and does not stop the walk; passthrough subtrees get none
@@ -92,7 +93,7 @@ either. A scalar whose *logical type* has no domain, one from a newer
 client, stops the walk: encrypting it with no term and no error would leave
 an index silently incomplete. That refusal, an unassigned code point and a
 value invalid for its logical type all arrive as `EncryptError::Source`
-carrying a `TermError`, which holds the
+carrying a `TermError` (from `terms`, as a `TermsError`), which holds the
 `NormalizeError` and the path to the refused field. Its message names
 neither the field nor the value, because map keys can be user data; read
 the path with `TermError::path`.

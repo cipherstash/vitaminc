@@ -4,7 +4,7 @@
 //! [`Terms`] is a [`Sink`] that produces one [`Term`] per scalar that has
 //! an equality domain. It runs beside encryption as `Tee(EncryptSink,
 //! Terms)`, so a caller holds every term before any cipher is called and,
-//! with an async cipher, before the first await.
+//! with an async cipher, before the first await. [`terms`] runs it alone.
 
 use core::future::Future;
 use core::marker::PhantomData;
@@ -61,10 +61,37 @@ impl TermError {
     }
 }
 
+/// What [`terms`] fails with: what [`Terms`] refuses, or the source's own
+/// failure.
+///
+/// A source reports through [`Error::source`] whichever sink it feeds, so
+/// both arrive as a [`SourceError`]. [`term`](TermsError::term) recovers a
+/// [`TermError`] from it, the same downcast a caller makes on
+/// [`EncryptError::Source`] when `Terms` runs beside encryption.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct TermsError(pub SourceError);
+
+impl TermsError {
+    /// The scalar [`Terms`] refused, or `None` if the source failed on its
+    /// own.
+    pub fn term(&self) -> Option<&TermError> {
+        self.0.inner().downcast_ref()
+    }
+}
+
+impl Error for TermsError {
+    fn source(error: SourceError) -> Self {
+        Self(error)
+    }
+}
+
 /// A sink that collects one [`Term`] per scalar with an equality domain,
 /// in walk order.
 ///
-/// Generic over its error type so it adopts its [`Tee`] partner's.
+/// Generic over its error type so it adopts its [`Tee`] partner's. To
+/// collect terms without encrypting, call [`terms`], whose error type is
+/// [`TermsError`].
 ///
 /// A scalar whose *kind* has no domain (a null, a boolean, an `undefined`)
 /// produces no term and does not stop the walk: an absent or unindexable
@@ -86,7 +113,7 @@ impl TermError {
 /// (`UnassignedCodePoint`), or it is not valid for its logical type
 /// (`Invalid`). Beside [`EncryptSink`] that arrives as
 /// [`EncryptError::Source`], and `source.inner().downcast_ref::<TermError>()`
-/// recovers it.
+/// recovers it. Alone, through [`terms`], it is [`TermsError::term`].
 pub struct Terms<'t, E> {
     out: &'t mut Vec<Term>,
     /// The path of the container this sink is a child of, borrowed from
@@ -225,6 +252,43 @@ impl<E: Error> MapSink for TermsMap<'_, E> {
     fn end(self) -> Result<(), E> {
         Ok(())
     }
+}
+
+/// Every equality term of `value`, in walk order, without encrypting it.
+///
+/// # Examples
+///
+/// ```
+/// use std::collections::BTreeMap;
+/// use vitaminc_normalize::{domain, terms, NormalizeError, Step};
+///
+/// let mut user = BTreeMap::new();
+/// user.insert("name", "Ada");
+/// let found = terms(&user)?;
+/// assert!(matches!(found[0].path.steps(), [Step::Key(k)] if k == "name"));
+/// assert_eq!(found[0].normalized.domain, domain::TEXT);
+///
+/// // U+0378 is unassigned in Unicode 16, so the name has no term.
+/// user.insert("name", "\u{378}");
+/// let refused = terms(&user).unwrap_err();
+/// let term = refused.term().expect("refused by Terms");
+/// assert_eq!(term.error(), NormalizeError::UnassignedCodePoint);
+/// assert!(matches!(term.path().steps(), [Step::Key(k)] if k == "name"));
+/// // The message names neither the field nor its value.
+/// assert_eq!(
+///     refused.to_string(),
+///     "no equality term: text contains a code point unassigned in Unicode 16"
+/// );
+/// # Ok::<(), vitaminc_normalize::TermsError>(())
+/// ```
+///
+/// # Errors
+///
+/// [`TermsError`]: what [`Terms`] refuses, or the source's own failure.
+pub fn terms<P: Plaintext>(value: P) -> Result<Vec<Term>, TermsError> {
+    let mut out = Vec::new();
+    value.visit(Terms::new(&mut out))?;
+    Ok(out)
 }
 
 /// A ciphertext tree and the terms of the value it was sealed from, in

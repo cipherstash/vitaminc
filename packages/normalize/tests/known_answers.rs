@@ -10,12 +10,13 @@ use futures_executor::block_on;
 use vitaminc_aead::plaintext::kinds::chrono as conv;
 use vitaminc_aead::seal::{AsyncCipher, Cipher};
 use vitaminc_aead::{
-    Context, EncryptError, Float, Int, Logical, Physical, Plaintext, Sink, TimeUnit,
+    Context, EncryptError, Float, Int, Logical, Physical, Plaintext, SeqSink, Sink, SourceError,
+    TimeUnit,
 };
 use vitaminc_aead_value::canonical::equality_input;
 use vitaminc_aead_value::Value;
 use vitaminc_normalize::{
-    domain, encrypt_with_terms, encrypt_with_terms_async, normalize, plan_with_terms,
+    domain, encrypt_with_terms, encrypt_with_terms_async, normalize, plan_with_terms, terms,
     NormalizeError, Path, Step, Term, TermError,
 };
 use vitaminc_protected::{Controlled, Protected};
@@ -488,6 +489,51 @@ fn a_refusal_names_the_field_only_on_request() {
         assert!(shown.contains("UnassignedCodePoint"), "{shown}");
         assert!(shown.contains("Index(1)"), "{shown}");
     }
+}
+
+#[test]
+fn terms_collects_every_term_without_encrypting() {
+    let found = terms(user()).expect("walks");
+    assert_eq!(paths(&found), [".ages[0]", ".ages[2]"]);
+    assert_eq!(found[1].normalized.domain, domain::INTEGER);
+    // A borrowed value walks too, and a scalar at the root has no steps.
+    let name = String::from("Ada");
+    let found = terms(&name).expect("walks");
+    assert_eq!(paths(&found), [""]);
+    assert!(terms(Vec::<u32>::new()).expect("walks").is_empty());
+}
+
+#[test]
+fn terms_says_which_field_it_refused() {
+    let invalid = vitaminc_aead::Raw(Some(Logical::Undefined), Physical::Int(Int::I32(1)));
+    let mut doc = BTreeMap::new();
+    doc.insert("x", invalid);
+    let err = terms(doc).expect_err("refused");
+    let term = err.term().expect("refused by Terms");
+    assert_eq!(term.error(), NormalizeError::Invalid);
+    assert_eq!(render(term.path()), ".x");
+    assert_eq!(
+        err.to_string(),
+        "no equality term: the value is not valid for its logical type"
+    );
+}
+
+#[test]
+fn terms_passes_a_source_failure_through() {
+    struct Throws;
+    impl Plaintext for Throws {
+        fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
+            let mut seq = sink.seq(None)?;
+            1u32.visit(seq.element()?)?;
+            Err(<S::Error as vitaminc_aead::plaintext::Error>::source(
+                SourceError::msg("getter threw"),
+            ))
+        }
+    }
+    let err = terms(Throws).expect_err("refused");
+    assert!(err.term().is_none());
+    assert_eq!(err.to_string(), "getter threw");
+    assert_eq!(err.0.to_string(), "getter threw");
 }
 
 /// Seals through an await, and checks that the source's walk had finished
