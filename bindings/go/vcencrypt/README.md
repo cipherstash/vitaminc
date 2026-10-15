@@ -190,6 +190,7 @@ failure *kinds* as sentinel errors (use `errors.Is`):
 | `ErrEncoding`                | malformed transport bytes                        |
 | `ErrBadHandle`               | cipher used after `Close`, or an unknown handle  |
 | `ErrInternal`                | guest panic or other unexpected failure          |
+| `ErrNothingSealed`           | an array or object holding only `Plain` values: nothing would authenticate it |
 
 ## The cipher handle ABI
 

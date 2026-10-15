@@ -288,6 +288,35 @@ func TestPassthroughRoundTrip(t *testing.T) {
 	}
 }
 
+// TestNothingSealedIsItsOwnError: a container holding only Plain values has
+// nothing to authenticate it, and the guest refuses it as the caller's input
+// rather than as an internal failure (#385). A bare Plain scalar is not a
+// container and travels in the clear as before.
+func TestNothingSealedIsItsOwnError(t *testing.T) {
+	cipher := newCipher(t)
+	for _, value := range []any{
+		map[string]any{"id": vcvalue.Plain{V: int64(42)}},
+		[]any{vcvalue.Plain{V: "a"}, vcvalue.Plain{V: "b"}},
+		map[string]any{"row": []any{vcvalue.Plain{V: int64(1)}}, "ok": "sealed"},
+	} {
+		_, err := cipher.Encrypt(t.Context(), value, []byte("aad"))
+		if !errors.Is(err, vcencrypt.ErrNothingSealed) {
+			t.Fatalf("%#v: got %v, want ErrNothingSealed", value, err)
+		}
+		if errors.Is(err, vcencrypt.ErrInternal) {
+			t.Fatalf("%#v: ErrNothingSealed must not read as ErrInternal", value)
+		}
+	}
+
+	ct, err := cipher.Encrypt(t.Context(), vcvalue.Plain{V: int64(42)}, nil)
+	if err != nil {
+		t.Fatalf("a bare Plain scalar: %v", err)
+	}
+	if _, ok := ct.(vcvalue.Plain); !ok {
+		t.Fatalf("a bare Plain scalar travels as Plain, got %#v", ct)
+	}
+}
+
 // A modified passthrough value is NOT detected (passthrough is unauthenticated)
 // while its sealed sibling still authenticates.
 func TestPassthroughIsUnauthenticated(t *testing.T) {

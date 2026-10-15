@@ -1,7 +1,7 @@
 //! # vitaminc-wasi-guest
 //!
-//! WASI guest module exposing `vitaminc` AEAD encryption of [`Value`]
-//! trees to non-Rust hosts — the Go bindings spike. Built for
+//! WASI guest module exposing `vitaminc` AEAD encryption of transport
+//! frames to non-Rust hosts — the Go bindings spike. Built for
 //! `wasm32-wasip1` and embedded by the Go module in the parent directory
 //! (wazero host, `CGO_ENABLED=0`).
 //!
@@ -13,12 +13,15 @@
 //! On wasm32 the `vitaminc-encrypt` crate uses its pure-Rust
 //! (RustCrypto `aes-gcm`) backend; the trade-offs are documented there.
 //!
-//! See [`abi`] for the export surface and buffer-ownership rules. The
-//! transport encoding lives in `vitaminc_aead_value::transport`
-//! (transport-only — the sealed leaf format inside the envelope is the only
-//! frozen byte format).
+//! See [`abi`] for the export surface and buffer-ownership rules. A value
+//! arrives as one [`Frame`] and is encrypted in place, walking its bytes
+//! into the encrypting sink; a ciphertext is decrypted into a
+//! [`FrameWriter`], so no value tree is built on either path. The ciphertext
+//! transport lives in `vitaminc_aead_value::transport` (transport-only — the
+//! sealed leaf format inside the envelope is the only frozen byte format).
 //!
-//! [`Value`]: vitaminc_aead_value::Value
+//! [`Frame`]: vitaminc_aead::Frame
+//! [`FrameWriter`]: vitaminc_aead::FrameWriter
 
 // The ABI's packed u64 results embed 32-bit pointers and its bounds checks
 // read the wasm linear-memory size, so the module only exists on wasm32

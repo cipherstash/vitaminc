@@ -15,3 +15,8 @@ pub const STATUS_BAD_HANDLE: u32 = 3;
 /// A cipher that could not be constructed, handle-id exhaustion, a caught
 /// panic (unwind builds only), or any other unexpected internal failure.
 pub const STATUS_INTERNAL: u32 = 4;
+/// A non-empty array or object whose values are all passthrough: nothing in
+/// it would be sealed, so nothing would authenticate the AAD or the keys,
+/// and the guest refuses to encrypt it. The caller's input, not a guest
+/// failure (#385).
+pub const STATUS_NOTHING_SEALED: u32 = 5;

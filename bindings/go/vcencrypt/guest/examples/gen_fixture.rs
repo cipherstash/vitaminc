@@ -1,5 +1,5 @@
 //! Generates the cross-language test fixture consumed by the Go module's
-//! `TestCrossLanguageFixture`: a value tree encrypted by **native** Rust
+//! `TestCrossLanguageFixture`: a value encrypted by **native** Rust
 //! (aws-lc-rs backend) that Go must decrypt through the wasm guest
 //! (RustCrypto backend) — proving key format, ciphertext transport,
 //! sealed-leaf tags, and AAD handling all line up across languages *and*
@@ -16,57 +16,53 @@
 //!
 //! Layout (all lengths u32 LE):
 //! `"VCGO1" ++ key[32] ++ len(aad) ++ aad ++ len(ct) ++ ct ++ len(val) ++ val`
-//! where `ct` and `val` use the transport codec.
+//! where `ct` uses the ciphertext transport and `val` is one frame.
 
 use std::fs;
 
-use vitaminc_aead::{Context, Encrypt};
+use vitaminc_aead::{encrypt, to_frame, Context, MapSink, Plaintext, SeqSink, Sink};
 use vitaminc_aead_value::transport as codec;
-use vitaminc_aead_value::Value;
 use vitaminc_encrypt::{Aes256Cipher, Key};
-use vitaminc_protected::Protected;
+use vitaminc_protected::{Controlled, Protected};
 
 const AAD: &[u8] = b"vitaminc/go-spike/fixture";
 
-fn string(s: &str) -> Value {
-    Value::String(s.into())
-}
+/// The fixture value, as a source. Hand-written rather than derived so the
+/// `tags` array can mix strings and a boolean, as a host value does.
+#[derive(Clone)]
+struct Fixture;
 
-fn passthrough(v: Value) -> Value {
-    Value::Passthrough(Box::new(v))
-}
-
-fn fixture_value() -> Value {
-    Value::Object(vec![
+impl Plaintext for Fixture {
+    fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
+        let mut map = sink.map(Some(14))?;
         // Passthrough fields: non-secret, travel in the clear. Go must read
         // these back WITHOUT the key path proving decryption.
-        ("id".into(), passthrough(Value::Int64(42))),
-        (
-            "created_at".into(),
-            passthrough(string("2026-07-25T00:00:00Z")),
-        ),
-        ("name".into(), string("Ada Lovelace")),
-        ("age".into(), Value::Int64(36)),
-        ("score".into(), Value::Float64(1.5)),
-        ("active".into(), Value::Bool(true)),
-        ("nickname".into(), Value::Null),
-        ("big".into(), Value::Int64(i64::MIN)),
+        map.entry("id")?.passthrough(42i64)?;
+        map.entry("created_at")?
+            .passthrough("2026-07-25T00:00:00Z")?;
+        "Ada Lovelace".visit(map.entry("name")?)?;
+        36i64.visit(map.entry("age")?)?;
+        1.5f64.visit(map.entry("score")?)?;
+        true.visit(map.entry("active")?)?;
+        None::<&str>.visit(map.entry("nickname")?)?;
+        i64::MIN.visit(map.entry("big")?)?;
         // Above i64::MAX: exercises the UINT64 tag cross-language.
-        ("huge".into(), Value::UInt64(u64::MAX)),
+        u64::MAX.visit(map.entry("huge")?)?;
         // The 32-bit numeric family, at edge values: exercises the INT32 /
         // UINT32 / FLOAT32 tags (and Go's exact-width decode) cross-language.
-        ("rank".into(), Value::Int32(i32::MIN)),
-        ("port".into(), Value::UInt32(u32::MAX)),
-        ("ratio".into(), Value::Float32(0.5)),
-        (
-            "tags".into(),
-            Value::Array(vec![string("math"), string("engines"), Value::Bool(false)]),
-        ),
-        (
-            "blob".into(),
-            Value::Bytes(Protected::new(vec![0xDE, 0xAD, 0xBE, 0xEF])),
-        ),
-    ])
+        i32::MIN.visit(map.entry("rank")?)?;
+        u32::MAX.visit(map.entry("port")?)?;
+        0.5f32.visit(map.entry("ratio")?)?;
+        {
+            let mut tags = map.entry("tags")?.seq(Some(3))?;
+            "math".visit(tags.element()?)?;
+            "engines".visit(tags.element()?)?;
+            false.visit(tags.element()?)?;
+            tags.end()?;
+        }
+        Protected::new(vec![0xDEu8, 0xAD, 0xBE, 0xEF]).visit(map.entry("blob")?)?;
+        map.end()
+    }
 }
 
 fn push_chunk(out: &mut Vec<u8>, chunk: &[u8]) {
@@ -79,15 +75,11 @@ fn main() {
     let key_bytes: [u8; 32] = std::array::from_fn(|i| i as u8);
     let cipher = Aes256Cipher::new(&Key::from(key_bytes)).unwrap();
 
-    let ct = fixture_value()
-        .encrypt_with_aad(&cipher, Context::from_encoded(AAD))
-        .unwrap();
+    let node = encrypt(Fixture, &cipher, Context::from_encoded(AAD)).unwrap();
     let mut ct_bytes = Vec::new();
-    // Re-home the Box passthrough payload type to Value value-nodes for the wire.
-    codec::encode_ciphertext_boxed(ct, &mut ct_bytes).unwrap();
+    codec::encode_ciphertext(&node, &mut ct_bytes).unwrap();
 
-    let mut val_bytes = Vec::new();
-    codec::encode_value(fixture_value(), &mut val_bytes).unwrap();
+    let val_bytes = to_frame(Fixture).unwrap().risky_unwrap();
 
     let mut out = Vec::new();
     out.extend_from_slice(b"VCGO1");
