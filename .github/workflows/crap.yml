@@ -42,7 +42,7 @@ concurrency:
 jobs:
   changes:
     # What counts as a Rust change for this gate lives in
-    # .github/scripts/has_no_rust_changes.py.
+    # .github/scripts/has_rust_changes.py.
     # Skipped on a manual dispatch, which runs the gate below.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -50,7 +50,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      has_no_rust_changes: ${{ steps.check.outputs.has_no_rust_changes }}
+      has_rust_changes: ${{ steps.check.outputs.has_rust_changes }}
     env:
       # The task needs only the runner's python3. Auto-install would build
       # every cargo tool in mise.toml, costing more than the gate it skips.
@@ -71,20 +71,20 @@ jobs:
           cache: false
 
       - name: test the Rust changes check
-        run: mise run pr:gate:has_no_rust_changes:test
+        run: mise run pr:gate:has_rust_changes:test
 
       - name: check for Rust changes
         id: check
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: mise run pr:gate:has_no_rust_changes -- crap --base "origin/$BASE_REF"
+        run: mise run pr:gate:has_rust_changes -- crap --base "origin/$BASE_REF"
 
   crap:
     needs: changes
     # Fails closed: skip only when the `changes` job succeeded and found no
     # Rust changes. A failed `changes` job, or one skipped on a manual
     # dispatch, runs the gate.
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.has_no_rust_changes != 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.has_rust_changes == 'true') }}
     runs-on: ubuntu-latest
     name: "🚦 CRAP gate"
 

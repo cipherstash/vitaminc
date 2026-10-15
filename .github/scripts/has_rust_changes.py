@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Decide whether a pull request has no Rust changes for a required gate.
+"""Decide whether a pull request has Rust changes for a required gate.
 
 `🚦 CRAP gate` and `🧬 Mutants gate` are required checks on `main`. A
 workflow-level `paths:` filter stops the workflow from starting at all, and a
 required check that never reports leaves the PR at "Expected" forever. So
 both workflows start on every PR, and a cheap job runs this script to decide
-whether the expensive gate job can be skipped. GitHub reports a skipped job
+whether the expensive gate job needs to run. GitHub reports a skipped job
 as passed.
 
 Skipping a gate that should have run lets untested code merge, so doubt
-resolves to running it: an empty diff does not count as "no Rust changes",
-and any error exits non-zero, which the workflow also treats as run.
+resolves to running it: an empty diff counts as Rust changes, and any error
+exits non-zero, which the workflow also treats as run.
 
-Run `mise run pr:gate:has_no_rust_changes -- <gate>` to see the answer for
+Run `mise run pr:gate:has_rust_changes -- <gate>` to see the answer for
 the current branch against origin/main.
 """
 
@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SELF = ".github/scripts/has_no_rust_changes.py"
+SELF = ".github/scripts/has_rust_changes.py"
 
 
 @dataclass(frozen=True)
@@ -82,14 +82,14 @@ def changed_paths(base: str, head: str, cwd: Path = REPO_ROOT) -> list[str]:
     return [p for p in out.decode("utf-8", "surrogateescape").split("\0") if p]
 
 
-def has_no_rust_changes(rust_paths: RustPaths, paths: list[str]) -> bool:
+def has_rust_changes(rust_paths: RustPaths, paths: list[str]) -> bool:
     # A PR with no changes is rarer than a wrong base, so don't trust it.
-    return bool(paths) and not any(rust_paths.covers(p) for p in paths)
+    return not paths or any(rust_paths.covers(p) for p in paths)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Decide whether a PR has no Rust changes for a gate, so the gate can be skipped."
+        description="Decide whether a PR has Rust changes for a gate, so the gate runs only when it does."
     )
     parser.add_argument("gate", choices=sorted(RUST_PATHS))
     parser.add_argument(
@@ -100,9 +100,9 @@ def main(argv: list[str] | None = None) -> int:
 
     rust_paths = RUST_PATHS[args.gate]
     paths = changed_paths(args.base, args.head)
-    no_rust_changes = has_no_rust_changes(rust_paths, paths)
+    rust_changes = has_rust_changes(rust_paths, paths)
 
-    verdict = "no Rust changes, skip" if no_rust_changes else "Rust changes, run"
+    verdict = "Rust changes, run" if rust_changes else "no Rust changes, skip"
     print(f"{args.gate} gate: {verdict} ({len(paths)} path(s) changed since {args.base})")
     for path in paths:
         print(f"  {'rust    ' if rust_paths.covers(path) else 'not rust'}  {path}")
@@ -110,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:
         with open(github_output, "a", encoding="utf-8") as f:
-            f.write(f"has_no_rust_changes={'true' if no_rust_changes else 'false'}\n")
+            f.write(f"has_rust_changes={'true' if rust_changes else 'false'}\n")
     return 0
 
 
