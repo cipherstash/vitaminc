@@ -2798,6 +2798,7 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "rust_decimal",
+ "thiserror",
  "unicode-general-category",
  "unicode-normalization",
  "uuid",

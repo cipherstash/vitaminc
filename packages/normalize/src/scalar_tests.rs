@@ -431,3 +431,13 @@ fn orderable_f64_agrees_with_orderable_bytes(bits: u64) -> bool {
     let value = canonical_f64(f64::from_bits(bits));
     orderable_f64(value) == value.to_orderable_bytes()
 }
+
+#[test]
+fn debug_output_does_not_show_the_normalized_bytes() {
+    let n = normalize(None, Physical::Text("secret")).expect("text");
+    let v = format!("{n:?}");
+    assert!(v.contains(domain::TEXT), "{v}");
+    assert!(v.contains("***"), "{v}");
+    // "secret" as a `Vec<u8>` would print as [115, 101, 99, ...].
+    assert!(!v.contains("secret") && !v.contains("115, 101, 99"), "{v}");
+}

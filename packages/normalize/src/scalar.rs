@@ -19,14 +19,12 @@
 //! logical type, [`Logical::Unknown`] included, has no term and is refused
 //! with [`NormalizeError::NoDomain`].
 
-use core::fmt;
-
 use orderable_bytes::ToOrderableBytes;
 use unicode_general_category::{get_general_category, GeneralCategory};
 use unicode_normalization::UnicodeNormalization;
 use vitaminc_aead::plaintext::kinds::{timestamp_nanos, MAX_DATE_DAYS, MIN_DATE_DAYS};
 use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
-use vitaminc_protected::{Controlled, Protected};
+use vitaminc_protected::{Controlled, OpaqueDebug, Protected};
 
 /// Frozen domain labels for equality terms, one per kind that has one.
 pub mod domain {
@@ -46,8 +44,9 @@ pub mod domain {
     pub const BYTES: &str = "vitaminc/prf/value/bytes/v1";
     /// A uuid, over its sixteen raw bytes.
     pub const UUID: &str = "vitaminc/prf/value/uuid/v1";
-    /// Every domain, for a test or an index layer that enumerates them.
-    pub const ALL: [&str; 8] = [INTEGER, FLOAT, DATE, TIMESTAMP, DECIMAL, TEXT, BYTES, UUID];
+    /// Every domain, for a test or an index layer that enumerates them. A
+    /// slice, so a domain added later does not change its type.
+    pub const ALL: &[&str] = &[INTEGER, FLOAT, DATE, TIMESTAMP, DECIMAL, TEXT, BYTES, UUID];
 }
 
 /// The normalized bytes for one equality term and the domain they belong
@@ -57,40 +56,32 @@ pub mod domain {
 /// and whatever consumes a `Normalized` trusts them: a PRF derives under
 /// the `domain` it is handed. The only way to get the frozen encodings is
 /// through [`normalize`] or the per-kind encoders here.
-#[derive(Debug)]
+///
+/// `Debug` shows the domain and masks the bytes.
+#[derive(OpaqueDebug)]
 pub struct Normalized {
     /// The frozen domain label, one of the [`domain`] constants.
+    #[non_sensitive]
     pub domain: &'static str,
     /// The normalized plaintext, protected.
     pub bytes: Protected<Vec<u8>>,
 }
 
 /// Why a scalar has no term. Never includes plaintext.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum NormalizeError {
     /// The scalar has no equality domain: a null, an `undefined`, a
     /// boolean, or a logical type outside the opt-in table.
+    #[error("no equality domain for this kind of value")]
     NoDomain,
     /// The value is not valid for its logical type.
+    #[error("the value is not valid for its logical type")]
     Invalid,
     /// Text contains a code point unassigned in Unicode 16.
+    #[error("text contains a code point unassigned in Unicode 16")]
     UnassignedCodePoint,
 }
-
-impl fmt::Display for NormalizeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NoDomain => f.write_str("no equality domain for this kind of value"),
-            Self::Invalid => f.write_str("the value is not valid for its logical type"),
-            Self::UnassignedCodePoint => {
-                f.write_str("text contains a code point unassigned in Unicode 16")
-            }
-        }
-    }
-}
-
-impl core::error::Error for NormalizeError {}
 
 /// The opt-in table: the domain for a scalar, or `None` for one that has
 /// no term. A logical type decides on its own; a value without one goes by

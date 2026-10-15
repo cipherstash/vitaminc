@@ -16,6 +16,8 @@ use vitaminc_aead::{
     SeqSink, Sink, SourceError, Tee,
 };
 
+use vitaminc_protected::OpaqueDebug;
+
 use crate::scalar::{normalize, NormalizeError, Normalized};
 
 /// One step of the path from the root of a value to a scalar.
@@ -29,9 +31,13 @@ pub enum Step {
 
 /// One equality term: where the scalar sits in the value, and its
 /// normalized bytes with their domain.
-#[derive(Debug)]
+///
+/// `Debug` shows the path, which is structure (indexes and map keys, which
+/// the ciphertext carries in the clear too), and masks the term.
+#[derive(OpaqueDebug)]
 pub struct Term {
     /// The path from the root, empty for a scalar at the root.
+    #[non_sensitive]
     pub path: Vec<Step>,
     /// The term itself: the frozen domain label and the normalized bytes.
     pub normalized: Normalized,

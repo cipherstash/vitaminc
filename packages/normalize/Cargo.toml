@@ -15,6 +15,7 @@ rust-version.workspace = true
 [dependencies]
 vitaminc-aead = { version = "0.5.1", path = "../aead" }
 vitaminc-protected = { version = "0.5.1", path = "../protected" }
+thiserror = { workspace = true }
 
 # Only for the decimal term. Its encoding is constant-time arithmetic over
 # the mantissa and scale that this crate does not want a second copy of, so
