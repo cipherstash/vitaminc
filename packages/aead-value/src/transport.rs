@@ -21,7 +21,7 @@ use std::any::Any;
 use std::collections::HashSet;
 
 use crate::{tags, Value};
-use vitaminc_aead::CipherText;
+use vitaminc_aead::{CipherText, Frame, PassthroughFrame};
 use vitaminc_protected::Controlled;
 
 // The framing tags and the depth bound live with the frame in
@@ -70,6 +70,23 @@ impl TransportPassthrough for Value {
     }
     fn decode_node(reader: &mut Reader<'_>, depth: usize) -> Result<Self, CodecError> {
         decode_value_inner(reader, depth)
+    }
+}
+
+/// A [`PassthroughFrame`] is already one value node, so it crosses the
+/// transport as its own bytes: written as they are, and read back by
+/// validating one node at the ciphertext's depth and taking exactly it.
+/// This is the payload type of the sink-based ciphertext tree
+/// ([`vitaminc_aead::Node`]).
+impl TransportPassthrough for PassthroughFrame {
+    fn encode_node(&self, out: &mut Vec<u8>) -> Result<(), CodecError> {
+        out.extend_from_slice(&self.0);
+        Ok(())
+    }
+    fn decode_node(reader: &mut Reader<'_>, depth: usize) -> Result<Self, CodecError> {
+        let (frame, _) = Frame::parse_nested(reader.remaining(), depth).map_err(|_| CodecError)?;
+        let len = frame.as_bytes().len();
+        Ok(PassthroughFrame(reader.take(len)?.to_vec()))
     }
 }
 
@@ -533,6 +550,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vitaminc_aead::{LocalCipherText, Node};
     use vitaminc_encrypt::AesCipherText;
     use vitaminc_protected::Protected;
 
@@ -1189,6 +1207,77 @@ mod tests {
         let mut out2 = Vec::new();
         encode_ciphertext_boxed(decoded, &mut out2).expect("codec");
         assert_eq!(out, out2);
+    }
+
+    #[test]
+    fn a_frame_payload_crosses_the_ciphertext_transport_as_its_own_bytes() {
+        // The sink-based tree carries passthrough subtrees as frames, and a
+        // frame is already one value node, so the wire bytes are the same
+        // as for a `Value` payload with the same content.
+        let mut id = Vec::new();
+        encode_value(Value::Int64(42), &mut id).expect("codec");
+        let node: Node<LocalCipherText> = CipherText::Map(vec![
+            (
+                "id".into(),
+                CipherText::Passthrough(PassthroughFrame(id.clone())),
+            ),
+            ("email".into(), CipherText::Single(vec![9u8; 40].into())),
+        ]);
+        let mut out = Vec::new();
+        encode_ciphertext(&node, &mut out).expect("codec");
+
+        let boxed: AesCipherText = CipherText::Map(vec![
+            (
+                "id".into(),
+                CipherText::Passthrough(Box::new(Value::Int64(42))),
+            ),
+            ("email".into(), CipherText::Single(vec![9u8; 40].into())),
+        ]);
+        let mut expected = Vec::new();
+        encode_ciphertext_boxed(boxed, &mut expected).expect("codec");
+        assert_eq!(out, expected);
+
+        let decoded: Node<LocalCipherText> =
+            decode_ciphertext(&mut Reader::new(&out)).expect("codec");
+        let CipherText::Map(entries) = &decoded else {
+            panic!("a map decodes as a map");
+        };
+        assert!(matches!(
+            &entries[0].1,
+            CipherText::Passthrough(frame) if frame.0 == id
+        ));
+        let mut again = Vec::new();
+        encode_ciphertext(&decoded, &mut again).expect("codec");
+        assert_eq!(again, out);
+    }
+
+    #[test]
+    fn a_malformed_frame_payload_is_refused() {
+        // A truncated array inside the passthrough.
+        let bytes = [CT_PASSTHROUGH, ARRAY, 2, 0, 0, 0, tags::NULL];
+        assert!(
+            decode_ciphertext::<LocalCipherText, PassthroughFrame>(&mut Reader::new(&bytes))
+                .is_err()
+        );
+        // Trailing bytes after the one node the passthrough carries.
+        let bytes = [CT_PASSTHROUGH, tags::NULL, tags::NULL];
+        assert!(
+            decode_ciphertext::<LocalCipherText, PassthroughFrame>(&mut Reader::new(&bytes))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_frame_payload_shares_the_ciphertext_depth_budget() {
+        let ok = ciphertext_passthrough_nest(MAX_DEPTH - 1);
+        assert!(
+            decode_ciphertext::<LocalCipherText, PassthroughFrame>(&mut Reader::new(&ok)).is_ok()
+        );
+        let too_deep = ciphertext_passthrough_nest(MAX_DEPTH);
+        assert!(
+            decode_ciphertext::<LocalCipherText, PassthroughFrame>(&mut Reader::new(&too_deep))
+                .is_err()
+        );
     }
 
     #[test]
