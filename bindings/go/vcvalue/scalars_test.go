@@ -32,11 +32,27 @@ func TestInteger128Boundaries(t *testing.T) {
 }
 
 func TestDecimalExactness(t *testing.T) {
-	for _, text := range []string{"0", "-0.00", "1.50", "-79228162514264337593543950335", "0.0000000000000000000000000001"} {
+	for _, text := range []string{"0", "1.50", "-79228162514264337593543950335", "0.0000000000000000000000000001"} {
 		v, err := ParseDecimal(text)
 		if err != nil || v.String() != text {
 			t.Fatalf("%s: %v %s", text, err, v.String())
 		}
+	}
+	// A zero has no sign: the scale is kept and the sign is dropped (ADR 0001).
+	for _, text := range []string{"-0", "-0.00", "+0.0"} {
+		v, err := ParseDecimal(text)
+		if err != nil || v.Negative || !v.IsZero() {
+			t.Fatalf("%s: %v %#v", text, err, v)
+		}
+	}
+	if v, _ := ParseDecimal("-0.00"); v.String() != "0.00" {
+		t.Fatalf("negative zero prints as %s", v.String())
+	}
+	if n := (Decimal{Negative: true, Scale: 2}).Normalized(); n.Negative {
+		t.Fatal("Normalized kept the sign of a zero")
+	}
+	if n := (Decimal{Negative: true, Scale: 2, Coefficient: [12]byte{1}}).Normalized(); !n.Negative {
+		t.Fatal("Normalized dropped the sign of a nonzero")
 	}
 	for _, text := range []string{"NaN", "+nan", "-NaN", "inf", "+Infinity", "-Infinity"} {
 		if _, err := ParseDecimal(text); !errors.Is(err, ErrNonFiniteDecimal) {
@@ -66,14 +82,34 @@ func TestDatesAndTimestampBounds(t *testing.T) {
 			t.Fatalf("accepted %v", d)
 		}
 	}
-	for _, ts := range []Timestamp{{0, 0}, {-1, 999999999}, {59, 1123456789}, {-1, 1999999999}} {
+	for _, ts := range []Timestamp{{0, 0}, {-1, 999999999}, {59, 123456789}} {
 		if ts.Validate() != nil {
 			t.Fatalf("rejected %v", ts)
 		}
 	}
-	for _, ts := range []Timestamp{{0, 1000000000}, {59, 2000000000}, {time.Date(262143, 1, 1, 0, 0, 0, 0, time.UTC).Unix(), 0}, {1<<63 - 1, 0}} {
+	// A leap second has no count since the epoch and is refused (ADR 0001).
+	for _, ts := range []Timestamp{{0, 1000000000}, {59, 1123456789}, {59, 2000000000}, {time.Date(262143, 1, 1, 0, 0, 0, 0, time.UTC).Unix(), 0}, {1<<63 - 1, 0}} {
 		if ts.Validate() == nil {
 			t.Fatalf("accepted %v", ts)
+		}
+	}
+}
+
+func TestUUIDSpelling(t *testing.T) {
+	text := "123e4567-e89b-12d3-a456-426614174000"
+	u, err := ParseUUID(text)
+	if err != nil || u.String() != text {
+		t.Fatalf("%s: %v %s", text, err, u.String())
+	}
+	if u[0] != 0x12 || u[15] != 0x00 || u[4] != 0xe8 {
+		t.Fatalf("bytes %x", u[:])
+	}
+	if upper, err := ParseUUID("123E4567-E89B-12D3-A456-426614174000"); err != nil || upper != u {
+		t.Fatalf("upper case: %v", err)
+	}
+	for _, bad := range []string{"", "123e4567e89b12d3a456426614174000", "{123e4567-e89b-12d3-a456-426614174000}", "123e4567-e89b-12d3-a456-42661417400g", "123e4567-e89b-12d3-a456-4266141740000"} {
+		if _, err := ParseUUID(bad); !errors.Is(err, ErrInvalidUUID) {
+			t.Fatalf("accepted %q", bad)
 		}
 	}
 }

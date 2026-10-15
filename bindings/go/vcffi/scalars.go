@@ -52,6 +52,8 @@ func (e Encoder) TimestampParts(v vcvalue.Timestamp) {
 	e.scalar(tagTimestamp, b)
 }
 
+// Decimal records a finite decimal. A zero is written without a sign,
+// whatever the sign of the value given (ADR 0001).
 func (e Encoder) Decimal(v vcvalue.Decimal) {
 	if e.st.err != nil {
 		return
@@ -60,6 +62,7 @@ func (e Encoder) Decimal(v vcvalue.Decimal) {
 		e.st.fail(err)
 		return
 	}
+	v = v.Normalized()
 	flags := uint32(v.Scale) << 16
 	if v.Negative {
 		flags |= 0x80000000
@@ -67,6 +70,76 @@ func (e Encoder) Decimal(v vcvalue.Decimal) {
 	b := binary.LittleEndian.AppendUint32(nil, flags)
 	b = append(b, v.Coefficient[:]...)
 	e.scalar(tagDecimal, b)
+}
+
+// UUID records sixteen bytes under the Uuid logical type, in the 0xF3
+// envelope over a bytes scalar.
+func (e Encoder) UUID(u vcvalue.UUID) {
+	if e.st.err != nil {
+		return
+	}
+	e.push(tagEnvelope, logicalUUID, 0)
+	e.Bytes(u[:])
+}
+
+// Tagged records a physical scalar under a logical id this build does not
+// know, in the 0xF3 envelope: what Unmarshal produced for such a value, so
+// it goes back out unchanged. An id this build knows, or a value that is
+// not a physical scalar, is refused.
+func (e Encoder) Tagged(t vcvalue.Tagged) {
+	if e.st.err != nil {
+		return
+	}
+	if t.ID <= logicalLastKnown {
+		e.st.fail(vcvalue.ErrInvalidTagged)
+		return
+	}
+	e.push(tagEnvelope, t.ID, t.Param)
+	if !e.physical(t.V) {
+		e.st.fail(vcvalue.ErrInvalidTagged)
+	}
+}
+
+// physical writes v through its scalar channel, for the kinds the envelope
+// may carry, and reports whether v was one of them.
+func (e Encoder) physical(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		e.Null()
+	case bool:
+		e.Bool(x)
+	case int8:
+		e.Int8(x)
+	case uint8:
+		e.UInt8(x)
+	case int16:
+		e.Int16(x)
+	case uint16:
+		e.UInt16(x)
+	case int32:
+		e.Int32(x)
+	case uint32:
+		e.UInt32(x)
+	case int64:
+		e.Int64(x)
+	case uint64:
+		e.UInt64(x)
+	case vcvalue.Int128:
+		e.Int128(x)
+	case vcvalue.Uint128:
+		e.UInt128(x)
+	case float32:
+		e.Float32(x)
+	case float64:
+		e.Float64(x)
+	case string:
+		e.String(x)
+	case []byte:
+		e.Bytes(x)
+	default:
+		return false
+	}
+	return true
 }
 
 func decodeScalar(r *reader, tag byte) (any, error) {
@@ -94,12 +167,11 @@ func decodeScalar(r *reader, tag byte) (any, error) {
 		}
 		return d, nil
 	case tagTimestamp:
+		// A leap second (nanoseconds of one billion or more) has no count
+		// since the epoch and is refused by Validate (ADR 0001).
 		t := vcvalue.Timestamp{Seconds: int64(binary.LittleEndian.Uint64(b)), Nanoseconds: binary.LittleEndian.Uint32(b[8:])}
 		if t.Validate() != nil {
 			return nil, ErrMalformed
-		}
-		if t.Nanoseconds >= 1000000000 {
-			return t, nil
 		}
 		return time.Unix(t.Seconds, int64(t.Nanoseconds)).UTC(), nil
 	case tagDecimal:
@@ -112,7 +184,8 @@ func decodeScalar(r *reader, tag byte) (any, error) {
 		if d.Validate() != nil {
 			return nil, ErrMalformed
 		}
-		return d, nil
+		// A negative zero reads as zero, with its scale kept (ADR 0001).
+		return d.Normalized(), nil
 	default:
 		return nil, ErrMalformed
 	}

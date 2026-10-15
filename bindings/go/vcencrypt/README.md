@@ -269,5 +269,5 @@ source first, so it always compares Go with the Rust on the same commit.
   plaintext values) cannot be reliably wiped from Go.
 - The transport encoding is transport-only, and lives in the shared sibling
   module [`vcffi`](../vcffi). The only frozen byte format is the sealed leaf
-  (`[tag] ++ payload`, see the Rust crate `vitaminc-aead`'s leaf codec); durable database interop
+  (`[tag] ++ payload`, see `vitaminc-aead`'s tag table); durable database interop
   belongs to a schema-aware layer, which this module knows nothing about.

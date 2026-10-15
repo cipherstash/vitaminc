@@ -61,7 +61,6 @@ sealed:
 | value             | meaning                                                              |
 | ----------------- | -------------------------------------------------------------------- |
 | `Sealed`          | one encrypted leaf: `version(1) \|\| nonce \|\| ciphertext \|\| tag` |
-| `SealedNone`      | the authenticated absent marker                                      |
 | `SealedEmptySeq`  | the authenticated marker for an empty sequence                       |
 | `SealedEmptyMap`  | the authenticated marker for an empty map                            |
 | `Plain{V: ...}`   | a passthrough field, readable without the key                        |
@@ -106,11 +105,18 @@ inputs return `ErrIntegerRange`.
 `Date{Year, Month, Day}` is a Gregorian calendar date in chrono's range
 (-262143 through 262142). `time.Time` maps to Timestamp with nanoseconds and
 decodes in UTC; timezone/location and monotonic metadata are not retained.
-`Timestamp{Seconds, Nanoseconds}` retains chrono leap seconds that time.Time
-cannot represent. Invalid calendar/timestamp inputs return `ErrInvalidDate`
-or `ErrInvalidTimestamp`.
+`Timestamp{Seconds, Nanoseconds}` encodes an instant from its parts. A leap
+second has no count since the epoch and is refused everywhere in the model
+(ADR 0001). Invalid calendar/timestamp inputs return `ErrInvalidDate` or
+`ErrInvalidTimestamp`.
+
+`UUID` is sixteen bytes under the Uuid logical type, spelled as hyphenated
+hexadecimal by `ParseUUID` and `String`. `Tagged{ID, Param, V}` carries a
+physical scalar under a logical id this build does not know, so a value
+from a newer client is read and re-encoded unchanged rather than dropped.
 
 `ParseDecimal("1.50")` constructs a finite 96-bit coefficient with scale 0–28,
-retaining trailing zeroes and signed zero. Exponents and rounding are not
+retaining trailing zeroes. A zero has no sign: `-0.00` is `0.00` with its
+scale kept (ADR 0001). Exponents and rounding are not
 accepted. NaN and infinities return `ErrNonFiniteDecimal`; malformed or
 out-of-range text returns `ErrInvalidDecimal`. Match these with `errors.Is`.

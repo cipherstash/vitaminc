@@ -40,6 +40,33 @@ const (
 	// tagPassthrough wraps one value node that travels in the clear
 	// (unencrypted, unauthenticated). Transport-local, like array/object.
 	tagPassthrough = 0xF2
+	// tagEnvelope carries a logical type with no shorthand tag over a
+	// physical scalar: id, parameter, then the scalar (ADR 0001). 0xF4 is
+	// reserved for a longer envelope and is refused.
+	tagEnvelope = 0xF3
+)
+
+// Logical type ids, as the envelope spells them. Undefined, Date, Decimal
+// and nanosecond Timestamp have shorthand tags of their own, so the
+// envelope never carries them: there is one encoding per value.
+const (
+	logicalUndefined = 1
+	logicalDate      = 2
+	logicalTimestamp = 3
+	logicalDecimal   = 4
+	logicalUUID      = 5
+	// logicalLastKnown is the highest id this build knows. Any id above it
+	// is read and re-encoded unchanged as a vcvalue.Tagged.
+	logicalLastKnown = logicalUUID
+)
+
+// Timestamp units, as the envelope's parameter spells them. Nanoseconds is
+// the shorthand Timestamp tag, so only the coarser units use the envelope.
+const (
+	unitSeconds = 0
+	unitMillis  = 1
+	unitMicros  = 2
+	unitNanos   = 3
 )
 
 // maxUint32 bounds every length/count written or read (all are u32 LE).

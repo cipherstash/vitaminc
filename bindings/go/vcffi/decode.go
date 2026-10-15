@@ -3,6 +3,8 @@ package vcffi
 import (
 	"encoding/binary"
 	"math"
+	"math/big"
+	"time"
 
 	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 )
@@ -21,7 +23,10 @@ import (
 //   - Bytes              → []byte;
 //   - Array              → []any;
 //   - vcvalue.Object             → vcvalue.Object (ordered []Field);
-//   - Passthrough        → vcvalue.Plain{V: <decoded value>} (the clear-field marker).
+//   - Passthrough        → vcvalue.Plain{V: <decoded value>} (the clear-field marker);
+//   - the 0xF3 envelope  → time.Time for a timestamp in seconds, milliseconds
+//     or microseconds, vcvalue.UUID for a UUID, and vcvalue.Tagged for a
+//     logical id this build does not know, which re-encodes unchanged.
 //
 // Go maps exactly in both directions — the 32-bit tags decode to int32 /
 // uint32 / float32, not widened to 64-bit. JavaScript decodes integer tags
@@ -49,6 +54,11 @@ func decodeValue(r *reader, depth int) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return decodeTagged(r, tag, depth)
+}
+
+// decodeTagged decodes the node whose tag has just been read.
+func decodeTagged(r *reader, tag byte, depth int) (any, error) {
 	switch tag {
 	case tagInt8, tagUint8, tagInt16, tagUint16, tagInt128, tagUint128, tagDate, tagTimestamp, tagDecimal:
 		return decodeScalar(r, tag)
@@ -157,7 +167,123 @@ func decodeValue(r *reader, depth int) (any, error) {
 			return nil, err
 		}
 		return vcvalue.Plain{V: inner}, nil
+	case tagEnvelope:
+		return decodeEnvelope(r)
 	default:
 		return nil, ErrMalformed
 	}
+}
+
+// physicalTag reports whether tag is a physical scalar: one the envelope
+// may carry. The logical shorthand tags (Undefined, Date, Timestamp,
+// Decimal) and the containers are not.
+func physicalTag(tag byte) bool {
+	switch tag {
+	case tagNull, tagFalse, tagTrue, tagInt32, tagInt64, tagUint32, tagUint64, tagFloat32, tagFloat64,
+		tagString, tagBytes, tagInt8, tagUint8, tagInt16, tagUint16, tagInt128, tagUint128:
+		return true
+	}
+	return false
+}
+
+// decodeEnvelope reads the 0xF3 envelope after its tag: a logical id, a
+// parameter, and a physical scalar. There is one encoding per value, so an
+// envelope over a type with a shorthand tag, an id of zero, or a known id
+// with a parameter it cannot take is malformed (ADR 0001 section 3).
+func decodeEnvelope(r *reader) (any, error) {
+	id, err := r.byteTag()
+	if err != nil {
+		return nil, err
+	}
+	param, err := r.byteTag()
+	if err != nil {
+		return nil, err
+	}
+	tag, err := r.byteTag()
+	if err != nil {
+		return nil, err
+	}
+	if !physicalTag(tag) {
+		return nil, ErrMalformed
+	}
+	physical, err := decodeTagged(r, tag, maxDepth)
+	if err != nil {
+		return nil, err
+	}
+	switch id {
+	case 0, logicalUndefined, logicalDate, logicalDecimal:
+		return nil, ErrMalformed
+	case logicalTimestamp:
+		return envelopeTimestamp(param, physical)
+	case logicalUUID:
+		b, ok := physical.([]byte)
+		if param != 0 || !ok || len(b) != 16 {
+			return nil, ErrMalformed
+		}
+		var u vcvalue.UUID
+		copy(u[:], b)
+		return u, nil
+	default:
+		return vcvalue.Tagged{ID: id, Param: param, V: physical}, nil
+	}
+}
+
+// envelopeTimestamp is a count of seconds, milliseconds or microseconds
+// since the epoch as a time.Time, in chrono's range. The nanosecond unit has
+// the shorthand Timestamp tag and is refused in the envelope.
+func envelopeTimestamp(unit byte, physical any) (any, error) {
+	var per int64
+	switch unit {
+	case unitSeconds:
+		per = 1_000_000_000
+	case unitMillis:
+		per = 1_000_000
+	case unitMicros:
+		per = 1_000
+	default:
+		return nil, ErrMalformed
+	}
+	count, ok := integerOf(physical)
+	if !ok {
+		return nil, ErrMalformed
+	}
+	nanos := new(big.Int).Mul(count, big.NewInt(per))
+	seconds, sub := new(big.Int).DivMod(nanos, big.NewInt(1_000_000_000), new(big.Int))
+	if !seconds.IsInt64() {
+		return nil, ErrMalformed
+	}
+	t := vcvalue.Timestamp{Seconds: seconds.Int64(), Nanoseconds: uint32(sub.Int64())}
+	if t.Validate() != nil {
+		return nil, ErrMalformed
+	}
+	return time.Unix(t.Seconds, int64(t.Nanoseconds)).UTC(), nil
+}
+
+// integerOf is the value of a decoded int of any width.
+func integerOf(v any) (*big.Int, bool) {
+	switch x := v.(type) {
+	case int8:
+		return big.NewInt(int64(x)), true
+	case int16:
+		return big.NewInt(int64(x)), true
+	case int32:
+		return big.NewInt(int64(x)), true
+	case int64:
+		return big.NewInt(x), true
+	case uint8:
+		return new(big.Int).SetUint64(uint64(x)), true
+	case uint16:
+		return new(big.Int).SetUint64(uint64(x)), true
+	case uint32:
+		return new(big.Int).SetUint64(uint64(x)), true
+	case uint64:
+		return new(big.Int).SetUint64(x), true
+	case vcvalue.Int128:
+		value, ok := new(big.Int).SetString(x.String(), 10)
+		return value, ok
+	case vcvalue.Uint128:
+		value, ok := new(big.Int).SetString(x.String(), 10)
+		return value, ok
+	}
+	return nil, false
 }

@@ -3,7 +3,6 @@ package vcencrypt_test
 import (
 	"encoding/hex"
 	"encoding/json"
-	"github.com/cipherstash/vitaminc/bindings/go/vcencrypt"
 	"github.com/cipherstash/vitaminc/bindings/go/vcffi"
 	"os"
 	"testing"
@@ -33,9 +32,6 @@ func TestScalarCorpusThroughWasm(t *testing.T) {
 			value, err := vcffi.Unmarshal(raw)
 			if err != nil {
 				t.Fatal(err)
-			}
-			if vcencrypt.PendingADR0001(value) {
-				t.Skip("vcffi and the guest read this scalar differently until #444")
 			}
 			sealed, err := cipher.Encrypt(t.Context(), value, []byte("shared-corpus"))
 			if err != nil {

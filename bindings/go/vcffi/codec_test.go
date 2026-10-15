@@ -285,7 +285,7 @@ func TestCipherTextPassthroughTransportRoundTrip(t *testing.T) {
 func TestCipherTextTransportRoundTrip(t *testing.T) {
 	ct := map[string]any{
 		"a": vcvalue.Sealed{9, 9, 9},
-		"b": []any{vcvalue.Sealed{1}, vcvalue.SealedNone{2}},
+		"b": []any{vcvalue.Sealed{1}, vcvalue.SealedEmptySeq{2}},
 	}
 	buf, err := MarshalCipherText(VCValueLeaves(), ct)
 	if err != nil {
@@ -948,7 +948,6 @@ func TestCipherTextRoundTripsAllLeafKinds(t *testing.T) {
 	// empty-seq belongs) fails here rather than at some later decrypt.
 	ct := map[string]any{
 		"single":   vcvalue.Sealed{9, 9, 9},
-		"none":     vcvalue.SealedNone{2},
 		"emptySeq": vcvalue.SealedEmptySeq{7},
 		"emptyMap": vcvalue.SealedEmptyMap{8},
 	}

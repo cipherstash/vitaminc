@@ -8,41 +8,45 @@ const path = require('node:path');
 const addon = require(path.resolve(process.argv[2]));
 const corpus = JSON.parse(fs.readFileSync(path.join(__dirname, '../../../testdata/value-conformance.json')));
 const { VcDate, VcTimestamp, VcDecimal, VcUuid } = addon;
-function expected(row) {
-  if (/^(u?int)/.test(row.kind)) return BigInt(row.value);
+function expected(row, value = row.value) {
+  if (/^(u?int)/.test(row.kind)) return BigInt(value);
   switch (row.kind) {
     case 'undefined': return undefined;
-    case 'bytes': return Buffer.from(row.value, 'hex');
-    case 'date': return new VcDate(row.value);
-    case 'decimal': return new VcDecimal(row.value);
-    case 'timestamp': return row.js_date ? new Date(row.value) : new VcTimestamp(row.value);
-    default: return row.value;
+    case 'bytes': return Buffer.from(value, 'hex');
+    case 'date': return new VcDate(value);
+    case 'decimal': return new VcDecimal(value);
+    case 'timestamp': return row.js_date ? new Date(value) : new VcTimestamp(value);
+    case 'uuid': return new VcUuid(value);
+    default: return value;
   }
 }
 let checked = 0;
 for (const row of corpus.vectors) {
   const wire = Buffer.from(row.transport, 'hex');
-  if (row.frame === 'refused') {
-    // ADR 0001 section 3 refuses this encoding; #414 moves it to `malformed`.
-    assert.throws(() => addon.codecRoundTrip(wire), undefined, row.name);
-    assert.throws(() => addon.decode(wire), undefined, row.name);
+  assert.equal(addon.codecRoundTrip(wire).toString('hex'), row.transport, row.name);
+  if (row.js === 'refused') {
+    // A logical type this binding does not know has no JavaScript value.
+    assert.throws(() => addon.decode(wire), /not known to this binding/, row.name);
     continue;
   }
-  const reencoded = row.frame_reencode ?? row.transport;
-  assert.equal(addon.codecRoundTrip(wire).toString('hex'), reencoded, row.name);
   const value = addon.decode(wire);
-  if (row.frame_reencode) {
-    // The frame codec reads this vector as a different value (ADR 0001
-    // section 3); #414 pins what that value is. Until then only the bytes.
-    assert.equal(addon.encode(value).toString('hex'), reencoded, row.name);
-    continue;
-  }
   assert.deepEqual(value, expected(row), row.name);
   // Encode the decoded value and, independently, the expected one.
   for (const input of [value, expected(row)]) {
     assert.equal(addon.encode(input).toString('hex'), row.js_reencode ?? row.transport, row.name);
   }
   checked++;
+}
+// A normalized vector reads, and writes back as its canonical bytes, from
+// the decoded value and from either spelling.
+for (const row of corpus.normalized) {
+  const wire = Buffer.from(row.transport, 'hex');
+  assert.equal(addon.codecRoundTrip(wire).toString('hex'), row.reencode, row.name);
+  const value = addon.decode(wire);
+  assert.deepEqual(value, expected(row, row.reencode_value), row.name);
+  for (const input of [value, expected(row), expected(row, row.reencode_value)]) {
+    assert.equal(addon.encode(input).toString('hex'), row.reencode, row.name);
+  }
 }
 for (const row of corpus.malformed) assert.throws(() => addon.decode(Buffer.from(row.transport, 'hex')), undefined, row.name);
 const boundaries = [

@@ -37,12 +37,10 @@ import (
 // or marshal where the other belongs.
 
 // Ciphertext node tags in the transport encoding (mirrors the Rust codec).
-// ctNone is the absence marker ADR 0001 retires: the Rust codec no longer
-// writes it and refuses it on read, and #414 removes it here with the
-// SealedNone leaf it carries.
+// 0x02 was the absent marker, retired by ADR 0001 (a None is a null leaf):
+// never written, and refused when read like any unknown tag.
 const (
 	ctSingle      byte = 0x01
-	ctNone        byte = 0x02
 	ctSeq         byte = 0x03
 	ctMap         byte = 0x04
 	ctPassthrough byte = 0x05
@@ -50,7 +48,7 @@ const (
 	ctEmptyMap    byte = 0x07
 )
 
-// LeafKind names the four sealed-leaf node kinds of the ciphertext framing.
+// LeafKind names the three sealed-leaf node kinds of the ciphertext framing.
 // The stored bytes do not record the kind — it is authenticated through
 // domain-separated AAD — so the framing carries it on the wire.
 type LeafKind byte
@@ -58,8 +56,6 @@ type LeafKind byte
 const (
 	// LeafSingle is one encrypted value.
 	LeafSingle LeafKind = iota
-	// LeafNone is the authenticated absent marker.
-	LeafNone
 	// LeafEmptySeq is the authenticated marker for an empty sequence.
 	LeafEmptySeq
 	// LeafEmptyMap is the authenticated marker for an empty map.
@@ -89,7 +85,7 @@ type LeafSet struct {
 }
 
 // VCValueLeaves returns the [LeafSet] of the vcvalue model: vcvalue.Sealed,
-// vcvalue.SealedNone, vcvalue.SealedEmptySeq and vcvalue.SealedEmptyMap.
+// vcvalue.SealedEmptySeq and vcvalue.SealedEmptyMap.
 // These are the leaf types the vitaminc-encrypt binding materializes; other
 // bindings define their own set so their leaves stay a distinct Go type. A
 // function rather than an exported var, so no importer can reassign the set
@@ -103,8 +99,6 @@ var vcValueLeaves = LeafSet{
 		switch n := v.(type) {
 		case vcvalue.Sealed:
 			return LeafSingle, n, true
-		case vcvalue.SealedNone:
-			return LeafNone, n, true
 		case vcvalue.SealedEmptySeq:
 			return LeafEmptySeq, n, true
 		case vcvalue.SealedEmptyMap:
@@ -117,15 +111,13 @@ var vcValueLeaves = LeafSet{
 		switch kind {
 		case LeafSingle:
 			return vcvalue.Sealed(bytes)
-		case LeafNone:
-			return vcvalue.SealedNone(bytes)
 		case LeafEmptySeq:
 			return vcvalue.SealedEmptySeq(bytes)
 		case LeafEmptyMap:
 			return vcvalue.SealedEmptyMap(bytes)
 		default:
 			// An unlisted kind is rejected (nil), mirroring leafTag on the
-			// encode side — a future fifth kind must not silently mint Sealed.
+			// encode side — a future fourth kind must not silently mint Sealed.
 			return nil
 		}
 	},
@@ -150,7 +142,6 @@ func (l LeafSet) check() error {
 // round-trip inside Go under a tag the Rust codec has never heard of.
 var leafTags = [...]byte{
 	LeafSingle:   ctSingle,
-	LeafNone:     ctNone,
 	LeafEmptySeq: ctEmptySeq,
 	LeafEmptyMap: ctEmptyMap,
 }

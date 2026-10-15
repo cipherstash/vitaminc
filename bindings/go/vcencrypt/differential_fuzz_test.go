@@ -7,8 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"os"
-	"slices"
 	"testing"
 
 	"github.com/cipherstash/vitaminc/bindings/go/vcffi"
@@ -100,41 +100,48 @@ func corpusTransports(f *testing.F) [][]byte {
 	return out
 }
 
-// requireGoMatchesRust fails unless goOut is rustOut with exactly its
-// Undefined value-node tags (0x01) turned into Null (0x00): Go projects
-// Undefined to nil by design. Every other byte, including a 0x01 inside a
-// payload, must match.
+// requireGoMatchesRust fails unless goOut is rustOut with exactly Go's
+// documented projections applied: an Undefined value-node tag (0x01) turned
+// into Null (0x00), and a timestamp in the 0xF3 envelope (seconds,
+// milliseconds or microseconds) written in the shorthand nanosecond form,
+// because Go reads it as a time.Time. Every other byte, including a 0x01
+// inside a payload, must match.
 func requireGoMatchesRust(t *testing.T, data, rustOut, goOut []byte) {
 	t.Helper()
-	want := bytes.Clone(rustOut)
-	for _, at := range undefinedTags(rustOut) {
-		want[at] = 0x00
-	}
+	want := rewrite(rustOut, true)
 	if !bytes.Equal(goOut, want) {
 		t.Fatalf("input %x: Rust re-encodes as %x, Go as %x, want %x", data, rustOut, goOut, want)
 	}
 }
 
-// undefinedTags returns the offset of every Undefined value-node tag in an
-// accepted value tree, nested ones included. vcffi's fuzz tests have the same
-// walker, but this is a separate Go module and cannot import test code. It
-// follows the transport format independently of either decoder, so a walk
-// that falls out of step reports the wrong offsets and fails the comparison
-// rather than passing it.
-func undefinedTags(data []byte) []int {
+// rustCanonical is what Rust re-encodes an accepted value as: the input,
+// with a decimal negative zero read back as zero (ADR 0001). Rust keeps
+// Undefined and envelope timestamps as they are.
+func rustCanonical(data []byte) []byte {
+	return rewrite(data, false)
+}
+
+// rewrite walks an accepted value tree following the transport format
+// independently of either decoder, so a walk that falls out of step with it
+// produces the wrong bytes and fails the comparison rather than passing. It
+// always normalizes a decimal negative zero; with goProjection it also
+// applies Go's two projections. vcffi's fuzz tests have the same walker, but
+// this is a separate Go module and cannot import test code.
+func rewrite(data []byte, goProjection bool) []byte {
 	pos := 0
-	var at []int
-	take := func(n int) {
-		pos = min(pos+n, len(data))
+	var out []byte
+	take := func(n int) []byte {
+		end := min(pos+n, len(data))
+		b := data[pos:end]
+		pos = end
+		return b
 	}
-	count := func() int {
-		if len(data)-pos < 4 {
-			pos = len(data)
-			return 0
+	count := func() (int, []byte) {
+		b := take(4)
+		if len(b) < 4 {
+			return 0, b
 		}
-		n := int(binary.LittleEndian.Uint32(data[pos:]))
-		pos += 4
-		return n
+		return int(binary.LittleEndian.Uint32(b)), b
 	}
 	var walk func()
 	walk = func() {
@@ -145,37 +152,103 @@ func undefinedTags(data []byte) []int {
 		pos++
 		switch tag {
 		case 0x01: // Undefined
-			at = append(at, pos-1)
+			if goProjection {
+				out = append(out, 0x00)
+			} else {
+				out = append(out, tag)
+			}
+		case 0x02, 0x03, 0x00: // booleans, Null
+			out = append(out, tag)
 		case 0x0C, 0x0D: // Int8, UInt8
-			take(1)
+			out = append(append(out, tag), take(1)...)
 		case 0x0E, 0x0F: // Int16, UInt16
-			take(2)
+			out = append(append(out, tag), take(2)...)
 		case 0x04, 0x06, 0x08, 0x12: // Int32, UInt32, Float32, Date
-			take(4)
+			out = append(append(out, tag), take(4)...)
 		case 0x05, 0x07, 0x09: // Int64, UInt64, Float64
-			take(8)
+			out = append(append(out, tag), take(8)...)
 		case 0x13: // Timestamp
-			take(12)
-		case 0x10, 0x11, 0x14: // Int128, UInt128, Decimal
-			take(16)
+			out = append(append(out, tag), take(12)...)
+		case 0x10, 0x11: // Int128, UInt128
+			out = append(append(out, tag), take(16)...)
+		case 0x14: // Decimal: a set sign over a zero coefficient is a negative zero
+			b := bytes.Clone(take(16))
+			if len(b) == 16 && bytes.Equal(b[4:], make([]byte, 12)) {
+				b[3] &^= 0x80
+			}
+			out = append(append(out, tag), b...)
 		case 0x0A, 0x0B: // String, Bytes
-			take(count())
+			n, prefix := count()
+			out = append(append(append(out, tag), prefix...), take(n)...)
 		case 0xF0: // Array
-			for range count() {
+			n, prefix := count()
+			out = append(append(out, tag), prefix...)
+			for range n {
 				walk()
 			}
 		case 0xF1: // Object
-			for range count() {
-				take(count())
+			n, prefix := count()
+			out = append(append(out, tag), prefix...)
+			for range n {
+				k, keyPrefix := count()
+				out = append(append(out, keyPrefix...), take(k)...)
 				walk()
 			}
 		case 0xF2: // Passthrough
+			out = append(out, tag)
 			walk()
+		case 0xF3: // the envelope: id, parameter, then a physical scalar
+			header := take(2)
+			if goProjection && len(header) == 2 && header[0] == 3 && header[1] <= 2 {
+				if shorthand, ok := shorthandTimestamp(data, &pos, header[1]); ok {
+					out = append(out, shorthand...)
+					return
+				}
+			}
+			out = append(append(out, tag), header...)
+			walk()
+		default:
+			out = append(out, tag)
+			pos = len(data)
 		}
-		// Null, False and True have no payload.
 	}
 	walk()
-	return at
+	return out
+}
+
+// shorthandTimestamp reads the int the envelope carries at *pos and writes
+// the instant as the shorthand Timestamp tag: i64 seconds then u32
+// nanoseconds.
+func shorthandTimestamp(data []byte, pos *int, unit byte) ([]byte, bool) {
+	if *pos >= len(data) {
+		return nil, false
+	}
+	tag := data[*pos]
+	widths := map[byte]int{0x0C: 1, 0x0D: 1, 0x0E: 2, 0x0F: 2, 0x04: 4, 0x06: 4, 0x05: 8, 0x07: 8, 0x10: 16, 0x11: 16}
+	width, ok := widths[tag]
+	if !ok || *pos+1+width > len(data) {
+		return nil, false
+	}
+	b := data[*pos+1 : *pos+1+width]
+	*pos += 1 + width
+	be := make([]byte, width)
+	for i, x := range b {
+		be[width-1-i] = x
+	}
+	count := new(big.Int).SetBytes(be)
+	signed := tag == 0x0C || tag == 0x0E || tag == 0x04 || tag == 0x05 || tag == 0x10
+	if signed && b[width-1]&0x80 != 0 {
+		count.Sub(count, new(big.Int).Lsh(big.NewInt(1), uint(8*width)))
+	}
+	per := []int64{1_000_000_000, 1_000_000, 1_000}[unit]
+	nanos := new(big.Int).Mul(count, big.NewInt(per))
+	seconds, sub := new(big.Int).DivMod(nanos, big.NewInt(1_000_000_000), new(big.Int))
+	if !seconds.IsInt64() {
+		return nil, false
+	}
+	out := []byte{0x13}
+	out = binary.LittleEndian.AppendUint64(out, uint64(seconds.Int64()))
+	return binary.LittleEndian.AppendUint32(out, uint32(sub.Int64())), true
 }
 
 func FuzzDifferentialValue(f *testing.F) {
@@ -191,9 +264,6 @@ func FuzzDifferentialValue(f *testing.F) {
 			return
 		}
 		goValue, goErr := vcffi.Unmarshal(data)
-		if goErr == nil && PendingADR0001(goValue) {
-			return // a known gap, stated on the helper
-		}
 		rustOK, err := rustAccepts(client, client.encrypt, data)
 		if err != nil {
 			t.Fatalf("input %x: guest decode failed abnormally: %v", data, err)
@@ -225,8 +295,9 @@ func FuzzDifferentialValue(f *testing.F) {
 		if err != nil {
 			t.Fatalf("input %x: guest re-encode failed: %v", data, err)
 		}
-		// Rust has no Undefined projection, so its re-encoding is exact.
-		if !bytes.Equal(rustOut, append([]byte{0xF2}, data...)) {
+		// Rust has no Undefined projection, so its re-encoding is the input
+		// with only a decimal negative zero normalized.
+		if !bytes.Equal(rustOut, append([]byte{0xF2}, rustCanonical(data)...)) {
 			t.Fatalf("input %x: Rust re-encodes the passthrough as %x", data, rustOut)
 		}
 		rustOut = rustOut[1:]
@@ -254,10 +325,7 @@ func FuzzDifferentialCipherText(f *testing.F) {
 		if len(data) > maxDifferentialInput {
 			return
 		}
-		goTree, goErr := vcffi.UnmarshalCipherText(vcffi.VCValueLeaves(), data)
-		if goErr == nil && PendingADR0001(goTree) {
-			return // a known gap, stated on the helper
-		}
+		_, goErr := vcffi.UnmarshalCipherText(vcffi.VCValueLeaves(), data)
 		rustOK, err := rustAccepts(client, client.decrypt, data)
 		if err != nil {
 			t.Fatalf("input %x: guest decode failed abnormally: %v", data, err)
@@ -333,24 +401,38 @@ func BenchmarkDifferential(b *testing.B) {
 	})
 }
 
-// The walker decides which bytes may differ, so pin that it finds nested
-// Undefined tags and nothing else.
-func TestUndefinedTags(t *testing.T) {
+// The walker decides which bytes may differ, so pin that it rewrites
+// nested Undefined tags, negative-zero signs and envelope timestamps, and
+// nothing else, under each projection.
+func TestRewrite(t *testing.T) {
+	negativeZero := []byte{0x14, 0, 0, 2, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	zero := []byte{0x14, 0, 0, 2, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	millis := []byte{0xF3, 3, 1, 0x05, 0x7b, 0, 0, 0, 0, 0, 0, 0}
+	nanos := []byte{0x13, 0, 0, 0, 0, 0, 0, 0, 0, 0xc0, 0xd4, 0x54, 0x07}
+	cat := func(parts ...[]byte) []byte { return bytes.Join(parts, nil) }
 	for _, tc := range []struct {
-		name string
-		data []byte
-		want []int
+		name       string
+		data, rust []byte
+		goOut      []byte
 	}{
-		{"bare", []byte{0x01}, []int{0}},
-		{"int32 payload of 1", []byte{0x04, 1, 0, 0, 0}, nil},
-		{"bytes payload of 0x01", []byte{0x0B, 1, 0, 0, 0, 0x01}, nil},
-		{"array", []byte{0xF0, 2, 0, 0, 0, 0x0B, 1, 0, 0, 0, 0x01, 0x01}, []int{11}},
-		{"object key of 0x01", []byte{0xF1, 1, 0, 0, 0, 1, 0, 0, 0, 0x01, 0x01}, []int{10}},
-		{"passthrough", []byte{0xF2, 0x01}, []int{1}},
-		{"extended scalars", []byte{0xF0, 3, 0, 0, 0, 0x0D, 0x01, 0x13, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0x01}, []int{20}},
+		{"bare undefined", []byte{0x01}, []byte{0x01}, []byte{0x00}},
+		{"int32 payload of 1", []byte{0x04, 1, 0, 0, 0}, []byte{0x04, 1, 0, 0, 0}, []byte{0x04, 1, 0, 0, 0}},
+		{"bytes payload of 0x01", []byte{0x0B, 1, 0, 0, 0, 0x01}, []byte{0x0B, 1, 0, 0, 0, 0x01}, []byte{0x0B, 1, 0, 0, 0, 0x01}},
+		{"array", []byte{0xF0, 2, 0, 0, 0, 0x0B, 1, 0, 0, 0, 0x01, 0x01}, []byte{0xF0, 2, 0, 0, 0, 0x0B, 1, 0, 0, 0, 0x01, 0x01}, []byte{0xF0, 2, 0, 0, 0, 0x0B, 1, 0, 0, 0, 0x01, 0x00}},
+		{"object key of 0x01", []byte{0xF1, 1, 0, 0, 0, 1, 0, 0, 0, 0x01, 0x01}, []byte{0xF1, 1, 0, 0, 0, 1, 0, 0, 0, 0x01, 0x01}, []byte{0xF1, 1, 0, 0, 0, 1, 0, 0, 0, 0x01, 0x00}},
+		{"passthrough", []byte{0xF2, 0x01}, []byte{0xF2, 0x01}, []byte{0xF2, 0x00}},
+		{"extended scalars", []byte{0xF0, 3, 0, 0, 0, 0x0D, 0x01, 0x13, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0x01}, []byte{0xF0, 3, 0, 0, 0, 0x0D, 0x01, 0x13, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0x01}, []byte{0xF0, 3, 0, 0, 0, 0x0D, 0x01, 0x13, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0x00}},
+		{"negative zero", negativeZero, zero, zero},
+		{"negative zero in an array", cat([]byte{0xF0, 1, 0, 0, 0}, negativeZero), cat([]byte{0xF0, 1, 0, 0, 0}, zero), cat([]byte{0xF0, 1, 0, 0, 0}, zero)},
+		{"unknown envelope", []byte{0xF3, 200, 9, 0x06, 34, 0, 0, 0}, []byte{0xF3, 200, 9, 0x06, 34, 0, 0, 0}, []byte{0xF3, 200, 9, 0x06, 34, 0, 0, 0}},
+		{"millisecond envelope", millis, millis, nanos},
+		{"second envelope over an i8", []byte{0xF3, 3, 0, 0x0C, 10}, []byte{0xF3, 3, 0, 0x0C, 10}, []byte{0x13, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
 	} {
-		if got := undefinedTags(tc.data); !slices.Equal(got, tc.want) {
-			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		if got := rustCanonical(tc.data); !bytes.Equal(got, tc.rust) {
+			t.Errorf("%s: Rust canonical %x, want %x", tc.name, got, tc.rust)
+		}
+		if got := rewrite(tc.rust, true); !bytes.Equal(got, tc.goOut) {
+			t.Errorf("%s: Go projection %x, want %x", tc.name, got, tc.goOut)
 		}
 	}
 }

@@ -517,6 +517,12 @@ func interceptMarkers(enc Encoder, v any) bool {
 	case vcvalue.Decimal:
 		enc.Decimal(x)
 		return true
+	case vcvalue.UUID:
+		enc.UUID(x)
+		return true
+	case vcvalue.Tagged:
+		enc.Tagged(x)
+		return true
 	case vcvalue.Plain:
 		encodeAny(enc.Passthrough(), x.V)
 		return true
