@@ -15,16 +15,12 @@ on:
   # No branch filter: a stacked PR (a feature branch as base) must run this
   # gate too. With `branches: [main]` here, retargeting a PR onto its
   # parent branch silently switched every Rust gate off; see go.yml.
+  #
+  # No path filter either: this check is required by the `main` ruleset, and
+  # a required check that never reports leaves the PR at "Expected" forever.
+  # A docs-only PR therefore runs the job too; a coverage run costs a few
+  # minutes and the gate passes on unchanged code.
   pull_request:
-    paths:
-      - "packages/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".cargo-crap.toml"
-      - ".github/workflows/crap.yml"
-      # Negative patterns must stay last: keep the matches above but ignore
-      # pure-docs changes so a README-only PR doesn't run coverage.
-      - "!**.md"
 
   workflow_dispatch:
 
