@@ -2648,6 +2648,7 @@ dependencies = [
  "vitaminc-encrypt",
  "vitaminc-hmac",
  "vitaminc-kms",
+ "vitaminc-normalize",
  "vitaminc-permutation",
  "vitaminc-prf",
  "vitaminc-protected",
@@ -2785,6 +2786,24 @@ dependencies = [
  "vitaminc-protected",
  "vitaminc-traits",
  "zeroize",
+]
+
+[[package]]
+name = "vitaminc-normalize"
+version = "0.5.1"
+dependencies = [
+ "chrono",
+ "futures-executor",
+ "orderable-bytes",
+ "quickcheck",
+ "quickcheck_macros",
+ "rust_decimal",
+ "unicode-general-category",
+ "unicode-normalization",
+ "uuid",
+ "vitaminc-aead",
+ "vitaminc-aead-value",
+ "vitaminc-protected",
 ]
 
 [[package]]

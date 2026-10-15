@@ -13,6 +13,7 @@ members = [
     "packages/derive-tests/umbrella-only",
     "packages/encrypt",
     "packages/kms",
+    "packages/normalize",
     "packages/protected",
     "packages/protected-derive",
     "packages/password",
