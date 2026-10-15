@@ -69,8 +69,16 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-mutants-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: setup rust stable
+      - name: setup rust
+        # Pinned to the same release as test.yml and crap.yml, not `@stable`:
+        # the unmutated baseline runs the whole workspace's tests, including
+        # the trybuild cases whose .stderr snapshots record one compiler's
+        # wording. On an unpinned stable a release that rewords a diagnostic
+        # fails the baseline here, so every PR's mutants gate goes red while
+        # test.yml stays green. Bump all three files together.
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
 
       - uses: actions/setup-node@v6
         with:
