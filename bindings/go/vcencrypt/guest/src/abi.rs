@@ -337,6 +337,11 @@ fn context(aad: &[u8], as_element: bool) -> Context<'_> {
 /// contains plaintext — the host must copy it out and immediately release
 /// it with [`vc_dealloc`] (which wipes it).
 ///
+/// Leaves at wire version 1 open as well as current ones: every version 1
+/// leaf this binding sees was sealed by the tagged pre-ADR 0001 `Value`
+/// path, so it reads as the value it held (see
+/// `Aes256Cipher::opening_version_1`).
+///
 /// # Safety
 ///
 /// As for [`vc_encrypt`].
@@ -394,8 +399,8 @@ fn decrypt(handle: u32, aad: &[u8], ct: &[u8], as_element: bool) -> Result<Vec<u
     // differential fuzz targets, as in `encrypt`.
     let node: Node<LocalCipherText> = codec::decode_ciphertext(ct).map_err(|_| STATUS_ENCODING)?;
     with_cipher(handle, |cipher| {
-        let out =
-            decrypt_to_frame(cipher, node, context(aad, as_element)).map_err(decrypt_status)?;
+        let out = decrypt_to_frame(&cipher.opening_version_1(), node, context(aad, as_element))
+            .map_err(decrypt_status)?;
         Ok(out.risky_unwrap())
     })
 }

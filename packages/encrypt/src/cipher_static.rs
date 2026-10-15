@@ -640,4 +640,65 @@ mod test {
         let a2 = (&cipher).encrypt_none(aad).unwrap().into_local();
         a1.as_ref() != a2.as_ref()
     }
+
+    #[quickcheck]
+    fn encrypt_bytes_round_trips_through_open_encrypted(key: Key, data: Vec<u8>) -> bool {
+        let cipher = Aes256Cipher::new(&key).unwrap();
+        let aad = b"aad".as_slice();
+        let sealed = (&cipher)
+            .encrypt_bytes(Protected::new(data.clone()), aad)
+            .unwrap();
+        cipher.open_encrypted(sealed, aad).unwrap().risky_unwrap() == data
+    }
+
+    #[test]
+    fn encrypt_bytes_round_trips_the_boundary_payloads() {
+        // The empty payload, and payloads that start with a tag byte, come
+        // back unchanged: only the one tag the cipher added is removed.
+        let cipher = Aes256Cipher::new(&Key::from([8u8; 32])).unwrap();
+        let aad = b"aad".as_slice();
+        for data in [
+            vec![],
+            vec![tags::BYTES],
+            vec![tags::BYTES, tags::BYTES],
+            vec![tags::NULL],
+        ] {
+            let sealed = (&cipher)
+                .encrypt_bytes(Protected::new(data.clone()), aad)
+                .unwrap();
+            let opened = cipher.open_encrypted(sealed, aad).unwrap();
+            assert_eq!(opened.risky_ref(), &data, "payload: {data:?}");
+        }
+    }
+
+    #[test]
+    fn hlist_openers_refuse_other_sealed_leaves() {
+        // The hlist slots use the same AAD as the sink-based `encrypt`, so
+        // a key holder can put a sink-path leaf in one. Neither opener may
+        // take a leaf it did not make: not a string, a bool or an int, not
+        // an empty plaintext, and not a null leaf with a byte after it.
+        let cipher = Aes256Cipher::new(&Key::from([6u8; 32])).unwrap();
+        let aad = b"aad".as_slice();
+        let leaf = |node| match node {
+            vitaminc_aead::CipherText::Single(leaf) => leaf,
+            other => panic!("expected one leaf, got {other:?}"),
+        };
+        let sealed = || {
+            [
+                leaf(vitaminc_aead::encrypt("x", &cipher, aad).unwrap()),
+                leaf(vitaminc_aead::encrypt(false, &cipher, aad).unwrap()),
+                leaf(vitaminc_aead::encrypt(0u32, &cipher, aad).unwrap()),
+                seal_into_local(&cipher, Protected::new(Vec::new()), aad).unwrap(),
+                seal_into_local(&cipher, Protected::new(vec![tags::NULL, 0]), aad).unwrap(),
+            ]
+        };
+        for (i, local) in sealed().into_iter().enumerate() {
+            let opened = cipher.open_encrypted(Encrypted::from_local(local), aad);
+            assert_eq!(opened.map(|_| ()), Err(Unspecified), "case {i}");
+        }
+        for (i, local) in sealed().into_iter().enumerate() {
+            let verified = cipher.verify_absent(Absent::from_local(local), aad);
+            assert_eq!(verified, Err(Unspecified), "case {i}");
+        }
+    }
 }

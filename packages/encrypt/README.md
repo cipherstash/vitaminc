@@ -25,7 +25,12 @@ Add this to your `Cargo.toml`:
 [dependencies]
 vitaminc-encrypt = "0.2.0-pre.1"
 vitaminc-random = "0.2.0-pre.1"  # For key generation
+vitaminc-aead = "0.2.0-pre.1"    # For the Plaintext and Decrypt derives
 ```
+
+The `Plaintext` and `Decrypt` derives are re-exported here, but the code they
+generate names the `vitaminc_aead` crate, so a crate that derives them for its
+own types must depend on `vitaminc-aead` too.
 
 ### Feature flags
 
@@ -148,6 +153,21 @@ A ciphertext that does not have the shape the type expects — a string where a
 sequence was stored, a map missing a field — is refused as a
 [`DecryptError`] rather than decoded wrongly.
 
+### Upgrading from 0.5
+
+The plaintext in every leaf now starts with a type tag, and the leaf is sealed
+under wire version 2.
+The `Encrypt` path of 0.5 sealed raw, untagged bytes under wire version 1,
+so [`decrypt`] refuses every version 1 leaf with
+[`DecryptError::Cipher`] rather than read the first byte of the value as a
+tag. To keep data written by 0.5, decrypt it with 0.5 and encrypt it again
+with this version.
+
+Ciphertext from the 0.5 `Value` path (`vitaminc-aead-value` and the Go
+binding) was already tagged, and opens through
+[`Aes256Cipher::opening_version_1`]. Do not use that view for data from the
+`Encrypt` path: it can read such a leaf as a different value.
+
 ### One-shot helpers
 
 [`encrypt_with_key`] and [`decrypt_with_key`] build the cipher from a key
@@ -236,7 +256,7 @@ let decrypted: Protected<String> = decrypt(&cipher, ciphertext, ()).expect("decr
 
 ### Encrypting Keys (Key Wrapping)
 
-Keys can be encrypted with other keys, enabling key hierarchy and key wrapping. A [`Key`] is a `Plaintext` source and a `Decrypt` target: it seals as its protected 32 bytes and decrypts straight back into a `Key`, so the bytes never leave the wrapper in either direction.
+Keys can be encrypted with other keys, enabling key hierarchy and key wrapping. [`Key::wrap`] seals a key's protected 32 bytes under a key encryption key, and [`Key::from_wrapped`] reads them straight back into a `Key`, so the bytes never leave the wrapper in either direction. A `Key` is not a `Plaintext` source, so `encrypt` does not take one: a walk over a value hands its bytes to a sink, and any crate can write a sink.
 
 ```rust
 use vitaminc_encrypt::{decrypt, encrypt, Aes256Cipher, Key};
@@ -252,10 +272,10 @@ let cipher = Aes256Cipher::new(&kek).expect("cipher creation failed");
 let dek = Key::random(&mut rng).expect("key generation failed");
 
 // Wrap the DEK with the KEK
-let wrapped_dek = encrypt(dek, &cipher, "dek:1").expect("encryption failed");
+let wrapped_dek = dek.wrap(&cipher, "dek:1").expect("encryption failed");
 
 // Later, unwrap it straight back into a key and use it.
-let dek: Key = decrypt(&cipher, wrapped_dek, "dek:1").expect("decryption failed");
+let dek = Key::from_wrapped(&cipher, wrapped_dek, "dek:1").expect("decryption failed");
 let data_cipher = Aes256Cipher::new(&dek).expect("cipher creation failed");
 # let ct = encrypt("payload", &data_cipher, ()).expect("encrypt");
 # let back: String = decrypt(&data_cipher, ct, ()).expect("decrypt");

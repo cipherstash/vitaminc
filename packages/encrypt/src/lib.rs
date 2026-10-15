@@ -6,7 +6,7 @@ mod cipher;
 mod cipher_static;
 mod key;
 
-pub use cipher::Aes256Cipher;
+pub use cipher::{Aes256Cipher, OpensVersion1};
 pub use key::Key;
 
 // Re-exports

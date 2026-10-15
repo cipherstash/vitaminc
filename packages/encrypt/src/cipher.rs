@@ -44,7 +44,34 @@ impl Aes256Cipher {
             key: key.cipher_key()?,
         })
     }
+
+    /// This cipher, opening wire version 1 leaves as well as current ones.
+    ///
+    /// Use it only to read ciphertext from the pre-ADR 0001 `Value` path:
+    /// `vitaminc-aead-value` 0.5 and the Go binding built on it. Those
+    /// leaves are tagged like today's, so they open to the same values.
+    /// `vitaminc-encrypt` 0.5's `Encrypt` path also wrote version 1 leaves,
+    /// but with raw, untagged bytes; read through this view, such a leaf
+    /// can come back as a different value with no error. That is why
+    /// [`Aes256Cipher`] itself, and so the typed [`decrypt`], refuses every
+    /// version 1 leaf.
+    ///
+    /// Sealing through the view writes current leaves, exactly as the
+    /// cipher does.
+    ///
+    /// [`decrypt`]: vitaminc_aead::decrypt
+    pub fn opening_version_1(&self) -> OpensVersion1<'_> {
+        OpensVersion1(self)
+    }
 }
+
+/// The wire version the pre-ADR 0001 `Value` path sealed its tagged leaves
+/// under. See [`Aes256Cipher::opening_version_1`].
+const VALUE_PATH_WIRE_VERSION: u8 = 1;
+
+/// An [`Aes256Cipher`] that also opens wire version 1 leaves, made by
+/// [`Aes256Cipher::opening_version_1`].
+pub struct OpensVersion1<'a>(&'a Aes256Cipher);
 
 /// Seal one leaf: `version(1) ‖ nonce ‖ ciphertext ‖ tag`, with the wire
 /// version bound into the AAD via `Context::for_leaf`.
@@ -81,7 +108,7 @@ where
 /// Open one leaf sealed by [`seal_leaf`]: checks the wire version before
 /// parsing, then verifies with the same `Context::for_leaf` derivation.
 /// Shared by the [`Cipher`] impl and the static hlist path for the same
-/// anti-drift reason as [`seal_leaf`].
+/// anti-drift reason as [`seal_leaf`]. Only the current wire version opens.
 pub(crate) fn open_leaf<'a, A>(
     cipher: &Aes256Cipher,
     ct: LocalCipherText,
@@ -90,12 +117,26 @@ pub(crate) fn open_leaf<'a, A>(
 where
     A: IntoAad<'a>,
 {
-    // `read_version` rejects unknown wire versions before any parsing; the
-    // version is *also* bound under the tag (`for_leaf`, mirroring the seal
-    // side), so a relabeled byte that parses still fails.
-    let (nonce, reader) = ct.into_reader().read_version()?.read_nonce::<NONCE_LEN>()?;
+    open_leaf_in(cipher, ct, aad, &[WIRE_VERSION])
+}
+
+/// [`open_leaf`], accepting any wire version in `accepted`.
+fn open_leaf_in<'a, A>(
+    cipher: &Aes256Cipher,
+    ct: LocalCipherText,
+    aad: A,
+    accepted: &[u8],
+) -> Result<Protected<Vec<u8>>, Unspecified>
+where
+    A: IntoAad<'a>,
+{
+    // `read_version_in` rejects any other wire version before parsing; the
+    // version read is *also* bound under the tag (`for_leaf`, mirroring the
+    // seal side), so a relabeled byte that parses still fails.
+    let (version, reader) = ct.into_reader().read_version_in(accepted)?;
+    let (nonce, reader) = reader.read_nonce::<NONCE_LEN>()?;
     let nonce_bytes = nonce.into_inner();
-    let aad = aad.into_aad().for_leaf(WIRE_VERSION);
+    let aad = aad.into_aad().for_leaf(version);
 
     reader
         .accepts_plaintext_ok(|data| cipher.key.open(&nonce_bytes, aad.as_bytes(), data))
@@ -120,6 +161,32 @@ impl Cipher for Aes256Cipher {
         aad: &Context<'_>,
     ) -> Result<Protected<Vec<u8>>, Unspecified> {
         open_leaf(self, leaf, aad.clone())
+    }
+}
+
+impl Cipher for OpensVersion1<'_> {
+    type Leaf = LocalCipherText;
+    type Error = Unspecified;
+
+    fn seal(
+        &self,
+        plaintext: Protected<Vec<u8>>,
+        aad: &Context<'_>,
+    ) -> Result<LocalCipherText, Unspecified> {
+        seal_leaf(self.0, plaintext, aad.clone())
+    }
+
+    fn open(
+        &self,
+        leaf: LocalCipherText,
+        aad: &Context<'_>,
+    ) -> Result<Protected<Vec<u8>>, Unspecified> {
+        open_leaf_in(
+            self.0,
+            leaf,
+            aad.clone(),
+            &[VALUE_PATH_WIRE_VERSION, WIRE_VERSION],
+        )
     }
 }
 
@@ -471,26 +538,179 @@ mod test {
 
     #[test]
     fn a_wrapped_key_is_one_bytes_leaf_that_unwraps_to_the_same_key() {
-        // Key wrapping: a `Key` seals as its 32 bytes in one tagged bytes
-        // leaf, `[BYTES] ++ key`, and decrypts straight back into a `Key`
-        // with the same bytes. This pins the wrapping wire format.
+        // Key wrapping: `Key::wrap` seals the key's 32 bytes as one tagged
+        // bytes leaf, `[BYTES] ++ key`, and `Key::from_wrapped` reads them
+        // straight back into a `Key`. This pins the wrapping wire format.
         let kek = cipher(&Key::from([59u8; 32]));
         let aad = Context::from_encoded(b"dek:1".as_slice());
         let dek = Key::from([0x5A; 32]);
-        let wrapped = encrypt(dek, &kek, aad.clone()).unwrap();
+        let wrapped = dek.wrap(&kek, aad.clone()).unwrap();
         let leaf = leaf_of(wrapped);
         let copy = LocalCipherText::from(leaf.as_ref().to_vec());
         let opened = Cipher::open(&kek, copy, &aad).unwrap();
         let mut expected = vec![vitaminc_aead::tags::BYTES];
         expected.extend_from_slice(&[0x5A; 32]);
         assert_eq!(opened.risky_ref(), &expected);
-        let unwrapped: Key = decrypt(&kek, CipherText::Single(leaf), aad).unwrap();
+        let unwrapped = Key::from_wrapped(&kek, CipherText::Single(leaf), aad).unwrap();
         // It is the same key: a value sealed under it opens under the
         // original.
         let original = cipher(&Key::from([0x5A; 32]));
         let ct = encrypt("payload".to_string(), &cipher(&unwrapped), ()).unwrap();
         let back: String = decrypt(&original, ct, ()).unwrap();
         assert_eq!(back, "payload");
+    }
+
+    #[test]
+    fn a_wrapped_leaf_of_the_wrong_length_or_kind_does_not_unwrap_to_a_key() {
+        // A wrongly wrapped key must never come back as a usable key.
+        let kek = cipher(&Key::from([60u8; 32]));
+        let aad = Context::from_encoded(b"dek:1".as_slice());
+        let refused = |node: Node<LocalCipherText>| {
+            matches!(
+                Key::from_wrapped(&kek, node, aad.clone()),
+                Err(DecryptError::Sink(_))
+            )
+        };
+        assert!(refused(encrypt([0x5Au8; 31], &kek, aad.clone()).unwrap()));
+        assert!(refused(
+            encrypt(vec![0x5Au8; 33], &kek, aad.clone()).unwrap()
+        ));
+        assert!(refused(
+            encrypt(Vec::<u8>::new(), &kek, aad.clone()).unwrap()
+        ));
+        assert!(refused(encrypt("not a key", &kek, aad.clone()).unwrap()));
+    }
+
+    #[test]
+    fn a_wrapped_key_does_not_unwrap_under_another_aad() {
+        let kek = cipher(&Key::from([61u8; 32]));
+        let wrapped = Key::from([0x5A; 32]).wrap(&kek, "dek:1").unwrap();
+        assert!(matches!(
+            Key::from_wrapped(&kek, wrapped, "dek:2"),
+            Err(DecryptError::Cipher(_))
+        ));
+    }
+
+    mod wire_versions {
+        //! New leaves are wire version 2. Version 1 leaves come from two
+        //! released writers that cannot be told apart: the `Value` path
+        //! sealed tagged scalars, `vitaminc-encrypt` 0.5.1's `Encrypt` path
+        //! sealed raw bytes. The cipher, and so the typed path, refuses
+        //! every version 1 leaf; only `opening_version_1` reads them.
+        use super::*;
+        use crate::decrypt_with_key;
+        use vitaminc_aead::tags;
+
+        /// Seal a leaf as the 0.5.1 `seal_leaf` did: version 1 in front,
+        /// and version 1 bound into the AAD.
+        fn seal_version_1(
+            cipher: &Aes256Cipher,
+            plaintext: &[u8],
+            aad: Context,
+        ) -> LocalCipherText {
+            let nonce = cipher.nonce_generator.generate().unwrap();
+            let nonce_bytes: [u8; NONCE_LEN] = nonce.as_ref().try_into().unwrap();
+            let mut buf = plaintext.to_vec();
+            cipher
+                .key
+                .seal(&nonce_bytes, aad.for_leaf(1).as_bytes(), &mut buf)
+                .unwrap();
+            let mut leaf = vec![1];
+            leaf.extend_from_slice(&nonce_bytes);
+            leaf.extend(buf);
+            LocalCipherText::from(leaf)
+        }
+
+        #[test]
+        fn a_new_leaf_is_wire_version_2() {
+            let cipher = cipher(&Key::from([62u8; 32]));
+            let leaf = leaf_of(encrypt("x", &cipher, ()).unwrap());
+            assert_eq!(WIRE_VERSION, 2);
+            assert_eq!(leaf.wire_version(), Some(2));
+            let through_view = cipher
+                .opening_version_1()
+                .seal(Protected::new(vec![tags::STRING]), &Context::empty())
+                .unwrap();
+            assert_eq!(through_view.wire_version(), Some(2));
+        }
+
+        #[test]
+        fn a_0_5_1_raw_string_leaf_is_not_read_as_a_different_string() {
+            // What 0.5.1's `encrypt(&key, "\nhello")` stored: raw UTF-8,
+            // no tag. `\n` is `tags::STRING`, so read as tagged it would
+            // come back as "hello".
+            let key = Key::from([7u8; 32]);
+            let cipher = cipher(&key);
+            let leaf = || seal_version_1(&cipher, b"\nhello", Context::empty());
+            let typed = decrypt::<String, _, _>(&cipher, CipherText::Single(leaf()), ());
+            assert!(matches!(typed, Err(DecryptError::Cipher(_))), "{typed:?}");
+            let one_shot = decrypt_with_key::<String>(&key, CipherText::Single(leaf()));
+            assert!(
+                matches!(one_shot, Err(DecryptError::Cipher(_))),
+                "{one_shot:?}"
+            );
+        }
+
+        #[test]
+        fn a_0_5_1_raw_bytes_leaf_is_not_read_as_different_bytes() {
+            let cipher = cipher(&Key::from([8u8; 32]));
+            let leaf = seal_version_1(&cipher, &[tags::BYTES, 1, 2, 3], Context::empty());
+            let typed = decrypt::<Vec<u8>, _, _>(&cipher, CipherText::Single(leaf), ());
+            assert!(matches!(typed, Err(DecryptError::Cipher(_))), "{typed:?}");
+        }
+
+        #[test]
+        fn the_cipher_refuses_a_tagged_version_1_leaf() {
+            let cipher = cipher(&Key::from([63u8; 32]));
+            let aad = Context::from_encoded(b"ctx".as_slice());
+            let leaf = seal_version_1(&cipher, &[tags::STRING, b'h', b'i'], aad.clone());
+            assert_eq!(
+                Cipher::open(&cipher, leaf, &aad).map(|_| ()),
+                Err(Unspecified)
+            );
+        }
+
+        #[test]
+        fn the_version_1_view_opens_a_tagged_version_1_leaf_and_a_current_one() {
+            let cipher = cipher(&Key::from([64u8; 32]));
+            let aad = Context::from_encoded(b"ctx".as_slice());
+            let old = seal_version_1(&cipher, &[tags::STRING, b'h', b'i'], aad.clone());
+            let view = cipher.opening_version_1();
+            let back: String = decrypt(&view, CipherText::Single(old), aad.clone()).unwrap();
+            assert_eq!(back, "hi");
+            let current = encrypt("hi", &cipher, aad.clone()).unwrap();
+            let back: String = decrypt(&view, current, aad).unwrap();
+            assert_eq!(back, "hi");
+        }
+
+        #[test]
+        fn the_version_1_view_still_authenticates_the_version() {
+            // A current leaf relabeled as version 1 parses, but its tag
+            // was made under version 2's AAD, so it fails; so does a version
+            // the view does not read.
+            let cipher = cipher(&Key::from([65u8; 32]));
+            let aad = Context::from_encoded(b"ctx".as_slice());
+            let bytes = leaf_of(encrypt("hi", &cipher, aad.clone()).unwrap())
+                .as_ref()
+                .to_vec();
+            for version in [0, 1, 3] {
+                let mut relabeled = bytes.clone();
+                relabeled[0] = version;
+                let opened = Cipher::open(
+                    &cipher.opening_version_1(),
+                    LocalCipherText::from(relabeled),
+                    &aad,
+                );
+                assert_eq!(opened.map(|_| ()), Err(Unspecified), "version {version}");
+            }
+            let wrong_aad = seal_version_1(&cipher, &[tags::STRING], aad);
+            let opened = Cipher::open(
+                &cipher.opening_version_1(),
+                wrong_aad,
+                &Context::from_encoded(b"other".as_slice()),
+            );
+            assert_eq!(opened.map(|_| ()), Err(Unspecified));
+        }
     }
 
     #[quickcheck]
