@@ -25,14 +25,10 @@ pub(crate) use aws_lc::CipherKey;
 
 /// AES-256-GCM nonce length, in bytes.
 pub(crate) const NONCE_LEN: usize = 12;
-
-/// AES-256-GCM authentication tag length, in bytes.
-///
-/// The RustCrypto backend needs it to size the plaintext buffer when opening
-/// (`aws-lc-rs` manages tag layout internally). It is also used by
-/// `Aes256Cipher::encrypt_bytes_array` in every configuration to reserve
-/// buffer capacity for the appended tag, so the in-place seal never
-/// reallocates — hence the constant is no longer gated.
+/// The AES-GCM tag length. The RustCrypto backend splits the tag off the
+/// buffer itself; `aws-lc-rs` handles the tag internally, so the constant
+/// is unused in a native build.
+#[allow(dead_code)]
 pub(crate) const TAG_LEN: usize = 16;
 
 #[cfg(test)]

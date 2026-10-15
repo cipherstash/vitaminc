@@ -4,8 +4,13 @@
 
 use crate::Aes256Cipher;
 use vitaminc_aead::hlist::{Absent, Encrypted, Entry, StaticCipher};
-use vitaminc_aead::{IntoAad, Unspecified};
+use vitaminc_aead::{tags, IntoAad, Unspecified};
 use vitaminc_protected::{Controlled, Protected};
+
+/// What an [`Absent`] seals: the null leaf, as `None` is everywhere else
+/// (ADR 0001). No separate absence derivation is needed, because the leaf
+/// itself says what it is.
+const NULL_LEAF: [u8; 1] = [tags::NULL];
 
 impl StaticCipher for &Aes256Cipher {
     type Error = Unspecified;
@@ -26,13 +31,12 @@ impl StaticCipher for &Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        // `Context::for_none` domain-separates the absence marker from an empty
-        // `Encrypted`: both seal an empty plaintext, so without it an
-        // `Absent` slot could be swapped for an empty `Encrypted` one (and
-        // vice versa) without tripping tag verification. Shared with the
-        // dynamic path's `Cipher::encrypt_none`, so both absence markers use
-        // one wire commitment. `verify_absent` re-derives the same AAD.
-        let local = seal_into_local(self, Protected::new(Vec::new()), aad.into_aad().for_none())?;
+        // The marker is a sealed null leaf under the slot's own AAD: the same
+        // bytes `encrypt` seals for a `None` there, so the static and the
+        // sink-based paths agree on what absence is. An empty `Encrypted`
+        // seals an empty plaintext, not the null leaf, so neither can stand
+        // in for the other; `verify_absent` checks the plaintext.
+        let local = seal_into_local(self, Protected::new(NULL_LEAF.to_vec()), aad)?;
         Ok(Absent::from_local(local))
     }
 }
@@ -42,9 +46,8 @@ impl Aes256Cipher {
     /// [`StaticCipher::encrypt_bytes`].
     ///
     /// The plaintext is returned inside `Protected` to thread the chain of
-    /// custody across the call boundary, matching
-    /// [`Aes256Cipher::decrypt_with_aad`]. The returned `Protected<Vec<u8>>` is
-    /// zeroized on drop (`Protected` is `ZeroizeOnDrop`).
+    /// custody across the call boundary. The returned `Protected<Vec<u8>>`
+    /// is zeroized on drop (`Protected` is `ZeroizeOnDrop`).
     pub fn open<'a, A>(&self, ct: Encrypted, aad: A) -> Result<Protected<Vec<u8>>, Unspecified>
     where
         A: IntoAad<'a>,
@@ -53,20 +56,19 @@ impl Aes256Cipher {
     }
 
     /// Verify an [`Absent`] marker under the supplied AAD. Returns
-    /// `Ok(())` if the tag binds `aad` **and** the sealed plaintext is empty,
-    /// `Err(Unspecified)` otherwise.
+    /// `Ok(())` if the tag binds `aad` **and** the sealed plaintext is the
+    /// null leaf, `Err(Unspecified)` otherwise.
     pub fn verify_absent<'a, A>(&self, ct: Absent, aad: A) -> Result<(), Unspecified>
     where
         A: IntoAad<'a>,
     {
-        // A conforming marker seals an empty plaintext; requiring emptiness
-        // here (not just a valid tag) means a key-holding writer cannot mint
-        // a nonempty payload under the `for_none` derivation and have it
-        // verify as an absence — defense in depth for the marker's meaning,
-        // not just its authenticity. The `Protected` drops (and zeroizes) at
-        // the end of the expression. The AAD wrap matches `encrypt_none`.
-        let plaintext = open_local(self, ct.into_local(), aad.into_aad().for_none())?;
-        if plaintext.risky_ref().is_empty() {
+        // A conforming marker seals the null leaf; requiring that here (not
+        // just a valid tag) means a key-holding writer cannot pass any other
+        // sealed value off as an absence — defense in depth for the marker's
+        // meaning, not just its authenticity. The `Protected` drops (and
+        // zeroizes) at the end of the expression.
+        let plaintext = open_local(self, ct.into_local(), aad)?;
+        if plaintext.risky_ref() == &NULL_LEAF {
             Ok(())
         } else {
             Err(Unspecified)
@@ -363,20 +365,22 @@ mod test {
     }
 
     #[test]
-    fn verify_absent_requires_empty_payload_under_the_none_derivation() {
-        // Even a key-holding writer must not be able to pass a nonempty
-        // payload off as an absence marker: verify_absent requires the sealed
-        // plaintext to be empty, not merely the tag to bind `for_none(aad)`.
+    fn verify_absent_requires_the_null_leaf() {
+        // Even a key-holding writer must not be able to pass another sealed
+        // value off as an absence marker: verify_absent requires the sealed
+        // plaintext to be the null leaf, not merely the tag to bind `aad`.
         let cipher = Aes256Cipher::new(&Key::from([6u8; 32])).unwrap();
         let aad = b"aad".as_slice();
-        // The empty payload proves the fixture passes authentication before
-        // verify_absent checks whether its plaintext is empty.
-        for (payload, expected) in [("", Ok(())), ("payload", Err(Unspecified))] {
+        // The null leaf proves the fixture passes authentication before
+        // verify_absent checks what its plaintext is.
+        for (payload, expected) in [
+            (&[tags::NULL][..], Ok(())),
+            (&[][..], Err(Unspecified)),
+            (&[tags::UNDEFINED][..], Err(Unspecified)),
+            (b"payload", Err(Unspecified)),
+        ] {
             let sealed = (&cipher)
-                .encrypt_bytes(
-                    Protected::new(payload.as_bytes().to_vec()),
-                    aad.into_aad().for_none(),
-                )
+                .encrypt_bytes(Protected::new(payload.to_vec()), aad)
                 .unwrap();
             let as_absent = Absent::from_local(sealed.into_local());
             assert_eq!(
@@ -387,19 +391,26 @@ mod test {
         }
     }
 
-    // An empty `Encrypted` and an `Absent` seal the same empty plaintext; the
-    // domain separator on `encrypt_none` is what keeps their tags from
-    // cross-validating under the same (key, AAD). Single representative case
-    // each — the property is structural, not value-dependent.
+    // An `Absent` is a sealed null leaf, which is what `encrypt` seals for
+    // a `None` too, so the two paths agree on absence. An empty `Encrypted`
+    // seals an empty plaintext, which is not the null leaf.
 
     #[test]
-    fn absent_does_not_validate_as_encrypted_empty() {
+    fn absent_is_the_null_leaf_sealed_under_the_slots_aad() {
         let cipher = Aes256Cipher::new(&Key::from([2u8; 32])).unwrap();
         let aad = b"shared-aad".as_slice();
         let absent = (&cipher).encrypt_none(aad).unwrap();
-        // Reinterpret the Absent's bytes as an Encrypted leaf under the same AAD.
         let as_encrypted = Encrypted::from_local(absent.into_local());
-        assert!(cipher.open(as_encrypted, aad).is_err());
+        let plaintext = cipher.open(as_encrypted, aad).unwrap();
+        assert_eq!(plaintext.risky_ref(), &NULL_LEAF);
+        // And what the sink-based path seals for `None` verifies as absent.
+        let node = vitaminc_aead::encrypt(None::<u32>, &cipher, aad).unwrap();
+        let vitaminc_aead::CipherText::Single(leaf) = node else {
+            panic!("a None is one leaf");
+        };
+        cipher
+            .verify_absent(Absent::from_local(leaf), aad)
+            .expect("the sink path's None is an absence");
     }
 
     #[test]

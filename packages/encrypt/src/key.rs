@@ -1,17 +1,18 @@
 use crate::backend::CipherKey;
-use vitaminc_aead::{Encrypt, Unspecified};
+use vitaminc_aead::{Plaintext, Unspecified};
 use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::{Generatable, RandomError, SafeRand};
 
 /// 256-bit key type for use with symmetric encryption algorithms like AES-256-GCM.
 /// Vitaminc does not support smaller key sizes to ensure quantum security and compatibility with AWS-LC.
 ///
-/// `Encrypt` is derived: a newtype is transparent, so a `Key` seals exactly as
-/// its `Protected<[u8; 32]>` does — which reaches the cipher's array entry
-/// point still wrapped (see `Encrypt::encrypt_protected`). The 32 bytes are
-/// never exposed as a bare `[u8; 32]` on the way in.
+/// `Plaintext` is derived: a newtype is transparent, so a `Key` seals exactly
+/// as its `Protected<[u8; 32]>` does, one bytes leaf walked by reference
+/// inside the wrapper. The 32 bytes are never exposed as a bare `[u8; 32]`
+/// on the way in. That is what key wrapping needs: a `Key` sealed under
+/// another key opens as a `Protected<[u8; 32]>`.
 // SAFETY: Safe to implement Debug because the inner type is Protected, which does not leak sensitive data.
-#[derive(Debug, Encrypt)]
+#[derive(Debug, Plaintext)]
 #[cfg_attr(test, derive(Clone))]
 pub struct Key(Protected<[u8; 32]>);
 
