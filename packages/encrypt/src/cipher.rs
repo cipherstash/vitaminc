@@ -23,7 +23,7 @@ use vitaminc_protected::Protected;
 /// synchronous `Cipher`, used from one thread at a time, not an
 /// `AsyncCipher` shared across tasks.
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// fn assert_sync<T: Sync>() {}
 /// assert_sync::<vitaminc_encrypt::Aes256Cipher>();
 /// ```
@@ -445,6 +445,52 @@ mod test {
                 "tamper at byte {idx}"
             );
         }
+    }
+
+    #[test]
+    fn a_truncated_or_extended_leaf_fails_decryption() {
+        // A short read or a tag cut off in storage, and a stray byte on the
+        // end: every prefix of a sealed leaf and the leaf plus one byte fail
+        // closed, on both backends.
+        let cipher = cipher(&Key::from([58u8; 32]));
+        let bytes = leaf_of(encrypt("hello".to_string(), &cipher, ()).unwrap())
+            .as_ref()
+            .to_vec();
+        for len in 0..bytes.len() {
+            let node = CipherText::Single(LocalCipherText::from(bytes[..len].to_vec()));
+            assert!(
+                decrypt::<String, _, _>(&cipher, node, ()).is_err(),
+                "truncated to {len} bytes"
+            );
+        }
+        let mut extended = bytes.clone();
+        extended.push(0);
+        let node = CipherText::Single(LocalCipherText::from(extended));
+        assert!(decrypt::<String, _, _>(&cipher, node, ()).is_err());
+    }
+
+    #[test]
+    fn a_wrapped_key_is_one_bytes_leaf_that_unwraps_to_the_same_key() {
+        // Key wrapping: a `Key` seals as its 32 bytes in one tagged bytes
+        // leaf, `[BYTES] ++ key`, and decrypts straight back into a `Key`
+        // with the same bytes. This pins the wrapping wire format.
+        let kek = cipher(&Key::from([59u8; 32]));
+        let aad = Context::from_encoded(b"dek:1".as_slice());
+        let dek = Key::from([0x5A; 32]);
+        let wrapped = encrypt(dek, &kek, aad.clone()).unwrap();
+        let leaf = leaf_of(wrapped);
+        let copy = LocalCipherText::from(leaf.as_ref().to_vec());
+        let opened = Cipher::open(&kek, copy, &aad).unwrap();
+        let mut expected = vec![vitaminc_aead::tags::BYTES];
+        expected.extend_from_slice(&[0x5A; 32]);
+        assert_eq!(opened.risky_ref(), &expected);
+        let unwrapped: Key = decrypt(&kek, CipherText::Single(leaf), aad).unwrap();
+        // It is the same key: a value sealed under it opens under the
+        // original.
+        let original = cipher(&Key::from([0x5A; 32]));
+        let ct = encrypt("payload".to_string(), &cipher(&unwrapped), ()).unwrap();
+        let back: String = decrypt(&original, ct, ()).unwrap();
+        assert_eq!(back, "payload");
     }
 
     #[quickcheck]

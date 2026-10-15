@@ -22,7 +22,9 @@ pub use vitaminc_aead::typed::Decrypt;
 pub use vitaminc_aead::Aad;
 #[doc(inline)]
 pub use vitaminc_aead::Plaintext;
-pub use vitaminc_aead::{decrypt, decrypt_into, encrypt, DecryptError, EncryptError, Node};
+pub use vitaminc_aead::{
+    decrypt, decrypt_into, encrypt, CipherText, DecodeError, DecryptError, EncryptError, Node,
+};
 pub use vitaminc_aead::{Context, IntoAad, IntoContext, LocalCipherText, Nonce, Unspecified};
 
 /// The ciphertext tree [`Aes256Cipher`] produces: one sealed leaf per
@@ -75,7 +77,7 @@ where
 pub fn decrypt_with_key<T>(
     key: &Key,
     ciphertext: AesCipherText,
-) -> Result<T, DecryptError<vitaminc_aead::DecodeError, Unspecified>>
+) -> Result<T, DecryptError<DecodeError, Unspecified>>
 where
     T: Decrypt,
 {

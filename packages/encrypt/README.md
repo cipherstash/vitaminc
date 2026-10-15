@@ -236,11 +236,10 @@ let decrypted: Protected<String> = decrypt(&cipher, ciphertext, ()).expect("decr
 
 ### Encrypting Keys (Key Wrapping)
 
-Keys can be encrypted with other keys, enabling key hierarchy and key wrapping. A [`Key`] is a `Plaintext` source: it seals as its protected 32 bytes, which never leave the wrapper on the way in.
+Keys can be encrypted with other keys, enabling key hierarchy and key wrapping. A [`Key`] is a `Plaintext` source and a `Decrypt` target: it seals as its protected 32 bytes and decrypts straight back into a `Key`, so the bytes never leave the wrapper in either direction.
 
 ```rust
 use vitaminc_encrypt::{decrypt, encrypt, Aes256Cipher, Key};
-use vitaminc_protected::Protected;
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
 let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
@@ -255,8 +254,12 @@ let dek = Key::random(&mut rng).expect("key generation failed");
 // Wrap the DEK with the KEK
 let wrapped_dek = encrypt(dek, &cipher, "dek:1").expect("encryption failed");
 
-// Later, unwrap the DEK's protected key bytes and rebuild the key from them.
-let unwrapped: Protected<[u8; 32]> = decrypt(&cipher, wrapped_dek, "dek:1").expect("decryption failed");
+// Later, unwrap it straight back into a key and use it.
+let dek: Key = decrypt(&cipher, wrapped_dek, "dek:1").expect("decryption failed");
+let data_cipher = Aes256Cipher::new(&dek).expect("cipher creation failed");
+# let ct = encrypt("payload", &data_cipher, ()).expect("encrypt");
+# let back: String = decrypt(&data_cipher, ct, ()).expect("decrypt");
+# assert_eq!(back, "payload");
 ```
 
 ### Your Own Types
