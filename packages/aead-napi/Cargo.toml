@@ -25,6 +25,8 @@ vitaminc-protected = { version = "0.5.1", path = "../protected" }
 # both levels.
 napi = { version = "3", default-features = false, features = ["napi6"] }
 zeroize = { workspace = true }
+# Only for `#[cfg_attr(test, mutants::skip)]`; consumers never see it.
+mutants = "0.0.4"
 
 [dev-dependencies]
 # `noop` disables automatic addon registration in unit tests. The live

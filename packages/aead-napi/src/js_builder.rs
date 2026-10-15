@@ -343,4 +343,57 @@ mod tests {
         assert_eq!(error.status, Status::InvalidArg);
         assert!(error.reason.contains("nested too deeply"), "{error}");
     }
+
+    // A container at the limit may itself be built, but each of its
+    // children sits one level deeper and must be refused. The builders
+    // below never reach the environment: the depth check comes first.
+
+    #[test]
+    fn a_sequence_at_the_limit_refuses_its_elements() {
+        let env = Env::from_raw(std::ptr::null_mut());
+        let mut seq = JsSeq {
+            env: &env,
+            depth: MAX_DEPTH,
+            out: Root,
+            items: Vec::new(),
+        };
+        let element = seq.element().expect("the element slot itself");
+        assert_eq!(element.depth, MAX_DEPTH + 1);
+        element.check_depth().expect_err("one level deeper");
+    }
+
+    #[test]
+    fn a_map_at_the_limit_refuses_its_entries() {
+        let env = Env::from_raw(std::ptr::null_mut());
+        let mut map = JsMap {
+            env: &env,
+            depth: MAX_DEPTH,
+            out: Root,
+            entries: Vec::new(),
+        };
+        let entry = map.entry("k").expect("the entry slot itself");
+        assert_eq!(entry.depth, MAX_DEPTH + 1);
+        entry.check_depth().expect_err("one level deeper");
+    }
+
+    #[test]
+    fn a_passthrough_at_the_limit_builds_its_value_one_level_deeper() {
+        /// A value that opens a sequence and reports whether the sink let it.
+        #[derive(Clone)]
+        struct Probe;
+        impl Plaintext for Probe {
+            fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
+                match sink.seq(Some(0)) {
+                    Ok(_) => panic!("a sequence one level past the limit was accepted"),
+                    Err(error) => Err(error),
+                }
+            }
+        }
+        let env = Env::from_raw(std::ptr::null_mut());
+        let error = JsBuilder::at_depth(&env, MAX_DEPTH)
+            .passthrough(Probe)
+            .err()
+            .expect("the passthrough's value sits one level deeper");
+        assert!(error.reason().contains("nested too deeply"), "{error:?}");
+    }
 }

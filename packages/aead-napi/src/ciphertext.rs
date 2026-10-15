@@ -397,6 +397,14 @@ mod tests {
 
     type Node<P> = CipherText<Vec<u8>, P>;
 
+    #[test]
+    fn a_node_is_a_javascript_object_named_ciphertext() {
+        use napi::bindgen_prelude::{TypeName, ValueType};
+        type Js = super::JsCipherText<Vec<u8>, PassthroughFrame>;
+        assert_eq!(Js::type_name(), "CipherText");
+        assert_eq!(Js::value_type(), ValueType::Object);
+    }
+
     fn nested<P>(levels: usize, wrap: fn(Node<P>) -> Node<P>, leaf: Node<P>) -> Node<P> {
         (0..levels).fold(leaf, |node, _| wrap(node))
     }

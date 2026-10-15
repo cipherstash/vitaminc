@@ -76,6 +76,13 @@ mod tests {
     use vitaminc_aead::plaintext::Error as _;
 
     #[test]
+    fn a_fault_reports_the_status_and_reason_it_was_made_with() {
+        let fault = JsFault::new(Status::GenericFailure, "the getter threw");
+        assert_eq!(fault.status(), Status::GenericFailure);
+        assert_eq!(fault.reason(), "the getter threw");
+    }
+
+    #[test]
     fn a_fault_round_trips_through_a_napi_error() {
         let fault = JsFault::new(Status::PendingException, "getter threw");
         let error: Error = fault.clone().into();

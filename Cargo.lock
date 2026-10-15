@@ -2696,6 +2696,7 @@ name = "vitaminc-aead-napi"
 version = "0.5.1"
 dependencies = [
  "chrono",
+ "mutants",
  "napi",
  "rust_decimal",
  "thiserror",

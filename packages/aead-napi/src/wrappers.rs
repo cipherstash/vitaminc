@@ -168,6 +168,10 @@ impl<'e> Wrappers<'e> {
 
 /// The environment cleanup hook: delete the reference while the
 /// environment can still do so, and forget the entry.
+///
+/// Only a live environment can run this, so no unit test reaches it; the
+/// Worker teardown check in `tests/object-safety.cjs` does.
+#[cfg_attr(test, mutants::skip)]
 fn release(key: usize) {
     let Ok(mut realms) = REALMS.lock() else {
         return;
