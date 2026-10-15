@@ -73,7 +73,7 @@ jobs:
           # llvm-tools-preview is required by cargo-llvm-cov to produce coverage.
           components: llvm-tools-preview
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
 
