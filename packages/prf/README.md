@@ -109,41 +109,45 @@ Executing the derivation requires a backend; with `vitaminc-hmac` in
 scope the value above resolves through
 `user.prf_visit_with_context(&prf, "tenant/acme/users/v1", UserTermsVisitor).await`.
 
-### Equality terms from `Value`
+### Equality terms for the plaintext data model
 
-With the `value` feature, `PrfValue` is implemented for
-`&vitaminc_aead_value::Value`. It borrows the source and derives one scalar
-equality term. Booleans, containers, null, undefined and passthrough return
-`PrfError::Canonical`; text with code points unassigned in Unicode 16 is also
-refused. The `chrono` and `rust_decimal` features enable `value` and the
-corresponding value variants. Without `value`, this crate does not depend on
-`vitaminc-aead-value` or its Unicode tables.
+With the `normalize` feature, `PrfValue` is implemented for
+`vitaminc_normalize::Normalized`, the output of that crate's index sink: a
+frozen domain label and protected bytes. Normalization happens once, there,
+and the PRF only derives under the domain it is handed.
+`EqualityTerm::new(logical, physical)` is the one-scalar convenience that
+normalizes on the way in, for a caller holding a single scalar (a query
+parameter, say) rather than a document to walk; a scalar with no equality
+domain (a null, a boolean, a logical type the normalizer does not know), text
+with code points unassigned in Unicode 16, or a value invalid for its logical
+type returns `PrfError::Normalize`. Without `normalize`, this crate does not
+depend on `vitaminc-normalize`, `vitaminc-aead` or the Unicode tables.
 
-The shared `vitaminc_aead_value::canonical` module owns the exhaustive value
-dispatch and returns each term's domain with its bytes. Every integer kind,
-`int8` through `uint128`, shares one domain and a 17-byte encoding (a sign
+`vitaminc-normalize` owns the encodings and the opt-in table of logical
+types. Every integer width shares one domain and a 17-byte encoding (a sign
 byte, then a big-endian 128-bit two's-complement word), so equal numbers give
-equal terms whatever width wrote them: a JavaScript `BigInt` stored as `int8`
-matches the same number stored as `int64` from Go. Both float kinds share one
-domain: a `float32` widens exactly to `float64` (in integer operations, so
+equal terms whatever width wrote them: a JavaScript `BigInt` stored as `i8`
+matches the same number stored as `i64` from Go. Both float widths share one
+domain: an `f32` widens exactly to `f64` (in integer operations, so
 subnormals take no slow path), then signed zero and every NaN fold to one
-positive quiet NaN. Equal numbers match across widths; `float32` 0.1 and
-`float64` 0.1 are different numbers and do not. Integer and float domains are
-distinct, so a JavaScript `number` 5 (`float64`) does not match an `int64` 5;
-use `BigInt` for integer data. Other scalars use `orderable-bytes` at their
-natural width: timestamps truncate fractional nanoseconds to
-microseconds while retaining the 12-byte seconds/nanoseconds layout, and
-decimal encodings normalize scale and signed zero. Text equality is Unicode 16
-NFC without accent or case folding; the Unicode assignment table is pinned
-exactly, and NFC stability keeps newer normalization tables compatible.
-Ciphertext retains the original value, including its integer width, scale and
-sub-microsecond data.
+positive quiet NaN. Equal numbers match across widths; `f32` 0.1 and `f64`
+0.1 are different numbers and do not. Integer and float domains are
+distinct, so a JavaScript `number` 5 (`f64`) does not match an `i64` 5; use
+`BigInt` for integer data. A date, a timestamp, a decimal and a uuid each
+have a domain of their own, separate from the physical value they are
+stored as: timestamps in any unit truncate to microseconds, decimals
+normalize scale and signed zero, and a uuid is its sixteen raw bytes under
+`vitaminc/prf/value/uuid/v1`. Text equality is Unicode 16 NFC without accent
+or case folding; the Unicode assignment table is pinned exactly, and NFC
+stability keeps newer normalization tables compatible. Ciphertext retains
+the original value, including its integer width, scale and sub-microsecond
+data.
 
-`PrfEncoding::for_value_kind` exposes the new, versioned domains. Existing
-primitive `PrfValue` implementations retain their established little-endian or
-raw UTF-8 domains. Applications must use the same input API and context for
-writes and queries. Every new domain has an independently calculated HMAC
-known-answer vector in `vitaminc-hmac/tests/value_equality.rs`.
+Existing primitive `PrfValue` implementations retain their established
+little-endian or raw UTF-8 domains. Applications must use the same input API
+and context for writes and queries. Every domain has an independently
+calculated HMAC known-answer vector in
+`vitaminc-hmac/tests/normalized_equality.rs`.
 
 **Merge gate for #373:** Dan Draper's written sign-off on canonical order bytes
 as PRF inputs is required before merge. The temporary `orderable-bytes` Git pin

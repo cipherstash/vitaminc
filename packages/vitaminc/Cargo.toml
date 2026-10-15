@@ -42,7 +42,7 @@ async-traits = ["dep:vitaminc-async-traits", "traits"]
 aws-kms = ["traits", "dep:vitaminc-kms"]
 aead = ["dep:vitaminc-aead", "context"]
 encrypt = ["traits", "aead", "dep:vitaminc-encrypt"]
-normalize = ["aead", "dep:vitaminc-normalize"]
+normalize = ["aead", "dep:vitaminc-normalize", "vitaminc-prf?/normalize"]
 
 [[test]]
 name = "timing_safe_runtime"

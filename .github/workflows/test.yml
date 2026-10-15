@@ -153,15 +153,13 @@ jobs:
           cargo test -p vitaminc-aead --features uuid &&
           cargo test -p vitaminc-aead --all-features
 
-      - name: test (canonical equality features)
+      - name: test (equality term feature)
         # The workspace run unifies hmac's dev-dependency features, so test
-        # prf alone without `value` as well as with each optional feature.
+        # prf alone without `normalize` as well as with it.
         run: |
           cargo test -p vitaminc-prf &&
-          cargo test -p vitaminc-prf --features chrono &&
-          cargo test -p vitaminc-prf --features rust_decimal &&
-          cargo test -p vitaminc-prf --all-features &&
-          cargo test -p vitaminc-hmac --test value_equality
+          cargo test -p vitaminc-prf --features normalize &&
+          cargo test -p vitaminc-hmac --test normalized_equality
 
       - name: test (vitaminc-encrypt, RustCrypto backend on native)
         # Forces the RustCrypto path that wasm32 uses, so the same property

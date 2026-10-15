@@ -5,14 +5,16 @@ mod context;
 mod encoding;
 mod error;
 mod impls;
+#[cfg(feature = "normalize")]
+mod normalize;
 mod ready;
 mod traits;
-#[cfg(feature = "value")]
-mod value;
 mod visitor;
 
-#[cfg(feature = "value")]
-pub use vitaminc_aead_value::canonical::CanonicalError;
+#[cfg(feature = "normalize")]
+pub use normalize::EqualityTerm;
+#[cfg(feature = "normalize")]
+pub use vitaminc_normalize::{NormalizeError, Normalized};
 
 #[cfg(test)]
 mod test_backend;

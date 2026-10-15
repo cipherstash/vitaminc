@@ -2768,7 +2768,9 @@ dependencies = [
  "rust_decimal",
  "sha2",
  "trybuild",
- "vitaminc-aead-value",
+ "uuid",
+ "vitaminc-aead",
+ "vitaminc-normalize",
  "vitaminc-prf",
  "vitaminc-protected",
  "zeroize",
@@ -2837,8 +2839,9 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "thiserror",
- "vitaminc-aead-value",
+ "vitaminc-aead",
  "vitaminc-context",
+ "vitaminc-normalize",
  "vitaminc-protected",
 ]
 
