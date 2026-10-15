@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use crate::crate_path::{parse_crate_value, protected_crate_path};
 use proc_macro::TokenStream;
 use proc_macro2::TokenTree;
 use quote::{format_ident, quote, quote_spanned, ToTokens};
@@ -18,23 +19,27 @@ use syn::{
 // - Macros and `core` items are called by absolute path (`::core::write!`,
 //   `::core::fmt::Debug`), so a same-named macro at the call site does not
 //   take their place.
-// - The `OpaqueDebug` marker trait is deliberately left unqualified: callers
-//   may reach it through `vitaminc_protected` or through the `vitaminc`
-//   umbrella crate (`vitaminc::protected`), and no single absolute path
-//   resolves for both. It must be in scope where the derive is used.
+// - The `OpaqueDebug` marker trait is named through the protected crate's
+//   path, resolved per invocation by `crate_path::protected_crate_path`, so
+//   the derive works without a `use` whether the caller depends on
+//   `vitaminc-protected` (under any name) or on the `vitaminc` umbrella.
 pub fn derive_opaque_debug(input: DeriveInput) -> TokenStream {
-    // Only config is the mask string (default "***")
-    let mask = match parse_mask_attr(&input) {
-        Ok(mask) => mask,
-        Err(err) => return err.to_compile_error().into(),
-    };
+    match expand(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let OpaqueDebugAttrs { mask, krate } = parse_attrs(input)?;
+    let krate = protected_crate_path(krate, "opaque_debug")?;
 
     let ident = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let marker_impl = quote! {
         #[automatically_derived]
-        impl #impl_generics OpaqueDebug for #ident #ty_generics #where_clause {}
+        impl #impl_generics #krate::OpaqueDebug for #ident #ty_generics #where_clause {}
     };
 
     // The `Debug` impl needs `FieldTy: Debug` for each field it formats
@@ -66,7 +71,7 @@ pub fn derive_opaque_debug(input: DeriveInput) -> TokenStream {
         },
     };
 
-    quote! {
+    Ok(quote! {
         #marker_impl
 
         #[automatically_derived]
@@ -80,8 +85,7 @@ pub fn derive_opaque_debug(input: DeriveInput) -> TokenStream {
                 #body
             }
         }
-    }
-    .into()
+    })
 }
 
 fn has_non_sensitive(attrs: &[Attribute]) -> bool {
@@ -141,27 +145,41 @@ fn shown_field_types(data: &Data, type_params: &BTreeSet<String>) -> Vec<Type> {
     out
 }
 
-/// Parse `#[opaque_debug(mask = "...")]` using syn v2 `parse_nested_meta`.
-fn parse_mask_attr(input: &DeriveInput) -> syn::Result<String> {
-    let mut mask = "***".to_string();
+struct OpaqueDebugAttrs {
+    /// The placeholder for masked fields (default `***`).
+    mask: String,
+    /// The `crate = "..."` override for the protected crate's path.
+    krate: Option<syn::Path>,
+}
+
+/// Parse `#[opaque_debug(mask = "...", crate = "...")]` using syn v2
+/// `parse_nested_meta`.
+fn parse_attrs(input: &DeriveInput) -> syn::Result<OpaqueDebugAttrs> {
+    let mut attrs = OpaqueDebugAttrs {
+        mask: "***".to_string(),
+        krate: None,
+    };
 
     for attr in &input.attrs {
         if !attr.path().is_ident("opaque_debug") {
             continue;
         }
-        // Accept: #[opaque_debug(mask = "...")]
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("mask") {
                 let lit: syn::LitStr = meta.value()?.parse()?;
-                mask = lit.value();
+                attrs.mask = lit.value();
+                return Ok(());
+            }
+            if meta.path.is_ident("crate") {
+                attrs.krate = Some(parse_crate_value(&meta)?);
                 return Ok(());
             }
             // Unknown keys produce a nice error tied to the attribute span
-            Err(meta.error("unsupported attribute; expected `mask = \"...\"`"))
+            Err(meta.error("unsupported attribute; expected `mask = \"...\"` or `crate = \"...\"`"))
         })?;
     }
 
-    Ok(mask)
+    Ok(attrs)
 }
 
 fn debug_body_for_struct(ds: &DataStruct, mask: &str) -> proc_macro2::TokenStream {

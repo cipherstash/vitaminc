@@ -1,0 +1,15 @@
+error: this derive needs a dependency on `vitaminc-protected`, or on `vitaminc` with the `protected` feature; otherwise name the crate with `#[opaque_debug(crate = "path::to::protected")]`
+ --> tests/ui/fail/no_protected_dependency.rs:4:10
+  |
+4 | #[derive(vitaminc_protected_derive::OpaqueDebug)]
+  |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the derive macro `vitaminc_protected_derive::OpaqueDebug` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: this derive needs a dependency on `vitaminc-protected`, or on `vitaminc` with the `protected` feature; otherwise name the crate with `#[timing_safe(crate = "path::to::protected")]`
+ --> tests/ui/fail/no_protected_dependency.rs:7:10
+  |
+7 | #[derive(vitaminc_protected_derive::TimingSafeEq)]
+  |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the derive macro `vitaminc_protected_derive::TimingSafeEq` (in Nightly builds, run with -Z macro-backtrace for more info)

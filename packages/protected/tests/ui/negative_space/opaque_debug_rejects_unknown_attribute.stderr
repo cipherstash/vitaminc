@@ -1,4 +1,4 @@
-error: unsupported attribute; expected `mask = "..."`
+error: unsupported attribute; expected `mask = "..."` or `crate = "..."`
  --> tests/ui/negative_space/opaque_debug_rejects_unknown_attribute.rs:7:16
   |
 7 | #[opaque_debug(bogus = "x", mask = "###")]

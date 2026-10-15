@@ -429,12 +429,9 @@ fn raw_identifier_fields_print_unraw() {
     );
 }
 
-// The derive must not pick up same-named macros at the call site.
+// The derive must not pick up same-named macros at the call site, and must
+// work by full path with neither the trait nor the derive imported.
 mod call_site_hygiene {
-    // The marker trait must be in scope (see the note in the derive). The
-    // derive itself is still named by full path below.
-    use vitaminc_protected::OpaqueDebug;
-
     // Unused on purpose: the derive must not expand to it.
     #[allow(unused_macros)]
     macro_rules! write {
@@ -469,7 +466,7 @@ mod call_site_hygiene {
 }
 
 #[test]
-fn derive_ignores_call_site_macros() {
+fn derive_ignores_call_site_macros_and_needs_no_import() {
     use call_site_hygiene::{E, S};
 
     let tn = type_name::<E>();
@@ -483,4 +480,19 @@ fn derive_ignores_call_site_macros() {
     assert_opaque(&s);
     let tn = type_name::<S>();
     assert_eq!(format!("{s:?}"), format!("{tn} {{ a: \"***\" }}"));
+}
+
+// `crate = "..."` overrides the resolved path to the protected crate.
+mod crate_override {
+    #[derive(vitaminc_protected::OpaqueDebug)]
+    #[opaque_debug(crate = "::vitaminc_protected", mask = "##")]
+    pub struct Overridden(pub u8);
+}
+
+#[test]
+fn crate_override_is_used_as_the_root() {
+    let v = crate_override::Overridden(1);
+    assert_opaque(&v);
+    let tn = type_name::<crate_override::Overridden>();
+    assert_eq!(format!("{v:?}"), format!("{tn}(\"##\")"));
 }

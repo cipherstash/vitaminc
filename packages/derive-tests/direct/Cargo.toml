@@ -1,0 +1,16 @@
+[package]
+name = "derive-tests-direct"
+description = "Test-only crate, never published: the vitaminc-protected derives from a crate that depends only on vitaminc-protected."
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# `vitaminc-protected` must stay the only dependency: the derives read this manifest to find the protected crate.
+[dependencies]
+vitaminc-protected = { path = "../../protected" }
+
+[[test]]
+name = "derives"
+path = "tests/derives.rs"

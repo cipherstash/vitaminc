@@ -1,0 +1,16 @@
+[package]
+name = "derive-tests-umbrella-only"
+description = "Test-only crate, never published: the vitaminc-protected derives from a crate that depends only on the vitaminc umbrella crate (feature protected), so the protected crate is reachable only as vitaminc::protected."
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# `vitaminc` must stay the only dependency: the derives read this manifest to find the protected crate, and this crate pins the layout where it is reachable only as `vitaminc::protected`.
+[dependencies]
+vitaminc = { path = "../../vitaminc", default-features = false, features = ["protected"] }
+
+[[test]]
+name = "derives"
+path = "tests/derives.rs"

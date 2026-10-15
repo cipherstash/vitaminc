@@ -77,3 +77,17 @@ fn derive_by_full_path_needs_no_import() {
     assert!(Kind::A(1) == Kind::A(1));
     assert!(Kind::A(1) != Kind::B);
 }
+
+// `crate = "..."` overrides the resolved path to the protected crate.
+mod crate_override {
+    #[derive(vitaminc_protected::TimingSafeEq)]
+    #[timing_safe(crate = "::vitaminc_protected")]
+    pub struct Overridden(pub [u8; 2]);
+}
+
+#[test]
+fn crate_override_is_used_as_the_root() {
+    use crate_override::Overridden;
+    assert!(Overridden([1, 2]) == Overridden([1, 2]));
+    assert!(Overridden([1, 2]) != Overridden([2, 1]));
+}

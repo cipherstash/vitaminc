@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, DeriveInput};
 
+mod crate_path;
 mod opaque_debug;
 mod timing_safe;
 
@@ -10,7 +11,7 @@ pub fn derive_opaque_debug(input: TokenStream) -> TokenStream {
     opaque_debug::derive_opaque_debug(input)
 }
 
-#[proc_macro_derive(TimingSafeEq)]
+#[proc_macro_derive(TimingSafeEq, attributes(timing_safe))]
 pub fn derive_timing_safe(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     timing_safe::derive_timing_safe(input)
