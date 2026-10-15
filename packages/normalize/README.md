@@ -77,7 +77,7 @@ user.insert("name", "Ada");
 
 let (ciphertext, terms) = encrypt_with_terms(user, &cipher, "users/v1")?;
 assert_eq!(terms.len(), 2);
-assert_eq!(terms[0].path, [Step::Key("email".into())]);
+assert!(matches!(terms[0].path.steps(), [Step::Key(k)] if k == "email"));
 assert_eq!(terms[0].normalized.domain, domain::TEXT);
 # Ok::<(), vitaminc_aead::EncryptError<core::convert::Infallible>>(())
 ```
@@ -92,7 +92,10 @@ either. A scalar whose *logical type* has no domain, one from a newer
 client, stops the walk: encrypting it with no term and no error would leave
 an index silently incomplete. That refusal, an unassigned code point and a
 value invalid for its logical type all arrive as `EncryptError::Source`
-carrying a `NormalizeError`.
+carrying a `TermError`, which holds the
+`NormalizeError` and the path to the refused field. Its message names
+neither the field nor the value, because map keys can be user data; read
+the path with `TermError::path`.
 
 ## Encodings
 

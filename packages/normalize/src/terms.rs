@@ -9,7 +9,7 @@
 use core::future::Future;
 use core::marker::PhantomData;
 
-use vitaminc_aead::plaintext::Error;
+use vitaminc_aead::plaintext::{Error, Path, Step};
 use vitaminc_aead::seal::{seal_all, seal_all_async, AsyncCipher, Cipher};
 use vitaminc_aead::{
     EncryptError, EncryptSink, IntoAad, Logical, MapSink, Node, Pending, Physical, Plaintext,
@@ -20,27 +20,45 @@ use vitaminc_protected::OpaqueDebug;
 
 use crate::scalar::{normalize, NormalizeError, Normalized};
 
-/// One step of the path from the root of a value to a scalar.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Step {
-    /// The element at this index of a sequence.
-    Index(usize),
-    /// The entry under this key of a map.
-    Key(String),
-}
-
 /// One equality term: where the scalar sits in the value, and its
 /// normalized bytes with their domain.
 ///
-/// `Debug` shows the path, which is structure (indexes and map keys, which
-/// the ciphertext carries in the clear too), and masks the term.
+/// `Debug` shows the path's shape, with its map keys masked as [`Step`]
+/// masks them, and masks the term.
 #[derive(OpaqueDebug)]
 pub struct Term {
     /// The path from the root, empty for a scalar at the root.
     #[non_sensitive]
-    pub path: Vec<Step>,
+    pub path: Path,
     /// The term itself: the frozen domain label and the normalized bytes.
     pub normalized: Normalized,
+}
+
+/// A scalar [`Terms`] refused: why, and where in the value.
+///
+/// `Display` shows only the reason, because the path can hold map keys and
+/// map keys can be user data. `Debug` shows the reason and the path's
+/// shape, with every key masked. Read the path with
+/// [`path`](TermError::path).
+#[derive(Clone, OpaqueDebug, thiserror::Error)]
+#[error("no equality term: {error}")]
+pub struct TermError {
+    #[non_sensitive]
+    path: Path,
+    #[non_sensitive]
+    error: NormalizeError,
+}
+
+impl TermError {
+    /// Where the refused scalar sits, from the root.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Why the scalar has no term.
+    pub fn error(&self) -> NormalizeError {
+        self.error
+    }
 }
 
 /// A sink that collects one [`Term`] per scalar with an equality domain,
@@ -61,13 +79,14 @@ pub struct Term {
 ///
 /// # Errors
 ///
-/// The walk stops with `E::source(SourceError::new(error))`, carrying the
-/// [`NormalizeError`], when a scalar's logical type has no domain
-/// (`NoDomain`), when text holds a code point unassigned in Unicode 16
-/// (`UnassignedCodePoint`), or when a value is not valid for its logical
-/// type (`Invalid`). Beside [`EncryptSink`] that arrives as
-/// [`EncryptError::Source`], and `source.inner().downcast_ref::<NormalizeError>()`
-/// recovers which it was.
+/// The walk stops with `E::source(SourceError::new(error))`, where `error`
+/// is a [`TermError`] holding the scalar's path and the
+/// [`NormalizeError`]: the scalar's logical type has no domain
+/// (`NoDomain`), its text holds a code point unassigned in Unicode 16
+/// (`UnassignedCodePoint`), or it is not valid for its logical type
+/// (`Invalid`). Beside [`EncryptSink`] that arrives as
+/// [`EncryptError::Source`], and `source.inner().downcast_ref::<TermError>()`
+/// recovers it.
 pub struct Terms<'t, E> {
     out: &'t mut Vec<Term>,
     /// The path of the container this sink is a child of, borrowed from
@@ -107,7 +126,7 @@ impl<'t, E: Error> Sink for Terms<'t, E> {
     fn scalar(self, ty: Option<Logical>, value: Physical<'_>) -> Result<(), E> {
         match normalize(ty, value) {
             Ok(normalized) => {
-                let path = self.path();
+                let path = Path::new(self.path());
                 self.out.push(Term { path, normalized });
                 Ok(())
             }
@@ -116,7 +135,10 @@ impl<'t, E: Error> Sink for Terms<'t, E> {
             Err(NormalizeError::NoDomain) if matches!(ty, None | Some(Logical::Undefined)) => {
                 Ok(())
             }
-            Err(error) => Err(E::source(SourceError::new(error))),
+            Err(error) => Err(E::source(SourceError::new(TermError {
+                path: Path::new(self.path()),
+                error,
+            }))),
         }
     }
 
@@ -215,7 +237,7 @@ pub type WithTerms<L> = (Node<L>, Vec<Term>);
 /// # Errors
 ///
 /// Everything [`EncryptSink`] refuses, plus what [`Terms`] refuses, which
-/// arrives as [`EncryptError::Source`] carrying a [`NormalizeError`].
+/// arrives as [`EncryptError::Source`] carrying a [`TermError`].
 pub fn plan_with_terms<'a, P, E, A>(value: P, aad: A) -> Result<WithTerms<Pending>, EncryptError<E>>
 where
     P: Plaintext,
