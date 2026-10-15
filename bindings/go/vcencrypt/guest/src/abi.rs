@@ -392,8 +392,7 @@ pub unsafe extern "C" fn vc_decrypt_element(
 fn decrypt(handle: u32, aad: &[u8], ct: &[u8], as_element: bool) -> Result<Vec<u8>, u32> {
     // Decoding before the handle lookup is relied on by vcencrypt's
     // differential fuzz targets, as in `encrypt`.
-    let node: Node<LocalCipherText> =
-        codec::decode_ciphertext(&mut codec::Reader::new(ct)).map_err(|_| STATUS_ENCODING)?;
+    let node: Node<LocalCipherText> = codec::decode_ciphertext(ct).map_err(|_| STATUS_ENCODING)?;
     with_cipher(handle, |cipher| {
         let out =
             decrypt_to_frame(cipher, node, context(aad, as_element)).map_err(decrypt_status)?;

@@ -2693,6 +2693,8 @@ name = "vitaminc-aead-frame"
 version = "0.5.1"
 dependencies = [
  "chrono",
+ "quickcheck",
+ "quickcheck_macros",
  "rust_decimal",
  "serde_json",
  "vitaminc-aead",
