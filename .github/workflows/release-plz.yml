@@ -35,6 +35,29 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
+      # Two test workspaces keep their own lockfiles, which pin the workspace
+      # crates by version and which release-plz does not update: the Node
+      # addon (built with --locked, so a stale pin fails CI) and the Go
+      # bindings' wasm guest. Re-sync both on the release branch after every
+      # regeneration. `cargo metadata` updates only what the bump changed.
+      - name: Re-sync the nested lockfiles on the release branch
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          branch=$(gh pr list --state open --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("release-plz-"))][0].headRefName // empty')
+          if [ -z "$branch" ]; then exit 0; fi
+          git fetch origin "$branch"
+          git switch "$branch"
+          for manifest in packages/aead-napi/tests/addon/Cargo.toml bindings/go/vcencrypt/guest/Cargo.toml; do
+            cargo metadata --quiet --format-version 1 --manifest-path "$manifest" > /dev/null
+          done
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: re-sync the nested lockfiles to the release version"
+          git push origin "$branch"
+
   release-plz-release:
     name: "Release"
     runs-on: ubuntu-latest
