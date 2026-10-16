@@ -1,0 +1,69 @@
+# Local backends for this crate's integration tests. Each vendor adapter's
+# emulator-backed tests talk to one of these on a fixed localhost port, so
+# `cargo test -p vitaminc-kms --all-features` needs all three running
+# (see CIP-4029, Linear map CIP-4028, for why tests require the emulator
+# rather than skipping themselves when it is absent).
+#
+# Google Cloud KMS has no viable emulator: the community ones are gRPC-only
+# or miss the MAC and asymmetric operations. Its adapter is tested against
+# the official crate's `stub` trait only.
+#
+# Usage:
+#   docker compose -f packages/kms/docker-compose.yml up -d --wait
+#   cargo test -p vitaminc-kms --all-features
+#   docker compose -f packages/kms/docker-compose.yml down
+services:
+  # AWS KMS: CreateKey/GenerateDataKey/Decrypt/Encrypt/GenerateMac/VerifyMac/
+  # Sign/Verify/GetPublicKey are all in the Community `kms` service.
+  localstack:
+    # Pinned to the last Community-only major: `:stable`/`:latest` now
+    # bundle LocalStack's "unified" image, which exits at startup
+    # requiring a paid LOCALSTACK_AUTH_TOKEN even for previously-free
+    # services (confirmed by actually running this — CIP-4035, Linear map
+    # CIP-4028). `:4` still runs the plain Community image with no token.
+    image: localstack/localstack:4
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=kms
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  # HashiCorp Vault Transit, dev mode: in-memory, unsealed, root token
+  # "root". The `transit` engine is enabled by the test setup itself.
+  # OpenBao (`openbao/openbao`, MPL-2.0) is a drop-in replacement if the
+  # BUSL licence of this image is a concern for your environment.
+  vault:
+    image: hashicorp/vault:2.1.0
+    ports:
+      - "8200:8200"
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=root
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  # Azure Key Vault: Lowkey Vault speaks the Keys REST API for RSA, EC and
+  # oct keys, including encrypt/decrypt, wrap/unwrap and sign/verify (HMAC
+  # included). It serves HTTPS on 8443 with a self-signed certificate; the
+  # Azure tests trust that certificate explicitly rather than via the OS
+  # store. It ignores token values, so any stub credential works.
+  lowkey-vault:
+    image: nagyesta/lowkey-vault:7.3.98
+    ports:
+      - "8443:8443"
+    healthcheck:
+      # The image has wget, not curl; it also serves plain HTTP on 8080,
+      # which is only used here for the probe.
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
