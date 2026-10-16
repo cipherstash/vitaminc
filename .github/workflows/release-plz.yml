@@ -51,8 +51,10 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          # --author is applied by GitHub's search, so only release-plz's own
+          # PRs come back; --limit lifts gh's default cap of 30 all the same.
           branch=$(gh pr list --state open --base main --author "app/cipherstash-release-plz" \
-            --json headRefName,isCrossRepository \
+            --limit 100 --json headRefName,isCrossRepository \
             --jq '[.[] | select(.isCrossRepository | not) | select(.headRefName | startswith("release-plz-"))][0].headRefName // empty')
           if [ -z "$branch" ]; then exit 0; fi
           git fetch origin "refs/heads/$branch"
