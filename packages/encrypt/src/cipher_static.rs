@@ -4,8 +4,52 @@
 
 use crate::Aes256Cipher;
 use vitaminc_aead::hlist::{Absent, Encrypted, Entry, StaticCipher};
-use vitaminc_aead::{IntoAad, Unspecified};
+use vitaminc_aead::{tags, IntoAad, Unspecified};
 use vitaminc_protected::{Controlled, Protected};
+use zeroize::Zeroizing;
+
+/// What an [`Absent`] seals: the null leaf, as `None` is everywhere else
+/// (ADR 0001). No separate absence derivation is needed, because the leaf
+/// itself says what it is.
+const NULL_LEAF: [u8; 1] = [tags::NULL];
+
+/// What an [`Encrypted`] seals: the caller's bytes as a tagged bytes leaf,
+/// `[tags::BYTES] ++ data`, the same leaf the sink-based path seals for a
+/// `Vec<u8>`. The tag is what keeps an `Encrypted` and an `Absent` apart
+/// under one AAD: a raw payload of one zero byte would otherwise be the
+/// null leaf, so a present field could pass as an absence and an absence
+/// could open as a present value.
+fn tagged_bytes(data: Protected<Vec<u8>>) -> Protected<Vec<u8>> {
+    data.map(|bytes| {
+        // `map` hands the closure the plain vector and with it the duty to
+        // wipe it. The leaf is a fresh allocation one byte longer, so the
+        // caller's vector is copied rather than grown in place (a growth
+        // would leave the old allocation behind unwiped); wrapping it wipes
+        // it when the closure returns.
+        let bytes = Zeroizing::new(bytes);
+        let mut leaf = Vec::with_capacity(bytes.len() + 1);
+        leaf.push(tags::BYTES);
+        leaf.extend_from_slice(&bytes);
+        leaf
+    })
+}
+
+/// The caller's bytes back out of a tagged bytes leaf. Any other leaf,
+/// the null leaf of an [`Absent`] first among them, is refused.
+fn untagged_bytes(leaf: Protected<Vec<u8>>) -> Result<Protected<Vec<u8>>, Unspecified> {
+    if leaf.risky_ref().first() != Some(&tags::BYTES) {
+        return Err(Unspecified);
+    }
+    Ok(leaf.map(|mut bytes| {
+        // Rotate the tag to the end and pop it, so the one byte the shorter
+        // vector leaves in its spare capacity is the public tag and not the
+        // last byte of the plaintext. `Protected` wipes the spare capacity
+        // on drop as well; this keeps nothing secret there to begin with.
+        bytes.rotate_left(1);
+        bytes.pop();
+        bytes
+    }))
+}
 
 impl StaticCipher for &Aes256Cipher {
     type Error = Unspecified;
@@ -18,7 +62,7 @@ impl StaticCipher for &Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        let local = seal_into_local(self, data, aad)?;
+        let local = seal_into_local(self, tagged_bytes(data), aad)?;
         Ok(Encrypted::from_local(local))
     }
 
@@ -26,47 +70,54 @@ impl StaticCipher for &Aes256Cipher {
     where
         A: IntoAad<'a>,
     {
-        // `Context::for_none` domain-separates the absence marker from an empty
-        // `Encrypted`: both seal an empty plaintext, so without it an
-        // `Absent` slot could be swapped for an empty `Encrypted` one (and
-        // vice versa) without tripping tag verification. Shared with the
-        // dynamic path's `Cipher::encrypt_none`, so both absence markers use
-        // one wire commitment. `verify_absent` re-derives the same AAD.
-        let local = seal_into_local(self, Protected::new(Vec::new()), aad.into_aad().for_none())?;
+        // The marker is a sealed null leaf under the slot's own AAD: the same
+        // bytes `encrypt` seals for a `None` there, so the static and the
+        // sink-based paths agree on what absence is. An `Encrypted` is a
+        // tagged bytes leaf, so neither can stand in for the other:
+        // `verify_absent` requires the null leaf and `open_encrypted` the
+        // bytes tag.
+        let local = seal_into_local(self, Protected::new(NULL_LEAF.to_vec()), aad)?;
         Ok(Absent::from_local(local))
     }
 }
 
 impl Aes256Cipher {
     /// Open an [`Encrypted`] leaf under the supplied AAD. Counterpart to
-    /// [`StaticCipher::encrypt_bytes`].
+    /// [`StaticCipher::encrypt_bytes`]. Named so it cannot shadow
+    /// [`Cipher::open`](vitaminc_aead::seal::Cipher::open), which takes a
+    /// [`LocalCipherText`](vitaminc_aead::LocalCipherText) and a `&Context`
+    /// and must resolve the same with or without the `hlist` feature.
     ///
     /// The plaintext is returned inside `Protected` to thread the chain of
-    /// custody across the call boundary, matching
-    /// [`Aes256Cipher::decrypt_with_aad`]. The returned `Protected<Vec<u8>>` is
-    /// zeroized on drop (`Protected` is `ZeroizeOnDrop`).
-    pub fn open<'a, A>(&self, ct: Encrypted, aad: A) -> Result<Protected<Vec<u8>>, Unspecified>
+    /// custody across the call boundary. The returned `Protected<Vec<u8>>`
+    /// is zeroized on drop (`Protected` is `ZeroizeOnDrop`). A sealed leaf
+    /// that is not a tagged bytes leaf, an [`Absent`] marker re-wrapped as
+    /// an `Encrypted` first among them, is refused.
+    pub fn open_encrypted<'a, A>(
+        &self,
+        ct: Encrypted,
+        aad: A,
+    ) -> Result<Protected<Vec<u8>>, Unspecified>
     where
         A: IntoAad<'a>,
     {
-        open_local(self, ct.into_local(), aad)
+        untagged_bytes(open_local(self, ct.into_local(), aad)?)
     }
 
     /// Verify an [`Absent`] marker under the supplied AAD. Returns
-    /// `Ok(())` if the tag binds `aad` **and** the sealed plaintext is empty,
-    /// `Err(Unspecified)` otherwise.
+    /// `Ok(())` if the tag binds `aad` **and** the sealed plaintext is the
+    /// null leaf, `Err(Unspecified)` otherwise.
     pub fn verify_absent<'a, A>(&self, ct: Absent, aad: A) -> Result<(), Unspecified>
     where
         A: IntoAad<'a>,
     {
-        // A conforming marker seals an empty plaintext; requiring emptiness
-        // here (not just a valid tag) means a key-holding writer cannot mint
-        // a nonempty payload under the `for_none` derivation and have it
-        // verify as an absence — defense in depth for the marker's meaning,
-        // not just its authenticity. The `Protected` drops (and zeroizes) at
-        // the end of the expression. The AAD wrap matches `encrypt_none`.
-        let plaintext = open_local(self, ct.into_local(), aad.into_aad().for_none())?;
-        if plaintext.risky_ref().is_empty() {
+        // A conforming marker seals the null leaf; requiring that here (not
+        // just a valid tag) means a key-holding writer cannot pass any other
+        // sealed value off as an absence — defense in depth for the marker's
+        // meaning, not just its authenticity. The `Protected` drops (and
+        // zeroizes) at the end of the expression.
+        let plaintext = open_local(self, ct.into_local(), aad)?;
+        if plaintext.risky_ref() == &NULL_LEAF {
             Ok(())
         } else {
             Err(Unspecified)
@@ -79,7 +130,7 @@ impl Aes256Cipher {
     /// whose cleartext key was renamed or swapped fails to open.
     ///
     /// [`StaticMapBuilder::encrypt_entry`]: vitaminc_aead::hlist::StaticMapBuilder::encrypt_entry
-    pub fn open_entry<'a, A>(
+    pub fn open_encrypted_entry<'a, A>(
         &self,
         entry: Entry<Encrypted>,
         aad: A,
@@ -88,11 +139,11 @@ impl Aes256Cipher {
         A: IntoAad<'a>,
     {
         let entry_aad = aad.into_aad().for_map_entry(entry.key);
-        open_local(self, entry.value.into_local(), entry_aad)
+        self.open_encrypted(entry.value, entry_aad)
     }
 
     /// Verify a map [`Entry`]'s absent marker, key-bound like
-    /// [`open_entry`](Aes256Cipher::open_entry).
+    /// [`open_encrypted_entry`](Aes256Cipher::open_encrypted_entry).
     pub fn verify_absent_entry<'a, A>(
         &self,
         entry: Entry<Absent>,
@@ -122,7 +173,8 @@ mod test {
     use crate::Key;
     use quickcheck_macros::quickcheck;
     use vitaminc_aead::hlist::{Entry, HCons, HNil, Map, Passthrough, StaticCipher};
-    use vitaminc_aead::LocalCipherText;
+    use vitaminc_aead::seal::Cipher;
+    use vitaminc_aead::{Context, LocalCipherText};
 
     // A worked example. In production this type alias would be generated
     // by a derive macro from the user's struct definition.
@@ -180,7 +232,7 @@ mod test {
         let version: u8 = version_e.value.0; // typed access, no fallibility
         let pw = String::from_utf8(
             cipher
-                .open_entry(pw_e, AAD)
+                .open_encrypted_entry(pw_e, AAD)
                 .expect("open pw")
                 .risky_unwrap(),
         )
@@ -195,7 +247,7 @@ mod test {
         let Map(HCons(theme_e, HNil)) = prefs_e.value;
         let theme = String::from_utf8(
             cipher
-                .open_entry(theme_e, inner_aad)
+                .open_encrypted_entry(theme_e, inner_aad)
                 .expect("open theme")
                 .risky_unwrap(),
         )
@@ -209,7 +261,7 @@ mod test {
     // Entry values are sealed against `Context::for_map_entry(aad, key)`, so a
     // stored entry whose cleartext key is renamed (the untrusted-input path a
     // future deserializer would expose) must fail to open — the same key-swap
-    // resistance the dynamic MapCipher enforces.
+    // resistance the encrypting walk enforces.
 
     #[test]
     fn static_entry_with_renamed_key_fails_to_open() {
@@ -225,7 +277,7 @@ mod test {
             key: "backup_email",
             value: entry.value,
         };
-        assert!(cipher.open_entry(renamed, AAD).is_err());
+        assert!(cipher.open_encrypted_entry(renamed, AAD).is_err());
     }
 
     #[test]
@@ -253,7 +305,7 @@ mod test {
         };
         let inner_aad = renamed.nested_aad(AAD);
         let Map(HCons(theme_e, HNil)) = renamed.value;
-        assert!(cipher.open_entry(theme_e, inner_aad).is_err());
+        assert!(cipher.open_encrypted_entry(theme_e, inner_aad).is_err());
     }
 
     #[test]
@@ -287,7 +339,7 @@ mod test {
         };
         let inner_aad = spliced.nested_aad(b"user:42".as_slice());
         let Map(HCons(theme_e, HNil)) = spliced.value;
-        assert!(cipher.open_entry(theme_e, inner_aad).is_err());
+        assert!(cipher.open_encrypted_entry(theme_e, inner_aad).is_err());
     }
 
     #[test]
@@ -314,7 +366,7 @@ mod test {
         let leaf = (&cipher)
             .encrypt_bytes(Protected::new(b"hello".to_vec()), b"right".as_slice())
             .expect("encrypt");
-        assert!(cipher.open(leaf, b"wrong".as_slice()).is_err());
+        assert!(cipher.open_encrypted(leaf, b"wrong".as_slice()).is_err());
     }
 
     #[test]
@@ -352,7 +404,7 @@ mod test {
     fn open_rejects_arbitrary_bytes(key: Key, bytes: Vec<u8>) -> bool {
         let cipher = Aes256Cipher::new(&key).unwrap();
         let leaf = Encrypted::from_local(LocalCipherText::from(bytes));
-        cipher.open(leaf, b"aad".as_slice()).is_err()
+        cipher.open_encrypted(leaf, b"aad".as_slice()).is_err()
     }
 
     #[quickcheck]
@@ -363,43 +415,126 @@ mod test {
     }
 
     #[test]
-    fn verify_absent_requires_empty_payload_under_the_none_derivation() {
-        // Even a key-holding writer must not be able to pass a nonempty
-        // payload off as an absence marker: verify_absent requires the sealed
-        // plaintext to be empty, not merely the tag to bind `for_none(aad)`.
+    fn verify_absent_requires_the_null_leaf() {
+        // Even a key-holding writer must not be able to pass another sealed
+        // value off as an absence marker: verify_absent requires the sealed
+        // plaintext to be the null leaf, not merely the tag to bind `aad`.
+        // Every `Encrypted` is a tagged bytes leaf, so none qualifies, not
+        // even the one-byte zero payload whose raw bytes are the null leaf.
         let cipher = Aes256Cipher::new(&Key::from([6u8; 32])).unwrap();
         let aad = b"aad".as_slice();
-        // The empty payload proves the fixture passes authentication before
-        // verify_absent checks whether its plaintext is empty.
-        for (payload, expected) in [("", Ok(())), ("payload", Err(Unspecified))] {
+        for payload in [
+            &[tags::NULL][..],
+            &[][..],
+            &[tags::UNDEFINED][..],
+            b"payload",
+        ] {
             let sealed = (&cipher)
-                .encrypt_bytes(
-                    Protected::new(payload.as_bytes().to_vec()),
-                    aad.into_aad().for_none(),
-                )
+                .encrypt_bytes(Protected::new(payload.to_vec()), aad)
                 .unwrap();
             let as_absent = Absent::from_local(sealed.into_local());
             assert_eq!(
                 cipher.verify_absent(as_absent, aad),
-                expected,
+                Err(Unspecified),
                 "payload: {payload:?}"
             );
         }
+        // The null leaf itself, sealed through the leaf path, is one.
+        let sealed = seal_into_local(&cipher, Protected::new(NULL_LEAF.to_vec()), aad).unwrap();
+        assert_eq!(
+            cipher.verify_absent(Absent::from_local(sealed), aad),
+            Ok(())
+        );
     }
 
-    // An empty `Encrypted` and an `Absent` seal the same empty plaintext; the
-    // domain separator on `encrypt_none` is what keeps their tags from
-    // cross-validating under the same (key, AAD). Single representative case
-    // each — the property is structural, not value-dependent.
+    #[test]
+    fn an_absence_marker_does_not_open_as_a_present_value() {
+        // The other direction: an `Absent` re-wrapped as an `Encrypted`
+        // authenticates, but it is the null leaf, not a bytes leaf, so a
+        // caller decoding a present field never reads a zero byte from it.
+        let cipher = Aes256Cipher::new(&Key::from([6u8; 32])).unwrap();
+        let aad = b"aad".as_slice();
+        let absent = (&cipher).encrypt_none(aad).unwrap();
+        let as_encrypted = Encrypted::from_local(absent.into_local());
+        assert!(matches!(
+            cipher.open_encrypted(as_encrypted, aad),
+            Err(Unspecified)
+        ));
+        // Through the map builder too.
+        let map = (&cipher)
+            .encrypt_map()
+            .none_entry("flag", aad)
+            .unwrap()
+            .end();
+        let Map(HCons(entry, HNil)) = map;
+        let as_present = Entry {
+            key: entry.key,
+            value: Encrypted::from_local(entry.value.into_local()),
+        };
+        assert!(matches!(
+            cipher.open_encrypted_entry(as_present, aad),
+            Err(Unspecified)
+        ));
+        // And a present one-byte zero does not verify as absent.
+        let map = (&cipher)
+            .encrypt_map()
+            .encrypt_entry("flag", Protected::new(vec![0]), aad)
+            .unwrap()
+            .end();
+        let Map(HCons(entry, HNil)) = map;
+        let as_absent = Entry {
+            key: entry.key,
+            value: Absent::from_local(entry.value.into_local()),
+        };
+        assert_eq!(cipher.verify_absent_entry(as_absent, aad), Err(Unspecified));
+    }
+
+    // An `Absent` is a sealed null leaf, which is what `encrypt` seals for
+    // a `None` too, so the two paths agree on absence. An `Encrypted` is a
+    // tagged bytes leaf, which is what `encrypt` seals for a `Vec<u8>`.
 
     #[test]
-    fn absent_does_not_validate_as_encrypted_empty() {
+    fn absent_is_the_null_leaf_sealed_under_the_slots_aad() {
         let cipher = Aes256Cipher::new(&Key::from([2u8; 32])).unwrap();
         let aad = b"shared-aad".as_slice();
         let absent = (&cipher).encrypt_none(aad).unwrap();
-        // Reinterpret the Absent's bytes as an Encrypted leaf under the same AAD.
-        let as_encrypted = Encrypted::from_local(absent.into_local());
-        assert!(cipher.open(as_encrypted, aad).is_err());
+        let plaintext = open_local(&cipher, absent.into_local(), aad).unwrap();
+        assert_eq!(plaintext.risky_ref(), &NULL_LEAF);
+        // And what the sink-based path seals for `None` verifies as absent.
+        let node = vitaminc_aead::encrypt(None::<u32>, &cipher, aad).unwrap();
+        let vitaminc_aead::CipherText::Single(leaf) = node else {
+            panic!("a None is one leaf");
+        };
+        cipher
+            .verify_absent(Absent::from_local(leaf), aad)
+            .expect("the sink path's None is an absence");
+    }
+
+    #[test]
+    fn encrypted_is_the_bytes_leaf_the_sink_path_seals() {
+        let cipher = Aes256Cipher::new(&Key::from([2u8; 32])).unwrap();
+        let aad = b"shared-aad".as_slice();
+        let sealed = (&cipher)
+            .encrypt_bytes(Protected::new(vec![0, 7]), aad)
+            .unwrap();
+        let plaintext = open_local(&cipher, sealed.into_local(), aad).unwrap();
+        assert_eq!(plaintext.risky_ref(), &[tags::BYTES, 0, 7]);
+        // So a `Vec<u8>` sealed by the sink path opens as an `Encrypted`,
+        // and an `Encrypted` decrypts as a `Vec<u8>`.
+        let node = vitaminc_aead::encrypt(vec![0u8, 7], &cipher, aad).unwrap();
+        let vitaminc_aead::CipherText::Single(leaf) = node else {
+            panic!("bytes are one leaf");
+        };
+        let opened = cipher
+            .open_encrypted(Encrypted::from_local(leaf), aad)
+            .unwrap();
+        assert_eq!(opened.risky_ref(), &[0, 7]);
+        let sealed = (&cipher)
+            .encrypt_bytes(Protected::new(vec![0, 7]), aad)
+            .unwrap();
+        let node = vitaminc_aead::CipherText::Single(sealed.into_local());
+        let bytes: Vec<u8> = vitaminc_aead::decrypt(&cipher, node, aad).unwrap();
+        assert_eq!(bytes, [0, 7]);
     }
 
     #[test]
@@ -413,6 +548,18 @@ mod test {
         assert!(cipher.verify_absent(as_absent, aad).is_err());
     }
 
+    #[test]
+    fn the_cipher_trait_open_resolves_by_method_syntax_with_hlist_on() {
+        // The hlist methods are named so they never shadow `Cipher::open`:
+        // with the feature on, `cipher.open(leaf, &ctx)` is still the trait
+        // method, so turning the feature on is additive for every caller.
+        let cipher = Aes256Cipher::new(&Key::from([2u8; 32])).unwrap();
+        let ctx = Context::from_encoded(b"ctx".as_slice());
+        let leaf = cipher.seal(Protected::new(vec![tags::NULL]), &ctx).unwrap();
+        let opened = cipher.open(leaf, &ctx).unwrap();
+        assert_eq!(opened.risky_ref(), &[tags::NULL]);
+    }
+
     // A ciphertext sealed under one key must not open under a different key.
 
     #[quickcheck]
@@ -424,7 +571,7 @@ mod test {
         let ct = (&cipher_a)
             .encrypt_bytes(Protected::new(plaintext), aad)
             .unwrap();
-        cipher_b.open(ct, aad).is_err()
+        cipher_b.open_encrypted(ct, aad).is_err()
     }
 
     #[quickcheck]
@@ -452,7 +599,10 @@ mod test {
             let mut tampered = bytes.clone();
             tampered[idx] ^= 1;
             let leaf = Encrypted::from_local(LocalCipherText::from(tampered));
-            assert!(cipher.open(leaf, aad).is_err(), "tamper at byte {idx}");
+            assert!(
+                cipher.open_encrypted(leaf, aad).is_err(),
+                "tamper at byte {idx}"
+            );
         }
     }
 
@@ -489,5 +639,66 @@ mod test {
         let a1 = (&cipher).encrypt_none(aad).unwrap().into_local();
         let a2 = (&cipher).encrypt_none(aad).unwrap().into_local();
         a1.as_ref() != a2.as_ref()
+    }
+
+    #[quickcheck]
+    fn encrypt_bytes_round_trips_through_open_encrypted(key: Key, data: Vec<u8>) -> bool {
+        let cipher = Aes256Cipher::new(&key).unwrap();
+        let aad = b"aad".as_slice();
+        let sealed = (&cipher)
+            .encrypt_bytes(Protected::new(data.clone()), aad)
+            .unwrap();
+        cipher.open_encrypted(sealed, aad).unwrap().risky_unwrap() == data
+    }
+
+    #[test]
+    fn encrypt_bytes_round_trips_the_boundary_payloads() {
+        // The empty payload, and payloads that start with a tag byte, come
+        // back unchanged: only the one tag the cipher added is removed.
+        let cipher = Aes256Cipher::new(&Key::from([8u8; 32])).unwrap();
+        let aad = b"aad".as_slice();
+        for data in [
+            vec![],
+            vec![tags::BYTES],
+            vec![tags::BYTES, tags::BYTES],
+            vec![tags::NULL],
+        ] {
+            let sealed = (&cipher)
+                .encrypt_bytes(Protected::new(data.clone()), aad)
+                .unwrap();
+            let opened = cipher.open_encrypted(sealed, aad).unwrap();
+            assert_eq!(opened.risky_ref(), &data, "payload: {data:?}");
+        }
+    }
+
+    #[test]
+    fn hlist_openers_refuse_other_sealed_leaves() {
+        // The hlist slots use the same AAD as the sink-based `encrypt`, so
+        // a key holder can put a sink-path leaf in one. Neither opener may
+        // take a leaf it did not make: not a string, a bool or an int, not
+        // an empty plaintext, and not a null leaf with a byte after it.
+        let cipher = Aes256Cipher::new(&Key::from([6u8; 32])).unwrap();
+        let aad = b"aad".as_slice();
+        let leaf = |node| match node {
+            vitaminc_aead::CipherText::Single(leaf) => leaf,
+            other => panic!("expected one leaf, got {other:?}"),
+        };
+        let sealed = || {
+            [
+                leaf(vitaminc_aead::encrypt("x", &cipher, aad).unwrap()),
+                leaf(vitaminc_aead::encrypt(false, &cipher, aad).unwrap()),
+                leaf(vitaminc_aead::encrypt(0u32, &cipher, aad).unwrap()),
+                seal_into_local(&cipher, Protected::new(Vec::new()), aad).unwrap(),
+                seal_into_local(&cipher, Protected::new(vec![tags::NULL, 0]), aad).unwrap(),
+            ]
+        };
+        for (i, local) in sealed().into_iter().enumerate() {
+            let opened = cipher.open_encrypted(Encrypted::from_local(local), aad);
+            assert_eq!(opened.map(|_| ()), Err(Unspecified), "case {i}");
+        }
+        for (i, local) in sealed().into_iter().enumerate() {
+            let verified = cipher.verify_absent(Absent::from_local(local), aad);
+            assert_eq!(verified, Err(Unspecified), "case {i}");
+        }
     }
 }

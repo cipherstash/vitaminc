@@ -13,6 +13,8 @@ var (
 	ErrInvalidTimestamp = errors.New("vcvalue: invalid timestamp")
 	ErrInvalidDecimal   = errors.New("vcvalue: invalid or out-of-range decimal")
 	ErrNonFiniteDecimal = errors.New("vcvalue: decimal must be finite")
+	ErrInvalidUUID      = errors.New("vcvalue: invalid UUID")
+	ErrInvalidTagged    = errors.New("vcvalue: a tagged value must hold a physical scalar under an unknown logical id")
 )
 
 // Int128 is a signed two's-complement integer in little-endian byte order.
@@ -102,9 +104,11 @@ func DateFromDaysCE(days int32) (Date, error) {
 	return d, d.Validate()
 }
 
-// Timestamp preserves chrono's leap-second representation, which time.Time
-// cannot represent. Ordinary timestamps decode to time.Time; leap seconds
-// decode to this type. Both encode with the same Timestamp tag.
+// Timestamp is an instant as Unix seconds and nanoseconds, for a caller
+// that holds the parts rather than a time.Time. Timestamps decode to
+// time.Time; this type only encodes. A leap second (nanoseconds of one
+// billion or more) has no count since the epoch and is refused, as it is
+// everywhere in the model (ADR 0001).
 type Timestamp struct {
 	Seconds     int64
 	Nanoseconds uint32
@@ -113,19 +117,91 @@ type Timestamp struct {
 func (t Timestamp) Validate() error {
 	min := time.Date(-262143, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
 	max := time.Date(262142, 12, 31, 23, 59, 59, 0, time.UTC).Unix()
-	if t.Seconds < min || t.Seconds > max || t.Nanoseconds >= 2000000000 {
-		return ErrInvalidTimestamp
-	}
-	second := (t.Seconds%60 + 60) % 60
-	if t.Nanoseconds >= 1000000000 && second != 59 {
+	if t.Seconds < min || t.Seconds > max || t.Nanoseconds >= 1000000000 {
 		return ErrInvalidTimestamp
 	}
 	return nil
 }
 
+// UUID is sixteen bytes under the Uuid logical type: it travels in the
+// 0xF3 envelope, since the type has no shorthand tag. ParseUUID reads the
+// hyphenated hexadecimal spelling and String writes it in lower case.
+//
+// Another UUID type, such as github.com/google/uuid.UUID, is a plain
+// [16]byte to the codec and is written as bytes. Convert it first, with
+// vcvalue.UUID(id), so that Rust and Node read it as a UUID.
+type UUID [16]byte
+
+// ParseUUID reads the hyphenated spelling, 8-4-4-4-12 hexadecimal digits in
+// either case, and returns ErrInvalidUUID for anything else.
+func ParseUUID(s string) (UUID, error) {
+	var u UUID
+	if len(s) != 36 || s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
+		return UUID{}, ErrInvalidUUID
+	}
+	hexDigits := strings.ReplaceAll(s, "-", "")
+	if len(hexDigits) != 32 {
+		return UUID{}, ErrInvalidUUID
+	}
+	for i := range u {
+		hi, ok1 := hexDigit(hexDigits[2*i])
+		lo, ok2 := hexDigit(hexDigits[2*i+1])
+		if !ok1 || !ok2 {
+			return UUID{}, ErrInvalidUUID
+		}
+		u[i] = hi<<4 | lo
+	}
+	return u, nil
+}
+
+func hexDigit(c byte) (byte, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	}
+	return 0, false
+}
+
+// String is the hyphenated spelling in lower case.
+func (u UUID) String() string {
+	const digits = "0123456789abcdef"
+	var out [36]byte
+	j := 0
+	for i, b := range u {
+		if i == 4 || i == 6 || i == 8 || i == 10 {
+			out[j] = '-'
+			j++
+		}
+		out[j] = digits[b>>4]
+		out[j+1] = digits[b&0x0f]
+		j += 2
+	}
+	return string(out[:])
+}
+
+// Tagged carries a scalar under a logical type this build does not know:
+// the envelope's id and parameter, and the physical value as the Go native
+// of its kind. A value from a newer client is read and re-encoded unchanged
+// rather than dropped or mistaken for its bare physical value. V must be a
+// physical scalar (nil, bool, an integer or float width, Int128, Uint128,
+// string or []byte); ID must be above the ids this build knows. An int or
+// uint is written as Int64 or UInt64, as everywhere else in the codec, so
+// it reads back as int64 or uint64.
+type Tagged struct {
+	ID    uint8
+	Param uint8
+	V     any
+}
+
 // Decimal is a finite base-10 value: sign * Coefficient * 10^-Scale.
 // Coefficient is an unsigned 96-bit little-endian integer. Scale is retained,
 // including trailing zeroes, and must be at most 28 (rust_decimal's range).
+// A zero has no sign: "-0.00" parses, decodes and encodes as 0.00 with its
+// scale kept (ADR 0001).
 type Decimal struct {
 	Coefficient [12]byte
 	Scale       uint8
@@ -178,7 +254,23 @@ func ParseDecimal(s string) (Decimal, error) {
 	}
 	raw := littleInteger(coefficient)
 	copy(d.Coefficient[:], raw[:12])
+	if coefficient.Sign() == 0 {
+		d.Negative = false
+	}
 	return d, nil
+}
+
+// IsZero reports whether the coefficient is zero, whatever the scale.
+func (d Decimal) IsZero() bool {
+	return d.Coefficient == [12]byte{}
+}
+
+// Normalized is the decimal with the sign dropped from a zero.
+func (d Decimal) Normalized() Decimal {
+	if d.IsZero() {
+		d.Negative = false
+	}
+	return d
 }
 
 func (d Decimal) String() string {

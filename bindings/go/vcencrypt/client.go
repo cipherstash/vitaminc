@@ -36,15 +36,21 @@ var (
 	ErrBadHandle = errors.New("vcencrypt: unknown or freed cipher handle")
 	// ErrInternal is a guest panic or any other unexpected internal failure.
 	ErrInternal = errors.New("vcencrypt: internal guest failure")
+	// ErrNothingSealed is a non-empty array or object, at any depth, whose
+	// values are all Plain. Nothing in it would be sealed, so nothing would
+	// authenticate the AAD or the keys, and the guest refuses to encrypt it.
+	// The input is the cause, not the guest.
+	ErrNothingSealed = errors.New("vcencrypt: nothing to seal: an array or object (at any depth) holds only Plain values")
 )
 
-// Guest status codes (see guest/src/abi.rs). Kept in lockstep with the Rust
+// Guest status codes (see guest/src/status.rs). Kept in lockstep with the Rust
 // STATUS_* constants.
 const (
-	statusAuth      = 1
-	statusEncoding  = 2
-	statusBadHandle = 3
-	statusInternal  = 4
+	statusAuth          = 1
+	statusEncoding      = 2
+	statusBadHandle     = 3
+	statusInternal      = 4
+	statusNothingSealed = 5
 )
 
 func statusError(status uint32) error {
@@ -57,6 +63,8 @@ func statusError(status uint32) error {
 		return ErrBadHandle
 	case statusInternal:
 		return ErrInternal
+	case statusNothingSealed:
+		return ErrNothingSealed
 	default:
 		// A status this host doesn't know is still an internal failure, but
 		// the code is preserved so a guest/host version skew is diagnosable.

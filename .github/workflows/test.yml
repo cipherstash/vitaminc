@@ -133,24 +133,26 @@ jobs:
           echo "RLIMIT_MEMLOCK soft: $(ulimit -l) KiB"
           cargo test
 
-      - name: test (aead-value optional scalar features)
-        # Exercise each feature separately as well as together: default tests
-        # reject these tags, while enabled tests pin exact date/time/decimal
-        # payloads and reject malformed encodings without normalization.
+      - name: test (aead optional scalar features)
+        # Only dev-dependencies enable these on vitaminc-aead, so a build
+        # of the crate alone skips the tests that pin the chrono,
+        # rust_decimal and uuid conversions and range constants. Run each
+        # alone and together.
         run: |
-          cargo test -p vitaminc-aead-value --features chrono &&
-          cargo test -p vitaminc-aead-value --features rust_decimal &&
-          cargo test -p vitaminc-aead-value --all-features
+          cargo test -p vitaminc-aead --features chrono &&
+          cargo test -p vitaminc-aead --features rust_decimal &&
+          cargo test -p vitaminc-aead --features uuid &&
+          cargo test -p vitaminc-aead --all-features
 
-      - name: test (canonical equality features)
+      - name: test (equality term feature)
         # The workspace run unifies hmac's dev-dependency features, so test
-        # prf alone without `value` as well as with each optional feature.
+        # prf alone without `normalize` as well as with it, and check that
+        # the facade's `normalize` feature forwards to prf on its own.
         run: |
           cargo test -p vitaminc-prf &&
-          cargo test -p vitaminc-prf --features chrono &&
-          cargo test -p vitaminc-prf --features rust_decimal &&
-          cargo test -p vitaminc-prf --all-features &&
-          cargo test -p vitaminc-hmac --test value_equality
+          cargo test -p vitaminc-prf --features normalize &&
+          cargo test -p vitaminc-hmac --test normalized_equality &&
+          cargo test -p vitaminc --features prf,normalize --test prf_normalize
 
       - name: test (vitaminc-encrypt, RustCrypto backend on native)
         # Forces the RustCrypto path that wasm32 uses, so the same property
@@ -158,9 +160,13 @@ jobs:
         run: cargo test -p vitaminc-encrypt --features _test-rust-crypto-backend
 
       - name: test (Node conversion kind inventory)
+        # `cargo test -p vitaminc-aead-napi` above runs this suite too, with
+        # the others, against the test addon it builds; this step runs it on
+        # its own so a missing kind fails with the inventory's own message.
         run: |
-          cargo build --locked -p vitaminc-aead-napi --example kind_inventory
-          node packages/aead-napi/tests/kind_inventory.cjs target/debug/examples/libkind_inventory.so
+          cargo build --locked --manifest-path packages/aead-napi/tests/addon/Cargo.toml &&
+          cp packages/aead-napi/tests/addon/target/debug/libvitaminc_napi_test_addon.so packages/aead-napi/tests/addon/addon.node &&
+          node packages/aead-napi/tests/kind_inventory.cjs packages/aead-napi/tests/addon/addon.node
 
       - name: test (hlist static-ciphertext feature)
         # The `hlist` feature gates the static-ciphertext API and is NOT in the

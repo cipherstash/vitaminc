@@ -23,7 +23,7 @@ name = "vitaminc-aead-napi"
 version_group = "vitaminc"
 
 [[package]]
-name = "vitaminc-aead-value"
+name = "vitaminc-aead-frame"
 version_group = "vitaminc"
 
 [[package]]
@@ -40,6 +40,10 @@ version_group = "vitaminc"
 
 [[package]]
 name = "vitaminc-kms"
+version_group = "vitaminc"
+
+[[package]]
+name = "vitaminc-normalize"
 version_group = "vitaminc"
 
 [[package]]

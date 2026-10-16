@@ -288,6 +288,72 @@ func TestPassthroughRoundTrip(t *testing.T) {
 	}
 }
 
+// TestNothingSealedIsItsOwnError: a container holding only Plain values has
+// nothing to authenticate it, and the guest refuses it as the caller's input
+// rather than as an internal failure (#385). A bare Plain scalar is not a
+// container and travels in the clear as before.
+func TestNothingSealedIsItsOwnError(t *testing.T) {
+	cipher := newCipher(t)
+	cases := []struct {
+		name  string
+		value any
+	}{
+		{"flat map", map[string]any{"id": vcvalue.Plain{V: int64(42)}}},
+		{"sequence", []any{vcvalue.Plain{V: "a"}, vcvalue.Plain{V: "b"}}},
+		{"nested sequence beside a sealed value", map[string]any{"row": []any{vcvalue.Plain{V: int64(1)}}, "ok": "sealed"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := cipher.Encrypt(t.Context(), tc.value, []byte("aad"))
+			if !errors.Is(err, vcencrypt.ErrNothingSealed) {
+				t.Fatalf("Encrypt: got %v, want ErrNothingSealed", err)
+			}
+			if errors.Is(err, vcencrypt.ErrInternal) {
+				t.Fatal("ErrNothingSealed must not read as ErrInternal")
+			}
+			// The element export shares the refusal.
+			if _, err := cipher.EncryptElement(t.Context(), tc.value, []byte("aad")); !errors.Is(err, vcencrypt.ErrNothingSealed) {
+				t.Fatalf("EncryptElement: got %v, want ErrNothingSealed", err)
+			}
+		})
+	}
+
+	ct, err := cipher.Encrypt(t.Context(), vcvalue.Plain{V: int64(42)}, nil)
+	if err != nil {
+		t.Fatalf("a bare Plain scalar: %v", err)
+	}
+	if _, ok := ct.(vcvalue.Plain); !ok {
+		t.Fatalf("a bare Plain scalar travels as Plain, got %#v", ct)
+	}
+}
+
+// An empty container seals as an authenticated marker, so a Plain value
+// beside one is not a container with nothing sealed.
+func TestPlainBesideAnEmptyContainerIsSealed(t *testing.T) {
+	cipher := newCipher(t)
+	aad := []byte("aad")
+	value := map[string]any{"id": vcvalue.Plain{V: int64(42)}, "tags": []any{}}
+
+	ct, err := cipher.Encrypt(t.Context(), value, aad)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	if _, ok := ct.(map[string]any)["tags"].(vcvalue.SealedEmptySeq); !ok {
+		t.Fatalf("expected tags to be a SealedEmptySeq marker, got %#v", ct)
+	}
+	got, err := cipher.Decrypt(t.Context(), ct, aad)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	want := vcvalue.Object{
+		{Key: "id", Value: vcvalue.Plain{V: int64(42)}},
+		{Key: "tags", Value: []any{}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 // A modified passthrough value is NOT detected (passthrough is unauthenticated)
 // while its sealed sibling still authenticates.
 func TestPassthroughIsUnauthenticated(t *testing.T) {
@@ -498,10 +564,24 @@ func TestMapSubsetDecrypts(t *testing.T) {
 // guest (RustCrypto backend): the cross-language, cross-backend vector test.
 // The fixture now also carries passthrough fields (id, created_at) — they must
 // arrive intact and be readable from the ciphertext WITHOUT the key path.
+//
+// cross_lang.bin is written by the current encrypt path; cross_lang_pre_adr0001.bin
+// is the same value and key as sealed by the pre-ADR 0001 `Value` path, kept so
+// that a row Go wrote before the model change keeps decrypting. Its value chunk
+// is byte-identical, so one test reads both.
 func TestCrossLanguageFixture(t *testing.T) {
-	raw, err := os.ReadFile("testdata/cross_lang.bin")
+	for _, fx := range []struct{ name, restore string }{
+		{"cross_lang.bin", "regenerate with `cargo run --example gen_fixture` in guest/"},
+		{"cross_lang_pre_adr0001.bin", "restore it from git; it cannot be regenerated"},
+	} {
+		t.Run(fx.name, func(t *testing.T) { crossLanguageFixture(t, "testdata/"+fx.name, fx.restore) })
+	}
+}
+
+func crossLanguageFixture(t *testing.T, path, restore string) {
+	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("reading fixture (regenerate with `cargo run --example gen_fixture` in guest/): %v", err)
+		t.Fatalf("reading fixture (%s): %v", restore, err)
 	}
 
 	const magic = "VCGO1"

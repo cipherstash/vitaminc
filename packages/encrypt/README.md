@@ -25,7 +25,12 @@ Add this to your `Cargo.toml`:
 [dependencies]
 vitaminc-encrypt = "0.2.0-pre.1"
 vitaminc-random = "0.2.0-pre.1"  # For key generation
+vitaminc-aead = "0.2.0-pre.1"    # For the Plaintext and Decrypt derives
 ```
+
+The `Plaintext` and `Decrypt` derives are re-exported here, but the code they
+generate names the `vitaminc_aead` crate, so a crate that derives them for its
+own types must depend on `vitaminc-aead` too.
 
 ### Feature flags
 
@@ -34,21 +39,38 @@ vitaminc-random = "0.2.0-pre.1"  # For key generation
 ## Quick Start
 
 ```rust
-use vitaminc_encrypt::{Aes256Cipher, Key};
+use vitaminc_encrypt::{decrypt, encrypt, Aes256Cipher, Key};
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
 // Generate a key
 let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
 let key = Key::random(&mut rng).expect("Failed to generate key");
-
-// Encrypt a message
-let ciphertext = vitaminc_encrypt::encrypt(&key, "secret message").expect("Failed to encrypt");
-
-// Decrypt it back via a cipher constructed from the same key
 let cipher = Aes256Cipher::new(&key).expect("Failed to create cipher");
-let plaintext: String = cipher.decrypt(ciphertext).expect("Failed to decrypt");
+
+// Encrypt a message under some associated data
+let ciphertext = encrypt("secret message", &cipher, "user:42").expect("Failed to encrypt");
+
+// Decrypt it back, naming the type to decrypt into
+let plaintext: String = decrypt(&cipher, ciphertext, "user:42").expect("Failed to decrypt");
 assert_eq!(plaintext, "secret message");
 ```
+
+## How it fits together
+
+[`Aes256Cipher`] is the sink-based [`Cipher`] of ADR 0001: it seals and
+opens one tagged leaf under the AAD derived for the leaf's place in the
+value, and nothing else. Everything about the *shape* of a value — how a
+sequence's elements and a map's entries are bound to their positions, how
+an empty container is authenticated, the refusal of a container with
+nothing sealed — lives once in `vitaminc-aead`'s encrypting sink and
+opening walk, and is driven by [`encrypt`] and [`decrypt`] (re-exported
+here). A value encrypted from static Rust therefore seals the same tagged
+leaves a value from a host binding does, and every ciphertext is
+self-describing.
+
+The value going in is anything that implements [`Plaintext`], and the
+value coming out is anything that implements the sink-based [`Decrypt`].
+Both are derivable.
 
 ## Usage
 
@@ -77,92 +99,126 @@ let key = Key::from(key_bytes);
 
 ### Encrypting Data
 
-The [`encrypt`] function can encrypt any type that implements the [`Encrypt`] trait. Built-in support includes:
+[`encrypt`] takes any [`Plaintext`] source. Built-in sources include:
 
-- `String`
-- `&str`
-- `[u8; N]` (fixed-size byte arrays)
-- `Vec<T>` and `Option<T>` where `T` implements `Encrypt`
-- `Protected<T>` where `T` implements `Encrypt`
+- `String`, `&str`, `Vec<u8>`, `&[u8]` and `[u8; N]`
+- every integer and float width, `bool`, and `Option<T>` where `T: Plaintext`
+- `Vec<T>`, `HashMap<String, T>` and `BTreeMap<String, T>` where `T: Plaintext`
+- `Protected<T>` where `&T: Plaintext`, walked without leaving the wrapper
+- `chrono`, `rust_decimal` and `uuid` scalars behind `vitaminc-aead`'s features
 
 ```rust
-use vitaminc_encrypt::{encrypt, Key};
+use vitaminc_encrypt::{encrypt, Aes256Cipher, Key};
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
 let key = Key::random(&mut SafeRand::from_entropy().expect("Failed to seed RNG")).expect("Failed to generate key");
+let cipher = Aes256Cipher::new(&key).expect("cipher creation failed");
 
 // Encrypt a string
-let ciphertext = encrypt(&key, "secret message").expect("encryption failed");
+let ciphertext = encrypt("secret message", &cipher, ()).expect("encryption failed");
 
-// Encrypt a collection (element-wise; each element must implement `Encrypt`)
+// Encrypt a collection (element-wise; each element is sealed under its own position)
 let data = vec!["one".to_string(), "two".to_string()];
-let ciphertext = encrypt(&key, data).expect("encryption failed");
+let ciphertext = encrypt(data, &cipher, ()).expect("encryption failed");
 
-// Encrypt a fixed-size array
+// Encrypt a fixed-size array, as one bytes leaf
 let array = [0u8; 32];
-let ciphertext = encrypt(&key, array).expect("encryption failed");
+let ciphertext = encrypt(array, &cipher, ()).expect("encryption failed");
 ```
 
 ### Decrypting Data
 
-Decryption goes through [`Aes256Cipher`]: construct a cipher from the key, then call [`Aes256Cipher::decrypt`], annotating the expected plaintext type:
+[`decrypt`] opens a ciphertext into any type that implements [`Decrypt`], named at the call site:
 
 ```rust
-use vitaminc_encrypt::{encrypt, Aes256Cipher, Key};
+use vitaminc_encrypt::{decrypt, encrypt, Aes256Cipher, Key};
 
 let key = Key::from([0u8; 32]);
 let cipher = Aes256Cipher::new(&key).expect("cipher creation failed");
 
 // Decrypt to String
-let ciphertext = encrypt(&key, "secret message").expect("encryption failed");
-let plaintext: String = cipher.decrypt(ciphertext).expect("decryption failed");
+let ciphertext = encrypt("secret message", &cipher, ()).expect("encryption failed");
+let plaintext: String = decrypt(&cipher, ciphertext, ()).expect("decryption failed");
 
 // Decrypt a collection
-let ciphertext = encrypt(&key, vec!["one".to_string(), "two".to_string()]).expect("encryption failed");
-let strings: Vec<String> = cipher.decrypt(ciphertext).expect("decryption failed");
+let ciphertext = encrypt(vec!["one".to_string(), "two".to_string()], &cipher, ()).expect("encryption failed");
+let strings: Vec<String> = decrypt(&cipher, ciphertext, ()).expect("decryption failed");
 
-// Decrypt to fixed-size array
-let ciphertext = encrypt(&key, [0u8; 32]).expect("encryption failed");
-let array: [u8; 32] = cipher.decrypt(ciphertext).expect("decryption failed");
+// Decrypt to a fixed-size array
+let ciphertext = encrypt([0u8; 32], &cipher, ()).expect("encryption failed");
+let array: [u8; 32] = decrypt(&cipher, ciphertext, ()).expect("decryption failed");
+```
+
+A ciphertext that does not have the shape the type expects — a string where a
+sequence was stored, a map missing a field — is refused as a
+[`DecryptError`] rather than decoded wrongly.
+
+### Upgrading from 0.5
+
+The plaintext in every leaf now starts with a type tag, and the leaf is sealed
+under wire version 2.
+The `Encrypt` path of 0.5 sealed raw, untagged bytes under wire version 1,
+so [`decrypt`] refuses every version 1 leaf with
+[`DecryptError::Cipher`] rather than read the first byte of the value as a
+tag. To keep data written by 0.5, decrypt it with 0.5 and encrypt it again
+with this version.
+
+Ciphertext from the 0.5 `Value` path (`vitaminc-aead-value` and the Go
+binding) was already tagged, and opens through
+[`Aes256Cipher::opening_version_1`]. Do not use that view for data from the
+`Encrypt` path: it can read such a leaf as a different value.
+
+### One-shot helpers
+
+[`encrypt_with_key`] and [`decrypt_with_key`] build the cipher from a key
+for a single call with no associated data:
+
+```rust
+use vitaminc_encrypt::{decrypt_with_key, encrypt_with_key, Key};
+
+let key = Key::from([0u8; 32]);
+let ciphertext = encrypt_with_key(&key, "secret message").expect("encryption failed");
+let plaintext: String = decrypt_with_key(&key, ciphertext).expect("decryption failed");
+assert_eq!(plaintext, "secret message");
 ```
 
 ### Additional Authenticated Data (AAD)
 
 AAD allows you to authenticate additional context alongside the ciphertext without encrypting it. This is useful for binding metadata to encrypted data.
 
-AAD is supplied on the encrypt side via the [`Encrypt`] trait's `encrypt_with_aad`, and on the decrypt side via [`Aes256Cipher::decrypt_with_aad`]. Any [`IntoAad`] type works — byte slices, byte arrays, or `String`.
+The third argument of [`encrypt`] and [`decrypt`] is the AAD. Any [`IntoAad`] type works — byte slices, byte arrays, `String`, or `()` for none.
 
 ```rust
-use vitaminc_encrypt::{Aes256Cipher, Encrypt, Key};
+use vitaminc_encrypt::{decrypt, encrypt, Aes256Cipher, Key};
 
 let key = Key::from([0u8; 32]);
 let cipher = Aes256Cipher::new(&key).expect("cipher creation failed");
 
 // Encrypt with context
-let user_id = b"user_123";
-let ciphertext = "secret message".encrypt_with_aad(&cipher, user_id).expect("encryption failed");
+let user_id = b"user_123".as_slice();
+let ciphertext = encrypt("secret message", &cipher, user_id).expect("encryption failed");
 
 // Decrypt with the same context
-let plaintext: String = cipher.decrypt_with_aad(ciphertext, user_id).expect("decryption failed");
+let plaintext: String = decrypt(&cipher, ciphertext, user_id).expect("decryption failed");
 assert_eq!(plaintext, "secret message");
 ```
 
 #### AAD Must Match
 
-Decryption will fail if the AAD doesn't match:
+Decryption will fail at the cipher if the AAD doesn't match:
 
 ```rust
-use vitaminc_encrypt::{Aes256Cipher, Encrypt, Key};
+use vitaminc_encrypt::{decrypt, encrypt, Aes256Cipher, DecryptError, Key};
 
 let key = Key::from([0u8; 32]);
 let cipher = Aes256Cipher::new(&key).expect("cipher creation failed");
 
 // Encrypt with one context
-let ciphertext = "secret".encrypt_with_aad(&cipher, b"context_1").expect("encryption failed");
+let ciphertext = encrypt("secret", &cipher, b"context_1".as_slice()).expect("encryption failed");
 
 // Try to decrypt with a different context - this will fail!
-let result: Result<String, _> = cipher.decrypt_with_aad(ciphertext, b"context_2");
-assert!(result.is_err());
+let result: Result<String, _> = decrypt(&cipher, ciphertext, b"context_2".as_slice());
+assert!(matches!(result, Err(DecryptError::Cipher(_))));
 ```
 
 #### Deprecated `Aad` alias
@@ -181,79 +237,71 @@ assert!(context.is_empty());
 
 ### Working with Protected Types
 
-Vitamin C Encrypt integrates with `vitaminc-protected` to ensure sensitive data is handled securely:
+Vitamin C Encrypt integrates with `vitaminc-protected` to ensure sensitive data is handled securely. A `Protected<T>` is walked by reference inside the wrapper, so the secret never leaves it on the way in, and comes back wrapped on the way out:
 
 ```rust
 use vitaminc_protected::Protected;
-use vitaminc_encrypt::{encrypt, Aes256Cipher, Key};
+use vitaminc_encrypt::{decrypt, encrypt, Aes256Cipher, Key};
 
 let key = Key::from([0u8; 32]);
 let cipher = Aes256Cipher::new(&key).expect("cipher creation failed");
 
 // Encrypt protected data
 let sensitive = Protected::new("password123".to_string());
-let ciphertext = encrypt(&key, sensitive).expect("encryption failed");
+let ciphertext = encrypt(sensitive, &cipher, ()).expect("encryption failed");
 
 // Decrypt back to protected data
-let decrypted: Protected<String> = cipher.decrypt(ciphertext).expect("decryption failed");
+let decrypted: Protected<String> = decrypt(&cipher, ciphertext, ()).expect("decryption failed");
 ```
 
 ### Encrypting Keys (Key Wrapping)
 
-Keys can be encrypted with other keys, enabling key hierarchy and key wrapping:
+Keys can be encrypted with other keys, enabling key hierarchy and key wrapping. [`Key::wrap`] seals a key's protected 32 bytes under a key encryption key, and [`Key::from_wrapped`] reads them straight back into a `Key`, so the bytes never leave the wrapper in either direction. A `Key` is not a `Plaintext` source, so `encrypt` does not take one: a walk over a value hands its bytes to a sink, and any crate can write a sink.
 
 ```rust
-use vitaminc_encrypt::{encrypt, Aes256Cipher, Key};
-use vitaminc_protected::Protected;
+use vitaminc_encrypt::{decrypt, encrypt, Aes256Cipher, Key};
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
 let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
 
 // Generate a key encryption key (KEK)
 let kek = Key::random(&mut rng).expect("key generation failed");
+let cipher = Aes256Cipher::new(&kek).expect("cipher creation failed");
 
 // Generate a data encryption key (DEK)
 let dek = Key::random(&mut rng).expect("key generation failed");
 
 // Wrap the DEK with the KEK
-let wrapped_dek = encrypt(&kek, dek).expect("encryption failed");
+let wrapped_dek = dek.wrap(&cipher, "dek:1").expect("encryption failed");
 
-// Later, unwrap the DEK's protected key bytes.
-// (`Key` implements `Encrypt` but not yet `Decrypt`, so decrypt to the
-// protected byte array and rebuild the key from it.)
-let cipher = Aes256Cipher::new(&kek).expect("cipher creation failed");
-let unwrapped: Protected<[u8; 32]> = cipher.decrypt(wrapped_dek).expect("decryption failed");
+// Later, unwrap it straight back into a key and use it.
+let dek = Key::from_wrapped(&cipher, wrapped_dek, "dek:1").expect("decryption failed");
+let data_cipher = Aes256Cipher::new(&dek).expect("cipher creation failed");
+# let ct = encrypt("payload", &data_cipher, ()).expect("encrypt");
+# let back: String = decrypt(&data_cipher, ct, ()).expect("decrypt");
+# assert_eq!(back, "payload");
 ```
 
-### Convenience Functions vs Traits
+### Your Own Types
 
-This crate provides both convenience functions and traits:
-
-**Convenience API** (recommended for most use cases):
-- [`encrypt`] - One-shot encrypt with no AAD
-- [`Aes256Cipher::decrypt`] - Decrypt with no AAD
-- [`Aes256Cipher::decrypt_with_aad`] - Decrypt with AAD
-
-**Traits** (defined in `vitaminc-aead`):
-- [`Encrypt`] (re-exported here) - `plaintext.encrypt(&cipher)` / `plaintext.encrypt_with_aad(&cipher, aad)`; implement to make your types encryptable
-- `Decrypt` (visitor-style, in `vitaminc-aead`) - implement to make your types decryptable
-- [`Cipher`] - Implement to create custom cipher algorithms
-
-Example using the traits directly:
+Derive [`Plaintext`] for a type to encrypt it, and the sink-based [`Decrypt`] to decrypt into it. Fields become map entries, each sealed under its own key; `#[aead(passthrough)]` stores a field in the clear, `#[aead(skip)]` leaves one out, and `#[aead(rename = "...")]` changes its wire key. See the [`vitaminc-aead` documentation](https://docs.rs/vitaminc-aead) for the attributes.
 
 ```rust
-use vitaminc_encrypt::{Aes256Cipher, Encrypt, Key};
+use vitaminc_encrypt::{decrypt, encrypt, Aes256Cipher, Decrypt, Key, Plaintext};
 
-let key = Key::from([0u8; 32]);
-let cipher = Aes256Cipher::new(&key).expect("cipher creation failed");
+#[derive(Debug, PartialEq, Plaintext, Decrypt)]
+struct User {
+    #[aead(passthrough)]
+    id: u64,
+    email: String,
+}
 
-let ciphertext = "secret".encrypt(&cipher).expect("encryption failed");
-let plaintext: String = cipher.decrypt(ciphertext).expect("decryption failed");
+let cipher = Aes256Cipher::new(&Key::from([0u8; 32])).expect("cipher creation failed");
+let user = User { id: 42, email: "ada@example.com".into() };
+let ciphertext = encrypt(User { id: 42, email: "ada@example.com".into() }, &cipher, "users").expect("encryption failed");
+let back: User = decrypt(&cipher, ciphertext, "users").expect("decryption failed");
+assert_eq!(back, user);
 ```
-
-### Custom Encryptable Types
-
-You can implement [`Encrypt`] (and `vitaminc_aead::Decrypt`) for your own types to enable selective field encryption — for example, encrypting only the sensitive field of a struct while leaving the rest in plaintext. The `Decrypt` trait is visitor-style; see the [`vitaminc-aead` documentation](https://docs.rs/vitaminc-aead) for the trait definitions and the built-in implementations to model your own on.
 
 ## Security Features
 
@@ -288,11 +336,11 @@ Vitamin C enforces 256-bit keys to ensure:
 
 ### Automatic Nonce Generation
 
-Each encryption operation generates a unique random nonce, preventing nonce reuse which could compromise security.
+Each encryption operation generates a unique random nonce, preventing nonce reuse which could compromise security. The nonce generator is a `RefCell`, so [`Aes256Cipher`] is `!Sync`: it is the synchronous cipher, used from one thread at a time.
 
 ### Unspecified Errors
 
-Encryption and decryption operations return an [`Unspecified`] error type that reveals no information about failures. This prevents side-channel attacks that could leak information through error messages.
+The cipher reports a failure as [`Unspecified`], which reveals no information: a wrong key, a wrong AAD and a tampered leaf are indistinguishable. The walk around it reports what it can say safely, such as a ciphertext whose shape does not match the type, through [`EncryptError`] and [`DecryptError`].
 
 ## Best Practices
 
@@ -315,17 +363,18 @@ On `wasm32-unknown-unknown` the RustCrypto backend takes over and runs as pure R
 
 ## Error Handling
 
-All encryption operations return `Result<T, Unspecified>` where [`Unspecified`] is an opaque error type that reveals no details about the failure. This is intentional to prevent side-channel attacks.
+The cipher's own failures are the opaque [`Unspecified`]; the walk's are [`EncryptError`] and [`DecryptError`], which carry no plaintext.
 
 ```rust
-use vitaminc_encrypt::{Key, encrypt, Unspecified};
+use vitaminc_encrypt::{encrypt_with_key, EncryptError, Key, Unspecified};
 use vitaminc_random::{SafeRand, SeedableRng, Generatable};
 
 let key = Key::random(&mut SafeRand::from_entropy().expect("Failed to seed RNG")).expect("Failed to generate key");
 
-match encrypt(&key, "message") {
+match encrypt_with_key(&key, "message") {
     Ok(ciphertext) => println!("Encrypted successfully"),
-    Err(Unspecified) => eprintln!("Encryption failed"),
+    Err(EncryptError::Cipher(Unspecified)) => eprintln!("The cipher failed"),
+    Err(other) => eprintln!("The value could not be encrypted: {other}"),
 }
 ```
 

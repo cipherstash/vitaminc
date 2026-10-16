@@ -14,13 +14,14 @@ rust-version.workspace = true
 
 [features]
 default = []
-# `PrfValue` for `&vitaminc_aead_value::Value` (canonical equality terms).
-value = ["dep:vitaminc-aead-value"]
-chrono = ["value", "vitaminc-aead-value/chrono"]
-rust_decimal = ["value", "vitaminc-aead-value/rust_decimal"]
+# `PrfValue` for `vitaminc_normalize::Normalized` and `EqualityTerm`: equality
+# terms over the plaintext data model. Off, this crate depends on neither
+# `vitaminc-normalize` nor its Unicode tables.
+normalize = ["dep:vitaminc-normalize", "dep:vitaminc-aead"]
 
 [dependencies]
-vitaminc-aead-value = { version = "0.5.1", path = "../aead-value", features = ["canonical"], optional = true }
+vitaminc-normalize = { version = "0.5.1", path = "../normalize", optional = true }
+vitaminc-aead = { version = "0.5.1", path = "../aead", optional = true }
 mutants = "0.0.4"
 thiserror = { workspace = true }
 vitaminc-context = { version = "0.5.1", path = "../context" }

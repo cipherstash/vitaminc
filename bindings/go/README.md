@@ -64,9 +64,9 @@ Settled choices for this spike, and things deliberately left out of scope:
 
 1. **The data model is the tag table + leaf encodings.** The cross-language
    contract is the frozen sealed-leaf tags (`[tag] ++ payload` inside the AEAD
-   envelope, defined in `vitaminc-aead-value`), not any particular language's
-   types. Rust's `Value` and Go's `vcvalue` channels / decode natives are
-   materializations of that model. It is deliberately narrow (JSON/CBOR-class,
+   envelope, defined in `vitaminc-aead`'s leaf codec), not any particular
+   language's types. Rust's `Plaintext` sources and Go's `vcvalue` channels /
+   decode natives are materializations of that model. It is deliberately narrow (JSON/CBOR-class,
    not serde-class): a new tag is added only when a value class *cannot be
    represented* in the existing model, and requires a defined decode mapping
    for every supported language before it ships. `UINT64` is the worked
@@ -118,6 +118,6 @@ Settled choices for this spike, and things deliberately left out of scope:
 - Guest-side buffers are zeroized before free, but copies on the Go heap
   (keys, plaintext values) cannot be reliably wiped from Go.
 - The transport encoding is transport-only. The only frozen byte format is the
-  sealed leaf (`[tag] ++ payload`, see `vitaminc-aead-value`); durable database
+  sealed leaf (`[tag] ++ payload`, see `vitaminc-aead`'s tag table); durable database
   interop belongs to a schema-aware layer, which these modules know nothing
   about.

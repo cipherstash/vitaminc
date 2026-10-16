@@ -1648,7 +1648,6 @@ name = "orderable-bytes"
 version = "0.1.1"
 source = "git+https://github.com/cipherstash/ore.rs?rev=b3b7800b9c0cd8f7c53c5382f8e018a4e8bcbbd5#b3b7800b9c0cd8f7c53c5382f8e018a4e8bcbbd5"
 dependencies = [
- "chrono",
  "rust_decimal",
 ]
 
@@ -2648,6 +2647,7 @@ dependencies = [
  "vitaminc-encrypt",
  "vitaminc-hmac",
  "vitaminc-kms",
+ "vitaminc-normalize",
  "vitaminc-permutation",
  "vitaminc-prf",
  "vitaminc-protected",
@@ -2660,10 +2660,17 @@ name = "vitaminc-aead"
 version = "0.5.1"
 dependencies = [
  "bytes",
+ "chrono",
+ "futures-executor",
+ "futures-util",
  "quickcheck",
  "quickcheck_macros",
+ "rust_decimal",
  "serde",
+ "serde_json",
+ "thiserror",
  "trybuild",
+ "uuid",
  "vitaminc-aead-derive",
  "vitaminc-context",
  "vitaminc-prf",
@@ -2682,33 +2689,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "vitaminc-aead-napi"
+name = "vitaminc-aead-frame"
 version = "0.5.1"
 dependencies = [
  "chrono",
- "napi",
- "rust_decimal",
- "thiserror",
- "vitaminc-aead",
- "vitaminc-aead-value",
- "vitaminc-protected",
- "zeroize",
-]
-
-[[package]]
-name = "vitaminc-aead-value"
-version = "0.5.1"
-dependencies = [
- "chrono",
- "orderable-bytes",
  "quickcheck",
  "quickcheck_macros",
  "rust_decimal",
  "serde_json",
- "unicode-general-category",
- "unicode-normalization",
  "vitaminc-aead",
  "vitaminc-encrypt",
+ "vitaminc-protected",
+]
+
+[[package]]
+name = "vitaminc-aead-napi"
+version = "0.5.1"
+dependencies = [
+ "chrono",
+ "mutants",
+ "napi",
+ "rust_decimal",
+ "thiserror",
+ "vitaminc-aead",
  "vitaminc-protected",
  "zeroize",
 ]
@@ -2758,7 +2761,9 @@ dependencies = [
  "rust_decimal",
  "sha2",
  "trybuild",
- "vitaminc-aead-value",
+ "uuid",
+ "vitaminc-aead",
+ "vitaminc-normalize",
  "vitaminc-prf",
  "vitaminc-protected",
  "zeroize",
@@ -2776,6 +2781,24 @@ dependencies = [
  "vitaminc-protected",
  "vitaminc-traits",
  "zeroize",
+]
+
+[[package]]
+name = "vitaminc-normalize"
+version = "0.5.1"
+dependencies = [
+ "chrono",
+ "futures-executor",
+ "orderable-bytes",
+ "quickcheck",
+ "quickcheck_macros",
+ "rust_decimal",
+ "thiserror",
+ "unicode-general-category",
+ "unicode-normalization",
+ "uuid",
+ "vitaminc-aead",
+ "vitaminc-protected",
 ]
 
 [[package]]
@@ -2808,8 +2831,9 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "thiserror",
- "vitaminc-aead-value",
+ "vitaminc-aead",
  "vitaminc-context",
+ "vitaminc-normalize",
  "vitaminc-protected",
 ]
 

@@ -4,6 +4,11 @@ use aes_gcm::aead::{AeadInPlace, KeyInit, Tag};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use vitaminc_aead::Unspecified;
 
+/// The AES-GCM tag length. This backend splits the tag off the buffer
+/// itself; `aws-lc-rs` handles the tag internally, so only this backend
+/// needs the constant.
+const TAG_LEN: usize = 16;
+
 pub(crate) struct CipherKey(Aes256Gcm);
 
 impl CipherKey {
@@ -35,10 +40,7 @@ impl CipherKey {
         aad: &[u8],
         in_out: &mut [u8],
     ) -> Result<usize, Unspecified> {
-        let plaintext_len = in_out
-            .len()
-            .checked_sub(super::TAG_LEN)
-            .ok_or(Unspecified)?;
+        let plaintext_len = in_out.len().checked_sub(TAG_LEN).ok_or(Unspecified)?;
         let nonce: &[u8; super::NONCE_LEN] = nonce.try_into().map_err(|_| Unspecified)?;
         let nonce = Nonce::from_slice(nonce);
         let (ciphertext, tag_bytes) = in_out.split_at_mut(plaintext_len);

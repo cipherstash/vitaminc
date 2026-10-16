@@ -2,10 +2,11 @@ package vcffi
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"math/big"
 	"os"
-	"slices"
 	"testing"
 )
 
@@ -24,108 +25,207 @@ func addCorpusSeeds(f *testing.F, wrap func([]byte) []byte) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	var corpus struct{ Vectors, Malformed []struct{ Transport string } }
+	var corpus struct {
+		Vectors, Malformed, Normalized []struct{ Transport string }
+		CiphertextMalformed            []struct{ Transport string } `json:"ciphertext_malformed"`
+	}
 	if err := json.Unmarshal(data, &corpus); err != nil {
 		f.Fatal(err)
 	}
-	for _, row := range append(corpus.Vectors, corpus.Malformed...) {
+	rows := append(append(corpus.Vectors, corpus.Malformed...), corpus.Normalized...)
+	for _, row := range rows {
 		raw, err := hex.DecodeString(row.Transport)
 		if err != nil {
 			f.Fatal(err)
 		}
 		f.Add(wrap(raw))
 	}
+	// The malformed ciphertext transports are seeds as they are: the
+	// ciphertext targets must refuse them, and the value targets must not
+	// read them as a value either.
+	for _, row := range corpus.CiphertextMalformed {
+		raw, err := hex.DecodeString(row.Transport)
+		if err != nil {
+			f.Fatal(err)
+		}
+		f.Add(raw)
+	}
 }
 
-// requireCanonical fails unless out re-encodes data exactly, apart from Go's
-// documented projection of Undefined to nil: each offset in undefinedAt is an
-// Undefined tag (0x01) that must come back as Null (0x00). Every other byte,
-// including a 0x01 inside a payload, must be unchanged.
-func requireCanonical(t *testing.T, data, out []byte, undefinedAt []int) {
+// canonicalForm is what an accepted value encoding re-encodes as. Three
+// things may legitimately change, and nothing else: an Undefined tag (0x01)
+// comes back as Null (0x00), Go's documented projection; a decimal negative
+// zero comes back as zero with its scale kept (ADR 0001); and a timestamp in
+// the 0xF3 envelope (seconds, milliseconds or microseconds) comes back in
+// the shorthand nanosecond form, because Go reads it as a time.Time. The
+// walker follows the transport format independently of the decoder, so a
+// walk that falls out of step with it produces the wrong bytes and fails
+// requireCanonical rather than passing.
+func canonicalForm(data []byte) []byte {
+	r := &reader{buf: data}
+	var out []byte
+	canonicalValue(r, &out)
+	return out
+}
+
+func requireCanonical(t *testing.T, data, out, want []byte) {
 	t.Helper()
-	want := bytes.Clone(data)
-	for _, at := range undefinedAt {
-		want[at] = tagNull
-	}
 	if !bytes.Equal(out, want) {
 		t.Fatalf("accepted %x re-encoded as %x, want %x", data, out, want)
 	}
 }
 
-// valueUndefinedTags returns the offset of every Undefined value-node tag in
-// an accepted value tree, nested ones included. It walks the transport format
-// independently of the decoder, so a walk that falls out of step with it
-// reports the wrong offsets and fails requireCanonical rather than passing.
-func valueUndefinedTags(data []byte) []int {
-	r := &reader{buf: data}
-	var at []int
-	walkValue(r, &at)
-	return at
-}
-
-func walkValue(r *reader, at *[]int) {
-	pos := r.pos
+func canonicalValue(r *reader, out *[]byte) {
 	tag, _ := r.byteTag()
 	switch tag {
 	case tagUndefined:
-		*at = append(*at, pos)
+		*out = append(*out, tagNull)
+	case tagDecimal:
+		b, _ := r.take(16)
+		b = bytes.Clone(b)
+		// flags(4) then the coefficient(12): a set sign bit over a zero
+		// coefficient is a negative zero, read back as zero.
+		if len(b) == 16 && bytes.Equal(b[4:], make([]byte, 12)) {
+			b[3] &^= 0x80
+		}
+		*out = append(append(*out, tag), b...)
+	case tagEnvelope:
+		header, _ := r.take(2)
+		if len(header) == 2 && header[0] == logicalTimestamp && header[1] <= unitMicros {
+			if shorthand, ok := shorthandTimestamp(r, header[1]); ok {
+				*out = append(*out, shorthand...)
+				return
+			}
+		}
+		*out = append(append(*out, tag), header...)
+		canonicalValue(r, out)
 	case tagInt32, tagUint32, tagFloat32:
-		_, _ = r.take(4)
+		b, _ := r.take(4)
+		*out = append(append(*out, tag), b...)
 	case tagInt64, tagUint64, tagFloat64:
-		_, _ = r.take(8)
+		b, _ := r.take(8)
+		*out = append(append(*out, tag), b...)
 	case tagString, tagBytes:
+		start := r.pos
 		n, _ := r.count()
 		_, _ = r.take(n)
+		*out = append(append(*out, tag), r.buf[start:r.pos]...)
 	case tagArray:
+		start := r.pos
 		n, _ := r.count()
+		*out = append(append(*out, tag), r.buf[start:r.pos]...)
 		for range n {
-			walkValue(r, at)
+			canonicalValue(r, out)
 		}
 	case tagObject:
+		start := r.pos
 		n, _ := r.count()
+		*out = append(append(*out, tag), r.buf[start:r.pos]...)
 		for range n {
+			start := r.pos
 			_, _ = r.str()
-			walkValue(r, at)
+			*out = append(*out, r.buf[start:r.pos]...)
+			canonicalValue(r, out)
 		}
 	case tagPassthrough:
-		walkValue(r, at)
+		*out = append(*out, tag)
+		canonicalValue(r, out)
 	default:
 		// Null, booleans and the fixed-width extended scalars.
-		_, _ = r.take(scalarWidth(tag))
+		b, _ := r.take(scalarWidth(tag))
+		*out = append(append(*out, tag), b...)
 	}
 }
 
-// cipherUndefinedTags is valueUndefinedTags for an accepted ciphertext tree,
-// where Undefined can only appear inside passthrough nodes.
-func cipherUndefinedTags(data []byte) []int {
+// shorthandTimestamp reads the int the envelope carries and writes the
+// instant as the shorthand Timestamp tag: i64 seconds then u32 nanoseconds.
+// Follows the int encodings by width rather than the decoder.
+func shorthandTimestamp(r *reader, unit byte) ([]byte, bool) {
+	tag, _ := r.byteTag()
+	var count *big.Int
+	switch tag {
+	case tagInt8, tagInt16, tagInt32, tagInt64, tagInt128:
+		b, _ := r.take(scalarWidth(tag) + map[byte]int{tagInt32: 4, tagInt64: 8}[tag])
+		if len(b) == 0 {
+			return nil, false
+		}
+		count = signedLittle(b)
+	case tagUint8, tagUint16, tagUint32, tagUint64, tagUint128:
+		b, _ := r.take(scalarWidth(tag) + map[byte]int{tagUint32: 4, tagUint64: 8}[tag])
+		if len(b) == 0 {
+			return nil, false
+		}
+		count = unsignedLittle(b)
+	default:
+		return nil, false
+	}
+	per := map[byte]int64{unitSeconds: 1_000_000_000, unitMillis: 1_000_000, unitMicros: 1_000}[unit]
+	nanos := new(big.Int).Mul(count, big.NewInt(per))
+	seconds, sub := new(big.Int).DivMod(nanos, big.NewInt(1_000_000_000), new(big.Int))
+	if !seconds.IsInt64() {
+		return nil, false
+	}
+	out := []byte{tagTimestamp}
+	out = binary.LittleEndian.AppendUint64(out, uint64(seconds.Int64()))
+	return binary.LittleEndian.AppendUint32(out, uint32(sub.Int64())), true
+}
+
+func unsignedLittle(b []byte) *big.Int {
+	be := make([]byte, len(b))
+	for i, x := range b {
+		be[len(b)-1-i] = x
+	}
+	return new(big.Int).SetBytes(be)
+}
+
+func signedLittle(b []byte) *big.Int {
+	v := unsignedLittle(b)
+	if b[len(b)-1]&0x80 != 0 {
+		v.Sub(v, new(big.Int).Lsh(big.NewInt(1), uint(8*len(b))))
+	}
+	return v
+}
+
+// cipherCanonicalForm is canonicalForm for an accepted ciphertext tree,
+// where a value can only appear inside passthrough nodes.
+func cipherCanonicalForm(data []byte) []byte {
 	r := &reader{buf: data}
-	var at []int
+	var out []byte
 	var walk func()
 	walk = func() {
 		tag, _ := r.byteTag()
 		if _, ok := leafKind(tag); ok {
+			start := r.pos
 			n, _ := r.count()
 			_, _ = r.take(n)
+			out = append(append(out, tag), r.buf[start:r.pos]...)
 			return
 		}
 		switch tag {
 		case ctSeq:
+			start := r.pos
 			n, _ := r.count()
+			out = append(append(out, tag), r.buf[start:r.pos]...)
 			for range n {
 				walk()
 			}
 		case ctMap:
+			start := r.pos
 			n, _ := r.count()
+			out = append(append(out, tag), r.buf[start:r.pos]...)
 			for range n {
+				start := r.pos
 				_, _ = r.str()
+				out = append(out, r.buf[start:r.pos]...)
 				walk()
 			}
 		case ctPassthrough:
-			walkValue(r, &at)
+			out = append(out, tag)
+			canonicalValue(r, &out)
 		}
 	}
 	walk()
-	return at
+	return out
 }
 
 func FuzzUnmarshal(f *testing.F) {
@@ -152,8 +252,8 @@ func FuzzUnmarshal(f *testing.F) {
 		if err != nil {
 			t.Fatalf("accepted decode failed to re-encode: %v (value %#v)", err, v)
 		}
-		requireCanonical(t, data, out, valueUndefinedTags(data))
-		// The re-encoding holds no Undefined, so it must be a fixed point.
+		requireCanonical(t, data, out, canonicalForm(data))
+		// The re-encoding is canonical, so it must be a fixed point.
 		again, err := Unmarshal(out)
 		if err != nil {
 			t.Fatalf("re-encoding %x does not decode: %v", out, err)
@@ -166,7 +266,7 @@ func FuzzUnmarshal(f *testing.F) {
 
 func FuzzUnmarshalCipherText(f *testing.F) {
 	f.Add([]byte{0x01, 1, 0, 0, 0, 0xAB})                                    // ctSingle leaf
-	f.Add([]byte{0x02, 1, 0, 0, 0, 0xAB})                                    // ctNone
+	f.Add([]byte{0x02, 1, 0, 0, 0, 0xAB})                                    // the retired ctNone: malformed
 	f.Add([]byte{0x03, 1, 0, 0, 0, 0x01, 1, 0, 0, 0, 0xAB})                  // ctSeq[leaf]
 	f.Add([]byte{0x04, 1, 0, 0, 0, 1, 0, 0, 0, 'a', 0x01, 1, 0, 0, 0, 0xAB}) // ctMap{a: leaf}
 	f.Add([]byte{0x06, 1, 0, 0, 0, 0xAB})                                    // ctEmptySeq
@@ -185,30 +285,46 @@ func FuzzUnmarshalCipherText(f *testing.F) {
 		if err != nil {
 			t.Fatalf("accepted ciphertext decode failed to re-encode: %v (value %#v)", err, v)
 		}
-		requireCanonical(t, data, out, cipherUndefinedTags(data))
+		requireCanonical(t, data, out, cipherCanonicalForm(data))
 	})
 }
 
-// The walkers decide which bytes may legitimately change, so pin that they
-// find nested Undefined tags and nothing else.
-func TestUndefinedTagWalkers(t *testing.T) {
+// The walkers decide what may legitimately change, so pin that they rewrite
+// nested Undefined tags, negative-zero signs and envelope timestamps and
+// nothing else.
+func TestCanonicalWalkers(t *testing.T) {
+	negativeZero := []byte{0x14, 0, 0, 2, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	zero := []byte{0x14, 0, 0, 2, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	negativeOne := []byte{0x14, 0, 0, 2, 0x80, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	millis := []byte{0xF3, 3, 1, 0x05, 0x7b, 0, 0, 0, 0, 0, 0, 0}         // 123 ms
+	nanos := []byte{0x13, 0, 0, 0, 0, 0, 0, 0, 0, 0xc0, 0xd4, 0x54, 0x07} // 0 s, 123000000 ns
+	cat := func(parts ...[]byte) []byte { return bytes.Join(parts, nil) }
 	for _, tc := range []struct {
 		name string
-		walk func([]byte) []int
+		walk func([]byte) []byte
 		data []byte
-		want []int
+		want []byte
 	}{
-		{"bare", valueUndefinedTags, []byte{0x01}, []int{0}},
-		{"bytes payload of 0x01", valueUndefinedTags, []byte{0x0B, 1, 0, 0, 0, 0x01}, nil},
-		{"array", valueUndefinedTags, []byte{0xF0, 2, 0, 0, 0, 0x0B, 1, 0, 0, 0, 0x01, 0x01}, []int{11}},
-		{"object", valueUndefinedTags, []byte{0xF1, 1, 0, 0, 0, 1, 0, 0, 0, 0x01, 0x01}, []int{10}},
-		{"passthrough", valueUndefinedTags, []byte{0xF2, 0x01}, []int{1}},
-		{"extended scalar", valueUndefinedTags, []byte{0xF0, 2, 0, 0, 0, 0x0D, 0x01, 0x01}, []int{7}},
-		{"sealed leaf of 0x01", cipherUndefinedTags, []byte{0x01, 1, 0, 0, 0, 0x01}, nil},
-		{"ciphertext passthrough", cipherUndefinedTags, []byte{0x03, 1, 0, 0, 0, 0x05, 0xF0, 1, 0, 0, 0, 0x01}, []int{11}},
+		{"bare", canonicalForm, []byte{0x01}, []byte{0x00}},
+		{"bytes payload of 0x01", canonicalForm, []byte{0x0B, 1, 0, 0, 0, 0x01}, []byte{0x0B, 1, 0, 0, 0, 0x01}},
+		{"array", canonicalForm, []byte{0xF0, 2, 0, 0, 0, 0x0B, 1, 0, 0, 0, 0x01, 0x01}, []byte{0xF0, 2, 0, 0, 0, 0x0B, 1, 0, 0, 0, 0x01, 0x00}},
+		{"object", canonicalForm, []byte{0xF1, 1, 0, 0, 0, 1, 0, 0, 0, 0x01, 0x01}, []byte{0xF1, 1, 0, 0, 0, 1, 0, 0, 0, 0x01, 0x00}},
+		{"passthrough", canonicalForm, []byte{0xF2, 0x01}, []byte{0xF2, 0x00}},
+		{"extended scalar", canonicalForm, []byte{0xF0, 2, 0, 0, 0, 0x0D, 0x01, 0x01}, []byte{0xF0, 2, 0, 0, 0, 0x0D, 0x01, 0x00}},
+		{"unknown envelope", canonicalForm, []byte{0xF3, 200, 9, 0x06, 34, 0, 0, 0}, []byte{0xF3, 200, 9, 0x06, 34, 0, 0, 0}},
+		{"uuid envelope", canonicalForm, cat([]byte{0xF3, 5, 0, 0x0B, 2, 0, 0, 0, 0x01, 0x01}), cat([]byte{0xF3, 5, 0, 0x0B, 2, 0, 0, 0, 0x01, 0x01})},
+		{"negative zero", canonicalForm, negativeZero, zero},
+		{"negative zero in an array", canonicalForm, cat([]byte{0xF0, 1, 0, 0, 0}, negativeZero), cat([]byte{0xF0, 1, 0, 0, 0}, zero)},
+		{"negative one", canonicalForm, negativeOne, negativeOne},
+		{"millisecond envelope", canonicalForm, millis, nanos},
+		{"millisecond envelope in an object", canonicalForm, cat([]byte{0xF1, 1, 0, 0, 0, 1, 0, 0, 0, 'k'}, millis), cat([]byte{0xF1, 1, 0, 0, 0, 1, 0, 0, 0, 'k'}, nanos)},
+		{"second envelope over an i8", canonicalForm, []byte{0xF3, 3, 0, 0x0C, 10}, []byte{0x13, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
+		{"sealed leaf of 0x01", cipherCanonicalForm, []byte{0x01, 1, 0, 0, 0, 0x01}, []byte{0x01, 1, 0, 0, 0, 0x01}},
+		{"ciphertext passthrough", cipherCanonicalForm, []byte{0x03, 1, 0, 0, 0, 0x05, 0xF0, 1, 0, 0, 0, 0x01}, []byte{0x03, 1, 0, 0, 0, 0x05, 0xF0, 1, 0, 0, 0, 0x00}},
+		{"ciphertext passthrough negative zero", cipherCanonicalForm, cat([]byte{0x05}, negativeZero), cat([]byte{0x05}, zero)},
 	} {
-		if got := tc.walk(tc.data); !slices.Equal(got, tc.want) {
-			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		if got := tc.walk(tc.data); !bytes.Equal(got, tc.want) {
+			t.Errorf("%s: got %x, want %x", tc.name, got, tc.want)
 		}
 	}
 }
