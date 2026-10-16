@@ -120,7 +120,7 @@ new label.
 | float, either width | `vitaminc/prf/value/float-orderable/v1` | the `f64` value's orderable bytes; `f32` widened exactly, zero signs and NaN payloads folded |
 | date | `vitaminc/prf/value/date-orderable/v1` | orderable days from 0001-01-01 |
 | timestamp, any unit | `vitaminc/prf/value/timestamp-micros-orderable/v1` | orderable seconds, then nanoseconds truncated to microseconds |
-| decimal | `vitaminc/prf/value/decimal-orderable/v1` | the 14-byte orderable encoding of the value (see the `decimal` module), scale and signed zero normalized |
+| decimal | `vitaminc/prf/value/decimal-orderable/v1` | the 14-byte orderable encoding of the value (see [`decimal`]), scale and signed zero normalized |
 | text | `vitaminc/prf/value/text-nfc/unicode-16/v1` | Unicode 16 NFC; a code point unassigned in Unicode 16 is refused |
 | bytes | `vitaminc/prf/value/bytes/v1` | as they are |
 | uuid | `vitaminc/prf/value/uuid/v1` | the sixteen raw bytes |

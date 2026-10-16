@@ -21,9 +21,7 @@
 
 use unicode_general_category::{get_general_category, GeneralCategory};
 use unicode_normalization::UnicodeNormalization;
-use vitaminc_aead::plaintext::kinds::{
-    timestamp_nanos, MAX_DATE_DAYS, MAX_DECIMAL_SCALE, MIN_DATE_DAYS,
-};
+use vitaminc_aead::plaintext::kinds::{timestamp_nanos, MAX_DATE_DAYS, MIN_DATE_DAYS};
 use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
 use vitaminc_protected::{Controlled, OpaqueDebug, Protected};
 
@@ -198,12 +196,39 @@ pub fn timestamp(unit: TimeUnit, count: Int) -> Option<Protected<Vec<u8>>> {
 /// against it, which normalizes the scale and a signed zero. `None`
 /// if the mantissa does not fit 96 bits or the scale is above 28, the
 /// range `rust_decimal` represents.
+///
+/// # Encoding (scientific form, base 10)
+///
+/// Each non-zero value is re-expressed in signed scientific form:
+///
+/// ```text
+/// value = ±significand × 10^(leading_exp − digits(significand) + 1)
+/// ```
+///
+/// where `significand` is the mantissa with trailing zeros stripped and
+/// `leading_exp` is the decimal exponent of the leading significant digit,
+/// in `[-28, 28]`. The 14 bytes are:
+///
+/// ```text
+/// byte 0       : [sign:1][biased_exp:7]
+/// bytes 1..=13 : padded_significand (104 bits, big-endian)
+/// ```
+///
+/// - The sign bit is `1` for positive and zero, `0` for negative, so every
+///   negative sorts below zero and zero below every positive.
+/// - The biased exponent is `leading_exp + 64`, in `[36, 92]` for a
+///   non-zero value. Zero uses `0`, which no non-zero value reaches.
+/// - The padded significand is the significand left-justified to 29
+///   digits by appending zeros, so values at one exponent compare
+///   byte-wise however many digits they have. A 96-bit mantissa has at
+///   most 29 digits, so the padded value fits 104 bits.
+///
+/// For a negative, the exponent bits and the significand are inverted, so
+/// a larger magnitude sorts lower. `1`, `1.0` and `1.00` reduce to the
+/// same significand and exponent, and `+0` and `-0` to the same zero, so
+/// equal values are equal bytes, as `rust_decimal` compares them.
 pub fn decimal(scale: u8, mantissa: Int) -> Option<Protected<Vec<u8>>> {
-    let mantissa = mantissa.to_i128()?;
-    if scale > MAX_DECIMAL_SCALE || mantissa.unsigned_abs() >= 1 << 96 {
-        return None;
-    }
-    let bytes = Protected::new(crate::decimal::orderable(mantissa, u32::from(scale)));
+    let bytes = Protected::new(crate::decimal::orderable(mantissa.to_i128()?, scale)?);
     Some(Protected::new(bytes.risky_ref().to_vec()))
 }
 
