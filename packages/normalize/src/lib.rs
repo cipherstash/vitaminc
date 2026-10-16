@@ -1,6 +1,7 @@
 #![deny(clippy::unwrap_used, clippy::todo, unsafe_code, unused_imports)]
 #![doc = include_str!("../README.md")]
 
+mod decimal;
 mod scalar;
 mod terms;
 

@@ -46,6 +46,14 @@ exclude_re = [
     # function is skipped; its other mutants (including `mantissa | 1`, where
     # the operands do overlap) stay gated.
     "replace \\| with \\^ in widen_f32",
+    # The same equivalence in the decimal encoder (vitaminc-normalize
+    # decimal.rs): every `|` in `orderable` and `strip_trailing_zeros` is a
+    # branchless select, `(a & !mask) | (b & mask)`, whose halves are disjoint
+    # by construction, or the nonzero idiom `x | -x`, whose top bit the swap
+    # only changes for `x = 2^127`, outside the 96-bit mantissa the caller
+    # admits. Anchored to those two functions; their other mutants stay gated,
+    # and the port is checked byte for byte against the frozen crate besides.
+    "replace \\| with \\^ in (orderable|strip_trailing_zeros)$",
     # Unreachable, not untested: `Nothing` (vitaminc-aead typed.rs) is an
     # uninhabited enum, so no value exists to call `scalar` or `passthrough`
     # on and replacing either body with `Ok(())` cannot be observed. Its

@@ -1,4 +1,5 @@
 use super::*;
+use orderable_bytes::OrderableBytes;
 use quickcheck_macros::quickcheck;
 use vitaminc_aead::UnknownLogical;
 

@@ -19,10 +19,11 @@
 //! logical type, [`Logical::Unknown`] included, has no term and is refused
 //! with [`NormalizeError::NoDomain`].
 
-use orderable_bytes::ToOrderableBytes;
 use unicode_general_category::{get_general_category, GeneralCategory};
 use unicode_normalization::UnicodeNormalization;
-use vitaminc_aead::plaintext::kinds::{timestamp_nanos, MAX_DATE_DAYS, MIN_DATE_DAYS};
+use vitaminc_aead::plaintext::kinds::{
+    timestamp_nanos, MAX_DATE_DAYS, MAX_DECIMAL_SCALE, MIN_DATE_DAYS,
+};
 use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
 use vitaminc_protected::{Controlled, OpaqueDebug, Protected};
 
@@ -192,14 +193,17 @@ pub fn timestamp(unit: TimeUnit, count: Int) -> Option<Protected<Vec<u8>>> {
     Some(bytes)
 }
 
-/// A decimal's mantissa and scale, as `rust_decimal`'s orderable bytes,
-/// which normalize the scale and a signed zero. `None` if the mantissa does
-/// not fit 96 bits or the scale is above 28.
+/// A decimal's mantissa and scale, as the 14-byte orderable encoding of
+/// its value, ported from the frozen `orderable-bytes` release and checked
+/// against it, which normalizes the scale and a signed zero. `None`
+/// if the mantissa does not fit 96 bits or the scale is above 28, the
+/// range `rust_decimal` represents.
 pub fn decimal(scale: u8, mantissa: Int) -> Option<Protected<Vec<u8>>> {
-    let value =
-        rust_decimal::Decimal::try_from_i128_with_scale(mantissa.to_i128()?, u32::from(scale))
-            .ok()?;
-    let bytes = Protected::new(value.to_orderable_bytes());
+    let mantissa = mantissa.to_i128()?;
+    if scale > MAX_DECIMAL_SCALE || mantissa.unsigned_abs() >= 1 << 96 {
+        return None;
+    }
+    let bytes = Protected::new(crate::decimal::orderable(mantissa, u32::from(scale)));
     Some(Protected::new(bytes.risky_ref().to_vec()))
 }
 
