@@ -192,6 +192,40 @@ pub trait OrderScheme {
 
     /// Encrypt one scalar under the empty context.
     ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vitaminc_ore::{Int, Logical, OrderError, NormalizeError, OrderScheme, Physical, Raw};
+    /// # use vitaminc_ore::{Context, OrderPlaintext};
+    /// # /// Keeps the bytes as they are, for the example. Any scheme will do.
+    /// # struct Clear;
+    /// # impl OrderScheme for Clear {
+    /// #     const NAME: &'static str = "clear";
+    /// #     type Term = Vec<u8>;
+    /// #     type Error = core::convert::Infallible;
+    /// #     fn encrypt_plaintext(&self, p: &OrderPlaintext, _: &Context<'_>) -> Result<Vec<u8>, OrderError<Self::Error>> {
+    /// #         use vitaminc_protected::Controlled;
+    /// #         Ok(p.bytes().risky_ref().clone())
+    /// #     }
+    /// # }
+    /// # let scheme = Clear;
+    ///
+    /// // Any scalar of the data model; its kind decides the domain.
+    /// assert!(scheme.encrypt(41u32)? < scheme.encrypt(42u32)?);
+    /// let name = scheme.encrypt("Ada")?;
+    ///
+    /// // A typed scalar goes in as `Raw`.
+    /// let day = Raw(Some(Logical::Date), Physical::Int(Int::I32(19_000)));
+    /// let date = scheme.encrypt(day)?;
+    ///
+    /// // A scalar with no order term is refused, not skipped.
+    /// assert!(matches!(
+    ///     scheme.encrypt(true),
+    ///     Err(OrderError::Term(NormalizeError::NoDomain))
+    /// ));
+    /// # Ok::<(), OrderError<core::convert::Infallible>>(())
+    /// ```
+    ///
     /// # Errors
     ///
     /// As [`encrypt_with_context`](OrderScheme::encrypt_with_context).
@@ -206,6 +240,32 @@ pub trait OrderScheme {
     ///
     /// A scalar with no order term is refused rather than skipped: a
     /// caller who asks for one term and gets none should hear about it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vitaminc_ore::OrderScheme;
+    /// # use vitaminc_ore::{Context, OrderError, OrderPlaintext};
+    /// # struct Clear;
+    /// # impl OrderScheme for Clear {
+    /// #     const NAME: &'static str = "clear";
+    /// #     type Term = Vec<u8>;
+    /// #     type Error = core::convert::Infallible;
+    /// #     fn encrypt_plaintext(&self, p: &OrderPlaintext, c: &Context<'_>) -> Result<Vec<u8>, OrderError<Self::Error>> {
+    /// #         use vitaminc_protected::Controlled;
+    /// #         let mut t = self.salt(p, c).as_bytes().to_vec();
+    /// #         t.extend_from_slice(p.bytes().risky_ref());
+    /// #         Ok(t)
+    /// #     }
+    /// # }
+    /// # let scheme = Clear;
+    ///
+    /// // A column: the term compares only with terms under the same context.
+    /// let quantity = scheme.encrypt_with_context(42u32, ("orders", "quantity"))?;
+    /// let other = scheme.encrypt_with_context(42u32, ("orders", "total"))?;
+    /// assert_ne!(quantity, other);
+    /// # Ok::<(), OrderError<core::convert::Infallible>>(())
+    /// ```
     ///
     /// # Errors
     ///
