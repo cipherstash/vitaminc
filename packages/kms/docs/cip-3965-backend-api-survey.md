@@ -277,7 +277,7 @@ context payload and the wrapped-key bytes both need to fit through GCP's
 | | AWS KMS | Azure Key Vault | HashiCorp Vault (Transit) | Google Cloud KMS |
 |---|---|---|---|---|
 | Generate+wrap in one call | Yes (`GenerateDataKey`) | No (generate locally + `wrapKey`) | Yes (`datakey/plaintext`) | No (generate locally + `encrypt`) |
-| Native batch (generate) | No | No | **Enterprise only** (`datakeys/…?count=N`; Community answers `404 unsupported path` — found during implementation, see ADR 0002) | No |
+| Native batch (generate) | No | No | **Enterprise only** (`datakeys/…?count=N`; Community answers `404 unsupported path` — found during implementation, see ADR 0003) | No |
 | Native batch (retrieve) | No | No | **Yes** (`batch_input`) | No |
 | Deterministic derivation | No (Hierarchical Keyring caches a branch key instead) | No | **Partial** (`derived` + convergent mode — needs its own security review before use as a KDF) | No |
 | First-party caching primitive | Yes (Encryption SDK CMM; Hierarchical Keyring for the no-per-op-call case) | No | No | No |

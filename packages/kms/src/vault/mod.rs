@@ -22,7 +22,7 @@
 //!
 //! Vault's `hmac` and `sign` answer with `vault:v<N>:<base64>`, where `N`
 //! is the key version that produced the tag. The trait boundary carries
-//! raw canonical bytes (ADR 0001), so the adapter strips that prefix on
+//! raw canonical bytes (ADR 0002), so the adapter strips that prefix on
 //! the way out — and `verify` has to put it back on the way in, because
 //! Vault's `verify` will not accept a bare tag.
 //!

@@ -57,7 +57,7 @@ fn signing_algorithm_spec(algorithm: SignatureAlgorithm) -> SigningAlgorithmSpec
 ///
 /// Encodings need no conversion here: AWS returns ECDSA signatures as DER
 /// and public keys as DER `SubjectPublicKeyInfo`, which is exactly what
-/// ADR 0001 makes canonical, so the bytes pass straight through.
+/// ADR 0002 makes canonical, so the bytes pass straight through.
 ///
 /// ```no_run
 /// # use aws_sdk_kms::Client;
@@ -177,7 +177,7 @@ impl GetPublicKey for AwsSigningKey {
     type Error = Error;
 
     /// Returns the DER `SubjectPublicKeyInfo` bytes as AWS gives them —
-    /// already the canonical form of ADR 0001.
+    /// already the canonical form of ADR 0002.
     async fn get_public_key(&self) -> Result<Vec<u8>, Self::Error> {
         let response = self
             .client
@@ -330,7 +330,7 @@ mod tests {
     }
 
     /// AWS already returns DER `SubjectPublicKeyInfo`, the canonical form
-    /// of ADR 0001, so the adapter passes the bytes straight through.
+    /// of ADR 0002, so the adapter passes the bytes straight through.
     #[tokio::test]
     async fn get_public_key_returns_the_der_bytes_unchanged() {
         let public_key_rule = mock!(Client::get_public_key).then_output(|| {
@@ -451,7 +451,7 @@ mod tests {
         }
 
         /// DER `SubjectPublicKeyInfo` always opens with the `SEQUENCE` tag,
-        /// `0x30` — the canonical form of ADR 0001, which AWS already
+        /// `0x30` — the canonical form of ADR 0002, which AWS already
         /// returns, so the adapter converts nothing.
         #[tokio::test]
         async fn get_public_key_returns_der_subject_public_key_info() {

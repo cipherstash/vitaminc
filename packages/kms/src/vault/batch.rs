@@ -3,7 +3,7 @@
 //! `vaultrs` covers every single-item Transit call, but neither
 //! `POST {mount}/datakeys/:type/:name` nor `batch_input` on
 //! `POST {mount}/decrypt/:name`. Those two are the only native batch
-//! primitives any of the four backends offer, so ADR 0002 commits to
+//! primitives any of the four backends offer, so ADR 0003 commits to
 //! defining them here with `rustify`'s endpoint macro — the same macro
 //! `vaultrs` uses — and executing them through the caller's
 //! [`vaultrs::client::VaultClient`] via [`vaultrs::api::exec_with_result`].

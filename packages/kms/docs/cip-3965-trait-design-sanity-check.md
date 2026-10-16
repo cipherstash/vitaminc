@@ -95,7 +95,7 @@ native-batch cost, the best outcome any vendor offers here.
 > answers it with `404 unsupported path`. Batch `decrypt` is in every
 > edition. The shipped adapter tries `datakeys` once and falls back to
 > `fan_out_generate` on Community, so batch *generation* is one round trip
-> only on Enterprise. See ADR 0002.
+> only on Enterprise. See ADR 0003.
 
 **`load_index_key`.** The one vendor with a partial *native* answer —
 `derived: true` + convergent encryption gives deterministic output for the

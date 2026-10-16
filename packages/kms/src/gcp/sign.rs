@@ -69,7 +69,7 @@ impl From<CallError> for Error {
 /// construction rather than on every call.
 ///
 /// Signatures cross the trait boundary in the canonical encodings of
-/// ADR 0001: DER for ECDSA (which is what Google Cloud KMS already
+/// ADR 0002: DER for ECDSA (which is what Google Cloud KMS already
 /// returns) and raw signature bytes for RSA. Public keys are DER
 /// `SubjectPublicKeyInfo`.
 pub struct GcpSigningKey {
