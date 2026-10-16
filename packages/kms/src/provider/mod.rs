@@ -29,66 +29,13 @@ use std::future::Future;
 use crate::{GeneratedDataKey, IndexKeyMaterial, KeyId, KeyIsolation, KeyReconstruction};
 use vitaminc_protected::Protected;
 
+pub use crate::data_key::{Binding, BindingSupport};
 #[cfg(feature = "caching")]
 pub use caching::CachingKeyProvider;
 #[cfg(feature = "test-support")]
 pub use fake::{FakeKeyProvider, FakeKeyProviderError};
 pub use fixed_index_key::FixedIndexKeySource;
 pub use maybe_send::MaybeSend;
-
-/// Bytes a caller attaches to a data key when it is minted and must present
-/// again to retrieve it. Stack Encrypt passes each leaf's rendered context
-/// (its descriptor).
-///
-/// A newtype rather than a bare `&[u8]`, so a plaintext or a key id cannot
-/// be passed where a binding belongs. What a provider does with it is
-/// declared by [`KeyProvider::BINDING`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Binding<'a>(&'a [u8]);
-
-impl<'a> Binding<'a> {
-    pub const fn new(bytes: &'a [u8]) -> Self {
-        Self(bytes)
-    }
-
-    pub const fn as_bytes(self) -> &'a [u8] {
-        self.0
-    }
-
-    /// The binding to pass when the caller has nothing to bind.
-    pub const EMPTY: Binding<'static> = Binding(&[]);
-}
-
-impl<'a> From<&'a [u8]> for Binding<'a> {
-    fn from(bytes: &'a [u8]) -> Self {
-        Self(bytes)
-    }
-}
-
-impl<'a> From<&'a str> for Binding<'a> {
-    fn from(s: &'a str) -> Self {
-        Self(s.as_bytes())
-    }
-}
-
-/// Whether a provider honours the [`Binding`] it is given.
-///
-/// `Bound`: the provider has its backend bind the bytes into the data key,
-/// so retrieving with a different binding fails (ZeroKMS binds the
-/// descriptor and logs it per retrieval). `Unbound`: the provider ignores
-/// the bytes; the caller's own authenticated data is the only thing tying
-/// a key to its context. The four vendor data key sources are `Unbound`
-/// today; binding them through AWS `EncryptionContext`, Google AAD and
-/// Azure AEAD `aad` is follow-up work, and a non-derived Vault key has
-/// nothing to bind with.
-///
-/// An `Unbound` provider never errors on a non-empty binding. A caller that
-/// requires binding checks this constant up front.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BindingSupport {
-    Bound,
-    Unbound,
-}
 
 /// Mint and retrieve batches of data keys against one backend key bound at
 /// construction.
