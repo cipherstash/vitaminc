@@ -530,14 +530,16 @@ fn a_column_takes_a_collected_term_of_its_own_target_only() {
     ));
 }
 
-/// A column shows its scheme and target, and nothing it binds terms under.
+/// A column shows its target and masks the scheme, which holds the key,
+/// and the salt.
 #[test]
-fn a_column_debugs_as_its_scheme_and_target() {
+fn a_column_debugs_as_its_target_with_the_rest_masked() {
     let mock = Mock::new(key());
     let column = mock.column(T::I32, ("orders", "total"));
-    assert_eq!(
-        format!("{column:?}"),
-        r#"OrderColumn { scheme: "mock", target: I32, .. }"#
+    let shown = format!("{column:?}");
+    assert!(
+        shown.ends_with(r#"OrderColumn<'_, conformance::common::Mock> { scheme: "***", target: I32, salt: "***" }"#),
+        "{shown}"
     );
 }
 

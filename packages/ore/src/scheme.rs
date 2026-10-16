@@ -226,9 +226,12 @@ fn salt(scheme: &str, target: OrderTarget, context: &Context<'_>) -> Context<'st
 
 /// One column of an order index on a scheme: its target and the salt its
 /// terms are bound under, fixed when it is opened so every term of it
-/// agrees. From [`OrderEncrypt::column`].
+/// agrees. From [`OrderEncrypt::column`]. `Debug` shows the target and
+/// masks the scheme, whose key it holds, and the salt.
+#[derive(OpaqueDebug)]
 pub struct OrderColumn<'s, S: OrderScheme + ?Sized> {
     scheme: &'s S,
+    #[non_sensitive]
     target: OrderTarget,
     salt: Context<'static>,
 }
@@ -277,15 +280,6 @@ impl<S: OrderScheme + ?Sized> OrderColumn<'_, S> {
             return Err(OrderError::Term(NormalizeError::Mismatch));
         }
         self.scheme.encrypt_plaintext(plaintext, &self.salt)
-    }
-}
-
-impl<S: OrderScheme + ?Sized> fmt::Debug for OrderColumn<'_, S> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OrderColumn")
-            .field("scheme", &S::NAME)
-            .field("target", &self.target)
-            .finish_non_exhaustive()
     }
 }
 
