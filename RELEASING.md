@@ -77,12 +77,13 @@ The job runs on every push to `main`, but publishes only when the commit is a me
 The `release` job publishes through crates.io trusted publishing, and crates.io lets a crate be set up for that only once it exists. So the job cannot publish a crate that has never been released. When a release includes a new crate:
 
 1. Merge the release PR as usual. The job publishes crates in dependency order and fails at the first new one; the crates before it are released.
-2. From the merge commit, finish the release locally with your own crates.io token. release-plz skips what is already published, publishes the rest, and creates the tags and GitHub releases:
+2. From the merge commit, finish the release locally with a crates.io token of your own. Make it narrow: the `publish-new` and `publish-update` scopes, the crate pattern `vitaminc*`, and an expiry of the next day. Hand it to this one command through the environment rather than `cargo login`, which would keep it in `~/.cargo/credentials.toml`. release-plz skips what is already published, publishes the rest, and creates the tags and GitHub releases:
 
    ```bash
    git switch --detach <merge-commit>
-   cargo login                      # a token with publish-new and publish-update scopes
+   read -rs CARGO_REGISTRY_TOKEN && export CARGO_REGISTRY_TOKEN
    release-plz release --forge github --git-token "$(gh auth token)"
+   unset CARGO_REGISTRY_TOKEN
    ```
 
 3. On crates.io, set up trusted publishing for each new crate (repository `cipherstash/vitaminc`, workflow `release-plz.yml`), so the job can publish it from then on.
