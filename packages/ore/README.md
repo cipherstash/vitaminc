@@ -27,9 +27,13 @@ case out of text, which an equality term must not.
 
 ## One scalar
 
+A scheme encrypts a value: any scalar of the data model, with its kind
+deciding the term's domain. Under a context, the term compares only with
+terms of the same column.
+
 ```rust
 use vitaminc_aead::{Int, Logical, Physical};
-use vitaminc_ore::{domain, order, order_term, OrderError, NormalizeError, OrderScheme};
+use vitaminc_ore::{domain, order, OrderError, NormalizeError, OrderScheme, Raw};
 # use vitaminc_ore::{Context, OrderPlaintext};
 # /// Keeps the bytes as they are, for the example. Any scheme will do.
 # struct Clear;
@@ -37,26 +41,26 @@ use vitaminc_ore::{domain, order, order_term, OrderError, NormalizeError, OrderS
 #     const NAME: &'static str = "clear";
 #     type Term = Vec<u8>;
 #     type Error = core::convert::Infallible;
-#     fn encrypt(&self, p: &OrderPlaintext, _: &Context<'_>) -> Result<Vec<u8>, OrderError<Self::Error>> {
+#     fn encrypt_plaintext(&self, p: &OrderPlaintext, _: &Context<'_>) -> Result<Vec<u8>, OrderError<Self::Error>> {
 #         use vitaminc_protected::Controlled;
 #         Ok(p.bytes().risky_ref().clone())
 #     }
 # }
 # let scheme = Clear;
 
-let three = order(None, Physical::Int(Int::I32(3)))?;
-let forty = order(None, Physical::Int(Int::I32(40)))?;
-assert_eq!(three.domain(), domain::INT32);
-assert_eq!(three.width(), Some(4));
+let three = scheme.encrypt(3i32)?;
+let forty = scheme.encrypt_with_context(40i32, ("orders", "total"))?;
 
-// `order_term` is `order` then the scheme, for a scalar in hand, and it
-// refuses a scalar with no term rather than returning nothing.
+// A typed scalar goes in as `Raw`: a date is not the integer it is stored as.
 let day = Physical::Int(Int::I32(19_000));
-let a_date = order_term(&scheme, Some(Logical::Date), day, "birthdays")?;
-assert_eq!(
-    order_term(&scheme, None, Physical::Bool(true), "flags"),
+let a_date = scheme.encrypt(Raw(Some(Logical::Date), day))?;
+assert_eq!(order(Some(Logical::Date), day)?.domain(), domain::DATE);
+
+// A scalar with no order term is refused rather than returning nothing.
+assert!(matches!(
+    scheme.encrypt(true),
     Err(OrderError::Term(NormalizeError::NoDomain))
-);
+));
 # Ok::<(), OrderError<core::convert::Infallible>>(())
 ```
 
@@ -99,9 +103,12 @@ the walk. A logical type with no order domain does stop it, as it stops
 
 ## Implementing a scheme
 
-A scheme reads the plaintext's bytes, binds the salt, and refuses what it
-cannot take by domain. It never pads or truncates: a fixed-width scheme
-reads [`OrderPlaintext::width`] and refuses a kind, not a value.
+A scheme implements one method, `encrypt_plaintext`, over the sealed
+[`OrderPlaintext`] that `encrypt` and `encrypt_with_context` build from
+the caller's value. It reads the plaintext's bytes, binds the salt, and
+refuses what it cannot take by domain. It never pads or truncates: a
+fixed-width scheme reads [`OrderPlaintext::width`] and refuses a kind,
+not a value.
 
 ```rust
 use core::convert::Infallible;
@@ -116,7 +123,7 @@ impl OrderScheme for FourBytes {
     type Term = Vec<u8>;
     type Error = Infallible;
 
-    fn encrypt(
+    fn encrypt_plaintext(
         &self,
         plaintext: &OrderPlaintext,
         context: &Context<'_>,

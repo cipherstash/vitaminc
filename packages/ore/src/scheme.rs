@@ -1,16 +1,20 @@
 //! The sealed order plaintext, and the trait a scheme implements to
 //! encrypt it.
 //!
-//! A scheme never sees bytes that skipped the encoding: the only way to
-//! make an [`OrderPlaintext`] is [`order`](crate::order), which is why
-//! raw bytes handed to a scheme cannot sort wrong. The plaintext carries
-//! its domain and, for a fixed-width kind, its width, so a scheme can
-//! refuse a kind by name, and it derives the salt every scheme binds, so
-//! two schemes never disagree about what a term is bound to.
+//! A caller encrypts a value: `scheme.encrypt(42i32)`, or any other scalar
+//! of the data model, and never sees the encoding. A scheme implements
+//! one method over the sealed [`OrderPlaintext`], and never sees bytes
+//! that skipped the encoding: the only way to make one is
+//! [`order`](crate::order), which is why raw bytes handed to a scheme
+//! cannot sort wrong. The plaintext carries its domain and, for a
+//! fixed-width kind, its width, so a scheme can refuse a kind by name,
+//! and it derives the salt every scheme binds, so two schemes never
+//! disagree about what a term is bound to.
 
 use core::fmt;
 
-use vitaminc_aead::{Logical, Physical};
+use vitaminc_aead::plaintext::{self, SourceError};
+use vitaminc_aead::{Encrypt, Logical, MapSink, Physical, SeqSink, Sink};
 use vitaminc_context::{Context, IntoContext};
 use vitaminc_normalize::NormalizeError;
 use vitaminc_protected::{Controlled, OpaqueDebug, Protected};
@@ -24,8 +28,9 @@ const SALT_LABEL: &[u8] = b"vitaminc/ore/v1";
 /// value's order, with the frozen domain label they belong to.
 ///
 /// Only [`order`] builds one, so a scheme can rely on the bytes being the
-/// encoding of their domain. `Debug` shows the domain and width and
-/// masks the bytes.
+/// encoding of their domain. A caller never needs one:
+/// [`OrderScheme::encrypt`] takes the value itself. `Debug` shows the
+/// domain and width and masks the bytes.
 #[derive(OpaqueDebug)]
 pub struct OrderPlaintext {
     #[non_sensitive]
@@ -99,14 +104,22 @@ fn width_of(domain: &str) -> Option<usize> {
 }
 
 /// Why a scheme produced no term. Never includes plaintext.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum OrderError<E> {
     /// The scalar has no order term: no order domain for its kind, not
     /// valid for its logical type, or text with a code point unassigned
-    /// in Unicode 16. From [`order_term`], which encodes on the way in.
+    /// in Unicode 16.
     #[error("no order term: {0}")]
     Term(#[from] NormalizeError),
+    /// The value is a sequence, a map or a passthrough, which has no
+    /// single term. Walk it with [`order_terms`](crate::order_terms).
+    #[error("a container has no single order term; walk it for one per scalar")]
+    NotScalar,
+    /// The value could not be read: its source failed before any term
+    /// was made.
+    #[error("the value could not be read: {0}")]
+    Source(SourceError),
     /// The scheme does not take terms of this domain: a fixed-width scheme
     /// given text, or a width above its limit.
     #[error("{scheme} has no order term for {domain}")]
@@ -131,8 +144,15 @@ impl<E> OrderError<E> {
     }
 }
 
-/// An order scheme: encrypts one [`OrderPlaintext`] under a context so
-/// that the terms still compare.
+/// An order scheme: encrypts one scalar so that the terms still compare.
+///
+/// A caller uses [`encrypt`](OrderScheme::encrypt) or
+/// [`encrypt_with_context`](OrderScheme::encrypt_with_context) with any
+/// scalar of the data model: an integer, a float, a string, bytes, or a
+/// typed value such as a date. The value's kind decides the term's
+/// domain, as it does everywhere else in the stack. A scheme implements
+/// [`encrypt_plaintext`](OrderScheme::encrypt_plaintext) over the sealed
+/// [`OrderPlaintext`] those methods build, and nothing else.
 ///
 /// Terms compare only between terms of the same scheme, key, domain and
 /// context: a column. The scheme keeps its own comparison (CLLW ORE and
@@ -156,17 +176,55 @@ pub trait OrderScheme {
     /// for a scheme that cannot fail once keyed.
     type Error: core::error::Error + Send + Sync + 'static;
 
-    /// Encrypt `plaintext` under `context`, binding its domain.
+    /// Encrypt a sealed plaintext under `context`, binding its domain.
+    /// What a scheme implements; a caller uses
+    /// [`encrypt`](OrderScheme::encrypt).
     ///
     /// # Errors
     ///
     /// [`OrderError::Unsupported`] if the scheme does not take this
     /// domain, [`OrderError::Backend`] if it failed.
-    fn encrypt(
+    fn encrypt_plaintext(
         &self,
         plaintext: &OrderPlaintext,
         context: &Context<'_>,
     ) -> Result<Self::Term, OrderError<Self::Error>>;
+
+    /// Encrypt one scalar under the empty context.
+    ///
+    /// # Errors
+    ///
+    /// As [`encrypt_with_context`](OrderScheme::encrypt_with_context).
+    fn encrypt<V: Encrypt>(&self, value: V) -> Result<Self::Term, OrderError<Self::Error>> {
+        self.encrypt_with_context(value, ())
+    }
+
+    /// Encrypt one scalar under `context`: a column, a tenant, whatever
+    /// the term must compare within. The value is encoded by
+    /// [`order`] and handed to
+    /// [`encrypt_plaintext`](OrderScheme::encrypt_plaintext).
+    ///
+    /// A scalar with no order term is refused rather than skipped: a
+    /// caller who asks for one term and gets none should hear about it.
+    ///
+    /// # Errors
+    ///
+    /// [`OrderError::Term`] if the scalar has no order term,
+    /// [`OrderError::NotScalar`] if the value is a container,
+    /// [`OrderError::Source`] if the value could not be read, else as
+    /// [`encrypt_plaintext`](OrderScheme::encrypt_plaintext).
+    fn encrypt_with_context<'a, V, C>(
+        &self,
+        value: V,
+        context: C,
+    ) -> Result<Self::Term, OrderError<Self::Error>>
+    where
+        V: Encrypt,
+        C: IntoContext<'a>,
+    {
+        let plaintext = value.visit(Scalar)?;
+        self.encrypt_plaintext(&plaintext, &context.into_context().encode())
+    }
 
     /// The salt this scheme binds `plaintext` under: the plaintext's
     /// [`salt`](OrderPlaintext::salt) with this scheme's name.
@@ -198,28 +256,100 @@ pub trait OrderKeyInit: OrderScheme + Sized {
     fn try_from_bytes(key: Protected<Vec<u8>>) -> Result<Self, Self::KeyError>;
 }
 
-/// One order term for one scalar, encrypted: [`order`] then
-/// [`OrderScheme::encrypt`], for a caller that holds a scalar and its type
-/// (a query parameter, say) rather than a value to walk. It refuses a
-/// scalar with no term rather than returning nothing: a caller who asks
-/// for one term and gets none should hear about it.
-///
-/// # Errors
-///
-/// [`OrderError::Term`] if the scalar has no order term, else as
-/// [`OrderScheme::encrypt`].
-pub fn order_term<'a, S, C>(
-    scheme: &S,
-    ty: Option<Logical>,
-    value: Physical<'_>,
-    context: C,
-) -> Result<S::Term, OrderError<S::Error>>
-where
-    S: OrderScheme,
-    C: IntoContext<'a>,
-{
-    let plaintext = order(ty, value)?;
-    scheme.encrypt(&plaintext, &context.into_context().encode())
+/// The sink one scalar is walked into: it encodes the scalar with
+/// [`order`] and refuses a container.
+struct Scalar;
+
+/// How one scalar fails to become a plaintext.
+#[derive(Debug, thiserror::Error)]
+enum ScalarError {
+    #[error(transparent)]
+    Term(NormalizeError),
+    #[error("not a scalar")]
+    NotScalar,
+    #[error(transparent)]
+    Source(SourceError),
+}
+
+impl plaintext::Error for ScalarError {
+    fn source(error: SourceError) -> Self {
+        Self::Source(error)
+    }
+}
+
+impl<E> From<ScalarError> for OrderError<E> {
+    fn from(error: ScalarError) -> Self {
+        match error {
+            ScalarError::Term(e) => Self::Term(e),
+            ScalarError::NotScalar => Self::NotScalar,
+            ScalarError::Source(e) => Self::Source(e),
+        }
+    }
+}
+
+impl Sink for Scalar {
+    type Ok = OrderPlaintext;
+    type Error = ScalarError;
+    type Seq = Never;
+    type Map = Never;
+
+    fn scalar(
+        self,
+        ty: Option<Logical>,
+        value: Physical<'_>,
+    ) -> Result<OrderPlaintext, ScalarError> {
+        order(ty, value).map_err(ScalarError::Term)
+    }
+
+    fn seq(self, _: Option<usize>) -> Result<Never, ScalarError> {
+        Err(ScalarError::NotScalar)
+    }
+
+    fn map(self, _: Option<usize>) -> Result<Never, ScalarError> {
+        Err(ScalarError::NotScalar)
+    }
+
+    fn passthrough<P: Encrypt + Clone>(self, _: P) -> Result<OrderPlaintext, ScalarError> {
+        Err(ScalarError::NotScalar)
+    }
+}
+
+/// The container sink [`Scalar`] never hands out. Uninhabited, so it
+/// cannot be built.
+enum Never {}
+
+impl SeqSink for Never {
+    type Ok = OrderPlaintext;
+    type Error = ScalarError;
+    type Element<'s>
+        = Scalar
+    where
+        Self: 's;
+
+    fn element(&mut self) -> Result<Scalar, ScalarError> {
+        match *self {}
+    }
+
+    fn end(self) -> Result<OrderPlaintext, ScalarError> {
+        match self {}
+    }
+}
+
+impl MapSink for Never {
+    type Ok = OrderPlaintext;
+    type Error = ScalarError;
+    type Entry<'s>
+        = Scalar
+    where
+        Self: 's;
+
+    fn entry(&mut self, _: &str) -> Result<Scalar, ScalarError> {
+        match *self {}
+    }
+
+    fn end(self) -> Result<OrderPlaintext, ScalarError> {
+        match self {}
+    }
 }
 
 impl fmt::Display for OrderPlaintext {
@@ -294,6 +424,14 @@ mod tests {
             "no order term: no domain for this kind of value"
         );
         assert_eq!(
+            E::NotScalar.to_string(),
+            "a container has no single order term; walk it for one per scalar"
+        );
+        assert_eq!(
+            E::Source(SourceError::msg("getter threw")).to_string(),
+            "the value could not be read: getter threw"
+        );
+        assert_eq!(
             E::Unsupported {
                 scheme: "block-ore",
                 domain: domain::TEXT
@@ -306,6 +444,24 @@ mod tests {
             "the order scheme failed: down"
         );
         let from: E = NormalizeError::Invalid.into();
-        assert_eq!(from, E::Term(NormalizeError::Invalid));
+        assert!(matches!(from, E::Term(NormalizeError::Invalid)));
+    }
+
+    #[test]
+    fn the_scalar_sink_encodes_one_scalar_and_refuses_a_container() {
+        let p = 7i16.visit(Scalar).expect("scalar");
+        assert_eq!(p.domain(), domain::INT16);
+        assert!(matches!(
+            vec![1u16, 2].visit(Scalar),
+            Err(ScalarError::NotScalar)
+        ));
+        assert!(matches!(
+            std::collections::BTreeMap::from([("k", 1u16)]).visit(Scalar),
+            Err(ScalarError::NotScalar)
+        ));
+        assert!(matches!(
+            true.visit(Scalar),
+            Err(ScalarError::Term(NormalizeError::NoDomain))
+        ));
     }
 }

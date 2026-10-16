@@ -36,7 +36,7 @@ impl OrderScheme for Mock {
     type Term = MockTerm;
     type Error = Infallible;
 
-    fn encrypt(
+    fn encrypt_plaintext(
         &self,
         plaintext: &OrderPlaintext,
         context: &Context<'_>,
@@ -82,7 +82,7 @@ impl<const N: usize> OrderScheme for Fixed<N> {
     type Term = MockTerm;
     type Error = Infallible;
 
-    fn encrypt(
+    fn encrypt_plaintext(
         &self,
         plaintext: &OrderPlaintext,
         context: &Context<'_>,
@@ -90,7 +90,7 @@ impl<const N: usize> OrderScheme for Fixed<N> {
         if plaintext.width() != Some(N) {
             return Err(OrderError::unsupported::<Self>(plaintext));
         }
-        let mut term = self.0.encrypt(plaintext, context)?;
+        let mut term = self.0.encrypt_plaintext(plaintext, context)?;
         term.salt = self.salt(plaintext, context).as_bytes().to_vec();
         Ok(term)
     }
@@ -108,7 +108,7 @@ impl OrderScheme for Down {
     type Term = MockTerm;
     type Error = BackendDown;
 
-    fn encrypt(
+    fn encrypt_plaintext(
         &self,
         _: &OrderPlaintext,
         _: &Context<'_>,

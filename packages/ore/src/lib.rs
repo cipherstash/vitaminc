@@ -7,10 +7,10 @@ mod order;
 mod scheme;
 
 pub use order::{domain, domain_of, float, int, order, order_terms, text, Order};
-pub use scheme::{order_term, OrderError, OrderKeyInit, OrderPlaintext, OrderScheme};
+pub use scheme::{OrderError, OrderKeyInit, OrderPlaintext, OrderScheme};
 // The types in this crate's signatures, so a caller needs no second import:
-// a scheme crate's tests build plaintexts from the data model through
-// `order` without depending on vitaminc-aead themselves.
-pub use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
+// a scheme encrypts values of the data model, and a typed scalar goes in
+// as `Raw(ty, physical)`, without depending on vitaminc-aead.
+pub use vitaminc_aead::{Encrypt, Float, Int, Logical, Physical, Raw, TimeUnit};
 pub use vitaminc_context::{Context, IntoContext};
 pub use vitaminc_normalize::{NormalizeError, Term, TermsError};

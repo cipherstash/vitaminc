@@ -13,7 +13,7 @@ use vitaminc_aead::plaintext::kinds::id::LAST_KNOWN;
 use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
 use vitaminc_normalize::{domain as equality, normalize};
 use vitaminc_ore::{
-    domain, order, order_term, IntoContext, NormalizeError, OrderError, OrderKeyInit, OrderScheme,
+    domain, order, IntoContext, NormalizeError, OrderError, OrderKeyInit, OrderScheme, Raw,
 };
 use vitaminc_protected::{Controlled, Protected};
 
@@ -160,10 +160,10 @@ fn every_kind_has_an_order_term_or_is_a_named_exception() {
         }
         let (x, y) = (
             scheme
-                .encrypt(&below, &().into_context().encode())
+                .encrypt_plaintext(&below, &().into_context().encode())
                 .expect("mock"),
             scheme
-                .encrypt(&above, &().into_context().encode())
+                .encrypt_plaintext(&above, &().into_context().encode())
                 .expect("mock"),
         );
         assert_eq!(x.cmp(&y), Ordering::Less, "{}", kind.domain);
@@ -297,7 +297,7 @@ fn a_scheme_refuses_a_domain_by_name_not_by_counting_bytes() {
     let fixed = Fixed::<4>(Mock::new(key()));
     let context = ().into_context().encode();
     let date = order(Some(Logical::Date), Physical::Int(Int::I32(1))).expect("term");
-    assert!(fixed.encrypt(&date, &context).is_ok());
+    assert!(fixed.encrypt_plaintext(&date, &context).is_ok());
     for (ty, v, domain) in [
         (None, Physical::Int(Int::I8(1)), domain::INT8),
         (None, Physical::Text("abcd"), domain::TEXT),
@@ -305,12 +305,11 @@ fn a_scheme_refuses_a_domain_by_name_not_by_counting_bytes() {
         (None, Physical::Int(Int::I128(1)), domain::INT128),
     ] {
         let term = order(ty, v).expect("term");
-        assert_eq!(
-            fixed.encrypt(&term, &context),
-            Err(OrderError::Unsupported {
-                scheme: "fixed",
-                domain
-            }),
+        assert!(
+            matches!(
+                fixed.encrypt_plaintext(&term, &context),
+                Err(OrderError::Unsupported { scheme: "fixed", domain: d }) if d == domain
+            ),
             "{domain}"
         );
     }
@@ -321,22 +320,31 @@ fn terms_compare_only_within_one_scheme_key_domain_and_context() {
     let zero = Physical::Int(Int::I8(0));
     let tenant = |n: u64| ("tenant", n);
     let mock = Mock::new(key());
-    let under_one = order_term(&mock, None, zero, tenant(1)).expect("mock");
+    let under_one = mock
+        .encrypt_with_context(Raw(None, zero), tenant(1))
+        .expect("mock");
     assert_ne!(
         under_one,
-        order_term(&mock, None, zero, tenant(2)).expect("mock")
+        mock.encrypt_with_context(Raw(None, zero), tenant(2))
+            .expect("mock")
     );
     assert_ne!(
         under_one,
-        order_term(&Mock::new(Protected::new([8; 32])), None, zero, tenant(1)).expect("mock")
+        Mock::new(Protected::new([8; 32]))
+            .encrypt_with_context(Raw(None, zero), tenant(1))
+            .expect("mock")
     );
     assert_ne!(
         under_one,
-        order_term(&Fixed::<1>(Mock::new(key())), None, zero, tenant(1)).expect("fixed")
+        Fixed::<1>(Mock::new(key()))
+            .encrypt_with_context(Raw(None, zero), tenant(1))
+            .expect("fixed")
     );
     // The same bytes under another domain are another term.
-    let as_i8 = order_term(&mock, None, Physical::Int(Int::U8(0x80)), ()).expect("mock");
-    let as_u8 = order_term(&mock, None, zero, ()).expect("mock");
+    let as_i8 = mock
+        .encrypt(Raw(None, Physical::Int(Int::U8(0x80))))
+        .expect("mock");
+    let as_u8 = mock.encrypt(Raw(None, zero)).expect("mock");
     assert_eq!(as_i8.bytes, as_u8.bytes);
     assert_ne!(as_i8, as_u8);
 }
@@ -345,20 +353,22 @@ fn terms_compare_only_within_one_scheme_key_domain_and_context() {
 fn the_scalar_path_refuses_before_the_scheme_and_passes_the_schemes_failure_through() {
     let mock = Mock::new(key());
     for v in [Physical::Null, Physical::Bool(true)] {
-        assert_eq!(
-            order_term(&mock, None, v, ()),
+        assert!(matches!(
+            mock.encrypt(Raw(None, v)),
             Err(OrderError::Term(NormalizeError::NoDomain))
-        );
+        ));
     }
-    assert_eq!(
-        order_term(&mock, None, Physical::Text("\u{378}"), ()),
+    assert!(matches!(
+        mock.encrypt(Raw(None, Physical::Text("\u{378}"))),
         Err(OrderError::Term(NormalizeError::UnassignedCodePoint))
-    );
-    assert_eq!(
-        order_term(&mock, Some(Logical::Uuid), Physical::Bytes(&[0; 3]), ()),
+    ));
+    assert!(matches!(
+        mock.encrypt(Raw(Some(Logical::Uuid), Physical::Bytes(&[0; 3]))),
         Err(OrderError::Term(NormalizeError::Invalid))
-    );
-    let failed = order_term(&Down, None, Physical::Int(Int::I8(1)), ()).expect_err("down");
+    ));
+    let failed = Down
+        .encrypt(Raw(None, Physical::Int(Int::I8(1))))
+        .expect_err("down");
     assert!(matches!(failed, OrderError::Backend(_)));
     assert_eq!(
         failed.to_string(),
@@ -369,8 +379,11 @@ fn the_scalar_path_refuses_before_the_scheme_and_passes_the_schemes_failure_thro
 #[test]
 fn a_scheme_is_keyed_like_a_prf() {
     let from_bytes = Mock::try_from_bytes(Protected::new(vec![7; 32])).expect("32 bytes");
-    let term =
-        |scheme: &Mock| order_term(scheme, None, Physical::Int(Int::I8(1)), ()).expect("mock");
+    let term = |scheme: &Mock| {
+        scheme
+            .encrypt(Raw(None, Physical::Int(Int::I8(1))))
+            .expect("mock")
+    };
     assert_eq!(term(&from_bytes), term(&Mock::new(key())));
     let short = Mock::try_from_bytes(Protected::new(vec![7; 16]))
         .err()
@@ -381,7 +394,10 @@ fn a_scheme_is_keyed_like_a_prf() {
 #[quickcheck]
 fn order_through_a_scheme_is_value_order(a: i32, b: i32, text_a: String, text_b: String) -> bool {
     let mock = Mock::new(key());
-    let under = |v: Physical<'_>| order_term(&mock, None, v, "col").expect("mock");
+    let under = |v: Physical<'_>| {
+        mock.encrypt_with_context(Raw(None, v), "col")
+            .expect("mock")
+    };
     let ints =
         under(Physical::Int(Int::I32(a))).cmp(&under(Physical::Int(Int::I32(b)))) == a.cmp(&b);
     // Bytes compare as bytes; text ties where it folds together, so only
@@ -395,7 +411,8 @@ fn order_through_a_scheme_is_value_order(a: i32, b: i32, text_a: String, text_b:
 #[test]
 fn a_mock_term_is_the_plaintext_bytes() {
     // So the tests above are about the plaintext layer, not the mock.
-    let term: MockTerm =
-        order_term(&Mock::new(key()), None, Physical::Int(Int::U8(9)), ()).expect("mock");
+    let term: MockTerm = Mock::new(key())
+        .encrypt(Raw(None, Physical::Int(Int::U8(9))))
+        .expect("mock");
     assert_eq!(term.as_ref(), &[9]);
 }
