@@ -47,6 +47,10 @@ name = "vitaminc-normalize"
 version_group = "vitaminc"
 
 [[package]]
+name = "vitaminc-ore"
+version_group = "vitaminc"
+
+[[package]]
 name = "vitaminc-password"
 version_group = "vitaminc"
 

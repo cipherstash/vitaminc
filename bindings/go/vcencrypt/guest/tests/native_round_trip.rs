@@ -4,7 +4,7 @@
 //! `vc_decrypt` drive inside the wasm module, minus the linear-memory ABI.
 
 use vitaminc_aead::{
-    decrypt_to_frame, encrypt, to_frame, Context, DecryptError, Frame, MapSink, Node, Plaintext,
+    decrypt_to_frame, encrypt, to_frame, Context, DecryptError, Encrypt, Frame, MapSink, Node,
     SeqSink, Sink,
 };
 use vitaminc_aead_frame::transport as codec;
@@ -20,7 +20,7 @@ fn cipher() -> Aes256Cipher {
 #[derive(Clone)]
 struct Sample;
 
-impl Plaintext for Sample {
+impl Encrypt for Sample {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         let mut map = sink.map(Some(4))?;
         // Non-secret fields travelling in the clear alongside the sealed ones.

@@ -19,11 +19,11 @@ pub use vitaminc_aead::{
     decrypt, decrypt_into, encrypt, CipherText, DecodeError, DecryptError, EncryptError, Node,
 };
 pub use vitaminc_aead::{Context, IntoAad, IntoContext, LocalCipherText, Nonce, Unspecified};
-/// The derives for the data model: `Plaintext` for values going in, and
+/// The derives for the data model: `Encrypt` for values going in, and
 /// `Decrypt` for typed values coming out. Inlined so the derives'
 /// `#[aead(...)]` reference renders here too.
 #[doc(inline)]
-pub use vitaminc_aead::{Decrypt, Plaintext};
+pub use vitaminc_aead::{Decrypt, Encrypt};
 
 /// The ciphertext tree [`Aes256Cipher`] produces: one sealed leaf per
 /// scalar, with the shape of the value around them.
@@ -31,7 +31,7 @@ pub type AesCipherText = Node<LocalCipherText>;
 
 /// Encrypt `plaintext` under `key` with no associated data.
 ///
-/// Any type that implements [`Plaintext`] can be encrypted. This builds a
+/// Any type that implements [`Encrypt`] can be encrypted. This builds a
 /// one-shot [`Aes256Cipher`]; to encrypt many values, or with associated
 /// data, construct the cipher once and call [`encrypt`] with it.
 ///
@@ -54,7 +54,7 @@ pub fn encrypt_with_key<T>(
     plaintext: T,
 ) -> Result<AesCipherText, EncryptError<Unspecified>>
 where
-    T: Plaintext,
+    T: Encrypt,
 {
     let cipher = Aes256Cipher::new(key).map_err(EncryptError::Cipher)?;
     encrypt(plaintext, &cipher, ())

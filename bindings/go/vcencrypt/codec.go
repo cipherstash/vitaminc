@@ -32,7 +32,7 @@ func Encode(enc Encoder, v any) error {
 	return vcffi.Encode(enc, v)
 }
 
-// Plaintext value trees cross the boundary through vcffi.Marshal/Unmarshal
+// Encrypt value trees cross the boundary through vcffi.Marshal/Unmarshal
 // directly — no wrapper, so there is exactly one spelling in this package.
 // The ciphertext pair below earns its wrappers by binding the vcvalue leaves.
 

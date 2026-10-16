@@ -1,0 +1,55 @@
+[package]
+name = "vitaminc-ore"
+description = "Order terms for the plaintext data model: one sealed order encoding per kind, and the scheme trait that encrypts it. Part of the Vitamin-C cryptographic suite."
+documentation = "https://docs.rs/vitaminc-ore"
+version.workspace = true
+repository.workspace = true
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+# The case-folding table in src/casefold_unicode16.rs is derived from
+# Unicode's data files, whose licence (UNICODE-LICENSE.txt) travels with
+# it; the rest of the crate is MIT, as the workspace is.
+license = "MIT AND Unicode-3.0"
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+# The generator is for reviewers rebuilding the table from the repository,
+# not for users of the crate.
+exclude = ["tools/"]
+
+[dependencies]
+vitaminc-aead = { version = "0.5.1", path = "../aead" }
+vitaminc-context = { version = "0.5.1", path = "../context" }
+vitaminc-normalize = { version = "0.5.1", path = "../normalize" }
+vitaminc-protected = { version = "0.5.1", path = "../protected" }
+thiserror = { workspace = true }
+
+# As in vitaminc-normalize: NFD and NFC are stable for assigned code
+# points, and the Unicode 16 assignment check refuses everything else.
+[dependencies.unicode-normalization]
+version = "0.1.24"
+
+# Exact pin: this table defines which code points are assigned in Unicode
+# 16, and a newer table would widen the accepted input of a frozen domain.
+# The case-folding table is generated from Unicode 16 and pinned the same
+# way (see tools/generate_casefold.py).
+[dependencies.unicode-general-category]
+version = "=1.1.0"
+
+[dev-dependencies]
+# Path-only, so publish order does not matter. `test-support` for
+# `plaintext::render`, the path notation the tests assert against.
+vitaminc-aead = { path = "../aead", features = ["chrono", "rust_decimal", "uuid", "test-support"] }
+quickcheck = "1.1.0"
+# Typed values as callers hold them, for the tests that encrypt them.
+chrono = { version = "0.4.44", default-features = false, features = ["std"] }
+rust_decimal = { version = "1.41", default-features = false, features = ["std"] }
+uuid = { version = "1", default-features = false }
+quickcheck_macros = "1.2.0"
+
+# The frozen release the integer and float encodings were ported from, so
+# the tests can check them byte for byte. Not a dependency of the crate:
+# ADR 0002 keeps `orderable-bytes` for cipherstash-client's stored terms
+# and has vitaminc own its encodings.
+orderable-bytes = { version = "=0.2.0" }

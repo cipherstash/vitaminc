@@ -15,7 +15,7 @@ use vitaminc_aead::plaintext::kinds::chrono as conv;
 use vitaminc_aead::plaintext::render;
 use vitaminc_aead::seal::{AsyncCipher, Cipher};
 use vitaminc_aead::{
-    Context, EncryptError, Float, Int, Logical, Physical, Plaintext, Refusal, SeqSink, Sink,
+    Context, Encrypt, EncryptError, Float, Int, Logical, Physical, Refusal, SeqSink, Sink,
     SourceError, TimeUnit, Unencryptable,
 };
 use vitaminc_normalize::{
@@ -1135,7 +1135,7 @@ fn encrypt_with_terms_seals_the_same_leaves_and_returns_the_terms() {
 #[test]
 fn scalars_without_a_domain_and_passthroughs_get_no_term() {
     struct Doc;
-    impl Plaintext for Doc {
+    impl Encrypt for Doc {
         fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
             use vitaminc_aead::MapSink;
             let mut map = sink.map(Some(5))?;
@@ -1345,7 +1345,7 @@ fn terms_says_which_field_it_refused() {
 #[test]
 fn terms_passes_a_source_failure_through() {
     struct Throws;
-    impl Plaintext for Throws {
+    impl Encrypt for Throws {
         fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
             let mut seq = sink.seq(None)?;
             1u32.visit(seq.element()?)?;
@@ -1391,7 +1391,7 @@ impl AsyncCipher for Remote {
 fn encrypt_with_terms_async_has_every_term_before_its_first_await() {
     static WALKED: AtomicBool = AtomicBool::new(false);
     struct Source;
-    impl Plaintext for Source {
+    impl Encrypt for Source {
         fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
             let out = vec![1u32, 2].visit(sink);
             WALKED.store(true, Ordering::SeqCst);

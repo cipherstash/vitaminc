@@ -17,17 +17,6 @@ vitaminc-aead = { version = "0.5.1", path = "../aead" }
 vitaminc-protected = { version = "0.5.1", path = "../protected" }
 thiserror = { workspace = true }
 
-# Only for the decimal term. Its encoding is constant-time arithmetic over
-# the mantissa and scale that this crate does not want a second copy of, so
-# the (scale, mantissa) pair is turned back into a `Decimal` to encode it.
-rust_decimal = { version = "1.41", default-features = false, features = ["std"] }
-
-# Temporary review pin: ore.rs #97; replace with its 0.2 release before publishing.
-[dependencies.orderable-bytes]
-git = "https://github.com/cipherstash/ore.rs"
-rev = "b3b7800b9c0cd8f7c53c5382f8e018a4e8bcbbd5"
-features = ["decimal"]
-
 # NFC is stable for assigned code points, and the Unicode 16 assignment check
 # refuses everything else, so newer normalization releases are safe.
 [dependencies.unicode-normalization]
@@ -48,3 +37,10 @@ uuid = { version = "1", default-features = false }
 quickcheck = "1.1.0"
 quickcheck_macros = "1.2.0"
 futures-executor = "0.3.31"
+
+# The frozen release the decimal and float encodings were ported from, so
+# the tests can check them byte for byte. It is not a dependency of the
+# crate: ADR 0002 keeps `orderable-bytes` for cipherstash-client's stored
+# terms and has vitaminc own its encodings.
+orderable-bytes = { version = "=0.2.0", features = ["decimal"] }
+rust_decimal = { version = "1.41", default-features = false, features = ["std"] }

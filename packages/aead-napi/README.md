@@ -4,10 +4,10 @@ NAPI (Node-API) bindings layer for the Vitamin-C AEAD encryption — the
 JS-specific piece of exposing `vitaminc` encryption to Node.js.
 
 The data model is the FFI boundary (ADR 0001): a value coming in is a
-[`Plaintext`] source and a value going out is built by a [`Sink`], and
+[`Encrypt`] source and a value going out is built by a [`Sink`], and
 nothing sits in between. This crate supplies the JavaScript side of both:
 
-- **`JsRef<'e>`** — a live JavaScript value as a `Plaintext`. The walk runs
+- **`JsRef<'e>`** — a live JavaScript value as an `Encrypt`. The walk runs
   on the JavaScript thread, reading each value as it goes, so no value tree
   is built and a scalar leaves the engine only to go straight to the sink.
   `encrypt(JsRef::new(value), &cipher, aad)` seals a value in place. To
@@ -202,6 +202,6 @@ coverage; the pure functions beside them stay scored.
   would otherwise take `t` and `v` from `String.prototype`.
 - Errors carry no cryptographic detail (`Unspecified` at the trait layer).
 
-[`Plaintext`]: vitaminc_aead::Plaintext
+[`Encrypt`]: vitaminc_aead::Encrypt
 [`Sink`]: vitaminc_aead::Sink
 [`JsFault`]: crate::JsFault

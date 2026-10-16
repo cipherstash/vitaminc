@@ -147,12 +147,13 @@ jobs:
       - name: test (equality term feature)
         # The workspace run unifies hmac's dev-dependency features, so test
         # prf alone without `normalize` as well as with it, and check that
-        # the facade's `normalize` feature forwards to prf on its own.
+        # the facade's `normalize` and `ore` features forward on their own.
         run: |
           cargo test -p vitaminc-prf &&
           cargo test -p vitaminc-prf --features normalize &&
           cargo test -p vitaminc-hmac --test normalized_equality &&
-          cargo test -p vitaminc --features prf,normalize --test prf_normalize
+          cargo test -p vitaminc --features prf,normalize --test prf_normalize &&
+          cargo check -p vitaminc --features ore
 
       - name: test (vitaminc-encrypt, RustCrypto backend on native)
         # Forces the RustCrypto path that wasm32 uses, so the same property

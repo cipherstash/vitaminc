@@ -21,6 +21,10 @@ pub use vitaminc_encrypt as encrypt;
 #[cfg_attr(docsrs, doc(cfg(feature = "normalize")))]
 pub use vitaminc_normalize as normalize;
 
+#[cfg(feature = "ore")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ore")))]
+pub use vitaminc_ore as ore;
+
 #[cfg(feature = "aws-kms")]
 #[cfg_attr(docsrs, doc(cfg(feature = "aws-kms")))]
 pub use vitaminc_kms as aws_kms;

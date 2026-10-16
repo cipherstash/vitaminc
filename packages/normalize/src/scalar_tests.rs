@@ -1,4 +1,5 @@
 use super::*;
+use orderable_bytes::OrderableBytes;
 use quickcheck_macros::quickcheck;
 use vitaminc_aead::UnknownLogical;
 
@@ -513,4 +514,34 @@ fn a_logical_term_is_the_same_at_every_integer_width(n: i16) -> bool {
         let first = int(Some(ty), widths[0]);
         widths.iter().all(|&w| int(Some(ty), w) == first)
     })
+}
+
+/// The 96-bit check is the only one between a direct caller and the
+/// encoder, which would otherwise drop a mantissa's top bits and give it
+/// the term of another value.
+#[test]
+fn decimal_refuses_a_mantissa_outside_96_bits_by_itself() {
+    let limit = 1i128 << 96;
+    assert!(
+        decimal(0, Int::I128(limit - 1)).is_some(),
+        "the largest mantissa"
+    );
+    assert!(
+        decimal(0, Int::I128(1 - limit)).is_some(),
+        "the smallest mantissa"
+    );
+    assert!(
+        decimal(0, Int::I128(limit)).is_none(),
+        "one past the largest"
+    );
+    assert!(
+        decimal(0, Int::I128(-limit)).is_none(),
+        "one past the smallest"
+    );
+    assert!(
+        decimal(5, Int::I128((1i128 << 104) + 10i128.pow(28))).is_none(),
+        "above 104 bits this would take the term of 10^23"
+    );
+    assert!(decimal(0, Int::I128(i128::MAX)).is_none());
+    assert!(decimal(0, Int::I128(i128::MIN)).is_none());
 }

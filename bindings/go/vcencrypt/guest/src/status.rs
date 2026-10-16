@@ -102,10 +102,10 @@ mod tests {
     /// seals nothing, and the host must hear that as its own status.
     #[test]
     fn a_real_refusal_reaches_the_host_as_nothing_sealed() {
-        use vitaminc_aead::{plan, Context, Plaintext, Sink};
+        use vitaminc_aead::{plan, Context, Encrypt, Sink};
 
         struct Pass;
-        impl Plaintext for Pass {
+        impl Encrypt for Pass {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
                 sink.passthrough("public")
             }

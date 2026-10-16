@@ -9,7 +9,7 @@ use vitaminc_aead::frame::MAX_DEPTH;
 use vitaminc_aead::plaintext::render;
 use vitaminc_aead::seal::Cipher;
 use vitaminc_aead::{
-    Context, EncryptError, Logical, MapSink, Physical, Plaintext, Raw, SeqSink, Sink, SourceError,
+    Context, Encrypt, EncryptError, Logical, MapSink, Physical, Raw, SeqSink, Sink, SourceError,
     Unencryptable,
 };
 use vitaminc_normalize::{encrypt_with_terms, terms, NormalizeError, Term, TermError};
@@ -57,7 +57,7 @@ fn sourced(source: &SourceError) -> Outcome {
     }
 }
 
-fn alone<P: Plaintext>(value: P) -> Outcome {
+fn alone<P: Encrypt>(value: P) -> Outcome {
     match terms(value) {
         Ok(found) => paths(&found),
         Err(err) => match err.refusal() {
@@ -67,7 +67,7 @@ fn alone<P: Plaintext>(value: P) -> Outcome {
     }
 }
 
-fn encrypting<P: Plaintext>(value: P) -> Outcome {
+fn encrypting<P: Encrypt>(value: P) -> Outcome {
     match encrypt_with_terms(value, &Clear, "ctx") {
         Ok((_, found)) => paths(&found),
         Err(EncryptError::Shape(refusal)) => Shape(refusal.reason(), render(refusal.path())),
@@ -78,7 +78,7 @@ fn encrypting<P: Plaintext>(value: P) -> Outcome {
 
 /// `value()` ends the same way both walks, and that way is `expected`.
 #[track_caller]
-fn agree<P: Plaintext>(value: impl Fn() -> P, expected: Outcome) {
+fn agree<P: Encrypt>(value: impl Fn() -> P, expected: Outcome) {
     assert_eq!(encrypting(value()), expected, "encrypt_with_terms");
     assert_eq!(alone(value()), expected, "terms");
 }
@@ -93,7 +93,7 @@ fn shape(reason: Unencryptable, at: &str) -> Outcome {
 #[derive(Clone)]
 struct Users<P>(P);
 
-impl<P: Plaintext> Plaintext for Users<P> {
+impl<P: Encrypt> Encrypt for Users<P> {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         let mut map = sink.map(Some(2))?;
         1u32.visit(map.entry("id")?)?;
@@ -109,7 +109,7 @@ impl<P: Plaintext> Plaintext for Users<P> {
 #[derive(Clone)]
 struct Dup;
 
-impl Plaintext for Dup {
+impl Encrypt for Dup {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         let mut map = sink.map(None)?;
         "one".visit(map.entry("k")?)?;
@@ -124,7 +124,7 @@ struct OnlyPass {
     map: bool,
 }
 
-impl Plaintext for OnlyPass {
+impl Encrypt for OnlyPass {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         if self.map {
             let mut map = sink.map(Some(1))?;
@@ -144,7 +144,7 @@ struct DropsAChild {
     map: bool,
 }
 
-impl Plaintext for DropsAChild {
+impl Encrypt for DropsAChild {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         if self.map {
             let mut map = sink.map(None)?;
@@ -164,7 +164,7 @@ impl Plaintext for DropsAChild {
 #[derive(Clone)]
 struct Unclosed;
 
-impl Plaintext for Unclosed {
+impl Encrypt for Unclosed {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         let mut outer = sink.seq(None)?;
         let mut inner = outer.element()?.seq(None)?;
@@ -178,7 +178,7 @@ impl Plaintext for Unclosed {
 #[derive(Clone)]
 struct Passes<P>(P);
 
-impl<P: Plaintext + Clone> Plaintext for Passes<P> {
+impl<P: Encrypt + Clone> Encrypt for Passes<P> {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         let mut seq = sink.seq(Some(2))?;
         "sealed".visit(seq.element()?)?;
@@ -191,7 +191,7 @@ impl<P: Plaintext + Clone> Plaintext for Passes<P> {
 #[derive(Clone)]
 struct Throws;
 
-impl Plaintext for Throws {
+impl Encrypt for Throws {
     fn visit<S: Sink>(self, _: S) -> Result<S::Ok, S::Error> {
         Err(<S::Error as vitaminc_aead::plaintext::Error>::source(
             SourceError::msg("getter threw"),
@@ -212,7 +212,7 @@ enum Kind {
 #[derive(Clone, Copy)]
 struct Nest(Kind, usize);
 
-impl Plaintext for Nest {
+impl Encrypt for Nest {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         let Nest(kind, n) = self;
         if n == 0 {
