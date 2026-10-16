@@ -6,6 +6,12 @@
 //! Terms)`, so a caller holds every term before any cipher is called and,
 //! with an async cipher, before the first await. [`terms`] runs it alone,
 //! and then it refuses what encryption would refuse.
+//!
+//! The sink does the walking and the [`Normalize`] it is given does the
+//! encoding, so an index of another kind (an order index, whose bytes
+//! differ from an equality term's) collects its terms through the same
+//! sink with a normalizer of its own, through [`Terms::by`] and
+//! [`terms_by`].
 
 use core::future::Future;
 use core::marker::PhantomData;
@@ -22,18 +28,58 @@ use vitaminc_protected::OpaqueDebug;
 
 use crate::scalar::{normalize, NormalizeError, Normalized};
 
-/// One equality term: where the scalar sits in the value, and its
-/// normalized bytes with their domain.
+/// How [`Terms`] turns one scalar into a term.
+///
+/// [`Equality`] is the normalizer this crate is about. An index of another
+/// kind supplies its own, with a term type of its own (an order index
+/// seals its term so only a scheme can read it) and the same outcome
+/// contract: a scalar whose kind has no term under this index (a null, a
+/// boolean) returns [`NormalizeError::NoDomain`], and [`Terms`] skips it
+/// when it has no logical type; a scalar whose logical type has no term
+/// returns the same error and stops the walk; any other error stops the
+/// walk too.
+pub trait Normalize {
+    /// What one scalar becomes.
+    type Term;
+
+    /// The term for one scalar, or why it has none.
+    fn normalize(
+        &self,
+        ty: Option<Logical>,
+        value: Physical<'_>,
+    ) -> Result<Self::Term, NormalizeError>;
+}
+
+/// The equality normalizer: [`normalize`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Equality;
+
+impl Normalize for Equality {
+    type Term = Normalized;
+
+    fn normalize(
+        &self,
+        ty: Option<Logical>,
+        value: Physical<'_>,
+    ) -> Result<Normalized, NormalizeError> {
+        normalize(ty, value)
+    }
+}
+
+/// One term: where the scalar sits in the value, and what the normalizer
+/// made of it. An equality term, a [`Normalized`], unless [`Terms::by`]
+/// was given another normalizer.
 ///
 /// `Debug` shows the path's shape, with its map keys masked as [`Step`]
 /// masks them, and masks the term.
 #[derive(OpaqueDebug)]
-pub struct Term {
+pub struct Term<T = Normalized> {
     /// The path from the root, empty for a scalar at the root.
     #[non_sensitive]
     pub path: Path,
-    /// The term itself: the frozen domain label and the normalized bytes.
-    pub normalized: Normalized,
+    /// The term itself: for equality, the frozen domain label and the
+    /// normalized bytes.
+    pub normalized: T,
 }
 
 /// A scalar [`Terms`] refused: why, and where in the value.
@@ -113,7 +159,9 @@ impl Error for TermsError {
 ///
 /// Generic over its error type so it adopts its [`Tee`] partner's. To
 /// collect terms without encrypting, call [`terms`], whose error type is
-/// [`TermsError`].
+/// [`TermsError`]. Generic too over the [`Normalize`] that encodes each
+/// scalar, [`Equality`] unless [`by`](Terms::by) is given another, so an
+/// index of another kind collects its terms through this same walk.
 ///
 /// A scalar whose *kind* has no domain (a null, a boolean, an `undefined`)
 /// produces no term and does not stop the walk: an absent or unindexable
@@ -180,12 +228,13 @@ impl Error for TermsError {
 /// exactly takes, and a passthrough is framed. Beside `EncryptSink`,
 /// through [`plan_with_terms`], none of that is paid twice. A caller that
 /// tees `Terms::new` beside `EncryptSink` itself has both keep the rules.
-pub struct Terms<'t, E> {
-    out: &'t mut Vec<Term>,
+pub struct Terms<'t, E, N: Normalize = Equality> {
+    out: &'t mut Vec<Term<N::Term>>,
     keys: Keys<'t>,
     at: Place<'t>,
     /// `None` beside an [`EncryptSink`] that keeps the rules itself.
     rules: Option<NodeRules<'t>>,
+    by: N,
     _error: PhantomData<E>,
 }
 
@@ -300,18 +349,10 @@ fn refused<E: Error>(refusal: Refusal) -> E {
 }
 
 impl<'t, E> Terms<'t, E> {
-    /// A sink that appends to `out` and keeps the shape rules itself.
+    /// A sink that appends equality terms to `out` and keeps the shape
+    /// rules itself.
     pub fn new(out: &'t mut Vec<Term>) -> Self {
-        Self {
-            out,
-            keys: Keys::Own(String::new()),
-            at: Place::Root,
-            rules: Some(NodeRules {
-                depth: 0,
-                settle: None,
-            }),
-            _error: PhantomData,
-        }
+        Self::by(Equality, out)
     }
 
     /// A sink that appends to `out` and leaves the shape rules to the
@@ -320,6 +361,27 @@ impl<'t, E> Terms<'t, E> {
         Self {
             rules: None,
             ..Self::new(out)
+        }
+    }
+}
+
+impl<'t, E, N: Normalize> Terms<'t, E, N> {
+    /// A sink that appends the terms `by` makes to `out` and keeps the
+    /// shape rules itself.
+    ///
+    /// The normalizer is copied into every child sink, so it is `Copy`: a
+    /// normalizer carries no state.
+    pub fn by(by: N, out: &'t mut Vec<Term<N::Term>>) -> Self {
+        Self {
+            out,
+            keys: Keys::Own(String::new()),
+            at: Place::Root,
+            rules: Some(NodeRules {
+                depth: 0,
+                settle: None,
+            }),
+            by,
+            _error: PhantomData,
         }
     }
 
@@ -331,17 +393,17 @@ impl<'t, E> Terms<'t, E> {
     }
 }
 
-impl<'t, E: Error> Sink for Terms<'t, E> {
+impl<'t, E: Error, N: Normalize + Copy> Sink for Terms<'t, E, N> {
     type Ok = ();
     type Error = E;
-    type Seq = TermsSeq<'t, E>;
-    type Map = TermsMap<'t, E>;
+    type Seq = TermsSeq<'t, E, N>;
+    type Map = TermsMap<'t, E, N>;
 
     fn scalar(self, ty: Option<Logical>, value: Physical<'_>) -> Result<(), E> {
         if let Some(rules) = &self.rules {
             shape::scalar(rules.depth, ty, &value, &self.at()).map_err(refused)?;
         }
-        match normalize(ty, value) {
+        match self.by.normalize(ty, value) {
             Ok(normalized) => {
                 let path = self.at.path(self.keys.as_str());
                 self.out.push(Term { path, normalized });
@@ -387,6 +449,7 @@ impl<'t, E: Error> Sink for Terms<'t, E> {
             at: self.at,
             next: 0,
             rules,
+            by: self.by,
             _error: PhantomData,
         })
     }
@@ -415,6 +478,7 @@ impl<'t, E: Error> Sink for Terms<'t, E> {
             keys: self.keys,
             at: self.at,
             rules,
+            by: self.by,
             _error: PhantomData,
         })
     }
@@ -438,8 +502,8 @@ impl<'t, E: Error> Sink for Terms<'t, E> {
 
 /// The sequence side of [`Terms`]: each element's path is the sequence's
 /// plus its index.
-pub struct TermsSeq<'t, E> {
-    out: &'t mut Vec<Term>,
+pub struct TermsSeq<'t, E, N: Normalize = Equality> {
+    out: &'t mut Vec<Term<N::Term>>,
     keys: Keys<'t>,
     /// Where this sequence's own keys would begin: the length of `keys`
     /// at its start.
@@ -447,18 +511,19 @@ pub struct TermsSeq<'t, E> {
     at: Place<'t>,
     next: usize,
     rules: Option<Held<'t, SeqRules>>,
+    by: N,
     _error: PhantomData<E>,
 }
 
-impl<E: Error> SeqSink for TermsSeq<'_, E> {
+impl<E: Error, N: Normalize + Copy> SeqSink for TermsSeq<'_, E, N> {
     type Ok = ();
     type Error = E;
     type Element<'s>
-        = Terms<'s, E>
+        = Terms<'s, E, N>
     where
         Self: 's;
 
-    fn element(&mut self) -> Result<Terms<'_, E>, E> {
+    fn element(&mut self) -> Result<Terms<'_, E, N>, E> {
         let TermsSeq {
             out,
             keys,
@@ -466,6 +531,7 @@ impl<E: Error> SeqSink for TermsSeq<'_, E> {
             at,
             next,
             rules,
+            by,
             ..
         } = self;
         let keys = keys.get();
@@ -488,6 +554,7 @@ impl<E: Error> SeqSink for TermsSeq<'_, E> {
             keys: Keys::Lent(keys),
             at: Place::Element { parent: at, index },
             rules,
+            by: *by,
             _error: PhantomData,
         })
     }
@@ -507,32 +574,34 @@ impl<E: Error> SeqSink for TermsSeq<'_, E> {
 
 /// The map side of [`Terms`]: each entry's path is the map's plus its
 /// key.
-pub struct TermsMap<'t, E> {
-    out: &'t mut Vec<Term>,
+pub struct TermsMap<'t, E, N: Normalize = Equality> {
+    out: &'t mut Vec<Term<N::Term>>,
     keys: Keys<'t>,
     /// Where this map's keys begin in `keys`: its length at the map's
     /// start. Each entry's key replaces the last one there.
     mark: usize,
     at: Place<'t>,
     rules: Option<Held<'t, MapRules>>,
+    by: N,
     _error: PhantomData<E>,
 }
 
-impl<E: Error> MapSink for TermsMap<'_, E> {
+impl<E: Error, N: Normalize + Copy> MapSink for TermsMap<'_, E, N> {
     type Ok = ();
     type Error = E;
     type Entry<'s>
-        = Terms<'s, E>
+        = Terms<'s, E, N>
     where
         Self: 's;
 
-    fn entry(&mut self, key: &str) -> Result<Terms<'_, E>, E> {
+    fn entry(&mut self, key: &str) -> Result<Terms<'_, E, N>, E> {
         let TermsMap {
             out,
             keys,
             mark,
             at,
             rules,
+            by,
             ..
         } = self;
         let keys = keys.get();
@@ -555,6 +624,7 @@ impl<E: Error> MapSink for TermsMap<'_, E> {
             keys: Keys::Lent(keys),
             at: Place::Entry { parent: at, key },
             rules,
+            by: *by,
             _error: PhantomData,
         })
     }
@@ -617,8 +687,26 @@ impl<E: Error> MapSink for TermsMap<'_, E> {
 /// [`TermsError`]: what [`Terms`] refuses, a value encryption would refuse
 /// included, or the source's own failure.
 pub fn terms<P: Encrypt>(value: P) -> Result<Vec<Term>, TermsError> {
+    terms_by(Equality, value)
+}
+
+/// Every term of `value` under the normalizer `by`, in walk order, without
+/// encrypting it: [`terms`] for an index of another kind.
+///
+/// It refuses what [`terms`] refuses for the value's shape, and what `by`
+/// refuses for a scalar, the way [`Terms`] describes.
+///
+/// # Errors
+///
+/// [`TermsError`]: what [`Terms`] refuses, a value encryption would refuse
+/// included, or the source's own failure.
+pub fn terms_by<N, P>(by: N, value: P) -> Result<Vec<Term<N::Term>>, TermsError>
+where
+    N: Normalize + Copy,
+    P: Encrypt,
+{
     let mut out = Vec::new();
-    value.visit(Terms::new(&mut out))?;
+    value.visit(Terms::by(by, &mut out))?;
     Ok(out)
 }
 

@@ -10,7 +10,7 @@ pub use scalar::{
     NormalizeError, Normalized,
 };
 pub use terms::{
-    encrypt_with_terms, encrypt_with_terms_async, plan_with_terms, terms, Term, TermError, Terms,
-    TermsError, TermsMap, TermsSeq, WithTerms,
+    encrypt_with_terms, encrypt_with_terms_async, plan_with_terms, terms, terms_by, Equality,
+    Normalize, Term, TermError, Terms, TermsError, TermsMap, TermsSeq, WithTerms,
 };
 pub use vitaminc_aead::plaintext::{Path, Step};
