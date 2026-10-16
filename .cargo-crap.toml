@@ -64,6 +64,14 @@ exclude = ["tests/**", "src/test_support.rs"]
 #     `eager_capacity`, `capacity`, `bigint`, `check_depth`, `class_name`,
 #     `frame_error` and friends) stay scored. The mutation gate does not
 #     exempt them: it rebuilds that addon from the mutated source.
+#
+#     A bare name matches every function of that name in the workspace, not
+#     just the one in the file named by the comment above it. So each name
+#     here must be defined once in the whole workspace: a generic name such as
+#     `walk` or `date` would also hide functions in other crates (it once hid
+#     `vitaminc-aead`'s decrypt walk). The aead-napi functions carry a `js_`
+#     prefix for that reason. Check with
+#     `git grep -nP '\bfn NAME\s*[<(]' -- '*.rs'` before adding one.
 allow = [
     "**/random-derives/**",
     "**/protected-derive/**",
@@ -81,16 +89,16 @@ allow = [
     # js_ref.rs
     "JsRef::to_frame",
     "JsRef::visit",
-    "fault",
-    "conversion",
-    "walk",
-    "object",
-    "bytes",
-    "date",
-    "classify",
-    "map",
-    "array",
-    "wrapped",
+    "js_fault",
+    "js_conversion",
+    "js_walk",
+    "js_object",
+    "js_bytes",
+    "js_date",
+    "js_classify",
+    "js_map",
+    "js_array",
+    "js_wrapped",
     # js_builder.rs
     "JsBuilder::build",
     "JsBuilder::scalar",
@@ -110,5 +118,5 @@ allow = [
     "Wrappers::is_plain",
     "Wrappers::text",
     "Wrappers::construct",
-    "release",
+    "release_wrappers",
 ]

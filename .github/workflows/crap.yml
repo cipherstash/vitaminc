@@ -46,6 +46,28 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Check each allowlisted function name is defined once
+        # cargo-crap matches a bare name in `allow` against every function of
+        # that name in the workspace, so a generic name exempts functions in
+        # other crates too. Runs first because it needs no build.
+        run: |
+          python3 - <<'PY'
+          import re, subprocess, sys, tomllib
+          allow = tomllib.load(open(".cargo-crap.toml", "rb"))["allow"]
+          names = [a for a in allow if "/" not in a and "*" not in a and "::" not in a]
+          failed = False
+          for name in names:
+              out = subprocess.run(
+                  ["git", "grep", "-nP", rf"\bfn {re.escape(name)}\s*[<(]", "--", "*.rs"],
+                  capture_output=True, text=True,
+              ).stdout.splitlines()
+              if len(out) != 1:
+                  failed = True
+                  print(f"::error file=.cargo-crap.toml::allow entry {name!r} is defined {len(out)} times; it must name exactly one function")
+                  print("\n".join(out))
+          sys.exit(1 if failed else 0)
+          PY
+
       - uses: actions/cache@v6
         with:
           path: |

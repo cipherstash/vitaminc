@@ -106,7 +106,7 @@ impl<'e> Wrappers<'e> {
                     .lock()
                     .map_err(|_| registry_poisoned())?
                     .insert(key, reference);
-                env.add_env_cleanup_hook(key, release)?;
+                env.add_env_cleanup_hook(key, release_wrappers)?;
                 classes
             }
         };
@@ -193,7 +193,7 @@ impl<'e> Wrappers<'e> {
 /// Only a live environment can run this, so no unit test reaches it; the
 /// Worker teardown check in `tests/object-safety.cjs` does.
 #[cfg_attr(test, mutants::skip)]
-fn release(key: usize) {
+fn release_wrappers(key: usize) {
     let Ok(mut realms) = REALMS.lock() else {
         return;
     };
