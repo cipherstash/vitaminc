@@ -193,29 +193,24 @@ impl<'a> Context<'a> {
         Self::pae(&[SEQ_ELEMENT_DOMAIN, self.as_bytes(), b"element"])
     }
 
-    /// Marker context for an empty sequence. See
-    /// [`for_none`](Self::for_none) for the marker rule.
-    pub fn for_empty_sequence(&self) -> Context<'static> {
-        self.for_marker(b"empty-sequence")
-    }
-
-    /// Marker context for an empty map. See [`for_none`](Self::for_none)
-    /// for the marker rule.
-    pub fn for_empty_map(&self) -> Context<'static> {
-        self.for_marker(b"empty-map")
-    }
-
-    /// Marker context for an authenticated absent value, `Option::None`.
+    /// Marker context for an empty sequence.
     ///
     /// A marker is a sealed empty plaintext whose tag is the only thing
     /// authenticating a structural fact. Each marker kind is derived under
     /// its own labelled context, `PAE(domain, self, kind)`, so a single leaf
-    /// sealed under the bare context can never be re-tagged as an absence
-    /// marker (silent authenticated deletion), an absence marker can never
-    /// validate as an encrypted empty byte string, and no marker can be
-    /// replayed as a different structural claim.
-    pub fn for_none(&self) -> Context<'static> {
-        self.for_marker(b"none")
+    /// sealed under the bare context can never be re-tagged as a marker, a
+    /// marker can never validate as an encrypted empty byte string, and no
+    /// marker can be replayed as a different structural claim. An absent
+    /// value is not a marker: `None` is a null leaf, sealed like any other
+    /// (ADR 0001).
+    pub fn for_empty_sequence(&self) -> Context<'static> {
+        self.for_marker(b"empty-sequence")
+    }
+
+    /// Marker context for an empty map. See
+    /// [`for_empty_sequence`](Self::for_empty_sequence) for the marker rule.
+    pub fn for_empty_map(&self) -> Context<'static> {
+        self.for_marker(b"empty-map")
     }
 
     /// The context an optional value's `Some` is derived under.
@@ -318,7 +313,6 @@ mod tests {
             for (derived, kind) in [
                 (ctx.for_empty_sequence(), b"empty-sequence".as_slice()),
                 (ctx.for_empty_map(), b"empty-map"),
-                (ctx.for_none(), b"none"),
             ] {
                 assert_eq!(
                     derived,
@@ -372,7 +366,6 @@ mod tests {
                 ctx.for_sequence_element(),
                 ctx.for_empty_sequence(),
                 ctx.for_empty_map(),
-                ctx.for_none(),
                 ctx.for_option_some(),
                 ctx.refine("element"),
             ];
@@ -400,7 +393,7 @@ mod tests {
                     .encode()
             );
             assert_ne!(
-                ctx.for_none(),
+                ctx.for_empty_map(),
                 (b"vitaminc/context/marker/v1".as_slice(), ctx.clone())
                     .into_context()
                     .encode()

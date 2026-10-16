@@ -14,14 +14,31 @@ import (
 	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 )
 
-// rfc3339ish matches the corpus timestamp spelling, including leap seconds
-// and ISO 8601 expanded years, which time.Parse cannot read.
+// rfc3339ish matches the corpus timestamp spelling, including ISO 8601
+// expanded years, which time.Parse cannot read.
 var rfc3339ish = regexp.MustCompile(`^([+-]?\d{4,})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z$`)
 
 // expected builds the Go value a vector's kind and value fields describe,
 // without the transport decoder, so a bug that decodes and encodes
 // symmetrically wrong cannot pass.
 func expected(kind string, raw json.RawMessage) (any, error) {
+	if kind == "unknown" {
+		// A logical id this build does not know: the id, the parameter and
+		// the physical scalar, which round-trips as a vcvalue.Tagged.
+		var inner struct {
+			ID, Param uint8
+			Kind      string
+			Value     json.RawMessage
+		}
+		if err := json.Unmarshal(raw, &inner); err != nil {
+			return nil, err
+		}
+		v, err := expected(inner.Kind, inner.Value)
+		if err != nil {
+			return nil, err
+		}
+		return vcvalue.Tagged{ID: inner.ID, Param: inner.Param, V: v}, nil
+	}
 	var text string
 	_ = json.Unmarshal(raw, &text)
 	integer := func(bits int) (int64, error) { return strconv.ParseInt(text, 10, bits) }
@@ -75,6 +92,8 @@ func expected(kind string, raw json.RawMessage) (any, error) {
 		return timestamp(text)
 	case "decimal":
 		return vcvalue.ParseDecimal(text)
+	case "uuid":
+		return vcvalue.ParseUUID(text)
 	case "array":
 		if string(raw) == "[]" {
 			return []any{}, nil
@@ -101,11 +120,6 @@ func timestamp(text string) (any, error) {
 		n[i] = v
 	}
 	nanos, _ := strconv.Atoi((m[7] + "000000000")[:9])
-	if n[5] == 60 {
-		// chrono's leap second: second 59 with nanoseconds >= 1e9.
-		t := time.Date(n[0], time.Month(n[1]), n[2], n[3], n[4], 59, 0, time.UTC)
-		return vcvalue.Timestamp{Seconds: t.Unix(), Nanoseconds: uint32(1000000000 + nanos)}, nil
-	}
 	return time.Date(n[0], time.Month(n[1]), n[2], n[3], n[4], n[5], nanos, time.UTC), nil
 }
 
@@ -128,7 +142,13 @@ func TestSharedValueConformance(t *testing.T) {
 			Value                 json.RawMessage
 			GoReencode            string `json:"go_reencode"`
 		}
-		Malformed []struct{ Name, Transport string }
+		Normalized []struct {
+			Name, Kind, Transport, Reencode string
+			Value                           json.RawMessage
+			ReencodeValue                   json.RawMessage `json:"reencode_value"`
+		}
+		Malformed           []struct{ Name, Transport string }
+		CiphertextMalformed []struct{ Name, Transport string } `json:"ciphertext_malformed"`
 	}
 	if err := json.Unmarshal(data, &corpus); err != nil {
 		t.Fatal(err)
@@ -166,6 +186,43 @@ func TestSharedValueConformance(t *testing.T) {
 			}
 		})
 	}
+	// A normalized vector reads, and writes back as its canonical bytes:
+	// from the decoded value, and from either spelling built independently.
+	if len(corpus.Normalized) == 0 {
+		t.Fatal("the corpus has no normalized vectors")
+	}
+	for _, row := range corpus.Normalized {
+		t.Run(row.Name, func(t *testing.T) {
+			raw, err := hex.DecodeString(row.Transport)
+			if err != nil {
+				t.Fatal(err)
+			}
+			value, err := Unmarshal(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			canonical, err := expected(row.Kind, row.ReencodeValue)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !sameValue(value, canonical) {
+				t.Fatalf("decoded %#v, want %#v", value, canonical)
+			}
+			given, err := expected(row.Kind, row.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, v := range []any{value, canonical, given} {
+				encoded, err := Marshal(v)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if hex.EncodeToString(encoded) != row.Reencode {
+					t.Fatalf("got %x, want %s (%#v)", encoded, row.Reencode, v)
+				}
+			}
+		})
+	}
 	for _, row := range corpus.Malformed {
 		t.Run(row.Name, func(t *testing.T) {
 			raw, err := hex.DecodeString(row.Transport)
@@ -173,6 +230,20 @@ func TestSharedValueConformance(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, err := Unmarshal(raw); err != ErrMalformed {
+				t.Fatalf("got %v, want ErrMalformed", err)
+			}
+		})
+	}
+	if len(corpus.CiphertextMalformed) == 0 {
+		t.Fatal("the corpus has no malformed ciphertexts")
+	}
+	for _, row := range corpus.CiphertextMalformed {
+		t.Run(row.Name, func(t *testing.T) {
+			raw, err := hex.DecodeString(row.Transport)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := UnmarshalCipherText(VCValueLeaves(), raw); err != ErrMalformed {
 				t.Fatalf("got %v, want ErrMalformed", err)
 			}
 		})

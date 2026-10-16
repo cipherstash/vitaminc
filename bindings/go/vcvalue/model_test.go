@@ -30,8 +30,6 @@ func TestSealedLeafTypesScanValueRoundTrip(t *testing.T) {
 	leaf := []byte{1, 2, 3}
 	var s vcvalue.Sealed
 	roundTrip(t, vcvalue.Sealed(leaf), &s, func() []byte { return []byte(s) }, leaf)
-	var n vcvalue.SealedNone
-	roundTrip(t, vcvalue.SealedNone(leaf), &n, func() []byte { return []byte(n) }, leaf)
 	var es vcvalue.SealedEmptySeq
 	roundTrip(t, vcvalue.SealedEmptySeq(leaf), &es, func() []byte { return []byte(es) }, leaf)
 	var em vcvalue.SealedEmptyMap

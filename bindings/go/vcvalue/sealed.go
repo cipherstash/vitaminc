@@ -29,16 +29,6 @@ func (s *Sealed) Scan(src any) error {
 	return err
 }
 
-// SealedNone is the authenticated absent marker: a sealed empty plaintext
-// whose tag still binds the AAD, so an absence cannot be forged.
-//
-// The value model has no "absent" of its own — a missing field is Null — so
-// nothing on this side of the boundary produces a SealedNone. It exists
-// because the container it mirrors does: a Rust cipher driven directly can
-// seal an Option::None, and such a ciphertext must survive the round trip
-// rather than being rejected or silently flattened into a Sealed.
-type SealedNone []byte
-
 // SealedEmptySeq is the authenticated marker for an empty sequence: with no
 // element ciphertexts to bind the AAD, the cipher seals an empty plaintext
 // under domain-separated AAD instead. Produced by encrypting an empty array;
@@ -61,16 +51,6 @@ type SealedEmptyMap []byte
 // A column that can hold both real values and empty-composite markers needs
 // the schema (or the application) to record which kind it stored; scan into
 // the type matching that record.
-
-// Value implements driver.Valuer: the marker binds as raw bytes.
-func (s SealedNone) Value() (driver.Value, error) { return []byte(s), nil }
-
-// Scan implements sql.Scanner — see the leaf-kind caveat above.
-func (s *SealedNone) Scan(src any) error {
-	b, err := scanLeafBytes(src, "SealedNone")
-	*s = SealedNone(b)
-	return err
-}
 
 // Value implements driver.Valuer: the marker binds as raw bytes.
 func (s SealedEmptySeq) Value() (driver.Value, error) { return []byte(s), nil }

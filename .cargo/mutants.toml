@@ -28,8 +28,8 @@ exclude_globs = [
     "packages/random-derives/**",
     # `aead-derive` keeps only its four `#[proc_macro_derive]` shims in lib.rs —
     # those same-compile-time entry points, and nothing else. The expansion each
-    # one delegates to lives in `encrypt.rs`, `decrypt.rs`, `plaintext.rs` and
-    # `typed_decrypt.rs` and is mutated normally, caught by its unit tests.
+    # one delegates to lives in `plaintext.rs`/`typed_decrypt.rs` and is
+    # mutated normally.
     "packages/aead-derive/src/lib.rs",
     # Kani proof harnesses: built only under `cfg(kani)`, so no test binary
     # ever contains them and every mutant there would survive spuriously.
@@ -39,8 +39,7 @@ exclude_globs = [
 
 exclude_re = [
     # Equivalent mutants, not missing tests: `widen_f32` (vitaminc-normalize
-    # scalar.rs, and vitaminc-aead-value canonical.rs until it is removed)
-    # assembles an f64 by OR-ing bit fields that are disjoint by
+    # scalar.rs) assembles an f64 by OR-ing bit fields that are disjoint by
     # construction — complementary masks, or fields shifted into separate bit
     # ranges — and for operands with no common set bit `a | b == a ^ b`, so no
     # input can tell the two apart. Only that one operator swap in that one

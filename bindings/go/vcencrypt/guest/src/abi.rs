@@ -29,8 +29,8 @@
 //!   [`vc_cipher_init`] they are the handle and the low bits are unused.
 //! - **error** — the high 32 bits are zero and the low 32 bits are a status
 //!   code ([`STATUS_AUTH`], [`STATUS_ENCODING`], [`STATUS_BAD_HANDLE`],
-//!   [`STATUS_INTERNAL`]). A valid output pointer / handle is never zero, so
-//!   the two spaces never collide.
+//!   [`STATUS_INTERNAL`], [`STATUS_NOTHING_SEALED`]). A valid output pointer
+//!   / handle is never zero, so the two spaces never collide.
 //!
 //! This packing embeds 32-bit pointers, and the bounds checks below read the
 //! wasm linear-memory size, so this module only exists on `wasm32` targets
@@ -66,13 +66,17 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use vitaminc_aead::{Context, Element, Encrypt};
-use vitaminc_aead_value::{transport as codec, Value};
-use vitaminc_encrypt::{Aes256Cipher, AesCipherText};
+use vitaminc_aead::{decrypt_to_frame, Context, Frame, Node};
+use vitaminc_aead_frame::transport as codec;
+use vitaminc_encrypt::{Aes256Cipher, LocalCipherText};
+use vitaminc_protected::Controlled;
 use zeroize::Zeroize;
 
 use crate::sessions::{build_cipher, Sessions};
-pub use crate::status::{STATUS_AUTH, STATUS_BAD_HANDLE, STATUS_ENCODING, STATUS_INTERNAL};
+use crate::status::{decrypt_status, encrypt_status};
+pub use crate::status::{
+    STATUS_AUTH, STATUS_BAD_HANDLE, STATUS_ENCODING, STATUS_INTERNAL, STATUS_NOTHING_SEALED,
+};
 
 thread_local! {
     // Wasm is single-threaded, so thread-local `RefCell`s are plain owners
@@ -239,7 +243,10 @@ fn with_cipher<R>(handle: u32, f: impl FnOnce(&Aes256Cipher) -> Result<R, u32>) 
     })
 }
 
-/// Encrypt a transport-encoded [`Value`] tree under the session `handle`.
+/// Encrypt a transport-encoded value (one [`Frame`]) under the session
+/// `handle`. The frame is validated and then walked in place: no value
+/// tree is built, and each scalar goes from the input buffer straight to
+/// the encrypting sink.
 ///
 /// Output: packed pointer to a transport-encoded ciphertext tree, or a status.
 ///
@@ -269,11 +276,11 @@ pub unsafe extern "C" fn vc_encrypt(
     .map_or_else(err_status, ok_buffer)
 }
 
-/// Like [`vc_encrypt`], but seals the value as a *sequence element* — the
-/// [`Element`] wrapper's derivation, byte-identical to what batch encryption
-/// of a sequence binds per element. A row inserted through this export
-/// interchanges with rows written by encrypting a whole sequence under the
-/// same AAD.
+/// Like [`vc_encrypt`], but seals the value as a *sequence element*: under
+/// [`Context::for_sequence_element`] of the caller's AAD, byte-identical to
+/// what batch encryption of a sequence binds per element. A row inserted
+/// through this export interchanges with rows written by encrypting a whole
+/// sequence under the same AAD.
 ///
 /// # Safety
 ///
@@ -299,30 +306,41 @@ pub unsafe extern "C" fn vc_encrypt_element(
 }
 
 fn encrypt(handle: u32, aad: &[u8], val: &[u8], as_element: bool) -> Result<Vec<u8>, u32> {
-    // Decode the input value first so garbage bytes surface as an encoding
+    // Validate the input frame first so garbage bytes surface as an encoding
     // error even for an unknown handle. vcencrypt's differential fuzz targets
     // rely on this order (`differential_fuzz_test.go`).
-    let value = codec::decode_value(&mut codec::Reader::new(val)).map_err(|_| STATUS_ENCODING)?;
+    let frame = Frame::parse(val).map_err(|_| STATUS_ENCODING)?;
     with_cipher(handle, |cipher| {
-        let aad = Context::from_encoded(aad);
-        let ct: AesCipherText = if as_element {
-            Element(value).encrypt_with_aad(cipher, aad)
-        } else {
-            value.encrypt_with_aad(cipher, aad)
-        }
-        .map_err(|_| STATUS_INTERNAL)?;
+        let node = vitaminc_aead::encrypt(frame, cipher, context(aad, as_element))
+            .map_err(encrypt_status)?;
         let mut out = Vec::new();
-        // Re-home the Box<dyn Any + Send> passthrough payload type to Value
-        // value-nodes before encoding.
-        codec::encode_ciphertext_boxed(ct, &mut out).map_err(|_| STATUS_ENCODING)?;
+        codec::encode_ciphertext(&node, &mut out).map_err(|_| STATUS_ENCODING)?;
         Ok(out)
     })
 }
 
+/// The caller's AAD, or its sequence-element derivation for the `_element`
+/// exports.
+fn context(aad: &[u8], as_element: bool) -> Context<'_> {
+    let aad = Context::from_encoded(aad);
+    if as_element {
+        aad.for_sequence_element()
+    } else {
+        aad
+    }
+}
+
 /// Decrypt a transport-encoded ciphertext tree back into a transport-encoded
-/// [`Value`] tree under the session `handle`. The output buffer contains
-/// plaintext — the host must copy it out and immediately release it with
-/// [`vc_dealloc`] (which wipes it).
+/// value (one frame) under the session `handle`. The frame is built inside
+/// `Protected` and wiped if any later leaf fails, so a refusal part way
+/// through leaves no plaintext behind; on success the output buffer
+/// contains plaintext — the host must copy it out and immediately release
+/// it with [`vc_dealloc`] (which wipes it).
+///
+/// Leaves at wire version 1 open as well as current ones: every version 1
+/// leaf this binding sees was sealed by the tagged pre-ADR 0001 `Value`
+/// path, so it reads as the value it held (see
+/// `Aes256Cipher::opening_version_1`).
 ///
 /// # Safety
 ///
@@ -351,7 +369,7 @@ pub unsafe extern "C" fn vc_decrypt(
 /// the read-side counterpart of [`vc_encrypt_element`]. This is how a host
 /// decrypts a single row that was batch-encrypted as part of a sequence:
 /// the caller presents the same AAD it gave the batch encrypt, and the
-/// [`Element`] wrapper derives the element AAD internally.
+/// guest derives the element AAD internally.
 ///
 /// # Safety
 ///
@@ -377,23 +395,12 @@ pub unsafe extern "C" fn vc_decrypt_element(
 }
 
 fn decrypt(handle: u32, aad: &[u8], ct: &[u8], as_element: bool) -> Result<Vec<u8>, u32> {
-    // Decode + re-home to the Box passthrough payload type the decipher
-    // expects. Decoding before the handle lookup is relied on by vcencrypt's
+    // Decoding before the handle lookup is relied on by vcencrypt's
     // differential fuzz targets, as in `encrypt`.
-    let ct: AesCipherText =
-        codec::decode_ciphertext_boxed(&mut codec::Reader::new(ct)).map_err(|_| STATUS_ENCODING)?;
+    let node: Node<LocalCipherText> = codec::decode_ciphertext(ct).map_err(|_| STATUS_ENCODING)?;
     with_cipher(handle, |cipher| {
-        let aad = Context::from_encoded(aad);
-        let value: Value = if as_element {
-            cipher
-                .decrypt_with_aad::<Element<Value>, _>(ct, aad)
-                .map(Element::into_inner)
-        } else {
-            cipher.decrypt_with_aad(ct, aad)
-        }
-        .map_err(|_| STATUS_AUTH)?;
-        let mut out = Vec::new();
-        codec::encode_value(value, &mut out).map_err(|_| STATUS_ENCODING)?;
-        Ok(out)
+        let out = decrypt_to_frame(&cipher.opening_version_1(), node, context(aad, as_element))
+            .map_err(decrypt_status)?;
+        Ok(out.risky_unwrap())
     })
 }

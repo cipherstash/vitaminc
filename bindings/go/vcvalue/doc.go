@@ -10,10 +10,10 @@
 //     unencrypted and unauthenticated — beside the sealed ones. It is always
 //     an explicit opt-in, never inferred.
 //   - Sealed is one encrypted leaf (version || nonce || ciphertext || tag),
-//     the only frozen byte format in the model. SealedNone, SealedEmptySeq
-//     and SealedEmptyMap are its authenticated marker siblings for absent
-//     values and empty composites. This sealed family is vitaminc-encrypt's
-//     materialization of the model: another binding (a stack-encrypt SDK,
+//     the only frozen byte format in the model. SealedEmptySeq and
+//     SealedEmptyMap are its authenticated marker siblings for empty
+//     composites; an absent value is a sealed null leaf (ADR 0001). This
+//     sealed family is vitaminc-encrypt's materialization of the model: another binding (a stack-encrypt SDK,
 //     say) defines its own distinct sealed-leaf types and wires them to the
 //     codec via vcffi's LeafSet — a stack-encrypt leaf is never a Sealed.
 //   - Object is the ordered map-decode shape (entry order preserved, so
@@ -34,8 +34,8 @@
 // codec in vcffi for the same reason.
 //
 // The cross-language contract is the frozen tag table plus the sealed leaf
-// encodings defined in the Rust crate vitaminc-aead-value — the model, not
-// any package. A new tag is added only when a value class cannot be
+// encodings defined in the Rust crate vitaminc-aead's leaf codec — the
+// model, not any package. A new tag is added only when a value class cannot be
 // represented in the existing model, and requires a defined decode mapping
 // for every supported language before it ships.
 package vcvalue

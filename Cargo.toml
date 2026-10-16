@@ -4,7 +4,7 @@ members = [
     "packages/aead",
     "packages/aead-derive",
     "packages/aead-napi",
-    "packages/aead-value",
+    "packages/aead-frame",
     "packages/async-traits",
     "packages/context",
     "packages/derive-tests/direct",

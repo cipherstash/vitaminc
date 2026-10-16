@@ -133,15 +133,6 @@ jobs:
           echo "RLIMIT_MEMLOCK soft: $(ulimit -l) KiB"
           cargo test
 
-      - name: test (aead-value optional scalar features)
-        # Exercise each feature separately as well as together: default tests
-        # reject these tags, while enabled tests pin exact date/time/decimal
-        # payloads and reject malformed encodings without normalization.
-        run: |
-          cargo test -p vitaminc-aead-value --features chrono &&
-          cargo test -p vitaminc-aead-value --features rust_decimal &&
-          cargo test -p vitaminc-aead-value --all-features
-
       - name: test (aead optional scalar features)
         # Only dev-dependencies enable these on vitaminc-aead, so a build
         # of the crate alone skips the tests that pin the chrono,
@@ -169,9 +160,13 @@ jobs:
         run: cargo test -p vitaminc-encrypt --features _test-rust-crypto-backend
 
       - name: test (Node conversion kind inventory)
+        # `cargo test -p vitaminc-aead-napi` above runs this suite too, with
+        # the others, against the test addon it builds; this step runs it on
+        # its own so a missing kind fails with the inventory's own message.
         run: |
-          cargo build --locked -p vitaminc-aead-napi --example kind_inventory
-          node packages/aead-napi/tests/kind_inventory.cjs target/debug/examples/libkind_inventory.so
+          cargo build --locked --manifest-path packages/aead-napi/tests/addon/Cargo.toml &&
+          cp packages/aead-napi/tests/addon/target/debug/libvitaminc_napi_test_addon.so packages/aead-napi/tests/addon/addon.node &&
+          node packages/aead-napi/tests/kind_inventory.cjs packages/aead-napi/tests/addon/addon.node
 
       - name: test (hlist static-ciphertext feature)
         # The `hlist` feature gates the static-ciphertext API and is NOT in the

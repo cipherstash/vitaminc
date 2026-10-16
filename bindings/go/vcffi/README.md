@@ -20,7 +20,7 @@ No wazero, no crypto.
 
 These bytes are an FFI detail with **no compatibility commitment**. The only
 frozen format is the sealed leaf inside the AEAD envelope (see
-`vcvalue.Sealed` and the Rust crate `vitaminc-aead-value`). Nothing this
+`vcvalue.Sealed` and the Rust crate `vitaminc-aead`'s leaf codec). Nothing this
 package encodes should ever be persisted.
 
 ## The `LeafSet` parameter
@@ -147,18 +147,25 @@ var stackLeaves = vcffi.LeafSet{
 
 `Classify` is offered only non-structural values, so it cannot claim `[]any`,
 `map[string]any` or `vcvalue.Plain`. A real binding covers all four kinds
-(`LeafSingle`, `LeafNone`, `LeafEmptySeq`, `LeafEmptyMap`); returning nil for
+(`LeafSingle`, `LeafEmptySeq`, `LeafEmptyMap`); returning nil for
 a kind the wire carries fails the decode attributably rather than injecting an
 untyped nil.
 
 ## Scalar mappings and shared vectors
 
 Fixed integer widths remain exact (`int8`→Int8, `uint16`→UInt16, and so on).
-`vcvalue.Int128`, `Uint128`, `Date` and `Decimal` are intercepted before
-reflection, including inside structs, pointers and containers. `time.Time`
-encodes a nanosecond Timestamp; leap-second timestamps decode into
-`vcvalue.Timestamp` so they can be re-encoded without loss. Matching explicit
-Encoder channels are available for custom `Encryptable` implementations.
+`vcvalue.Int128`, `Uint128`, `Date`, `Decimal`, `UUID` and `Tagged` are
+intercepted before reflection, including inside structs, pointers and
+containers. `time.Time` encodes a nanosecond Timestamp; a timestamp that
+arrives in the `0xF3` envelope in seconds, milliseconds or microseconds
+decodes to `time.Time` too, and so re-encodes in the nanosecond form. A leap
+second is refused in both directions, and a decimal negative zero reads back
+as zero (ADR 0001). `UUID` and `Tagged` travel in the `0xF3` envelope.
+Another UUID type, such as `github.com/google/uuid.UUID`, is a plain
+`[16]byte` and is written as bytes: convert it with `vcvalue.UUID(id)` first
+so that Rust and Node read it as a UUID.
+Matching explicit Encoder channels are available for custom `Encryptable`
+implementations.
 
 The codec reads `testdata/value-conformance.json` from the repo root directly,
 as do Rust and Node. Invalid scalar widths, date ranges, nanoseconds, decimal

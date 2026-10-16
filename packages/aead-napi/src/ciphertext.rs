@@ -8,13 +8,17 @@
 //!
 //! ```text
 //! Single(leaf)        ↦ { t: "ct",   v: Buffer }
-//! None(leaf)          ↦ { t: "none", v: Buffer }
 //! Sequence(...)       ↦ { t: "seq",  v: [node, ...] }
 //! EmptySequence(leaf) ↦ { t: "eseq", v: Buffer }
 //! Map(entries)        ↦ { t: "map",  v: { key: node, ... } }
 //! EmptyMap(leaf)      ↦ { t: "emap", v: Buffer }
 //! Passthrough(p)      ↦ { t: "pt",   v: <P's own JS projection> }
 //! ```
+//!
+//! The passthrough payload of the sink-based tree ([`Node`]) is a
+//! [`PassthroughFrame`], which projects onto the plain JavaScript value the
+//! frame describes, and reads back by walking the JavaScript value into a
+//! frame.
 //!
 //! The `t`/`v` node shape is an **in-memory/application-side convenience**:
 //! it is what a JS application holds between `encrypt` and `decrypt` calls,
@@ -24,21 +28,26 @@
 //! database format and treats the sealed leaves opaquely. Within that
 //! scope the node shape should still change only deliberately (apps may
 //! have persisted it), but it is not a cross-language wire commitment;
-//! only the leaf byte format (see `vitaminc-aead-value`) is frozen.
+//! only the leaf byte format (the leaf codec in `vitaminc-aead`) is frozen.
+//!
+//! [`Node`]: vitaminc_aead::Node
 
 use napi::bindgen_prelude::{
-    Array, Buffer, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue, Unknown,
+    Array, Buffer, BufferSlice, FromNapiValue, JsObjectValue, JsValue, Object, ToNapiValue,
+    TypeName, Unknown,
 };
 use napi::{sys, Env, Error, Result, Status, ValueType};
-use vitaminc_aead::CipherText;
+use vitaminc_aead::{CipherText, Frame, PassthroughFrame};
+use vitaminc_protected::Controlled;
 
-use crate::convert::{
+use crate::js::{
     define_own_properties, depth_error, eager_capacity, forbidden_key, get_own,
     get_property_unknown, new_array, own_enumerable_keys, own_property, MAX_DEPTH,
 };
+use crate::js_builder::JsBuilder;
+use crate::js_ref::{frame_error, JsRef};
 
 const T_CIPHERTEXT: &str = "ct";
-const T_NONE: &str = "none";
 const T_SEQ: &str = "seq";
 const T_EMPTY_SEQ: &str = "eseq";
 const T_MAP: &str = "map";
@@ -50,11 +59,9 @@ const T_PASSTHROUGH: &str = "pt";
 ///
 /// `Leaf` needs only byte-level accessors (`AsRef<[u8]>` out,
 /// `From<Vec<u8>>` in); the passthrough payload `P` converts through
-/// [`NapiPassthrough`]. For a cipher whose passthrough payload type is not
-/// [`NapiValue`] or `()` (e.g. the Rust-native `Box<dyn Any + Send>`),
-/// re-home the tree first with [`CipherText::map_passthrough`].
-///
-/// [`NapiValue`]: crate::NapiValue
+/// [`NapiPassthrough`], implemented for [`PassthroughFrame`] (the
+/// sink-based tree's payload) and `()`. A cipher whose passthrough
+/// payload type is something else needs its own `NapiPassthrough` impl.
 pub struct JsCipherText<Leaf, P>(pub CipherText<Leaf, P>);
 
 /// A ciphertext passthrough payload's conversion to and from JS.
@@ -100,6 +107,32 @@ impl NapiPassthrough for () {
         depth > MAX_DEPTH
     }
 
+    fn drop_flat(self) {}
+}
+
+/// A frame payload projects onto the JavaScript value it describes, and
+/// reads back as the frame of the JavaScript value, walked at the
+/// payload's depth so the tree's limit counts the whole structure.
+impl NapiPassthrough for PassthroughFrame {
+    fn to_js(self, env: &Env) -> Result<Unknown<'_>> {
+        // `exceeds_depth` has passed for this payload, which validated it.
+        let frame = Frame::parse(&self.0).map_err(|_| shape_error())?;
+        JsBuilder::build(env, frame)
+    }
+
+    fn from_js(value: Unknown<'_>, depth: usize) -> Result<Self> {
+        let frame = vitaminc_aead::to_frame(JsRef::at_depth(value, depth)).map_err(frame_error)?;
+        Ok(PassthroughFrame(frame.risky_ref().clone()))
+    }
+
+    /// A frame parsed `depth` levels down is bounded there; a payload that
+    /// is not a well-formed frame cannot be built either, so it counts as
+    /// exceeding too.
+    fn exceeds_depth(&self, depth: usize) -> bool {
+        Frame::parse_nested(&self.0, depth).is_err()
+    }
+
+    /// A frame is one flat buffer.
     fn drop_flat(self) {}
 }
 
@@ -157,7 +190,6 @@ where
     };
     let (tag, value) = match node {
         CipherText::Single(l) => leaf(T_CIPHERTEXT, l)?,
-        CipherText::None(l) => leaf(T_NONE, l)?,
         CipherText::EmptySequence(l) => leaf(T_EMPTY_SEQ, l)?,
         CipherText::EmptyMap(l) => leaf(T_EMPTY_MAP, l)?,
         CipherText::Sequence(items) => {
@@ -208,6 +240,18 @@ where
 const T_KEY: &str = "t";
 const V_KEY: &str = "v";
 
+/// A node is a JavaScript object, for the places napi-rs asks what a value
+/// is, such as the result of an async task.
+impl<Leaf, P> TypeName for JsCipherText<Leaf, P> {
+    fn type_name() -> &'static str {
+        "CipherText"
+    }
+
+    fn value_type() -> ValueType {
+        ValueType::Object
+    }
+}
+
 impl<Leaf, P> ToNapiValue for JsCipherText<Leaf, P>
 where
     Leaf: AsRef<[u8]>,
@@ -254,12 +298,14 @@ where
     }
     let t = String::from_unknown(own_field(obj, T_KEY)?)?;
     match t.as_str() {
-        T_CIPHERTEXT | T_NONE | T_EMPTY_SEQ | T_EMPTY_MAP => {
-            let buf = Buffer::from_unknown(own_field(obj, V_KEY)?)?;
+        T_CIPHERTEXT | T_EMPTY_SEQ | T_EMPTY_MAP => {
+            // Borrowed as a slice, which holds no reference: napi-rs's
+            // `Buffer` takes one before it checks the value and never
+            // releases it when the check fails.
+            let buf = BufferSlice::from_unknown(own_field(obj, V_KEY)?)?;
             let leaf = Leaf::from(buf.to_vec());
             Ok(match t.as_str() {
                 T_CIPHERTEXT => CipherText::Single(leaf),
-                T_NONE => CipherText::None(leaf),
                 T_EMPTY_SEQ => CipherText::EmptySequence(leaf),
                 _ => CipherText::EmptyMap(leaf),
             })
@@ -298,11 +344,11 @@ where
                 if forbidden_key(&key.name) {
                     return Err(Error::new(
                         Status::InvalidArg,
-                        format!("ciphertext map key is not allowed: {}", key.name),
+                        format!("ciphertext map key is not allowed: {}", *key.name),
                     ));
                 }
                 let value = node_object(get_own(&map, &key)?)?;
-                entries.push((key.name, node_from_js(&value, depth + 1)?));
+                entries.push((key.name.to_string(), node_from_js(&value, depth + 1)?));
             }
             Ok(CipherText::Map(entries))
         }
@@ -345,10 +391,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::{drop_flat, exceeds_depth, CipherText, NapiPassthrough, MAX_DEPTH};
-    use crate::NapiValue;
-    use vitaminc_aead_value::Value;
+    use vitaminc_aead::{to_frame, PassthroughFrame};
+    use vitaminc_protected::Controlled;
 
     type Node<P> = CipherText<Vec<u8>, P>;
+
+    #[test]
+    fn a_node_is_a_javascript_object_named_ciphertext() {
+        use napi::bindgen_prelude::{TypeName, ValueType};
+        type Js = super::JsCipherText<Vec<u8>, PassthroughFrame>;
+        assert_eq!(Js::type_name(), "CipherText");
+        assert_eq!(Js::value_type(), ValueType::Object);
+    }
 
     fn nested<P>(levels: usize, wrap: fn(Node<P>) -> Node<P>, leaf: Node<P>) -> Node<P> {
         (0..levels).fold(leaf, |node, _| wrap(node))
@@ -360,9 +414,27 @@ mod tests {
 
     fn map<P>(node: Node<P>) -> Node<P> {
         CipherText::Map(vec![
-            ("a".into(), CipherText::None(vec![1])),
+            ("a".into(), CipherText::EmptySequence(vec![1])),
             ("k".into(), node),
         ])
+    }
+
+    /// `levels` arrays around `true`, as a frame payload.
+    fn payload(levels: usize) -> Node<PassthroughFrame> {
+        struct Arrays(usize);
+        impl vitaminc_aead::Plaintext for Arrays {
+            fn visit<S: vitaminc_aead::Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
+                use vitaminc_aead::SeqSink;
+                if self.0 == 0 {
+                    return sink.scalar(None, vitaminc_aead::Physical::Bool(true));
+                }
+                let mut seq = sink.seq(Some(1))?;
+                Arrays(self.0 - 1).visit(seq.element()?)?;
+                seq.end()
+            }
+        }
+        let frame = to_frame(Arrays(levels)).expect("within the frame's own bound");
+        CipherText::Passthrough(PassthroughFrame(frame.risky_ref().clone()))
     }
 
     #[test]
@@ -389,26 +461,20 @@ mod tests {
         )));
         assert!(!().exceeds_depth(MAX_DEPTH));
         assert!(().exceeds_depth(MAX_DEPTH + 1));
-        // So does every level inside a value payload.
-        let payload = |levels| {
-            let value = (0..levels).fold(Value::Null, |v, _| Value::Array(vec![v]));
-            CipherText::Passthrough(NapiValue(value))
-        };
+        // So does every level inside a frame payload.
         assert!(!exceeds_depth(&nested(60, seq, payload(67))));
         assert!(exceeds_depth(&nested(60, seq, payload(68))));
+        // A frame that is not well formed cannot be built, so it exceeds.
+        assert!(PassthroughFrame(vec![0xF0, 1, 0, 0, 0]).exceeds_depth(0));
     }
 
     #[test]
     fn trees_too_deep_for_the_stack_are_measured_and_dropped_flat() {
-        for wrap in [seq::<NapiValue>, map::<NapiValue>] {
+        for wrap in [seq::<PassthroughFrame>, map::<PassthroughFrame>] {
             let deep = nested(1_000_000, wrap, CipherText::Single(vec![1]));
             assert!(exceeds_depth(&deep));
             drop_flat(deep);
         }
-        let value = (0..1_000_000).fold(Value::Null, |v, _| Value::Array(vec![v]));
-        let deep: Node<NapiValue> = CipherText::Passthrough(NapiValue(value));
-        assert!(exceeds_depth(&deep));
-        drop_flat(deep);
         drop_flat(nested(1_000_000, seq, CipherText::Passthrough(())));
     }
 }

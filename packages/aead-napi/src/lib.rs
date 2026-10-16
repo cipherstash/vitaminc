@@ -5,16 +5,17 @@
 #![deny(unsafe_op_in_unsafe_fn, clippy::undocumented_unsafe_blocks)]
 #![doc = include_str!("../README.md")]
 mod ciphertext;
-mod convert;
+mod error;
+mod js;
+mod js_builder;
+mod js_ref;
 mod scalar;
-mod value;
-pub use scalar::ConversionError;
+mod wrappers;
 
 pub use ciphertext::{JsCipherText, NapiPassthrough};
-pub use value::NapiValue;
-// Re-exported so addon crates need not depend on the value crate directly.
-pub use vitaminc_aead_value::Value;
-
-// Keep the old re-export available for the same compatibility window.
-#[allow(deprecated)]
-pub use vitaminc_aead_value::FfiValue;
+pub use error::JsFault;
+pub use js::MAX_DEPTH;
+pub use js_builder::JsBuilder;
+pub use js_ref::JsRef;
+pub use scalar::ConversionError;
+pub use wrappers::{Wrapper, Wrappers};

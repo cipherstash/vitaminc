@@ -14,7 +14,7 @@
 //
 // These bytes are an FFI detail with no compatibility commitment. The only
 // frozen format is the sealed leaf inside the AEAD envelope (see
-// vcvalue.Sealed and the Rust crate vitaminc-aead-value). Nothing this
+// vcvalue.Sealed and the Rust crate vitaminc-aead's leaf codec). Nothing this
 // package encodes should ever be persisted; durable cross-language interop
 // is a schema-aware layer's job.
 //
