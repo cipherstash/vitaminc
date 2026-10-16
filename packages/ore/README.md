@@ -215,6 +215,14 @@ so a code point unassigned in Unicode 16 is refused. Text processing is
 variable-time. The integer and float paths use no floating-point
 arithmetic.
 
+## License
+
+MIT, except the case-folding table, which is derived from Unicode's
+data files and is under the Unicode License v3
+(`UNICODE-LICENSE.txt`). The script that generates it,
+`tools/generate_casefold.py`, is in the repository and not in the
+published crate.
+
 ## Known exceptions
 
 Booleans, nulls and `undefined` have no order term under any target.

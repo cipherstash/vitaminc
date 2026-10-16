@@ -7,10 +7,16 @@ repository.workspace = true
 authors.workspace = true
 edition.workspace = true
 homepage.workspace = true
-license.workspace = true
+# The case-folding table in src/casefold_unicode16.rs is derived from
+# Unicode's data files, whose licence (UNICODE-LICENSE.txt) travels with
+# it; the rest of the crate is MIT, as the workspace is.
+license = "MIT AND Unicode-3.0"
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
+# The generator is for reviewers rebuilding the table from the repository,
+# not for users of the crate.
+exclude = ["tools/"]
 
 [dependencies]
 vitaminc-aead = { version = "0.5.1", path = "../aead" }
