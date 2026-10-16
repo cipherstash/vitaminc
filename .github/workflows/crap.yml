@@ -142,6 +142,15 @@ jobs:
             https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
           cargo binstall -y cargo-llvm-cov cargo-crap
 
+      - name: check each allowlisted function name is defined once
+        # cargo-crap matches a bare name in `allow` against every function of
+        # that name in the workspace, so a generic name would exempt functions
+        # in other crates too. Runs before coverage: it needs cargo-crap but
+        # no build.
+        run: |
+          python3 -m unittest discover -s .github/scripts -p 'test_crap_allow_names_unique.py'
+          python3 .github/scripts/crap_allow_names_unique.py
+
       - name: Generate coverage and build CRAP report
         # Coverage uses default features to match the primary `cargo test` gate
         # (the aws-lc-rs backend). `cargo crap` then renders the sticky-comment

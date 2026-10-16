@@ -48,6 +48,14 @@ run = "python3 {{ config_root }}/.github/scripts/has_rust_changes.py"
 description = "Test the has-Rust-changes check"
 run = "python3 -m unittest discover -s {{ config_root }}/.github/scripts -p 'test_*.py'"
 
+[tasks."crap:allow:check"]
+description = "Check each bare function name in .cargo-crap.toml's allow list is defined exactly once"
+run = "python3 {{ config_root }}/.github/scripts/crap_allow_names_unique.py"
+
+[tasks."crap:allow:check:test"]
+description = "Test the allow-list check"
+run = "python3 -m unittest discover -s {{ config_root }}/.github/scripts -p 'test_crap_allow_names_unique.py'"
+
 [tasks.docs]
 dir = "{{ config_root }}/packages/vitaminc"
 description = "Build and generate the docs"

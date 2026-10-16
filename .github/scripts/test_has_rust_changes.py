@@ -46,7 +46,11 @@ class HasRustChangesTest(unittest.TestCase):
         self.assertTrue(has_rust_changes(CRAP, ["README.md", "packages/hmac/src/lib.rs"]))
 
     def test_each_gate_owns_its_config_and_workflow(self):
-        crap_only = [".cargo-crap.toml", ".github/workflows/crap.yml"]
+        crap_only = [
+            ".cargo-crap.toml",
+            ".github/workflows/crap.yml",
+            ".github/scripts/crap_allow_names_unique.py",
+        ]
         mutants_only = [".cargo/mutants.toml", ".github/workflows/mutants.yml"]
         for path in crap_only:
             self.assertTrue(has_rust_changes(CRAP, [path]), path)

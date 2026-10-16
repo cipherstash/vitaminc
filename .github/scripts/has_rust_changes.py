@@ -51,7 +51,12 @@ _WORKSPACE_FILES = ("Cargo.toml", "Cargo.lock", SELF)
 RUST_PATHS = {
     "crap": RustPaths(
         dirs=_WORKSPACE_DIRS,
-        files=_WORKSPACE_FILES + (".cargo-crap.toml", ".github/workflows/crap.yml"),
+        files=_WORKSPACE_FILES
+        + (
+            ".cargo-crap.toml",
+            ".github/workflows/crap.yml",
+            ".github/scripts/crap_allow_names_unique.py",
+        ),
     ),
     "mutants": RustPaths(
         dirs=_WORKSPACE_DIRS,
