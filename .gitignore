@@ -11,3 +11,6 @@
 
 # Raw coverage profiles dropped by `cargo llvm-cov` / `mise run crap`.
 *.profraw
+
+# Bytecode from `mise run pr:gate:has_rust_changes:test`.
+__pycache__/

@@ -15,16 +15,12 @@ on:
   # No branch filter: a stacked PR (a feature branch as base) must run this
   # gate too. With `branches: [main]` here, retargeting a PR onto its
   # parent branch silently switched every Rust gate off; see go.yml.
+  #
+  # No path filter either: this check is required by the `main` ruleset, and
+  # a required check that never reports leaves the PR at "Expected" forever.
+  # The `changes` job below decides instead, and skips the gate when the PR
+  # has no Rust changes; GitHub reports a skipped job as passed.
   pull_request:
-    paths:
-      - "packages/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".cargo-crap.toml"
-      - ".github/workflows/crap.yml"
-      # Negative patterns must stay last: keep the matches above but ignore
-      # pure-docs changes so a README-only PR doesn't run coverage.
-      - "!**.md"
 
   workflow_dispatch:
 
@@ -44,7 +40,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    # What counts as a Rust change for this gate lives in
+    # .github/scripts/has_rust_changes.py.
+    # Skipped on a manual dispatch, which runs the gate below.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    name: "🔎 CRAP gate: Rust changes"
+    permissions:
+      contents: read
+    outputs:
+      has_rust_changes: ${{ steps.check.outputs.has_rust_changes }}
+    env:
+      # The task needs only the runner's python3. Auto-install would build
+      # every cargo tool in mise.toml, costing more than the gate it skips.
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The diff needs the merge base of the PR and its base branch.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: jdx/mise-action@v5
+        with:
+          version: 2026.10.7
+          # mise only: no `mise install`, and no cache to save.
+          install: false
+          cache: false
+
+      - name: test the Rust changes check
+        run: mise run pr:gate:has_rust_changes:test
+
+      - name: check for Rust changes
+        id: check
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: mise run pr:gate:has_rust_changes -- crap --base "origin/$BASE_REF"
+
   crap:
+    needs: changes
+    # Fails closed: skip only when the `changes` job succeeded and found no
+    # Rust changes. A failed `changes` job, or one skipped on a manual
+    # dispatch, runs the gate.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.has_rust_changes == 'true') }}
     runs-on: ubuntu-latest
     name: "🚦 CRAP gate"
 
@@ -101,6 +141,15 @@ jobs:
           curl -L --proto '=https' --tlsv1.2 -sSf \
             https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
           cargo binstall -y cargo-llvm-cov cargo-crap
+
+      - name: check each allowlisted function name is defined once
+        # cargo-crap matches a bare name in `allow` against every function of
+        # that name in the workspace, so a generic name would exempt functions
+        # in other crates too. Runs before coverage: it needs cargo-crap but
+        # no build.
+        run: |
+          python3 -m unittest discover -s .github/scripts -p 'test_crap_allow_names_unique.py'
+          python3 .github/scripts/crap_allow_names_unique.py
 
       - name: Generate coverage and build CRAP report
         # Coverage uses default features to match the primary `cargo test` gate
