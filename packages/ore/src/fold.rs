@@ -4,8 +4,12 @@
 //! folds further than an equality term may: `É`, `é`, `E` and `e` all
 //! become `e`. The steps are Unicode's canonical caseless matching
 //! (NFD, full default case folding, NFD again; *Unicode Standard* §3.13,
-//! D145) with every combining mark then dropped, and the result put back
-//! into NFC. Folding before dropping marks means a precomposed letter's
+//! D145) with every accent then dropped, and the result put back into
+//! NFC. An accent is a mark that attaches to its base letter, one with a
+//! non-zero canonical combining class: the acute in `é`, the umlaut in
+//! `ö`, a Devanagari virama. A mark of class zero is a letter of its own
+//! in its script, such as a Devanagari or Thai vowel sign (`कि` and `की`
+//! are different words), and is kept. Folding before dropping marks means a precomposed letter's
 //! case mapping is applied before its accent is lost, and decomposing
 //! again after folding catches a mark a case mapping introduces.
 //!
@@ -17,6 +21,7 @@
 use core::str::Chars;
 
 use unicode_general_category::{get_general_category, GeneralCategory};
+use unicode_normalization::char::canonical_combining_class;
 use unicode_normalization::UnicodeNormalization;
 use vitaminc_normalize::NormalizeError;
 use vitaminc_protected::{Controlled, Protected};
@@ -46,7 +51,7 @@ pub(crate) fn folded(text: &str) -> Result<Protected<Vec<u8>>, NormalizeError> {
     Ok(result)
 }
 
-/// NFD, case fold, NFD, drop marks, NFC.
+/// NFD, case fold, NFD, drop accents, NFC.
 fn pipeline(text: &str) -> impl Iterator<Item = char> + '_ {
     text.nfd()
         .flat_map(fold)
@@ -67,13 +72,17 @@ fn fold(c: char) -> core::iter::Chain<core::option::IntoIter<char>, Chars<'stati
     }
 }
 
+/// Whether `c` is an accent: a mark with a non-zero canonical combining
+/// class. A class is fixed once a code point is assigned, so the Unicode
+/// 16 pin still holds.
 fn is_mark(c: char) -> bool {
-    matches!(
-        get_general_category(c),
-        GeneralCategory::NonspacingMark
-            | GeneralCategory::SpacingMark
-            | GeneralCategory::EnclosingMark
-    )
+    canonical_combining_class(c) != 0
+        && matches!(
+            get_general_category(c),
+            GeneralCategory::NonspacingMark
+                | GeneralCategory::SpacingMark
+                | GeneralCategory::EnclosingMark
+        )
 }
 
 #[cfg(test)]
@@ -113,12 +122,38 @@ mod tests {
             ("ﬃ", "ffi"),
             ("\u{10400}", "\u{10428}"),
             ("e\u{301}", "e"),
-            ("a\u{0903}", "a"),
+            // A spacing mark of class zero is kept.
+            ("a\u{0903}", "a\u{0903}"),
             ("ÅNGSTRÖM", "angstrom"),
             ("", ""),
         ] {
             assert_eq!(fold_str(input), expected, "{input:?}");
         }
+    }
+
+    /// A vowel sign is a letter of its script, so words that differ only
+    /// in one stay apart; an accent of the same script still folds.
+    #[test]
+    fn vowel_signs_are_kept_and_accents_of_every_script_dropped() {
+        let ki = ["कि", "की", "के", "को"].map(fold_str);
+        for (i, a) in ki.iter().enumerate() {
+            for b in &ki[i + 1..] {
+                assert_ne!(a, b, "Devanagari vowel signs are kept");
+            }
+        }
+        assert_eq!(fold_str("कि"), "कि");
+        assert_ne!(fold_str("กิ"), fold_str("กี"), "Thai vowel signs are kept");
+        assert_ne!(
+            fold_str("কি"),
+            fold_str("কী"),
+            "Bengali vowel signs are kept"
+        );
+        // Class-nonzero marks still drop: the Devanagari nukta (7) and
+        // virama (9), Greek tonos, Cyrillic breve.
+        assert_eq!(fold_str("क\u{93c}"), "क");
+        assert_eq!(fold_str("क\u{94d}"), "क");
+        assert_eq!(fold_str("Ά"), "α");
+        assert_eq!(fold_str("й"), "и");
     }
 
     #[test]
