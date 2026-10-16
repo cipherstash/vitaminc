@@ -57,26 +57,13 @@ fn pipeline(text: &str) -> impl Iterator<Item = char> + '_ {
 
 /// The full default case folding of one code point: the table's mapping,
 /// or the code point itself.
-fn fold(c: char) -> Folded {
+///
+/// Built from the standard library's finite iterators rather than a
+/// hand-written `Iterator`, so there is no `next` that could fail to end.
+fn fold(c: char) -> core::iter::Chain<core::option::IntoIter<char>, Chars<'static>> {
     match FOLD.binary_search_by_key(&(c as u32), |&(code, _)| code) {
-        Ok(index) => Folded::Mapped(FOLD[index].1.chars()),
-        Err(_) => Folded::Same(Some(c)),
-    }
-}
-
-enum Folded {
-    Same(Option<char>),
-    Mapped(Chars<'static>),
-}
-
-impl Iterator for Folded {
-    type Item = char;
-
-    fn next(&mut self) -> Option<char> {
-        match self {
-            Folded::Same(c) => c.take(),
-            Folded::Mapped(chars) => chars.next(),
-        }
+        Ok(index) => None.into_iter().chain(FOLD[index].1.chars()),
+        Err(_) => Some(c).into_iter().chain("".chars()),
     }
 }
 
@@ -95,6 +82,17 @@ mod tests {
 
     fn fold_str(s: &str) -> String {
         String::from_utf8(folded(s).expect("assigned").risky_ref().clone()).expect("utf-8")
+    }
+
+    /// One code point folds to its mapping, or to itself, and then the
+    /// iterator ends.
+    #[test]
+    fn one_code_point_folds_and_then_ends() {
+        let take = |c: char| fold(c).take(4).collect::<String>();
+        assert_eq!(take('a'), "a");
+        assert_eq!(take('A'), "a");
+        assert_eq!(take('ß'), "ss");
+        assert_eq!(take('ﬃ'), "ffi");
     }
 
     #[test]
