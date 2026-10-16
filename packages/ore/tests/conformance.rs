@@ -530,6 +530,17 @@ fn a_column_takes_a_collected_term_of_its_own_target_only() {
     ));
 }
 
+/// A column shows its scheme and target, and nothing it binds terms under.
+#[test]
+fn a_column_debugs_as_its_scheme_and_target() {
+    let mock = Mock::new(key());
+    let column = mock.column(T::I32, ("orders", "total"));
+    assert_eq!(
+        format!("{column:?}"),
+        r#"OrderColumn { scheme: "mock", target: I32, .. }"#
+    );
+}
+
 #[test]
 fn a_scheme_is_keyed_like_a_prf() {
     let from_bytes = Mock::try_from_bytes(Protected::new(vec![7; 32])).expect("32 bytes");
