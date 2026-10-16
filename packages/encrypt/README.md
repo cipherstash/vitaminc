@@ -256,7 +256,7 @@ let decrypted: Protected<String> = decrypt(&cipher, ciphertext, ()).expect("decr
 
 ### Encrypting Keys (Key Wrapping)
 
-Keys can be encrypted with other keys, enabling key hierarchy and key wrapping. [`Key::wrap`] seals a key's protected 32 bytes under a key encryption key, and [`Key::from_wrapped`] reads them straight back into a `Key`, so the bytes never leave the wrapper in either direction. A `Key` is not a `Encrypt` source, so `encrypt` does not take one: a walk over a value hands its bytes to a sink, and any crate can write a sink.
+Keys can be encrypted with other keys, enabling key hierarchy and key wrapping. [`Key::wrap`] seals a key's protected 32 bytes under a key encryption key, and [`Key::from_wrapped`] reads them straight back into a `Key`, so the bytes never leave the wrapper in either direction. A `Key` is not an `Encrypt` source, so `encrypt` does not take one: a walk over a value hands its bytes to a sink, and any crate can write a sink.
 
 ```rust
 use vitaminc_encrypt::{decrypt, encrypt, Aes256Cipher, Key};

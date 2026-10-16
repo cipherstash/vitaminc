@@ -1,4 +1,4 @@
-//! [`JsRef`]: a live JavaScript value as a [`Encrypt`] source.
+//! [`JsRef`]: a live JavaScript value as an [`Encrypt`] source.
 //!
 //! The walk runs on the JavaScript thread, reading each value as it goes:
 //! no tree is built, and a scalar leaves the engine only to go straight to

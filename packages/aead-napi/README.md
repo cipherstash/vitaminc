@@ -7,7 +7,7 @@ The data model is the FFI boundary (ADR 0001): a value coming in is a
 [`Encrypt`] source and a value going out is built by a [`Sink`], and
 nothing sits in between. This crate supplies the JavaScript side of both:
 
-- **`JsRef<'e>`** — a live JavaScript value as a `Encrypt`. The walk runs
+- **`JsRef<'e>`** — a live JavaScript value as an `Encrypt`. The walk runs
   on the JavaScript thread, reading each value as it goes, so no value tree
   is built and a scalar leaves the engine only to go straight to the sink.
   `encrypt(JsRef::new(value), &cipher, aad)` seals a value in place. To

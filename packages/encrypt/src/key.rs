@@ -7,7 +7,7 @@ use vitaminc_random::{Generatable, RandomError, SafeRand};
 /// 256-bit key type for use with symmetric encryption algorithms like AES-256-GCM.
 /// Vitaminc does not support smaller key sizes to ensure quantum security and compatibility with AWS-LC.
 ///
-/// A `Key` is deliberately not a [`Encrypt`](vitaminc_aead::Encrypt)
+/// A `Key` is deliberately not an [`Encrypt`](vitaminc_aead::Encrypt)
 /// source or a [`Decrypt`](vitaminc_aead::typed::Decrypt) target. A
 /// `Encrypt` walk hands each scalar to a [`Sink`](vitaminc_aead::Sink),
 /// and any crate can write a sink, so it would be a way to copy the key
