@@ -1,5 +1,7 @@
 use super::{Binding, BindingSupport, IndexKeyProvider, KeyProvider};
-use crate::{GeneratedDataKey, IndexKeyMaterial, KeyId, KeyIsolation, KeyReconstruction};
+use crate::{
+    GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyIsolation, KeyReconstruction,
+};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -106,6 +108,9 @@ impl<const N: usize> KeyProvider<N> for FakeKeyProvider<N> {
     type Error = FakeKeyProviderError;
 
     const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
+    /// The fake hands out a random id and keeps the key in a map, so the
+    /// id is a reference rather than the key itself.
+    const CUSTODY: KeyCustody = KeyCustody::BackendHeld;
     const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
     const BINDING: BindingSupport = BindingSupport::Bound;
 

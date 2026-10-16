@@ -1,7 +1,7 @@
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
-    BindingSupport, GenerateDataKey, GeneratedDataKey, KeyIsolation, KeyReconstruction,
+    BindingSupport, GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
     RetrieveDataKey,
 };
 use crate::key_id::KeyId;
@@ -128,6 +128,11 @@ impl<const N: usize> RetrieveDataKey<N> for AwsDataKeySource<N> {
     /// sufficient, unlike ZeroKMS's client+server scheme.
     const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
 
+    /// The `CiphertextBlob` this source returns is the data key wrapped
+    /// under the CMK. KMS keeps no copy of the data key, so that blob is the
+    /// only one.
+    const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
+
     /// AWS KMS binds the `EncryptionContext` into the data key and refuses a
     /// `Decrypt` that presents a different one.
     const BINDING: BindingSupport = BindingSupport::Bound;
@@ -248,6 +253,16 @@ mod tests {
 
     fn fixed_ciphertext_blob() -> Vec<u8> {
         vec![9u8; 64]
+    }
+
+    /// The key id this source returns is the data key in wrapped form,
+    /// not a reference the backend can resolve: losing it loses the key.
+    #[test]
+    fn the_key_id_is_the_wrapped_key() {
+        assert_eq!(
+            <AwsDataKeySource<32> as RetrieveDataKey<32>>::CUSTODY,
+            KeyCustody::ClientHeld
+        );
     }
 
     #[tokio::test]

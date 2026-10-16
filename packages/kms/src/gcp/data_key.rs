@@ -2,7 +2,7 @@ use super::integrity::{self, CallError};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
-    BindingSupport, GenerateDataKey, GeneratedDataKey, KeyIsolation, KeyReconstruction,
+    BindingSupport, GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
     RetrieveDataKey,
 };
 use crate::key_id::KeyId;
@@ -184,6 +184,10 @@ impl<const N: usize> RetrieveDataKey<N> for GcpDataKeySource<N> {
     /// authorization alone — nothing the client holds is needed.
     const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
 
+    /// The ciphertext is the data key encrypted under the `CryptoKey`. Cloud
+    /// KMS keeps no copy of the data key, so that ciphertext is the only one.
+    const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
+
     /// Google Cloud KMS binds the additional authenticated data into the
     /// ciphertext and refuses a `decrypt` that presents different AAD.
     const BINDING: BindingSupport = BindingSupport::Bound;
@@ -342,6 +346,10 @@ mod tests {
         assert_eq!(
             <GcpDataKeySource<32> as RetrieveDataKey<32>>::RECONSTRUCTION,
             KeyReconstruction::ServerOnly
+        );
+        assert_eq!(
+            <GcpDataKeySource<32> as RetrieveDataKey<32>>::CUSTODY,
+            KeyCustody::ClientHeld
         );
     }
 
