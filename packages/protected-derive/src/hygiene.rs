@@ -50,7 +50,8 @@ pub struct Locals {
     /// Parameter names handed out, each of which needs a dummy in the
     /// enclosing `const _` block.
     params: BTreeSet<String>,
-    /// Body local names handed out since the last [`Locals::body_shadows`].
+    /// Body local names handed out, each of which needs a dummy at the top
+    /// of the fn body. Each expansion binds locals in one fn body only.
     body: BTreeSet<String>,
 }
 
@@ -89,10 +90,10 @@ impl Locals {
         shadows(&self.params)
     }
 
-    /// Dummies for the body locals handed out since the last call, for the top
-    /// of the fn body that binds them.
-    pub fn body_shadows(&mut self) -> TokenStream {
-        shadows(&std::mem::take(&mut self.body))
+    /// Dummies for the body locals, for the top of the fn body that binds
+    /// them.
+    pub fn body_shadows(&self) -> TokenStream {
+        shadows(&self.body)
     }
 
     fn pick(&self, preferred: &str, span: Span, taken: &BTreeSet<String>) -> syn::Ident {
@@ -122,9 +123,13 @@ impl Scope<'_> {
     }
 }
 
+/// Every generated name starts with `__` and is lowercase, so the dummies
+/// trip neither `dead_code` (which skips `_`-prefixed items) nor
+/// `non_snake_case`. They carry no `#[allow]`, which a caller's
+/// `#![forbid(...)]` would reject.
 fn shadows(names: &BTreeSet<String>) -> TokenStream {
     let names = names.iter().map(|name| format_ident!("{}", name));
-    quote! { #( #[allow(dead_code, non_snake_case)] fn #names() {} )* }
+    quote! { #( fn #names() {} )* }
 }
 
 /// Every identifier in `tokens` that can name a value. Lifetimes (`'a`) live

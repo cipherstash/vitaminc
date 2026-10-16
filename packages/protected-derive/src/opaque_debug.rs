@@ -14,9 +14,9 @@ use syn::{
 // caller's module, so every name they introduce or call must be one the input
 // cannot capture.
 //
-// - The formatter is `__opaque_debug_f`, and enum fields are bound as
-//   `__f_<name>` or `__fN`, so a field or a lowercase const parameter named
-//   `f` cannot collide with them.
+// - The formatter is `__opaque_debug_f`, and enum fields are bound by
+//   position as `__fN`, so a field or a lowercase const parameter named `f`
+//   cannot collide with them.
 // - Const parameters and items in the caller's scope must not capture the
 //   formatter parameter or the field bindings. `crate::hygiene::Locals` names
 //   them clear of every identifier in the input and emits dummy `fn`s that
@@ -306,16 +306,18 @@ fn debug_body_for_enum(
             }
 
             Fields::Named(fields) => {
-                // Bind each field to a prefixed local rather than its own name,
-                // as the tuple arm does with `__f0`, `__f1`, ... so a field
-                // cannot shadow the generated locals.
+                // Bind each field by position, as the tuple arm does, rather
+                // than by its own name, so a field cannot shadow the generated
+                // locals and an uppercase field name does not give a binding
+                // that trips `non_snake_case`.
                 let mut arm = locals.scope();
                 let bindings: Vec<(&syn::Ident, syn::Ident)> = fields
                     .named
                     .iter()
-                    .map(|field| {
+                    .enumerate()
+                    .map(|(i, field)| {
                         let id = field.ident.as_ref().unwrap();
-                        (id, arm.bind(&format!("__f_{}", id.unraw()), id.span()))
+                        (id, arm.bind(&format!("__f{i}"), id.span()))
                     })
                     .collect();
 

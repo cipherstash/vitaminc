@@ -12,7 +12,7 @@ struct __opaque_debug_f;
 #[derive(OpaqueDebug)]
 struct __f0(u8);
 
-const __f_value: u8 = 0;
+const __f1: u8 = 0;
 
 #[derive(OpaqueDebug)]
 struct Probe {
@@ -26,6 +26,8 @@ enum ProbeEnum {
     Named {
         #[non_sensitive]
         value: u8,
+        #[non_sensitive]
+        other: u8,
     },
 }
 
@@ -41,7 +43,7 @@ fn main() {
         format!("{tn}::Tuple(2)")
     );
     assert_eq!(
-        format!("{:?}", ProbeEnum::Named { value: 3 }),
-        format!("{tn}::Named {{ value: 3 }}")
+        format!("{:?}", ProbeEnum::Named { value: 3, other: 4 }),
+        format!("{tn}::Named {{ value: 3, other: 4 }}")
     );
 }

@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
-use syn::{ext::IdentExt, Data, DataEnum, DataStruct, DeriveInput, Fields, Path, Type};
+use syn::{Data, DataEnum, DataStruct, DeriveInput, Fields, Path, Type};
 
 use crate::crate_path::{parse_crate_value, protected_crate_path};
 use crate::hygiene::{Locals, Scope};
@@ -160,45 +160,42 @@ fn collect_field_types(data: &syn::Data) -> Vec<Type> {
     out
 }
 
-/// `let mut acc = 1; acc &= ts_eq(l, r); ...; acc` over the bound pairs.
-fn fold_compares(
+/// The `(lhs, rhs) => fold` arm that compares two values of the same struct
+/// or variant at `path` (`Self` or `Self::V`). Each field is bound by
+/// reference on both sides, as `__ts_lhs_<index>` and `__ts_rhs_<index>`, and
+/// the `ts_eq` results are combined with the non-short-circuiting `&`.
+fn compare_arm(
     krate: &Path,
+    path: proc_macro2::TokenStream,
+    fields: &Fields,
     scope: &mut Scope<'_>,
-    lhs: &[syn::Ident],
-    rhs: &[syn::Ident],
 ) -> proc_macro2::TokenStream {
-    let acc = scope.bind("__ts_acc", Span::call_site());
-    let compares = lhs
-        .iter()
-        .zip(rhs)
-        .map(|(l, r)| quote!( #acc &= #krate::TimingSafeEq::ts_eq(#l, #r); ));
+    let (lhs, rhs): (Vec<_>, Vec<_>) = (0..fields.len())
+        .map(|i| {
+            (
+                scope.bind(&format!("__ts_lhs_{i}"), Span::call_site()),
+                scope.bind(&format!("__ts_rhs_{i}"), Span::call_site()),
+            )
+        })
+        .unzip();
+    let (lhs_pat, rhs_pat) = match fields {
+        Fields::Named(named) => {
+            let names: Vec<_> = named.named.iter().map(|f| &f.ident).collect();
+            (
+                quote!(#path { #(#names: ref #lhs),* }),
+                quote!(#path { #(#names: ref #rhs),* }),
+            )
+        }
+        Fields::Unnamed(_) => (
+            quote!(#path( #(ref #lhs),* )),
+            quote!(#path( #(ref #rhs),* )),
+        ),
+        Fields::Unit => (path.clone(), path),
+    };
     quote! {
-        let mut #acc = #krate::Choice::from(1u8);
-        #(#compares)*
-        #acc
+        (#lhs_pat, #rhs_pat) => #krate::Choice::from(1u8)
+            #( & #krate::TimingSafeEq::ts_eq(#lhs, #rhs) )*
     }
-}
-
-/// Binds each field on both sides in one scope: `__ts_lhs_<key>`,
-/// `__ts_rhs_<key>`.
-fn bind_pairs(
-    scope: &mut Scope<'_>,
-    keys: impl Iterator<Item = String>,
-) -> (Vec<syn::Ident>, Vec<syn::Ident>) {
-    keys.map(|key| {
-        (
-            scope.bind(&format!("__ts_lhs_{key}"), Span::call_site()),
-            scope.bind(&format!("__ts_rhs_{key}"), Span::call_site()),
-        )
-    })
-    .unzip()
-}
-
-fn named_keys(named: &syn::FieldsNamed) -> impl Iterator<Item = String> + '_ {
-    named
-        .named
-        .iter()
-        .map(|f| f.ident.as_ref().unwrap().unraw().to_string())
 }
 
 fn ts_body_struct(
@@ -207,46 +204,18 @@ fn ts_body_struct(
     other: &syn::Ident,
     locals: &mut Locals,
 ) -> proc_macro2::TokenStream {
-    let mut scope = locals.scope();
-    match &ds.fields {
-        Fields::Named(named) => {
-            // Bind each field by reference on both sides: { a: ref l_a } vs { a: ref r_a }
-            let names: Vec<_> = named
-                .named
-                .iter()
-                .map(|f| f.ident.as_ref().unwrap())
-                .collect();
-            let (lhs, rhs) = bind_pairs(&mut scope, named_keys(named));
-            let fold = fold_compares(krate, &mut scope, &lhs, &rhs);
-            quote! {
-                match (self, #other) {
-                    (
-                        Self { #(#names: ref #lhs,)* },
-                        Self { #(#names: ref #rhs,)* },
-                    ) => {
-                        #fold
-                    }
-                }
-            }
-        }
-        Fields::Unnamed(unnamed) => {
-            // Tuple struct: (ref l_0, ref l_1, ...)
-            let (lhs, rhs) = bind_pairs(
-                &mut scope,
-                (0..unnamed.unnamed.len()).map(|i| i.to_string()),
-            );
-            let fold = fold_compares(krate, &mut scope, &lhs, &rhs);
-            quote! {
-                let Self( #(ref #lhs),* ) = self;
-                let Self( #(ref #rhs),* ) = #other;
-                #fold
-            }
-        }
+    if let Fields::Unit = ds.fields {
         // Always equal (no secret-bearing fields)
-        Fields::Unit => quote! {
+        return quote! {
             let _ = #other;
             #krate::Choice::from(1u8)
-        },
+        };
+    }
+    let arm = compare_arm(krate, quote!(Self), &ds.fields, &mut locals.scope());
+    quote! {
+        match (self, #other) {
+            #arm
+        }
     }
 }
 
@@ -256,57 +225,23 @@ fn ts_body_enum(
     other: &syn::Ident,
     locals: &mut Locals,
 ) -> proc_macro2::TokenStream {
-    // For each variant, generate a match arm that compares same-variant fields.
-    // Arms cannot see each other's bindings, so each gets its own scope.
-    let mut arms = Vec::new();
-
-    for v in &de.variants {
+    // One arm per variant comparing same-variant fields. Arms cannot see each
+    // other's bindings, so each gets its own scope.
+    let arms = de.variants.iter().map(|v| {
         let v_ident = &v.ident;
-        let mut scope = locals.scope();
-        match &v.fields {
-            Fields::Named(named) => {
-                let names: Vec<_> = named
-                    .named
-                    .iter()
-                    .map(|f| f.ident.as_ref().unwrap())
-                    .collect();
-                let (lhs, rhs) = bind_pairs(&mut scope, named_keys(named));
-                let fold = fold_compares(krate, &mut scope, &lhs, &rhs);
-                arms.push(quote! {
-                    (
-                        Self::#v_ident { #(#names: ref #lhs,)* },
-                        Self::#v_ident { #(#names: ref #rhs,)* },
-                    ) => {
-                        #fold
-                    }
-                });
-            }
-            Fields::Unnamed(unnamed) => {
-                let (lhs, rhs) = bind_pairs(
-                    &mut scope,
-                    (0..unnamed.unnamed.len()).map(|i| i.to_string()),
-                );
-                let fold = fold_compares(krate, &mut scope, &lhs, &rhs);
-                arms.push(quote! {
-                    (Self::#v_ident( #(ref #lhs),* ), Self::#v_ident( #(ref #rhs),* )) => {
-                        #fold
-                    }
-                });
-            }
-            Fields::Unit => {
-                arms.push(quote! {
-                    (Self::#v_ident, Self::#v_ident) => #krate::Choice::from(1u8)
-                });
-            }
-        }
-    }
-
-    // Non-matching variants are not equal.
-    arms.push(quote! { _ => #krate::Choice::from(0u8) });
+        compare_arm(
+            krate,
+            quote!(Self::#v_ident),
+            &v.fields,
+            &mut locals.scope(),
+        )
+    });
 
     quote! {
         match (self, #other) {
-            #(#arms),*
+            #(#arms,)*
+            // Non-matching variants are not equal.
+            _ => #krate::Choice::from(0u8),
         }
     }
 }

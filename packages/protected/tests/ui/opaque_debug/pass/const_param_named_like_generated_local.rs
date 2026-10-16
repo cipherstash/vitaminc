@@ -9,11 +9,13 @@ use vitaminc_protected::OpaqueDebug;
 struct Formatter<const __opaque_debug_f: usize>(#[non_sensitive] u8);
 
 #[derive(OpaqueDebug)]
-enum Bindings<const __f0: usize, const __f_value: usize> {
+enum Bindings<const __f0: usize, const __f1: usize> {
     Tuple(#[non_sensitive] u8),
     Named {
         #[non_sensitive]
         value: u8,
+        #[non_sensitive]
+        other: u8,
     },
 }
 
@@ -26,7 +28,7 @@ fn main() {
         format!("{tn}::Tuple(2)")
     );
     assert_eq!(
-        format!("{:?}", Bindings::<1, 2>::Named { value: 3 }),
-        format!("{tn}::Named {{ value: 3 }}")
+        format!("{:?}", Bindings::<1, 2>::Named { value: 3, other: 4 }),
+        format!("{tn}::Named {{ value: 3, other: 4 }}")
     );
 }

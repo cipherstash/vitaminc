@@ -6,13 +6,13 @@
 
 use vitaminc_protected::OpaqueDebug;
 
-const __f_value: usize = 2;
+const __f0: usize = 2;
 
 #[derive(OpaqueDebug)]
 enum E<T> {
     Named {
         #[non_sensitive]
-        value: [T; __f_value],
+        value: [T; __f0],
     },
 }
 
