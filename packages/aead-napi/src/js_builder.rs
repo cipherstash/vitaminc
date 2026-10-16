@@ -15,7 +15,7 @@
 
 use napi::bindgen_prelude::{BigInt, Buffer, JsValue, Null, Object, ToNapiValue, Unknown};
 use napi::{Env, Error, Status};
-use vitaminc_aead::{Float, Frame, Int, Logical, MapSink, Physical, Plaintext, SeqSink, Sink};
+use vitaminc_aead::{Encrypt, Float, Frame, Int, Logical, MapSink, Physical, SeqSink, Sink};
 
 use crate::error::JsFault;
 use crate::js::{
@@ -146,7 +146,7 @@ impl<'e, O: Out<'e>> Sink for JsBuilder<'e, O> {
 
     /// A passthrough subtree is plaintext to the application, so it is
     /// built like anything else, one level down as the frame counts it.
-    fn passthrough<P: Plaintext + Clone>(self, value: P) -> Result<O::Ok, JsFault> {
+    fn passthrough<P: Encrypt + Clone>(self, value: P) -> Result<O::Ok, JsFault> {
         self.check_depth()?;
         let built = value.visit(JsBuilder::at_depth(self.env, self.depth + 1))?;
         Ok(self.out.put(built))
@@ -382,7 +382,7 @@ mod tests {
         /// A value that opens a sequence and reports whether the sink let it.
         #[derive(Clone)]
         struct Probe;
-        impl Plaintext for Probe {
+        impl Encrypt for Probe {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
                 match sink.seq(Some(0)) {
                     Ok(_) => panic!("a sequence one level past the limit was accepted"),

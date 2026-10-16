@@ -25,10 +25,10 @@ Add this to your `Cargo.toml`:
 [dependencies]
 vitaminc-encrypt = "0.2.0-pre.1"
 vitaminc-random = "0.2.0-pre.1"  # For key generation
-vitaminc-aead = "0.2.0-pre.1"    # For the Plaintext and Decrypt derives
+vitaminc-aead = "0.2.0-pre.1"    # For the Encrypt and Decrypt derives
 ```
 
-The `Plaintext` and `Decrypt` derives are re-exported here, but the code they
+The `Encrypt` and `Decrypt` derives are re-exported here, but the code they
 generate names the `vitaminc_aead` crate, so a crate that derives them for its
 own types must depend on `vitaminc-aead` too.
 
@@ -68,7 +68,7 @@ here). A value encrypted from static Rust therefore seals the same tagged
 leaves a value from a host binding does, and every ciphertext is
 self-describing.
 
-The value going in is anything that implements [`Plaintext`], and the
+The value going in is anything that implements [`Encrypt`], and the
 value coming out is anything that implements the sink-based [`Decrypt`].
 Both are derivable.
 
@@ -99,12 +99,12 @@ let key = Key::from(key_bytes);
 
 ### Encrypting Data
 
-[`encrypt`] takes any [`Plaintext`] source. Built-in sources include:
+[`encrypt`] takes any [`Encrypt`] source. Built-in sources include:
 
 - `String`, `&str`, `Vec<u8>`, `&[u8]` and `[u8; N]`
-- every integer and float width, `bool`, and `Option<T>` where `T: Plaintext`
-- `Vec<T>`, `HashMap<String, T>` and `BTreeMap<String, T>` where `T: Plaintext`
-- `Protected<T>` where `&T: Plaintext`, walked without leaving the wrapper
+- every integer and float width, `bool`, and `Option<T>` where `T: Encrypt`
+- `Vec<T>`, `HashMap<String, T>` and `BTreeMap<String, T>` where `T: Encrypt`
+- `Protected<T>` where `&T: Encrypt`, walked without leaving the wrapper
 - `chrono`, `rust_decimal` and `uuid` scalars behind `vitaminc-aead`'s features
 
 ```rust
@@ -256,7 +256,7 @@ let decrypted: Protected<String> = decrypt(&cipher, ciphertext, ()).expect("decr
 
 ### Encrypting Keys (Key Wrapping)
 
-Keys can be encrypted with other keys, enabling key hierarchy and key wrapping. [`Key::wrap`] seals a key's protected 32 bytes under a key encryption key, and [`Key::from_wrapped`] reads them straight back into a `Key`, so the bytes never leave the wrapper in either direction. A `Key` is not a `Plaintext` source, so `encrypt` does not take one: a walk over a value hands its bytes to a sink, and any crate can write a sink.
+Keys can be encrypted with other keys, enabling key hierarchy and key wrapping. [`Key::wrap`] seals a key's protected 32 bytes under a key encryption key, and [`Key::from_wrapped`] reads them straight back into a `Key`, so the bytes never leave the wrapper in either direction. A `Key` is not a `Encrypt` source, so `encrypt` does not take one: a walk over a value hands its bytes to a sink, and any crate can write a sink.
 
 ```rust
 use vitaminc_encrypt::{decrypt, encrypt, Aes256Cipher, Key};
@@ -284,12 +284,12 @@ let data_cipher = Aes256Cipher::new(&dek).expect("cipher creation failed");
 
 ### Your Own Types
 
-Derive [`Plaintext`] for a type to encrypt it, and the sink-based [`Decrypt`] to decrypt into it. Fields become map entries, each sealed under its own key; `#[aead(passthrough)]` stores a field in the clear, `#[aead(skip)]` leaves one out, and `#[aead(rename = "...")]` changes its wire key. See the [`vitaminc-aead` documentation](https://docs.rs/vitaminc-aead) for the attributes.
+Derive [`Encrypt`] for a type to encrypt it, and the sink-based [`Decrypt`] to decrypt into it. Fields become map entries, each sealed under its own key; `#[aead(passthrough)]` stores a field in the clear, `#[aead(skip)]` leaves one out, and `#[aead(rename = "...")]` changes its wire key. See the [`vitaminc-aead` documentation](https://docs.rs/vitaminc-aead) for the attributes.
 
 ```rust
-use vitaminc_encrypt::{decrypt, encrypt, Aes256Cipher, Decrypt, Key, Plaintext};
+use vitaminc_encrypt::{decrypt, encrypt, Aes256Cipher, Decrypt, Key, Encrypt};
 
-#[derive(Debug, PartialEq, Plaintext, Decrypt)]
+#[derive(Debug, PartialEq, Encrypt, Decrypt)]
 struct User {
     #[aead(passthrough)]
     id: u64,

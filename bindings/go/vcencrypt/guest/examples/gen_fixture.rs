@@ -23,7 +23,7 @@
 
 use std::fs;
 
-use vitaminc_aead::{encrypt, to_frame, Context, MapSink, Plaintext, SeqSink, Sink};
+use vitaminc_aead::{encrypt, to_frame, Context, MapSink, Encrypt, SeqSink, Sink};
 use vitaminc_aead_frame::transport as codec;
 use vitaminc_encrypt::{Aes256Cipher, Key};
 use vitaminc_protected::{Controlled, Protected};
@@ -35,7 +35,7 @@ const AAD: &[u8] = b"vitaminc/go-spike/fixture";
 #[derive(Clone)]
 struct Fixture;
 
-impl Plaintext for Fixture {
+impl Encrypt for Fixture {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         let mut map = sink.map(Some(14))?;
         // Passthrough fields: non-secret, travel in the clear. Go must read

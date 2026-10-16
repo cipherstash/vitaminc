@@ -422,7 +422,7 @@ mod tests {
     /// `levels` arrays around `true`, as a frame payload.
     fn payload(levels: usize) -> Node<PassthroughFrame> {
         struct Arrays(usize);
-        impl vitaminc_aead::Plaintext for Arrays {
+        impl vitaminc_aead::Encrypt for Arrays {
             fn visit<S: vitaminc_aead::Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
                 use vitaminc_aead::SeqSink;
                 if self.0 == 0 {

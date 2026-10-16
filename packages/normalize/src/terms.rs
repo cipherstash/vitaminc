@@ -14,7 +14,7 @@ use vitaminc_aead::plaintext::{Error, Path, Step};
 use vitaminc_aead::seal::{seal_all, seal_all_async, AsyncCipher, Cipher};
 use vitaminc_aead::shape::{self, Locate, MapRules, SeqRules, Settle};
 use vitaminc_aead::{
-    EncryptError, EncryptSink, IntoAad, Logical, MapSink, Node, Pending, Physical, Plaintext,
+    Encrypt, EncryptError, EncryptSink, IntoAad, Logical, MapSink, Node, Pending, Physical,
     Refusal, SeqSink, Sink, SourceError, Tee,
 };
 
@@ -421,7 +421,7 @@ impl<'t, E: Error> Sink for Terms<'t, E> {
 
     /// No terms. Keeping the shape rules, the subtree is framed, as
     /// encryption frames it, and the frame dropped.
-    fn passthrough<P: Plaintext + Clone>(self, value: P) -> Result<(), E> {
+    fn passthrough<P: Encrypt + Clone>(self, value: P) -> Result<(), E> {
         if let Some(rules) = self.rules {
             let at = At {
                 place: &self.at,
@@ -616,7 +616,7 @@ impl<E: Error> MapSink for TermsMap<'_, E> {
 ///
 /// [`TermsError`]: what [`Terms`] refuses, a value encryption would refuse
 /// included, or the source's own failure.
-pub fn terms<P: Plaintext>(value: P) -> Result<Vec<Term>, TermsError> {
+pub fn terms<P: Encrypt>(value: P) -> Result<Vec<Term>, TermsError> {
     let mut out = Vec::new();
     value.visit(Terms::new(&mut out))?;
     Ok(out)
@@ -635,7 +635,7 @@ pub type WithTerms<L> = (Node<L>, Vec<Term>);
 /// arrives as [`EncryptError::Source`] carrying a [`TermError`].
 pub fn plan_with_terms<'a, P, E, A>(value: P, aad: A) -> Result<WithTerms<Pending>, EncryptError<E>>
 where
-    P: Plaintext,
+    P: Encrypt,
     A: IntoAad<'a>,
 {
     let mut terms = Vec::new();
@@ -658,7 +658,7 @@ pub fn encrypt_with_terms<'a, P, C, A>(
     aad: A,
 ) -> Result<WithTerms<C::Leaf>, EncryptError<C::Error>>
 where
-    P: Plaintext,
+    P: Encrypt,
     C: Cipher,
     A: IntoAad<'a>,
 {
@@ -681,7 +681,7 @@ pub fn encrypt_with_terms_async<'a, 'c, P, C, A>(
     aad: A,
 ) -> impl Future<Output = Result<WithTerms<C::Leaf>, EncryptError<C::Error>>> + Send + 'c
 where
-    P: Plaintext,
+    P: Encrypt,
     C: AsyncCipher,
     A: IntoAad<'a>,
 {

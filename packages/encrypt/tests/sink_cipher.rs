@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use vitaminc_aead::{
-    decrypt, encrypt, CipherText, Decrypt, DecryptError, EncryptError, MapSink, Plaintext, Sink,
+    decrypt, encrypt, CipherText, Decrypt, DecryptError, Encrypt, EncryptError, MapSink, Sink,
     Unencryptable,
 };
 use vitaminc_encrypt::{Aes256Cipher, Key};
@@ -16,7 +16,7 @@ fn cipher() -> Aes256Cipher {
     Aes256Cipher::new(&Key::from([42u8; 32])).expect("cipher")
 }
 
-#[derive(Debug, Clone, PartialEq, Plaintext, Decrypt)]
+#[derive(Debug, Clone, PartialEq, Encrypt, Decrypt)]
 struct Record {
     #[aead(passthrough)]
     id: u64,
@@ -122,7 +122,7 @@ mod given_a_nested_record {
         // The derive refuses this shape at compile time, so the source is
         // written by hand: a map whose only entry is a passthrough.
         struct OnlyPlain;
-        impl Plaintext for OnlyPlain {
+        impl Encrypt for OnlyPlain {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
                 let mut map = sink.map(Some(1))?;
                 map.entry("id")?.passthrough(7u64)?;

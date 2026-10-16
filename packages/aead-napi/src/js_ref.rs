@@ -1,4 +1,4 @@
-//! [`JsRef`]: a live JavaScript value as a [`Plaintext`] source.
+//! [`JsRef`]: a live JavaScript value as a [`Encrypt`] source.
 //!
 //! The walk runs on the JavaScript thread, reading each value as it goes:
 //! no tree is built, and a scalar leaves the engine only to go straight to
@@ -34,7 +34,7 @@ use napi::{Env, Error, Status, ValueType};
 use vitaminc_aead::frame::FrameWriteError;
 use vitaminc_aead::plaintext::{Error as _, SourceError};
 use vitaminc_aead::{
-    to_frame, Float, Logical, MapSink, Physical, Plaintext, SeqSink, Sink, TimeUnit,
+    to_frame, Encrypt, Float, Logical, MapSink, Physical, SeqSink, Sink, TimeUnit,
 };
 use vitaminc_protected::Protected;
 
@@ -72,7 +72,7 @@ impl<'e> JsRef<'e> {
     }
 }
 
-impl Plaintext for JsRef<'_> {
+impl Encrypt for JsRef<'_> {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         js_walk(self.value, self.depth, sink)
     }
