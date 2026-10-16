@@ -31,6 +31,10 @@ NESTED = (
 
 FIELD = re.compile(r'^(name|version|source) = "([^"]*)"$', re.MULTILINE)
 
+# A dependency entry that names its package with a version, which cargo
+# writes when a lockfile holds two packages of one name.
+QUALIFIED_REF = re.compile(r'^ "([^" ]+) [^"]+",?$', re.MULTILINE)
+
 
 def packages(lock: str) -> list[tuple[int, int, dict[str, str]]]:
     """Each `[[package]]` block as its start, its end and its fields."""
@@ -52,6 +56,19 @@ def workspace_versions(root_lock: str) -> dict[str, str]:
     }
 
 
+def check_unqualified(nested_lock: str, versions: dict[str, str]) -> None:
+    """Refuse a lockfile whose dependency entries name a workspace crate with
+    its version. `sync` changes only `version` lines, so such an entry would
+    be left pointing at the old version and the `--locked` build would fail
+    with nothing in the commit to say why. Cargo can re-sync that lockfile."""
+    for m in QUALIFIED_REF.finditer(nested_lock):
+        if m.group(1) in versions:
+            raise SystemExit(
+                f"{m.group(0).strip()}: a version-qualified reference to a "
+                "workspace crate; re-sync this lockfile with cargo"
+            )
+
+
 def sync(nested_lock: str, versions: dict[str, str]) -> str:
     """`nested_lock` with each workspace crate's version set from `versions`."""
     out = []
@@ -61,9 +78,12 @@ def sync(nested_lock: str, versions: dict[str, str]) -> str:
         if "source" in fields or name not in versions or fields.get("version") == versions[name]:
             continue
         block = nested_lock[start:end]
+        new = versions[name]
         block = re.sub(
             r'^version = "[^"]*"$',
-            f'version = "{versions[name]}"',
+            # A function, not a template: a backslash in the version would
+            # otherwise be read as an escape.
+            lambda _: f'version = "{new}"',
             block,
             count=1,
             flags=re.MULTILINE,
@@ -84,6 +104,7 @@ def main(argv: list[str]) -> int:
     for nested in NESTED:
         path = root / nested
         before = path.read_text()
+        check_unqualified(before, versions)
         after = sync(before, versions)
         if after != before:
             path.write_text(after)
