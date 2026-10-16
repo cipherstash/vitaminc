@@ -82,6 +82,16 @@ pub enum NormalizeError {
     /// Text contains a code point unassigned in Unicode 16.
     #[error("text contains a code point unassigned in Unicode 16")]
     UnassignedCodePoint,
+    /// The value is of another kind than the type the index declares: text
+    /// for an integer column, say. Not reported by the equality
+    /// normalizer, which declares no type.
+    #[error("the value is not of the kind the index declares")]
+    Mismatch,
+    /// The value is of the kind the index declares but does not fit it: an
+    /// integer outside the declared width. Not reported by the equality
+    /// normalizer, which declares no type.
+    #[error("the value does not fit the type the index declares")]
+    OutOfRange,
 }
 
 /// The opt-in table: the domain for a scalar, or `None` for one that has

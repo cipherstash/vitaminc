@@ -38,7 +38,11 @@ use crate::scalar::{normalize, NormalizeError, Normalized};
 /// when it has no logical type; a scalar whose logical type has no term
 /// returns the same error and stops the walk; any other error stops the
 /// walk too.
-pub trait Normalize {
+///
+/// A normalizer is copied into every child sink of a walk, so it is
+/// `Copy`: it carries settings, such as the type an index declares, but
+/// no state that a walk changes.
+pub trait Normalize: Copy {
     /// What one scalar becomes.
     type Term;
 
@@ -384,8 +388,8 @@ impl<'t, E, N: Normalize> Terms<'t, E, N> {
     /// A sink that appends the terms `by` makes to `out` and keeps the
     /// shape rules itself.
     ///
-    /// The normalizer is copied into every child sink, so it is `Copy`: a
-    /// normalizer carries no state.
+    /// The normalizer is copied into every child sink, which is why
+    /// [`Normalize`] requires `Copy`.
     pub fn by(by: N, out: &'t mut Vec<Term<N::Term>>) -> Self {
         Self {
             out,
@@ -408,7 +412,7 @@ impl<'t, E, N: Normalize> Terms<'t, E, N> {
     }
 }
 
-impl<'t, E: Error, N: Normalize + Copy> Sink for Terms<'t, E, N> {
+impl<'t, E: Error, N: Normalize> Sink for Terms<'t, E, N> {
     type Ok = ();
     type Error = E;
     type Seq = TermsSeq<'t, E, N>;
@@ -531,7 +535,7 @@ pub struct TermsSeq<'t, E, N: Normalize = Equality> {
     _error: PhantomData<E>,
 }
 
-impl<E: Error, N: Normalize + Copy> SeqSink for TermsSeq<'_, E, N> {
+impl<E: Error, N: Normalize> SeqSink for TermsSeq<'_, E, N> {
     type Ok = ();
     type Error = E;
     type Element<'s>
@@ -602,7 +606,7 @@ pub struct TermsMap<'t, E, N: Normalize = Equality> {
     _error: PhantomData<E>,
 }
 
-impl<E: Error, N: Normalize + Copy> MapSink for TermsMap<'_, E, N> {
+impl<E: Error, N: Normalize> MapSink for TermsMap<'_, E, N> {
     type Ok = ();
     type Error = E;
     type Entry<'s>
@@ -718,7 +722,7 @@ pub fn terms<P: Encrypt>(value: P) -> Result<Vec<Term>, TermsError> {
 /// included, or the source's own failure.
 pub fn terms_by<N, P>(by: N, value: P) -> Result<Vec<Term<N::Term>>, TermsError>
 where
-    N: Normalize + Copy,
+    N: Normalize,
     P: Encrypt,
 {
     let mut out = Vec::new();
