@@ -20,10 +20,11 @@ on:
   # No branch filter: a stacked PR (a feature branch as base) must run this
   # gate too. With `branches: [main]` here, retargeting a PR onto its
   # parent branch silently switched every Rust gate off; see go.yml.
-  # No path filter either: this check is required on main, and a required
-  # check whose workflow never triggers leaves a PR waiting for its status
-  # forever (#432). A PR that changes no Rust code still runs it; that costs
-  # a few minutes and keeps the gate's answer honest.
+  #
+  # No path filter either: this check is required by the `main` ruleset, and
+  # a required check that never reports leaves the PR at "Expected" forever.
+  # The `changes` job below decides instead, and skips the gate when the PR
+  # has no Rust changes; GitHub reports a skipped job as passed.
   pull_request:
 
   workflow_dispatch:
@@ -43,7 +44,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    # What counts as a Rust change for this gate lives in
+    # .github/scripts/has_rust_changes.py.
+    # Skipped on a manual dispatch, which runs the gate below.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    name: "🔎 Mutants gate: Rust changes"
+    permissions:
+      contents: read
+    outputs:
+      has_rust_changes: ${{ steps.check.outputs.has_rust_changes }}
+    env:
+      # The task needs only the runner's python3. Auto-install would build
+      # every cargo tool in mise.toml, costing more than the gate it skips.
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The diff needs the merge base of the PR and its base branch.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: jdx/mise-action@v5
+        with:
+          version: 2026.10.7
+          # mise only: no `mise install`, and no cache to save.
+          install: false
+          cache: false
+
+      - name: test the Rust changes check
+        run: mise run pr:gate:has_rust_changes:test
+
+      - name: check for Rust changes
+        id: check
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: mise run pr:gate:has_rust_changes -- mutants --base "origin/$BASE_REF"
+
   mutants:
+    needs: changes
+    # Fails closed: skip only when the `changes` job succeeded and found no
+    # Rust changes. A failed `changes` job, or one skipped on a manual
+    # dispatch, runs the gate.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.has_rust_changes == 'true') }}
     runs-on: ubuntu-latest
     name: "🧬 Mutants gate"
 
