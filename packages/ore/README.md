@@ -175,8 +175,9 @@ arithmetic.
 
 ## Known exceptions
 
-Booleans, nulls and `undefined` have no order term. Block ORE in `ore-rs`
-takes one to fifteen bytes, so `i128`, `u128` and uuid terms have no
-block ORE, and nor does text, whose terms vary in length, until chained
-block ORE is available (ore.rs #95); the CLLW schemes take every domain.
-A scheme reports such a refusal as [`OrderError::Unsupported`].
+Booleans, nulls and `undefined` have no order term. The fixed-width block
+ORE scheme in `ore-rs` takes one to fifteen bytes, so `i128`, `u128` and
+uuid terms have no fixed-width block ORE, and nor do text and bytes,
+whose terms vary in length; `ore-rs`'s chained block ORE scheme and the
+CLLW schemes take every domain. A scheme reports such a refusal as
+[`OrderError::Unsupported`].
