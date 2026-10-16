@@ -1,28 +1,30 @@
-//! One order term per scalar.
+//! One order term per scalar, encoded as the index's declared type.
 //!
-//! [`order`] turns a physical value and its optional logical type into
-//! the sealed [`OrderPlaintext`] a scheme encrypts: bytes whose
-//! lexicographic order is the value's order, and the frozen domain label
-//! they belong to. The encoders this crate adds are public, as
-//! [`vitaminc_normalize`]'s are, for an index layer that already knows a
-//! value's kind; only [`order`] can seal them.
+//! An order index declares the type of what it holds: an `i32` column,
+//! say, as [`OrderTarget::I32`]. [`order`] turns a physical value and its
+//! optional logical type into the sealed [`OrderPlaintext`] a scheme
+//! encrypts, encoded as that target: bytes whose lexicographic order is
+//! the value's order, and the frozen domain label of the target. The
+//! target, not the value, decides the domain and the width, so values
+//! from every host compare in one column. A JavaScript `BigInt` arrives as
+//! the narrowest integer that holds it, and a Rust field at its own type;
+//! both widen to the target, and a value outside it is refused.
 //!
-//! Where an equality term folds every integer width into one encoding and
-//! both float widths into `f64`, an order term keeps each kind at its
-//! natural width, so block ORE over an `i32` costs four blocks, not
-//! seventeen. A date, a timestamp, a decimal, bytes and a uuid order by
-//! the same bytes they are matched by, so those come from
-//! `vitaminc_normalize` unchanged. Text alone folds further: an order term
-//! drops accents and case, which equality must not. See the crate docs for
-//! the table.
+//! Where an equality term folds every integer width into one encoding, an
+//! order term keeps the declared width, so block ORE over an `i32` column
+//! costs four blocks, not seventeen. A float, a date, a timestamp, a
+//! decimal, bytes and a uuid order by the same bytes they are matched by,
+//! so those come from `vitaminc_normalize` unchanged. Text alone folds
+//! further: an order term drops accents and case, which equality must
+//! not. See the crate docs for the table.
 
-use vitaminc_aead::{Encrypt, Float, Int, Logical, Physical};
+use vitaminc_aead::{Encrypt, Int, Logical, Physical};
 use vitaminc_normalize::{terms_by, Normalize, NormalizeError, Term, TermsError};
 use vitaminc_protected::{Controlled, Protected};
 
 use crate::{fold, OrderPlaintext};
 
-/// Frozen domain labels for order terms, one per kind that has one.
+/// Frozen domain labels for order terms, one per [`OrderTarget`].
 pub mod domain {
     /// An `i8`, one byte.
     pub const INT8: &str = "vitaminc/ore/value/int8/v1";
@@ -44,8 +46,6 @@ pub mod domain {
     pub const INT128: &str = "vitaminc/ore/value/int128/v1";
     /// A `u128`, sixteen bytes.
     pub const UINT128: &str = "vitaminc/ore/value/uint128/v1";
-    /// An `f32`, four bytes, zero signs and NaN payloads folded.
-    pub const FLOAT32: &str = "vitaminc/ore/value/float32/v1";
     /// An `f64`, eight bytes, zero signs and NaN payloads folded.
     pub const FLOAT64: &str = "vitaminc/ore/value/float64/v1";
     /// A date, four bytes, over its day count.
@@ -63,95 +63,254 @@ pub mod domain {
     /// Every domain, for a test or an index layer that enumerates them. A
     /// slice, so a domain added later does not change its type.
     pub const ALL: &[&str] = &[
-        INT8, UINT8, INT16, UINT16, INT32, UINT32, INT64, UINT64, INT128, UINT128, FLOAT32,
-        FLOAT64, DATE, TIMESTAMP, DECIMAL, TEXT, BYTES, UUID,
+        INT8, UINT8, INT16, UINT16, INT32, UINT32, INT64, UINT64, INT128, UINT128, FLOAT64, DATE,
+        TIMESTAMP, DECIMAL, TEXT, BYTES, UUID,
     ];
 }
 
-/// The opt-in table: the order domain for a scalar, or `None` for one
-/// that has no order term. A logical type decides on its own; a value
-/// without one goes by its kind and, for an int or a float, its width.
-/// Neither looks at the value: [`order`] checks that.
-pub fn domain_of(ty: Option<Logical>, v: &Physical<'_>) -> Option<&'static str> {
-    match (ty, v) {
-        (None, Physical::Int(i)) => Some(match i {
-            Int::I8(_) => domain::INT8,
-            Int::U8(_) => domain::UINT8,
-            Int::I16(_) => domain::INT16,
-            Int::U16(_) => domain::UINT16,
-            Int::I32(_) => domain::INT32,
-            Int::U32(_) => domain::UINT32,
-            Int::I64(_) => domain::INT64,
-            Int::U64(_) => domain::UINT64,
-            Int::I128(_) => domain::INT128,
-            Int::U128(_) => domain::UINT128,
-        }),
-        (None, Physical::Float(Float::F32(_))) => Some(domain::FLOAT32),
-        (None, Physical::Float(Float::F64(_))) => Some(domain::FLOAT64),
-        (None, Physical::Text(_)) => Some(domain::TEXT),
-        (None, Physical::Bytes(_)) => Some(domain::BYTES),
-        // A boolean orders two groups of rows and hides nothing; a null
-        // has no order.
-        (None, Physical::Null | Physical::Bool(_)) => None,
-        (Some(Logical::Date), _) => Some(domain::DATE),
-        (Some(Logical::Timestamp(_)), _) => Some(domain::TIMESTAMP),
-        (Some(Logical::Decimal { .. }), _) => Some(domain::DECIMAL),
-        (Some(Logical::Uuid), _) => Some(domain::UUID),
-        // `Logical` is non-exhaustive: a type this build does not know, and
-        // any added later, has no term until it is given a domain here.
-        (Some(_), _) => None,
+/// The type an order index declares, which every value it holds is
+/// encoded as. A layer above maps its own column types onto these: an
+/// EQL `int` column is [`OrderTarget::I32`], whatever language the value
+/// comes from.
+///
+/// An integer of any width is accepted by an integer target it fits,
+/// and refused with [`NormalizeError::OutOfRange`] otherwise. An `f32` is
+/// widened exactly to [`OrderTarget::F64`]. Every other target takes only
+/// its own kind; anything else is [`NormalizeError::Mismatch`]. An
+/// integer is not a float, a date or a decimal, so none of those take
+/// one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum OrderTarget {
+    /// An `i8`.
+    I8,
+    /// A `u8`.
+    U8,
+    /// An `i16`.
+    I16,
+    /// A `u16`.
+    U16,
+    /// An `i32`.
+    I32,
+    /// A `u32`.
+    U32,
+    /// An `i64`.
+    I64,
+    /// A `u64`.
+    U64,
+    /// An `i128`.
+    I128,
+    /// A `u128`.
+    U128,
+    /// An `f64`; an `f32` widens to it exactly.
+    F64,
+    /// A [`Logical::Date`].
+    Date,
+    /// A [`Logical::Timestamp`] in any unit, truncated to microseconds.
+    Timestamp,
+    /// A [`Logical::Decimal`] at any scale.
+    Decimal,
+    /// Text.
+    Text,
+    /// Bytes.
+    Bytes,
+    /// A [`Logical::Uuid`].
+    Uuid,
+}
+
+impl OrderTarget {
+    /// Every target, for a test or an index layer that enumerates them.
+    pub const ALL: &[OrderTarget] = &[
+        Self::I8,
+        Self::U8,
+        Self::I16,
+        Self::U16,
+        Self::I32,
+        Self::U32,
+        Self::I64,
+        Self::U64,
+        Self::I128,
+        Self::U128,
+        Self::F64,
+        Self::Date,
+        Self::Timestamp,
+        Self::Decimal,
+        Self::Text,
+        Self::Bytes,
+        Self::Uuid,
+    ];
+
+    /// The frozen domain label of every term of this target.
+    pub fn domain(self) -> &'static str {
+        match self {
+            Self::I8 => domain::INT8,
+            Self::U8 => domain::UINT8,
+            Self::I16 => domain::INT16,
+            Self::U16 => domain::UINT16,
+            Self::I32 => domain::INT32,
+            Self::U32 => domain::UINT32,
+            Self::I64 => domain::INT64,
+            Self::U64 => domain::UINT64,
+            Self::I128 => domain::INT128,
+            Self::U128 => domain::UINT128,
+            Self::F64 => domain::FLOAT64,
+            Self::Date => domain::DATE,
+            Self::Timestamp => domain::TIMESTAMP,
+            Self::Decimal => domain::DECIMAL,
+            Self::Text => domain::TEXT,
+            Self::Bytes => domain::BYTES,
+            Self::Uuid => domain::UUID,
+        }
+    }
+
+    /// The width of every term of this target, or `None` for text and
+    /// bytes, whose terms vary in length.
+    pub fn width(self) -> Option<usize> {
+        match self {
+            Self::I8 | Self::U8 => Some(1),
+            Self::I16 | Self::U16 => Some(2),
+            Self::I32 | Self::U32 | Self::Date => Some(4),
+            Self::I64 | Self::U64 | Self::F64 => Some(8),
+            Self::Timestamp => Some(12),
+            Self::Decimal => Some(14),
+            Self::I128 | Self::U128 | Self::Uuid => Some(16),
+            Self::Text | Self::Bytes => None,
+        }
     }
 }
 
-/// Encode one scalar for ordering, sealed with the domain its term
-/// belongs to. The one exhaustive match over the data model.
+/// Encode one scalar as `target`, sealed with the target's domain. The one
+/// place a value meets the data model.
 ///
-/// An integer encodes at its own width, big-endian, with the sign bit
-/// flipped when signed, so the bytes sort as the numbers do; a float the
-/// same, with every bit of a negative flipped, zero signs and NaN payloads
-/// folded first. A date, a timestamp, a decimal, bytes and a uuid encode
-/// exactly as [`vitaminc_normalize::normalize`] encodes them for equality.
-/// Text is Unicode 16 NFC with accents and case folded, so `É` and `e` tie.
+/// An integer is converted to the target's width, then encoded
+/// big-endian, with the sign bit flipped when signed, so the bytes sort
+/// as the numbers do. A float, a date, a timestamp, a decimal, bytes and
+/// a uuid encode exactly as [`vitaminc_normalize::normalize`] encodes
+/// them for equality. Text is Unicode 16 NFC with accents and case
+/// folded, so `É` and `e` tie.
+///
+/// # Examples
+///
+/// ```
+/// use vitaminc_ore::{domain, order, Int, NormalizeError, OrderTarget, Physical};
+///
+/// // Every integer width widens to the column's type.
+/// let small = order(OrderTarget::I32, None, Physical::Int(Int::I8(100)))?;
+/// let large = order(OrderTarget::I32, None, Physical::Int(Int::U64(300)))?;
+/// assert_eq!(small.domain(), domain::INT32);
+/// assert_eq!(large.domain(), domain::INT32);
+///
+/// // A value the column cannot hold is refused, not truncated.
+/// let big = Physical::Int(Int::I64(1 << 40));
+/// assert_eq!(order(OrderTarget::I32, None, big).err(), Some(NormalizeError::OutOfRange));
+/// assert_eq!(
+///     order(OrderTarget::I32, None, Physical::Text("1")).err(),
+///     Some(NormalizeError::Mismatch)
+/// );
+/// # Ok::<(), NormalizeError>(())
+/// ```
 ///
 /// # Errors
 ///
 /// [`NormalizeError::NoDomain`] for a null, a boolean, an `undefined` or a
-/// logical type outside the table; [`NormalizeError::Invalid`] for a value
-/// that does not fit its logical type;
-/// [`NormalizeError::UnassignedCodePoint`] for text holding a code point
-/// Unicode 16 does not assign.
-pub fn order(ty: Option<Logical>, v: Physical<'_>) -> Result<OrderPlaintext, NormalizeError> {
+/// logical type this build does not know; [`NormalizeError::Invalid`] for
+/// a value that does not fit its own logical type;
+/// [`NormalizeError::Mismatch`] for a value of another kind than
+/// `target`; [`NormalizeError::OutOfRange`] for an integer outside
+/// `target`'s width; [`NormalizeError::UnassignedCodePoint`] for text
+/// holding a code point Unicode 16 does not assign.
+pub fn order(
+    target: OrderTarget,
+    ty: Option<Logical>,
+    v: Physical<'_>,
+) -> Result<OrderPlaintext, NormalizeError> {
+    use OrderTarget as T;
     // As `normalize`: a value that does not fit its logical type is refused
-    // before the type is looked up.
+    // before the target is looked at.
     if ty.is_some_and(|ty| !ty.admits(&v)) {
         return Err(NormalizeError::Invalid);
     }
-    let domain = domain_of(ty, &v).ok_or(NormalizeError::NoDomain)?;
-    let bytes = match (ty, v) {
-        (None, Physical::Int(i)) => Some(int(i)),
-        (None, Physical::Float(f)) => Some(float(f)),
-        (None, Physical::Text(s)) => Some(text(s)?),
-        (None, Physical::Bytes(b)) => Some(vitaminc_normalize::bytes(b)),
-        (Some(Logical::Date), Physical::Int(days)) => vitaminc_normalize::date(days),
-        (Some(Logical::Timestamp(unit)), Physical::Int(count)) => {
-            vitaminc_normalize::timestamp(unit, count)
+    let bytes = match (target, ty, v) {
+        // A null, a boolean or an `undefined` has no order, whatever the
+        // column, and a walk skips it.
+        (_, None, Physical::Null | Physical::Bool(_)) | (_, Some(Logical::Undefined), _) => {
+            return Err(NormalizeError::NoDomain)
         }
-        (Some(Logical::Decimal { scale }), Physical::Int(mantissa)) => {
-            vitaminc_normalize::decimal(scale, mantissa)
+        (_, Some(Logical::Unknown(_)), _) => return Err(NormalizeError::NoDomain),
+        (target, None, Physical::Int(i)) if target.is_int() => {
+            int(convert(target, i).ok_or(NormalizeError::OutOfRange)?)
         }
-        (Some(Logical::Uuid), Physical::Bytes(b)) => vitaminc_normalize::uuid(b),
-        // `admits` has already refused a logical type over the wrong kind,
-        // and `domain_of` everything without a term.
+        (T::F64, None, Physical::Float(f)) => vitaminc_normalize::float(f),
+        (T::Text, None, Physical::Text(s)) => text(s)?,
+        (T::Bytes, None, Physical::Bytes(b)) => vitaminc_normalize::bytes(b),
+        (T::Date, Some(Logical::Date), Physical::Int(days)) => {
+            vitaminc_normalize::date(days).ok_or(NormalizeError::Invalid)?
+        }
+        (T::Timestamp, Some(Logical::Timestamp(unit)), Physical::Int(count)) => {
+            vitaminc_normalize::timestamp(unit, count).ok_or(NormalizeError::Invalid)?
+        }
+        (T::Decimal, Some(Logical::Decimal { scale }), Physical::Int(mantissa)) => {
+            vitaminc_normalize::decimal(scale, mantissa).ok_or(NormalizeError::Invalid)?
+        }
+        (T::Uuid, Some(Logical::Uuid), Physical::Bytes(b)) => {
+            vitaminc_normalize::uuid(b).ok_or(NormalizeError::Invalid)?
+        }
+        // Another kind than the column's, including a logical type added
+        // to the data model later: it has no term here until it is given
+        // a target.
+        _ => return Err(NormalizeError::Mismatch),
+    };
+    Ok(OrderPlaintext::new(target, bytes))
+}
+
+impl OrderTarget {
+    /// Whether this is an integer target.
+    fn is_int(self) -> bool {
+        matches!(
+            self,
+            Self::I8
+                | Self::U8
+                | Self::I16
+                | Self::U16
+                | Self::I32
+                | Self::U32
+                | Self::I64
+                | Self::U64
+                | Self::I128
+                | Self::U128
+        )
+    }
+}
+
+/// `value` at an integer target's width, or `None` if it does not fit.
+/// Every width converts through `i128`, except a `u128` above
+/// `i128::MAX`, which only a `u128` target holds.
+fn convert(target: OrderTarget, value: Int) -> Option<Int> {
+    let Some(v) = value.to_i128() else {
+        return match (target, value) {
+            (OrderTarget::U128, Int::U128(v)) => Some(Int::U128(v)),
+            _ => None,
+        };
+    };
+    match target {
+        OrderTarget::I8 => i8::try_from(v).ok().map(Int::I8),
+        OrderTarget::U8 => u8::try_from(v).ok().map(Int::U8),
+        OrderTarget::I16 => i16::try_from(v).ok().map(Int::I16),
+        OrderTarget::U16 => u16::try_from(v).ok().map(Int::U16),
+        OrderTarget::I32 => i32::try_from(v).ok().map(Int::I32),
+        OrderTarget::U32 => u32::try_from(v).ok().map(Int::U32),
+        OrderTarget::I64 => i64::try_from(v).ok().map(Int::I64),
+        OrderTarget::U64 => u64::try_from(v).ok().map(Int::U64),
+        OrderTarget::I128 => Some(Int::I128(v)),
+        OrderTarget::U128 => u128::try_from(v).ok().map(Int::U128),
         _ => None,
     }
-    .ok_or(NormalizeError::Invalid)?;
-    Ok(OrderPlaintext::new(domain, bytes))
 }
 
 /// An integer at its own width: big-endian, with the sign bit flipped for
 /// a signed width, so two's complement sorts as the numbers do. The same
 /// bytes `orderable-bytes` produces, checked against it in the tests.
-pub fn int(value: Int) -> Protected<Vec<u8>> {
+fn int(value: Int) -> Protected<Vec<u8>> {
     match value {
         Int::I8(v) => fixed(((v as u8) ^ (1 << 7)).to_be_bytes()),
         Int::U8(v) => fixed(v.to_be_bytes()),
@@ -163,16 +322,6 @@ pub fn int(value: Int) -> Protected<Vec<u8>> {
         Int::U64(v) => fixed(v.to_be_bytes()),
         Int::I128(v) => fixed(((v as u128) ^ (1 << 127)).to_be_bytes()),
         Int::U128(v) => fixed(v.to_be_bytes()),
-    }
-}
-
-/// A float at its own width, zero signs and NaN payloads folded: an `f64`
-/// as [`vitaminc_normalize::float`] encodes it, an `f32` by the same rule
-/// over its own four bytes. Both paths use integer operations only.
-pub fn float(value: Float) -> Protected<Vec<u8>> {
-    match value {
-        Float::F32(f) => fixed(orderable_f32(canonical_f32(f))),
-        Float::F64(_) => vitaminc_normalize::float(value),
     }
 }
 
@@ -194,29 +343,13 @@ fn fixed<const N: usize>(bytes: [u8; N]) -> Protected<Vec<u8>> {
     Protected::new(bytes.risky_ref().to_vec())
 }
 
-/// Folds every NaN to one quiet NaN and `-0.0` to `0.0`, in integer
-/// operations only: `vitaminc_normalize`'s `f64` rule at `f32` width.
-fn canonical_f32(value: f32) -> f32 {
-    let bits = value.to_bits();
-    let magnitude = bits & 0x7fff_ffff;
-    let nan = 0u32.wrapping_sub((magnitude > 0x7f80_0000) as u32);
-    let nonzero = 0u32.wrapping_sub((magnitude != 0) as u32);
-    f32::from_bits((bits & !nan).wrapping_add(0x7fc0_0000 & nan) & nonzero)
-}
-
-/// The orderable bytes of an `f32`: negatives flip every bit, positives
-/// the sign bit, so the bytes sort as the numbers do. Expects a value
-/// [`canonical_f32`] has already folded.
-fn orderable_f32(value: f32) -> [u8; 4] {
-    let bits = value.to_bits();
-    let sign_extension = ((bits as i32) >> 31) as u32;
-    (bits ^ (sign_extension | (1u32 << 31))).to_be_bytes()
-}
-
 /// The order normalizer, for [`vitaminc_normalize::Terms::by`]: [`order`]
-/// as a [`Normalize`], whose terms are sealed [`OrderPlaintext`]s.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Order;
+/// at one target, whose terms are sealed [`OrderPlaintext`]s. Every scalar
+/// of the walk is encoded as that target, so it suits a value of one kind
+/// throughout, such as an array column; a scalar of another kind stops
+/// the walk with [`NormalizeError::Mismatch`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Order(pub OrderTarget);
 
 impl Normalize for Order {
     type Term = OrderPlaintext;
@@ -228,30 +361,29 @@ impl Normalize for Order {
         ty: Option<Logical>,
         value: Physical<'_>,
     ) -> Result<OrderPlaintext, NormalizeError> {
-        order(ty, value)
+        order(self.0, ty, value)
     }
 }
 
-/// Every order term of `value`, in walk order, without encrypting it:
-/// [`vitaminc_normalize::terms`] under the [`Order`] normalizer.
+/// Every order term of `value` as `target`, in walk order, without
+/// encrypting it: [`vitaminc_normalize::terms`] under the [`Order`]
+/// normalizer.
 ///
 /// A null, a boolean or an `undefined` produces no term and does not stop
-/// the walk; a logical type with no order domain stops it, and so does a
-/// value encryption would refuse, for the same reason at the same path.
-/// [`vitaminc_normalize::Terms`] has the rules.
+/// the walk; a scalar of another kind than `target`, or one outside it,
+/// stops it, and so does a value encryption would refuse, for the same
+/// reason at the same path. [`vitaminc_normalize::Terms`] has the rules.
 ///
 /// # Examples
 ///
 /// ```
-/// use std::collections::BTreeMap;
 /// use vitaminc_normalize::Step;
-/// use vitaminc_ore::{domain, order_terms};
+/// use vitaminc_ore::{domain, order_terms, OrderTarget};
 ///
-/// let mut user = BTreeMap::new();
-/// user.insert("name", "Ada");
-/// let found = order_terms(&user)?;
-/// assert_eq!(found[0].path.steps(), [Step::Key("name".into())]);
-/// assert_eq!(found[0].normalized.domain(), domain::TEXT);
+/// let scores: Vec<u16> = vec![7, 9];
+/// let found = order_terms(OrderTarget::I32, &scores)?;
+/// assert_eq!(found[1].path.steps(), [Step::Index(1)]);
+/// assert_eq!(found[1].normalized.domain(), domain::INT32);
 /// # Ok::<(), vitaminc_ore::TermsError>(())
 /// ```
 ///
@@ -259,8 +391,11 @@ impl Normalize for Order {
 ///
 /// [`TermsError`]: what the walk refuses, a value encryption would refuse
 /// included, or the source's own failure.
-pub fn order_terms<P: Encrypt>(value: P) -> Result<Vec<Term<OrderPlaintext>>, TermsError> {
-    terms_by(Order, value)
+pub fn order_terms<P: Encrypt>(
+    target: OrderTarget,
+    value: P,
+) -> Result<Vec<Term<OrderPlaintext>>, TermsError> {
+    terms_by(Order(target), value)
 }
 
 #[cfg(test)]

@@ -2807,12 +2807,15 @@ dependencies = [
 name = "vitaminc-ore"
 version = "0.5.1"
 dependencies = [
+ "chrono",
  "orderable-bytes",
  "quickcheck",
  "quickcheck_macros",
+ "rust_decimal",
  "thiserror",
  "unicode-general-category",
  "unicode-normalization",
+ "uuid",
  "vitaminc-aead",
  "vitaminc-context",
  "vitaminc-normalize",

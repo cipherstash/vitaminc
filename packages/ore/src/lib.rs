@@ -6,8 +6,10 @@ mod fold;
 mod order;
 mod scheme;
 
-pub use order::{domain, domain_of, float, int, order, order_terms, text, Order};
-pub use scheme::{OrderError, OrderKeyInit, OrderPlaintext, OrderScheme};
+pub use order::{domain, order, order_terms, text, Order, OrderTarget};
+pub use scheme::{
+    OrderColumn, OrderEncrypt, OrderError, OrderKeyInit, OrderPlaintext, OrderScheme,
+};
 // The types in this crate's signatures, so a caller needs no second import:
 // a scheme encrypts values of the data model, and a typed scalar goes in
 // as `Raw(ty, physical)`, without depending on vitaminc-aead.

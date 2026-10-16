@@ -39,9 +39,9 @@ impl OrderScheme for Mock {
     fn encrypt_plaintext(
         &self,
         plaintext: &OrderPlaintext,
-        context: &Context<'_>,
+        salt: &Context<'_>,
     ) -> Result<MockTerm, OrderError<Infallible>> {
-        let mut salt = self.salt(plaintext, context).as_bytes().to_vec();
+        let mut salt = salt.as_bytes().to_vec();
         salt.extend_from_slice(self.key.risky_ref());
         Ok(MockTerm {
             salt,
@@ -85,14 +85,12 @@ impl<const N: usize> OrderScheme for Fixed<N> {
     fn encrypt_plaintext(
         &self,
         plaintext: &OrderPlaintext,
-        context: &Context<'_>,
+        salt: &Context<'_>,
     ) -> Result<MockTerm, OrderError<Infallible>> {
         if plaintext.width() != Some(N) {
             return Err(OrderError::unsupported::<Self>(plaintext));
         }
-        let mut term = self.0.encrypt_plaintext(plaintext, context)?;
-        term.salt = self.salt(plaintext, context).as_bytes().to_vec();
-        Ok(term)
+        self.0.encrypt_plaintext(plaintext, salt)
     }
 }
 

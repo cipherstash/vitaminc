@@ -36,6 +36,10 @@ version = "=1.1.0"
 # `plaintext::render`, the path notation the tests assert against.
 vitaminc-aead = { path = "../aead", features = ["chrono", "rust_decimal", "uuid", "test-support"] }
 quickcheck = "1.1.0"
+# Typed values as callers hold them, for the tests that encrypt them.
+chrono = { version = "0.4.44", default-features = false, features = ["std"] }
+rust_decimal = { version = "1.41", default-features = false, features = ["std"] }
+uuid = { version = "1", default-features = false }
 quickcheck_macros = "1.2.0"
 
 # The frozen release the integer and float encodings were ported from, so
