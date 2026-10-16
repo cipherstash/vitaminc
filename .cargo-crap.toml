@@ -70,7 +70,7 @@ exclude = ["tests/**", "src/test_support.rs"]
 #     here must be defined once in the whole workspace: a generic name such as
 #     `walk` or `date` would also hide functions in other crates (it once hid
 #     `vitaminc-aead`'s decrypt walk). The aead-napi functions carry a `js_`
-#     prefix for that reason. The CRAP gate checks this first; run
+#     prefix for that reason. The CRAP gate checks this before coverage; run
 #     `mise run crap:allow:check` after adding one.
 allow = [
     "**/random-derives/**",
