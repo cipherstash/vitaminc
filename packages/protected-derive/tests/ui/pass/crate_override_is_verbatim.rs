@@ -20,9 +20,11 @@ mod stand_in {
         }
     }
 
-    impl core::ops::BitAndAssign for Choice {
-        fn bitand_assign(&mut self, rhs: Self) {
-            self.0 &= rhs.0;
+    impl core::ops::BitAnd for Choice {
+        type Output = Self;
+
+        fn bitand(self, rhs: Self) -> Self {
+            Choice(self.0 & rhs.0)
         }
     }
 

@@ -2,6 +2,7 @@ use proc_macro::TokenStream;
 use syn::{parse_macro_input, DeriveInput};
 
 mod crate_path;
+mod hygiene;
 mod opaque_debug;
 mod timing_safe;
 

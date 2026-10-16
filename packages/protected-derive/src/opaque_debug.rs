@@ -1,9 +1,10 @@
 use std::collections::BTreeSet;
 
 use crate::crate_path::{parse_crate_value, protected_crate_path};
+use crate::hygiene::Locals;
 use proc_macro::TokenStream;
-use proc_macro2::TokenTree;
-use quote::{format_ident, quote, quote_spanned, ToTokens};
+use proc_macro2::{Span, TokenTree};
+use quote::{quote, quote_spanned, ToTokens};
 use syn::{
     ext::IdentExt, spanned::Spanned, Attribute, Data, DataEnum, DataStruct, DeriveInput, Field,
     Fields, Type,
@@ -13,9 +14,15 @@ use syn::{
 // caller's module, so every name they introduce or call must be one the input
 // cannot capture.
 //
-// - The formatter is `__opaque_debug_f`, and enum fields are bound as
-//   `__f_<name>` or `__fN`, so a field or a lowercase const parameter named
-//   `f` cannot collide with them.
+// - The formatter is `__opaque_debug_f`, and enum fields are bound by
+//   position as `__fN`, so a field or a lowercase const parameter named `f`
+//   cannot collide with them.
+// - Const parameters and items in the caller's scope must not capture the
+//   formatter parameter or the field bindings. `crate::hygiene::Locals` names
+//   them clear of every identifier in the input and emits dummy `fn`s that
+//   shadow such items: the formatter's in the `const _: () = { ... };` block
+//   around the impls, the field bindings' at the top of `fmt`. See that
+//   module for what each placement can and cannot capture.
 // - Macros and `core` items are called by absolute path (`::core::write!`,
 //   `::core::fmt::Debug`), so a same-named macro at the call site does not
 //   take their place.
@@ -62,29 +69,40 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     }
     let (debug_impl_generics, _, debug_where_clause) = debug_generics.split_for_impl();
 
+    let mut locals = Locals::new(input);
+    let formatter = locals.param("__opaque_debug_f", Span::call_site());
+
     let body = match &input.data {
-        Data::Struct(ds) => debug_body_for_struct(ds, &mask),
-        Data::Enum(de) => debug_body_for_enum(de, &mask),
+        Data::Struct(ds) => debug_body_for_struct(ds, &mask, &formatter),
+        Data::Enum(de) => debug_body_for_enum(de, &mask, &formatter, &mut locals),
         // For unions: just print the type name
         Data::Union(_) => quote! {
-            __opaque_debug_f.write_str(::core::any::type_name::<Self>())
+            #formatter.write_str(::core::any::type_name::<Self>())
         },
     };
 
-    Ok(quote! {
-        #marker_impl
+    let param_shadows = locals.param_shadows();
+    let body_shadows = locals.body_shadows();
 
-        #[automatically_derived]
-        impl #debug_impl_generics ::core::fmt::Debug
-            for #ident #ty_generics #debug_where_clause
-        {
-            fn fmt(
-                &self,
-                __opaque_debug_f: &mut ::core::fmt::Formatter<'_>,
-            ) -> ::core::fmt::Result {
-                #body
+    Ok(quote! {
+        const _: () = {
+            #param_shadows
+
+            #marker_impl
+
+            #[automatically_derived]
+            impl #debug_impl_generics ::core::fmt::Debug
+                for #ident #ty_generics #debug_where_clause
+            {
+                fn fmt(
+                    &self,
+                    #formatter: &mut ::core::fmt::Formatter<'_>,
+                ) -> ::core::fmt::Result {
+                    #body_shadows
+                    #body
+                }
             }
-        }
+        };
     })
 }
 
@@ -182,7 +200,11 @@ fn parse_attrs(input: &DeriveInput) -> syn::Result<OpaqueDebugAttrs> {
     Ok(attrs)
 }
 
-fn debug_body_for_struct(ds: &DataStruct, mask: &str) -> proc_macro2::TokenStream {
+fn debug_body_for_struct(
+    ds: &DataStruct,
+    mask: &str,
+    formatter: &syn::Ident,
+) -> proc_macro2::TokenStream {
     match &ds.fields {
         Fields::Named(named) => {
             // Use DebugStruct and decide per-field based on #[non_sensitive]
@@ -199,7 +221,7 @@ fn debug_body_for_struct(ds: &DataStruct, mask: &str) -> proc_macro2::TokenStrea
             });
 
             quote! {
-                __opaque_debug_f
+                #formatter
                     .debug_struct(::core::any::type_name::<Self>())
                     #(#fields)*
                     .finish()
@@ -217,14 +239,14 @@ fn debug_body_for_struct(ds: &DataStruct, mask: &str) -> proc_macro2::TokenStrea
             });
 
             quote! {
-                __opaque_debug_f
+                #formatter
                     .debug_tuple(::core::any::type_name::<Self>())
                     #(#fields)*
                     .finish()
             }
         }
         Fields::Unit => quote! {
-            __opaque_debug_f.write_str(::core::any::type_name::<Self>())
+            #formatter.write_str(::core::any::type_name::<Self>())
         },
     }
 }
@@ -232,13 +254,18 @@ fn debug_body_for_struct(ds: &DataStruct, mask: &str) -> proc_macro2::TokenStrea
 /// Each arm prints `path::Enum::` and then formats the variant through
 /// `debug_struct`/`debug_tuple`, so enum output matches struct output
 /// (`path::E::V { a: "***" }`) and honours `{:#?}`.
-fn debug_body_for_enum(de: &DataEnum, mask: &str) -> proc_macro2::TokenStream {
+fn debug_body_for_enum(
+    de: &DataEnum,
+    mask: &str,
+    formatter: &syn::Ident,
+    locals: &mut Locals,
+) -> proc_macro2::TokenStream {
     let arms = de.variants.iter().map(|v| {
         let v_ident = &v.ident;
         let variant_ns = has_non_sensitive(&v.attrs);
         let prefix = quote! {
             ::core::write!(
-                __opaque_debug_f,
+                #formatter,
                 "{}::",
                 ::core::any::type_name::<Self>(),
             )?;
@@ -248,14 +275,15 @@ fn debug_body_for_enum(de: &DataEnum, mask: &str) -> proc_macro2::TokenStream {
             Fields::Unit => quote! {
                 Self::#v_ident => {
                     #prefix
-                    __opaque_debug_f.write_str(::core::stringify!(#v_ident))
+                    #formatter.write_str(::core::stringify!(#v_ident))
                 }
             },
 
             Fields::Unnamed(fields) => {
                 // bind each field by ref
+                let mut arm = locals.scope();
                 let bind_ids: Vec<syn::Ident> = (0..fields.unnamed.len())
-                    .map(|i| format_ident!("__f{}", i, span = v.span()))
+                    .map(|i| arm.bind(&format!("__f{i}"), v.span()))
                     .collect();
 
                 let writes = fields.unnamed.iter().zip(&bind_ids).map(|(f, local)| {
@@ -269,7 +297,7 @@ fn debug_body_for_enum(de: &DataEnum, mask: &str) -> proc_macro2::TokenStream {
                 quote! {
                     Self::#v_ident( #( ref #bind_ids ),* ) => {
                         #prefix
-                        __opaque_debug_f
+                        #formatter
                             .debug_tuple(::core::stringify!(#v_ident))
                             #(#writes)*
                             .finish()
@@ -278,15 +306,18 @@ fn debug_body_for_enum(de: &DataEnum, mask: &str) -> proc_macro2::TokenStream {
             }
 
             Fields::Named(fields) => {
-                // Bind each field to a prefixed local rather than its own name,
-                // as the tuple arm does with `__f0`, `__f1`, ... so a field
-                // cannot shadow the generated locals.
+                // Bind each field by position, as the tuple arm does, rather
+                // than by its own name, so a field cannot shadow the generated
+                // locals and an uppercase field name does not give a binding
+                // that trips `non_snake_case`.
+                let mut arm = locals.scope();
                 let bindings: Vec<(&syn::Ident, syn::Ident)> = fields
                     .named
                     .iter()
-                    .map(|f| {
-                        let id = f.ident.as_ref().unwrap();
-                        (id, format_ident!("__f_{}", id, span = id.span()))
+                    .enumerate()
+                    .map(|(i, field)| {
+                        let id = field.ident.as_ref().unwrap();
+                        (id, arm.bind(&format!("__f{i}"), id.span()))
                     })
                     .collect();
 
@@ -304,7 +335,7 @@ fn debug_body_for_enum(de: &DataEnum, mask: &str) -> proc_macro2::TokenStream {
                 quote! {
                     Self::#v_ident { #( #pat_bindings ),* } => {
                         #prefix
-                        __opaque_debug_f
+                        #formatter
                             .debug_struct(::core::stringify!(#v_ident))
                             #(#writes)*
                             .finish()
