@@ -2,11 +2,13 @@ package vcffi
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"math/big"
 	"os"
+	"slices"
 	"testing"
 )
 
@@ -187,7 +189,12 @@ func signedLittle(b []byte) *big.Int {
 }
 
 // cipherCanonicalForm is canonicalForm for an accepted ciphertext tree,
-// where a value can only appear inside passthrough nodes.
+// where a value can only appear inside passthrough nodes. One more thing
+// may change here: the entries of a map come back sorted by key. Rust
+// writes a map's entries in the order it holds them (a struct's field
+// order, say), while Go reads a map into map[string]any, which keeps no
+// order, and writes it back with the keys sorted. Entry order is not
+// authenticated, so the decoder accepts either and the walker sorts.
 func cipherCanonicalForm(data []byte) []byte {
 	r := &reader{buf: data}
 	var out []byte
@@ -213,11 +220,26 @@ func cipherCanonicalForm(data []byte) []byte {
 			start := r.pos
 			n, _ := r.count()
 			out = append(append(out, tag), r.buf[start:r.pos]...)
+			// Each entry is walked onto out, then cut back off and kept
+			// aside, so the entries can be written in key order.
+			type entry struct {
+				key   string
+				bytes []byte
+			}
+			var entries []entry
 			for range n {
 				start := r.pos
-				_, _ = r.str()
+				key, _ := r.str()
+				mark := len(out)
 				out = append(out, r.buf[start:r.pos]...)
 				walk()
+				entries = append(entries, entry{key, bytes.Clone(out[mark:])})
+				out = out[:mark]
+			}
+			// The same order as encodeCipherText's slices.Sort over the keys.
+			slices.SortFunc(entries, func(a, b entry) int { return cmp.Compare(a.key, b.key) })
+			for _, e := range entries {
+				out = append(out, e.bytes...)
 			}
 		case ctPassthrough:
 			out = append(out, tag)
@@ -290,8 +312,8 @@ func FuzzUnmarshalCipherText(f *testing.F) {
 }
 
 // The walkers decide what may legitimately change, so pin that they rewrite
-// nested Undefined tags, negative-zero signs and envelope timestamps and
-// nothing else.
+// nested Undefined tags, negative-zero signs, envelope timestamps and
+// ciphertext map entry order and nothing else.
 func TestCanonicalWalkers(t *testing.T) {
 	negativeZero := []byte{0x14, 0, 0, 2, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	zero := []byte{0x14, 0, 0, 2, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -299,6 +321,9 @@ func TestCanonicalWalkers(t *testing.T) {
 	millis := []byte{0xF3, 3, 1, 0x05, 0x7b, 0, 0, 0, 0, 0, 0, 0}         // 123 ms
 	nanos := []byte{0x13, 0, 0, 0, 0, 0, 0, 0, 0, 0xc0, 0xd4, 0x54, 0x07} // 0 s, 123000000 ns
 	cat := func(parts ...[]byte) []byte { return bytes.Join(parts, nil) }
+	ctMapHeader := []byte{0x04, 2, 0, 0, 0}                   // ctMap of two entries
+	entryA := []byte{1, 0, 0, 0, 'a', 0x01, 1, 0, 0, 0, 0xAA} // "a": sealed leaf AA
+	entryB := []byte{1, 0, 0, 0, 'b', 0x01, 1, 0, 0, 0, 0xBB} // "b": sealed leaf BB
 	for _, tc := range []struct {
 		name string
 		walk func([]byte) []byte
@@ -322,6 +347,10 @@ func TestCanonicalWalkers(t *testing.T) {
 		{"sealed leaf of 0x01", cipherCanonicalForm, []byte{0x01, 1, 0, 0, 0, 0x01}, []byte{0x01, 1, 0, 0, 0, 0x01}},
 		{"ciphertext passthrough", cipherCanonicalForm, []byte{0x03, 1, 0, 0, 0, 0x05, 0xF0, 1, 0, 0, 0, 0x01}, []byte{0x03, 1, 0, 0, 0, 0x05, 0xF0, 1, 0, 0, 0, 0x00}},
 		{"ciphertext passthrough negative zero", cipherCanonicalForm, cat([]byte{0x05}, negativeZero), cat([]byte{0x05}, zero)},
+		{"ciphertext map in key order", cipherCanonicalForm, cat(ctMapHeader, entryA, entryB), cat(ctMapHeader, entryA, entryB)},
+		{"ciphertext map out of key order", cipherCanonicalForm, cat(ctMapHeader, entryB, entryA), cat(ctMapHeader, entryA, entryB)},
+		{"ciphertext map nested in a sequence", cipherCanonicalForm, cat([]byte{0x03, 1, 0, 0, 0}, ctMapHeader, entryB, entryA), cat([]byte{0x03, 1, 0, 0, 0}, ctMapHeader, entryA, entryB)},
+		{"ciphertext map entries keep their own children", cipherCanonicalForm, cat(ctMapHeader, entryB, cat([]byte{1, 0, 0, 0, 'a', 0x05}, negativeZero)), cat(ctMapHeader, cat([]byte{1, 0, 0, 0, 'a', 0x05}, zero), entryB)},
 	} {
 		if got := tc.walk(tc.data); !bytes.Equal(got, tc.want) {
 			t.Errorf("%s: got %x, want %x", tc.name, got, tc.want)
