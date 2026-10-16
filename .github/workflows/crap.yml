@@ -91,6 +91,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: check each allowlisted function name is defined once
+        # cargo-crap matches a bare name in `allow` against every function of
+        # that name in the workspace, so a generic name would exempt functions
+        # in other crates too. Runs first: it needs no build.
+        run: |
+          python3 -m unittest discover -s .github/scripts -p 'test_crap_allow_names_unique.py'
+          python3 .github/scripts/crap_allow_names_unique.py
+
       - uses: actions/cache@v6
         with:
           path: |
