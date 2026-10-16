@@ -20,7 +20,7 @@ pub enum Error {
     #[error("Vault returned a signature that is not valid base64: {0}")]
     Base64(#[from] base64::DecodeError),
     /// The public key comes back as PEM and has to become DER
-    /// `SubjectPublicKeyInfo` for the trait boundary (ADR 0001).
+    /// `SubjectPublicKeyInfo` for the trait boundary (ADR 0002).
     #[error(transparent)]
     Encoding(#[from] EncodingError),
     /// [`Sign`] takes a pre-computed digest, so the adapter can check its
@@ -208,7 +208,7 @@ impl GetPublicKey for VaultSigningKey {
     /// `export/public-key/:name/:version` is ungated by the key's
     /// `exportable` flag — it only ever hands out the public half — so
     /// this works on any asymmetric Transit key without extra
-    /// configuration. Vault returns PEM; ADR 0001 promises DER
+    /// configuration. Vault returns PEM; ADR 0002 promises DER
     /// `SubjectPublicKeyInfo`.
     async fn get_public_key(&self) -> Result<Vec<u8>, Self::Error> {
         let response = vaultrs::transit::key::export(
@@ -580,7 +580,7 @@ mod integration_tests {
 
         let signature = key.sign(&digest(algorithm)).await.unwrap();
 
-        // ADR 0001: `SEQUENCE { INTEGER r, INTEGER s }`, never 64 raw
+        // ADR 0002: `SEQUENCE { INTEGER r, INTEGER s }`, never 64 raw
         // bytes. Round-tripping through the canonical helpers proves it
         // parses as DER rather than merely starting with 0x30.
         assert_eq!(signature[0], 0x30);

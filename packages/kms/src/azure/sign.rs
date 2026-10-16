@@ -24,7 +24,7 @@ pub enum Error {
     #[error(transparent)]
     DigestLength(#[from] crate::DigestLengthError),
     /// A signature or public key could not be converted to or from the
-    /// canonical encoding of ADR 0001.
+    /// canonical encoding of ADR 0002.
     #[error("canonical encoding failed: {0}")]
     Encoding(#[from] crate::encoding::EncodingError),
     /// `getKey` returned a key with no public part. Key Vault releases no
@@ -44,7 +44,7 @@ pub enum Error {
 /// the trait's shape and the service's agree. The digest length is checked
 /// against the configured algorithm before any call goes out.
 ///
-/// Two conversions keep the canonical encodings of ADR 0001:
+/// Two conversions keep the canonical encodings of ADR 0002:
 ///
 /// - Key Vault returns an ECDSA signature as raw `r || s`; [`Sign`] turns
 ///   that into DER, and [`Verify`] turns the caller's DER back into raw.

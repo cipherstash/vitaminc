@@ -72,7 +72,7 @@ fn into_sized<const N: usize>(bytes: Vec<u8>) -> Result<[u8; N], Error> {
 /// after the server has once answered `404 unsupported path`; see
 /// [`generate_data_keys`](BatchGenerateDataKey::generate_data_keys).
 /// Isolation is per value either way, so there is deliberately no pooled
-/// Vault source (ADR 0002).
+/// Vault source (ADR 0003).
 ///
 /// `N` is the data key size in bytes and must be 16, 32 or 64; Vault
 /// accepts only 128-, 256- and 512-bit data keys.
@@ -489,7 +489,7 @@ mod tests {
         let source = VaultDataKeySource::<32>::new(test_client(&server), "transit", KEY_NAME);
         let keys = source.generate_data_keys(3).await.unwrap();
 
-        // One round trip for the whole batch is the point of ADR 0002.
+        // One round trip for the whole batch is the point of ADR 0003.
         mock.assert_calls_async(1).await;
         assert_eq!(keys.len(), 3);
         assert_eq!(keys[2].plaintext.clone().risky_unwrap(), [3u8; 32]);

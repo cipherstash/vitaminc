@@ -1,4 +1,4 @@
-//! The canonical encodings promised by ADR 0001, for adapters whose vendor
+//! The canonical encodings promised by ADR 0002, for adapters whose vendor
 //! returns something else: ECDSA signatures as DER `SEQUENCE { INTEGER r,
 //! INTEGER s }` and public keys as DER `SubjectPublicKeyInfo`.
 //!

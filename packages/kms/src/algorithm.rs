@@ -12,11 +12,11 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum SignatureAlgorithm {
-    /// ECDSA over P-256 with SHA-256. Signatures are DER-encoded (ADR 0001).
+    /// ECDSA over P-256 with SHA-256. Signatures are DER-encoded (ADR 0002).
     EcdsaP256Sha256,
-    /// ECDSA over P-384 with SHA-384. Signatures are DER-encoded (ADR 0001).
+    /// ECDSA over P-384 with SHA-384. Signatures are DER-encoded (ADR 0002).
     EcdsaP384Sha384,
-    /// ECDSA over P-521 with SHA-512. Signatures are DER-encoded (ADR 0001).
+    /// ECDSA over P-521 with SHA-512. Signatures are DER-encoded (ADR 0002).
     EcdsaP521Sha512,
     /// RSASSA-PSS with SHA-256 (MGF1-SHA-256, salt length = digest length).
     RsaPssSha256,
