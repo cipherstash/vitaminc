@@ -316,18 +316,36 @@ mod oracle {
     use super::*;
     use orderable_bytes::OrderableBytes;
 
+    /// Every width at once, compared as two lists rather than a chain of
+    /// `&&`, so a mismatch in any width fails the property.
     #[quickcheck]
     fn integers_match_orderable_bytes(v: i128, w: u128) -> bool {
-        bytes(None, Physical::Int(Int::I8(v as i8))) == (v as i8).to_orderable_bytes()
-            && bytes(None, Physical::Int(Int::I16(v as i16))) == (v as i16).to_orderable_bytes()
-            && bytes(None, Physical::Int(Int::I32(v as i32))) == (v as i32).to_orderable_bytes()
-            && bytes(None, Physical::Int(Int::I64(v as i64))) == (v as i64).to_orderable_bytes()
-            && bytes(None, Physical::Int(Int::I128(v))) == v.to_orderable_bytes()
-            && bytes(None, Physical::Int(Int::U8(w as u8))) == (w as u8).to_orderable_bytes()
-            && bytes(None, Physical::Int(Int::U16(w as u16))) == (w as u16).to_orderable_bytes()
-            && bytes(None, Physical::Int(Int::U32(w as u32))) == (w as u32).to_orderable_bytes()
-            && bytes(None, Physical::Int(Int::U64(w as u64))) == (w as u64).to_orderable_bytes()
-            && bytes(None, Physical::Int(Int::U128(w))) == w.to_orderable_bytes()
+        let int = |i: Int| bytes(None, Physical::Int(i));
+        let ours = [
+            int(Int::I8(v as i8)),
+            int(Int::I16(v as i16)),
+            int(Int::I32(v as i32)),
+            int(Int::I64(v as i64)),
+            int(Int::I128(v)),
+            int(Int::U8(w as u8)),
+            int(Int::U16(w as u16)),
+            int(Int::U32(w as u32)),
+            int(Int::U64(w as u64)),
+            int(Int::U128(w)),
+        ];
+        let frozen = [
+            (v as i8).to_orderable_bytes().to_vec(),
+            (v as i16).to_orderable_bytes().to_vec(),
+            (v as i32).to_orderable_bytes().to_vec(),
+            (v as i64).to_orderable_bytes().to_vec(),
+            v.to_orderable_bytes().to_vec(),
+            (w as u8).to_orderable_bytes().to_vec(),
+            (w as u16).to_orderable_bytes().to_vec(),
+            (w as u32).to_orderable_bytes().to_vec(),
+            (w as u64).to_orderable_bytes().to_vec(),
+            w.to_orderable_bytes().to_vec(),
+        ];
+        ours == frozen
     }
 
     /// For every number: `orderable-bytes` folds the zero sign but keeps
