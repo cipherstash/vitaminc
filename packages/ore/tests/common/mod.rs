@@ -5,19 +5,26 @@
 
 #![allow(dead_code)]
 
+use core::cmp::Ordering;
 use core::convert::Infallible;
 
 use vitaminc_ore::{Context, OrderError, OrderKeyInit, OrderPlaintext, OrderScheme};
 use vitaminc_protected::{Controlled, Protected};
 
-/// A term from a mock: the salt it was bound under and the plaintext
-/// bytes, which it "encrypts" by keeping. Orders by salt then bytes, so
-/// terms under one salt order as the values do and terms under different
-/// salts never compare equal.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// A term from a mock: the salt and key it was bound under and the
+/// plaintext bytes, which it "encrypts" by keeping. Terms under one salt
+/// and key compare as the values do; a mock refuses to compare terms of
+/// different columns, which a real scheme cannot always tell apart.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MockTerm {
     pub salt: Vec<u8>,
     pub bytes: Vec<u8>,
+}
+
+/// The mocks' comparison: the values' order within one column, `None`
+/// across columns.
+fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
+    (a.salt == b.salt).then(|| a.bytes.cmp(&b.bytes))
 }
 
 impl AsRef<[u8]> for MockTerm {
@@ -47,6 +54,10 @@ impl OrderScheme for Mock {
             salt,
             bytes: plaintext.bytes().risky_ref().clone(),
         })
+    }
+
+    fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
+        compare(a, b)
     }
 }
 
@@ -92,6 +103,10 @@ impl<const N: usize> OrderScheme for Fixed<N> {
         }
         self.0.encrypt_plaintext(plaintext, salt)
     }
+
+    fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
+        compare(a, b)
+    }
 }
 
 /// A scheme whose backend fails.
@@ -112,6 +127,10 @@ impl OrderScheme for Down {
         _: &Context<'_>,
     ) -> Result<MockTerm, OrderError<BackendDown>> {
         Err(OrderError::Backend(BackendDown))
+    }
+
+    fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
+        compare(a, b)
     }
 }
 

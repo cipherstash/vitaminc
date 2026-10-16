@@ -10,6 +10,7 @@
 //! is [`order`]) or a salt it could derive differently from another
 //! scheme.
 
+use core::cmp::Ordering;
 use core::fmt;
 
 use vitaminc_aead::plaintext::{self, SourceError};
@@ -125,8 +126,12 @@ impl<E> OrderError<E> {
 ///
 /// Terms compare only between terms of the same scheme, key, target and
 /// context: a column. The scheme keeps its own comparison (CLLW ORE and
-/// block ORE do not compare byte by byte) through its term's `Ord`, and
-/// its own stored bytes through `AsRef<[u8]>`.
+/// block ORE do not compare byte by byte) in [`compare`](Self::compare),
+/// and its own stored bytes through `AsRef<[u8]>`. A term is not `Ord`:
+/// that would promise an order between any two terms, and no term carries
+/// which column it came from, so two terms of different columns would
+/// compare as noise and break every sort and tree that trusted the
+/// promise.
 ///
 /// Implemented by the scheme crates behind a `vitaminc` feature, and by a
 /// mock in this crate's tests. An implementation reads the plaintext's
@@ -139,7 +144,7 @@ pub trait OrderScheme {
     const NAME: &'static str;
 
     /// What one term encrypts to.
-    type Term: Ord + AsRef<[u8]>;
+    type Term: AsRef<[u8]>;
 
     /// The scheme's own failure. [`Infallible`](core::convert::Infallible)
     /// for a scheme that cannot fail once keyed.
@@ -159,6 +164,20 @@ pub trait OrderScheme {
         plaintext: &OrderPlaintext,
         salt: &Context<'_>,
     ) -> Result<Self::Term, OrderError<Self::Error>>;
+
+    /// The order of two terms of one column, as the order of the values
+    /// they encrypt. Needs no key: that is what makes the scheme an order
+    /// scheme.
+    ///
+    /// Over the terms of one column this is a total order, so a caller may
+    /// sort with it. `None` says the two cannot be compared: one is not a
+    /// term of this scheme, or the two were not made to compare (block
+    /// ORE under different padding). A scheme returns `None` wherever it
+    /// can tell, and never falls back to comparing bytes it cannot order.
+    /// It cannot tell everything: two well-formed terms of different
+    /// columns may compare as noise, so a caller keeps a column's terms
+    /// together, as [`OrderColumn::compare`] says.
+    fn compare(a: &Self::Term, b: &Self::Term) -> Option<Ordering>;
 }
 
 /// What a caller does with any [`OrderScheme`]: open a column. Implemented
@@ -172,6 +191,7 @@ pub trait OrderEncrypt: OrderScheme {
     /// # Examples
     ///
     /// ```
+    /// use std::cmp::Ordering;
     /// use vitaminc_ore::{Int, OrderEncrypt, OrderTarget, Physical, Raw};
     /// # use vitaminc_ore::{Context, OrderError, OrderPlaintext, OrderScheme};
     /// # /// Keeps the bytes as they are, for the example. Any scheme will do.
@@ -184,12 +204,17 @@ pub trait OrderEncrypt: OrderScheme {
     /// #         use vitaminc_protected::Controlled;
     /// #         Ok(p.bytes().risky_ref().clone())
     /// #     }
+    /// #     fn compare(a: &Vec<u8>, b: &Vec<u8>) -> Option<Ordering> {
+    /// #         Some(a.cmp(b))
+    /// #     }
     /// # }
     /// # let scheme = Clear;
     ///
     /// let total = scheme.column(OrderTarget::I32, ("orders", "total"));
-    /// // Whatever width a value arrives at, it is encoded as the column's.
-    /// assert!(total.encrypt(41i8)? < total.encrypt(42i64)?);
+    /// // Whatever width a value arrives at, it is encoded as the column's,
+    /// // and the column compares its terms.
+    /// let (a, b) = (total.encrypt(41i8)?, total.encrypt(42i64)?);
+    /// assert_eq!(total.compare(&a, &b), Some(Ordering::Less));
     ///
     /// // A typed scalar goes in as `Raw`, into a column of its type.
     /// let placed = scheme.column(OrderTarget::Date, ("orders", "placed"));
@@ -280,6 +305,18 @@ impl<S: OrderScheme + ?Sized> OrderColumn<'_, S> {
             return Err(OrderError::Term(NormalizeError::Mismatch));
         }
         self.scheme.encrypt_plaintext(plaintext, &self.salt)
+    }
+
+    /// The order of two of this column's terms, as the order of the values
+    /// they encrypt: [`OrderScheme::compare`]. A total order over the
+    /// column's terms, so they sort by it.
+    ///
+    /// Both terms must be this column's. A term records nothing of its
+    /// column, so the scheme cannot always tell two columns' terms apart,
+    /// and may order them as noise. `None` where it can tell: a term not
+    /// of this scheme, or two terms not made to compare.
+    pub fn compare(&self, a: &S::Term, b: &S::Term) -> Option<Ordering> {
+        S::compare(a, b)
     }
 }
 

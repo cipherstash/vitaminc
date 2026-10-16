@@ -41,6 +41,7 @@ A caller opens a column on a scheme with its target and the context
 its terms compare within, and encrypts values there:
 
 ```rust
+use std::cmp::Ordering;
 use vitaminc_ore::{Int, Logical, NormalizeError, OrderEncrypt, OrderError, OrderTarget, Physical, Raw};
 # use vitaminc_ore::{Context, OrderPlaintext, OrderScheme};
 # /// Keeps the bytes as they are, for the example. Any scheme will do.
@@ -53,13 +54,17 @@ use vitaminc_ore::{Int, Logical, NormalizeError, OrderEncrypt, OrderError, Order
 #         use vitaminc_protected::Controlled;
 #         Ok(p.bytes().risky_ref().clone())
 #     }
+#     fn compare(a: &Vec<u8>, b: &Vec<u8>) -> Option<Ordering> {
+#         Some(a.cmp(b))
+#     }
 # }
 # let scheme = Clear;
 
 let total = scheme.column(OrderTarget::I32, ("orders", "total"));
 let three = total.encrypt(3i8)?;
 let forty = total.encrypt(40i64)?;
-assert!(three < forty);
+// The column compares its terms; a term alone has no order.
+assert_eq!(total.compare(&three, &forty), Some(Ordering::Less));
 
 // Outside the column's type, or of another kind: refused.
 assert!(matches!(
@@ -137,6 +142,7 @@ is implemented for every scheme and cannot be overridden, so no scheme
 can change what its terms are bound to.
 
 ```rust
+use core::cmp::Ordering;
 use core::convert::Infallible;
 use vitaminc_ore::{Context, OrderError, OrderPlaintext, OrderScheme};
 use vitaminc_protected::Controlled;
@@ -162,6 +168,12 @@ impl OrderScheme for FourBytes {
         term.extend_from_slice(plaintext.bytes().risky_ref());
         Ok(term)
     }
+
+    /// The scheme's own comparison, without a key. `None` for a term that
+    /// is not this scheme's; here, one of the wrong length.
+    fn compare(a: &Vec<u8>, b: &Vec<u8>) -> Option<Ordering> {
+        (a.len() == b.len()).then(|| a.cmp(b))
+    }
 }
 ```
 
@@ -174,7 +186,11 @@ the way a PRF is keyed, so an index layer constructs any scheme the same
 way.
 
 A term compares only with terms of the same scheme, key, target and
-context, which is what a column is. A column's leakage is the combined
+context, which is what a column is, through `column.compare(&a, &b)`
+(the scheme's [`OrderScheme::compare`], which needs no key). A term is
+plain bytes and records nothing of its column, so it is not `Ord`: a
+promise to order any two terms is one no order scheme can keep across
+columns, and a caller keeps a column's terms together. A column's leakage is the combined
 leakage of every term it holds: an order term reveals order, an equality
 term reveals equality, and a column that carries both reveals both.
 
