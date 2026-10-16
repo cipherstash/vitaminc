@@ -1,9 +1,9 @@
 # Two of the four vendor sources bind their bytes, and two cannot
 
-ADR 0003 gave every key provider a `Binding` and a `BindingSupport` constant,
+ADR 0004 gave every key provider a `Binding` and a `BindingSupport` constant,
 left all four vendor data key sources `Unbound`, and said the work of binding
 them needed its own migration answer. This is that work, and the answer is not
-the one ADR 0003 assumed: it said AWS KMS, Google Cloud KMS and Azure Key
+the one ADR 0004 assumed: it said AWS KMS, Google Cloud KMS and Azure Key
 Vault "each have a mechanism that could carry the same bytes". Two do. Azure's
 does not reach the path a data key actually takes.
 
@@ -87,7 +87,7 @@ did pass bindings must re-mint.
 - `dedup_retrieve` keys on the whole `(KeyId, Binding)` pair. A `Bound`
   backend answers the same id differently under different bindings — one of
   them by refusing — so deduping on the id alone would hand one item a key it
-  never asked for. This is the caching consequence ADR 0003 predicted,
+  never asked for. This is the caching consequence ADR 0004 predicted,
   arriving in the batch helper rather than in a cache.
 - `Binding` and `BindingSupport` moved from `provider` to `data_key`, beside
   the traits that now take and declare them, and are re-exported from
