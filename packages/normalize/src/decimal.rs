@@ -10,45 +10,21 @@
 //! The input is the mantissa and scale a [`Logical::Decimal`](vitaminc_aead::Logical::Decimal)
 //! leaf carries: `value = mantissa × 10^(-scale)`, with the mantissa in
 //! `(-2^96, 2^96)` and the scale at most 28, which is `rust_decimal`'s
-//! range. The caller checks that; the encoder assumes it.
+//! range. The encoder refuses anything outside it: a larger mantissa would
+//! lose its top bits and take the bytes of another value.
 //!
-//! ## Encoding (scientific form, base 10)
-//!
-//! Each non-zero value is re-expressed in signed scientific form:
-//!
-//! ```text
-//! value = ±significand × 10^(leading_exp − digits(significand) + 1)
-//! ```
-//!
-//! where `significand` is the mantissa with trailing zeros stripped and
-//! `leading_exp` is the decimal exponent of the leading significant digit,
-//! in `[-28, 28]`. The 14 bytes are:
-//!
-//! ```text
-//! byte 0       : [sign:1][biased_exp:7]
-//! bytes 1..=13 : padded_significand (104 bits, big-endian)
-//! ```
-//!
-//! - The sign bit is `1` for positive and zero, `0` for negative, so every
-//!   negative sorts below zero and zero below every positive.
-//! - The biased exponent is `leading_exp + 64`, in `[36, 92]` for a
-//!   non-zero value. Zero uses `0`, which no non-zero value reaches.
-//! - The padded significand is the significand left-justified to 29
-//!   digits by appending zeros, so values at one exponent compare
-//!   byte-wise however many digits they have. A 96-bit mantissa has at
-//!   most 29 digits, so the padded value fits 104 bits.
-//!
-//! For a negative, the exponent bits and the significand are inverted, so
-//! a larger magnitude sorts lower. `1`, `1.0` and `1.00` reduce to the
-//! same significand and exponent, and `+0` and `-0` to the same zero, so
-//! equal values are equal bytes, as `rust_decimal` compares them.
+//! The layout is documented on [`decimal`](crate::decimal), the public
+//! function that wraps this encoder, so it is in the published docs.
 //!
 //! ## Constant time
 //!
-//! [`orderable`] is straight-line code with fixed-iteration loops and
-//! branchless mask arithmetic: no branch on the sign, the zero-ness, the
-//! digit count, the trailing-zero count or the scale, and no hardware
-//! division, whose latency is data-dependent on some targets.
+//! Past the range check, [`orderable`] is straight-line code with
+//! fixed-iteration loops and branchless mask arithmetic: no branch on the
+//! sign, the zero-ness, the digit count, the trailing-zero count or the
+//! scale, and no hardware division, whose latency is data-dependent on
+//! some targets.
+
+use vitaminc_aead::plaintext::kinds::MAX_DECIMAL_SCALE;
 
 /// Width of the padded-significand field in bytes (104 bits).
 const MANTISSA_BYTES: usize = 13;
@@ -66,6 +42,9 @@ const SIGN_BIT: u8 = 0x80;
 /// The 7-bit exponent field of byte 0.
 const EXP_MASK: u8 = 0x7F;
 
+/// One past the largest mantissa magnitude: a mantissa fits 96 bits.
+const MANTISSA_LIMIT: u128 = 1 << 96;
+
 /// The length of the encoding.
 pub(crate) const ENCODED_LEN: usize = 14;
 
@@ -79,8 +58,13 @@ const INV5: u128 = 0xCCCC_CCCC_CCCC_CCCC_CCCC_CCCC_CCCC_CCCD;
 const MAX_DIV_5: u128 = u128::MAX / 5;
 
 /// The encoding of `mantissa × 10^(-scale)`. Two equal values give the
-/// same bytes, and the bytes sort as the values do.
-pub(crate) fn orderable(mantissa: i128, scale: u32) -> [u8; ENCODED_LEN] {
+/// same bytes, and the bytes sort as the values do. `None` if the mantissa
+/// does not fit 96 bits or the scale is above 28.
+pub(crate) fn orderable(mantissa: i128, scale: u8) -> Option<[u8; ENCODED_LEN]> {
+    if scale > MAX_DECIMAL_SCALE || mantissa.unsigned_abs() >= MANTISSA_LIMIT {
+        return None;
+    }
+    let scale = u32::from(scale);
     let mut out = [0u8; ENCODED_LEN];
 
     // The pipeline runs unconditionally: zero goes through the same steps
@@ -141,7 +125,7 @@ pub(crate) fn orderable(mantissa: i128, scale: u32) -> [u8; ENCODED_LEN] {
     let mant_nonzero_bit = ((abs_mantissa | abs_mantissa.wrapping_neg()) >> 127) as u8;
     let zero_mask = 0u8.wrapping_sub(mant_nonzero_bit ^ 1);
     out[0] = (out[0] & !zero_mask) | (SIGN_BIT & zero_mask);
-    out
+    Some(out)
 }
 
 /// Divide by ten while the trailing digit is zero: the stripped value and
@@ -192,6 +176,12 @@ mod tests {
 
     const U96_MAX: u128 = (1u128 << 96) - 1;
 
+    /// The encoding of an in-range value.
+    fn encode(mantissa: i128, scale: u32) -> [u8; ENCODED_LEN] {
+        let scale = u8::try_from(scale).expect("scale fits u8");
+        orderable(mantissa, scale).expect("in range")
+    }
+
     /// The frozen encoding this one was ported from.
     fn oracle(mantissa: i128, scale: u32) -> [u8; ENCODED_LEN] {
         Decimal::try_from_i128_with_scale(mantissa, scale)
@@ -204,20 +194,20 @@ mod tests {
         let mut expected = [0u8; ENCODED_LEN];
         expected[0] = SIGN_BIT;
         for scale in [0, 1, 3, 28] {
-            assert_eq!(orderable(0, scale), expected, "scale {scale}");
+            assert_eq!(encode(0, scale), expected, "scale {scale}");
         }
-        assert_eq!(orderable(-0, 0), expected);
+        assert_eq!(encode(-0, 0), expected);
     }
 
     #[test]
     fn equivalent_forms_encode_identically() {
-        let one = orderable(1, 0);
-        assert_eq!(orderable(10, 1), one);
-        assert_eq!(orderable(100, 2), one);
-        assert_eq!(orderable(1_000, 3), one);
+        let one = encode(1, 0);
+        assert_eq!(encode(10, 1), one);
+        assert_eq!(encode(100, 2), one);
+        assert_eq!(encode(1_000, 3), one);
         // 100 strips to significand 1 at exponent 2: the same significand
         // bytes as 1, and an exponent two higher.
-        let hundred = orderable(100, 0);
+        let hundred = encode(100, 0);
         assert_eq!(&one[1..], &hundred[1..]);
         assert_eq!(one[0], SIGN_BIT | EXP_BIAS as u8);
         assert_eq!(hundred[0], SIGN_BIT | (2 + EXP_BIAS) as u8);
@@ -225,9 +215,9 @@ mod tests {
 
     #[test]
     fn worked_examples() {
-        assert_eq!(orderable(5, 1)[0], SIGN_BIT | (-1 + EXP_BIAS) as u8);
-        assert_eq!(orderable(10, 0)[0], SIGN_BIT | (1 + EXP_BIAS) as u8);
-        let (neg_one, pos_one) = (orderable(-1, 0), orderable(1, 0));
+        assert_eq!(encode(5, 1)[0], SIGN_BIT | (-1 + EXP_BIAS) as u8);
+        assert_eq!(encode(10, 0)[0], SIGN_BIT | (1 + EXP_BIAS) as u8);
+        let (neg_one, pos_one) = (encode(-1, 0), encode(1, 0));
         assert_eq!(neg_one[0] & SIGN_BIT, 0);
         assert_eq!(neg_one[0] & EXP_MASK, !(EXP_BIAS as u8) & EXP_MASK);
         for i in 1..ENCODED_LEN {
@@ -254,10 +244,7 @@ mod tests {
         ];
         for pair in values.windows(2) {
             let (a, b) = (pair[0], pair[1]);
-            assert!(
-                orderable(a.0, a.1) < orderable(b.0, b.1),
-                "{a:?} < {b:?} failed"
-            );
+            assert!(encode(a.0, a.1) < encode(b.0, b.1), "{a:?} < {b:?} failed");
         }
     }
 
@@ -319,7 +306,7 @@ mod tests {
         let magnitude = u96(m) as i128;
         let mantissa = if negative { -magnitude } else { magnitude };
         let scale = u32::from(scale) % 29;
-        orderable(mantissa, scale) == oracle(mantissa, scale)
+        encode(mantissa, scale) == oracle(mantissa, scale)
     }
 
     #[test]
@@ -333,7 +320,7 @@ mod tests {
             (-1, 28),
             (0, 28),
         ] {
-            assert_eq!(orderable(mantissa, scale), oracle(mantissa, scale));
+            assert_eq!(encode(mantissa, scale), oracle(mantissa, scale));
         }
     }
 
@@ -348,6 +335,53 @@ mod tests {
             Decimal::try_from_i128_with_scale(a, sa).expect("in range"),
             Decimal::try_from_i128_with_scale(b, sb).expect("in range"),
         );
-        orderable(a, sa).cmp(&orderable(b, sb)) == x.cmp(&y)
+        encode(a, sa).cmp(&encode(b, sb)) == x.cmp(&y)
+    }
+
+    /// The encoder checks its own range, so no caller can hand it a
+    /// mantissa whose top bits it would drop.
+    #[test]
+    fn a_mantissa_or_scale_out_of_range_is_refused() {
+        let limit = 1i128 << 96;
+        assert!(orderable(limit - 1, 0).is_some(), "the largest mantissa");
+        assert!(orderable(1 - limit, 0).is_some(), "the smallest mantissa");
+        assert!(orderable(limit, 0).is_none(), "one past the largest");
+        assert!(orderable(-limit, 0).is_none(), "one past the smallest");
+        assert!(orderable(1, 28).is_some(), "the largest scale");
+        assert!(orderable(1, 29).is_none(), "one past the largest scale");
+    }
+
+    /// Every digit count, with and without trailing zeros, at every scale
+    /// and both signs. Random 96-bit mantissas almost all have 28 or 29
+    /// digits, so the quickcheck oracle above rarely reaches short ones.
+    #[test]
+    fn every_digit_count_scale_and_sign_matches_orderable_bytes() {
+        for k in 0..=28u32 {
+            let p = 10i128.pow(k);
+            for magnitude in [p, p - 1, 7 * p, 123_456_789 * p] {
+                if magnitude as u128 > U96_MAX {
+                    continue;
+                }
+                for scale in 0..=28u32 {
+                    for mantissa in [magnitude, -magnitude] {
+                        assert_eq!(
+                            encode(mantissa, scale),
+                            oracle(mantissa, scale),
+                            "{mantissa} at scale {scale}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Built from a short significand, so `s * 10^k` stays in range and
+    /// every case reaches the comparison.
+    #[quickcheck]
+    fn strip_distributes_over_powers_of_ten_for_short_significands(base: u32, k: u8) -> bool {
+        let (s, _) = strip_trailing_zeros(u128::from(base));
+        // `s` has at most 10 digits, so `s * 10^k` stays below 10^28.
+        let k = u32::from(k) % (29 - digit_count(s));
+        s == 0 || strip_trailing_zeros(s * 10u128.pow(k)) == (s, k as i32)
     }
 }
