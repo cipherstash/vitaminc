@@ -14,6 +14,7 @@ members = [
     "packages/encrypt",
     "packages/kms",
     "packages/normalize",
+    "packages/ore",
     "packages/protected",
     "packages/protected-derive",
     "packages/password",

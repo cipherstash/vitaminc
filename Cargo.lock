@@ -2649,6 +2649,7 @@ dependencies = [
  "vitaminc-hmac",
  "vitaminc-kms",
  "vitaminc-normalize",
+ "vitaminc-ore",
  "vitaminc-permutation",
  "vitaminc-prf",
  "vitaminc-protected",
@@ -2799,6 +2800,22 @@ dependencies = [
  "unicode-normalization",
  "uuid",
  "vitaminc-aead",
+ "vitaminc-protected",
+]
+
+[[package]]
+name = "vitaminc-ore"
+version = "0.5.1"
+dependencies = [
+ "orderable-bytes",
+ "quickcheck",
+ "quickcheck_macros",
+ "thiserror",
+ "unicode-general-category",
+ "unicode-normalization",
+ "vitaminc-aead",
+ "vitaminc-context",
+ "vitaminc-normalize",
  "vitaminc-protected",
 ]
 

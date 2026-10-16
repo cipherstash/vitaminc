@@ -28,6 +28,7 @@ vitaminc-async-traits = { path = "../async-traits", version = "0.5.1", optional 
 vitaminc-encrypt = { path = "../encrypt", version = "0.5.1", optional = true }
 vitaminc-aead = { path = "../aead", version = "0.5.1", optional = true }
 vitaminc-normalize = { path = "../normalize", version = "0.5.1", optional = true }
+vitaminc-ore = { path = "../ore", version = "0.5.1", optional = true }
 
 [features]
 protected = ["dep:vitaminc-protected"]
@@ -43,6 +44,7 @@ aws-kms = ["traits", "dep:vitaminc-kms"]
 aead = ["dep:vitaminc-aead", "context"]
 encrypt = ["traits", "aead", "dep:vitaminc-encrypt"]
 normalize = ["aead", "dep:vitaminc-normalize", "vitaminc-prf?/normalize"]
+ore = ["normalize", "dep:vitaminc-ore"]
 
 [[test]]
 name = "timing_safe_runtime"
