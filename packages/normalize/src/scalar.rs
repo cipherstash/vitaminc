@@ -70,9 +70,11 @@ pub struct Normalized {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum NormalizeError {
-    /// The scalar has no equality domain: a null, an `undefined`, a
-    /// boolean, or a logical type outside the opt-in table.
-    #[error("no equality domain for this kind of value")]
+    /// The scalar has no domain under the normalizer: a null, an
+    /// `undefined`, a boolean, or a logical type outside its opt-in table.
+    /// The message does not name an index, because the equality and order
+    /// normalizers both report it; whatever wraps it says which.
+    #[error("no domain for this kind of value")]
     NoDomain,
     /// The value is not valid for its logical type.
     #[error("the value is not valid for its logical type")]

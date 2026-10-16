@@ -19,6 +19,8 @@ struct LowByte;
 impl Normalize for LowByte {
     type Term = Normalized;
 
+    const INDEX: &'static str = "low byte";
+
     fn normalize(
         &self,
         ty: Option<Logical>,
@@ -68,6 +70,12 @@ fn a_logical_type_the_normalizer_refuses_stops_the_walk() {
     let term = err.term().expect("refused by the normalizer");
     assert_eq!(term.error(), NormalizeError::NoDomain);
     assert_eq!(render(term.path()), ".d");
+    // The refusal names the normalizer's index, not equality.
+    assert_eq!(term.index(), "low byte");
+    assert_eq!(
+        err.to_string(),
+        "no low byte term: no domain for this kind of value"
+    );
 }
 
 #[test]

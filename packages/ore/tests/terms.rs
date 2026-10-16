@@ -119,9 +119,18 @@ fn order_terms_refuse_what_equality_terms_refuse_at_the_same_path() {
     let term = err.term().expect("refused by the normalizer");
     assert_eq!(term.error(), NormalizeError::UnassignedCodePoint);
     assert_eq!(render(term.path()), ".x");
+    // Each refusal names the index it was building, and neither names the
+    // field or its value.
+    assert_eq!(term.index(), "order");
     assert_eq!(
         err.to_string(),
-        terms(doc).expect_err("refused").to_string()
+        "no order term: text contains a code point unassigned in Unicode 16"
+    );
+    let equality = terms(doc).expect_err("refused");
+    assert_eq!(equality.term().expect("refused").index(), "equality");
+    assert_eq!(
+        equality.to_string(),
+        "no equality term: text contains a code point unassigned in Unicode 16"
     );
 
     // A value encryption refuses is refused for its shape, before the

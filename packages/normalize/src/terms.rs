@@ -42,6 +42,11 @@ pub trait Normalize {
     /// What one scalar becomes.
     type Term;
 
+    /// The kind of index the terms are for, as a refusal names it:
+    /// `"equality"` for [`Equality`], so a scalar it cannot normalize is
+    /// reported as having no equality term.
+    const INDEX: &'static str;
+
     /// The term for one scalar, or why it has none.
     fn normalize(
         &self,
@@ -56,6 +61,8 @@ pub struct Equality;
 
 impl Normalize for Equality {
     type Term = Normalized;
+
+    const INDEX: &'static str = "equality";
 
     fn normalize(
         &self,
@@ -93,8 +100,10 @@ pub struct Term<T = Normalized> {
 /// shape, with every key masked. Read the path with
 /// [`path`](TermError::path).
 #[derive(Clone, OpaqueDebug, thiserror::Error)]
-#[error("no equality term: {error}")]
+#[error("no {index} term: {error}")]
 pub struct TermError {
+    #[non_sensitive]
+    index: &'static str,
     #[non_sensitive]
     path: Path,
     #[non_sensitive]
@@ -103,6 +112,12 @@ pub struct TermError {
 }
 
 impl TermError {
+    /// The kind of index the scalar has no term for: the normalizer's
+    /// [`Normalize::INDEX`].
+    pub fn index(&self) -> &'static str {
+        self.index
+    }
+
     /// Where the refused scalar sits, from the root.
     pub fn path(&self) -> &Path {
         &self.path
@@ -413,6 +428,7 @@ impl<'t, E: Error, N: Normalize + Copy> Sink for Terms<'t, E, N> {
             Err(NormalizeError::NoDomain) if matches!(ty, None | Some(Logical::Undefined)) => {}
             Err(error) => {
                 return Err(E::source(SourceError::new(TermError {
+                    index: N::INDEX,
                     path: self.at.path(self.keys.as_str()),
                     error,
                 })))

@@ -221,6 +221,8 @@ pub struct Order;
 impl Normalize for Order {
     type Term = OrderPlaintext;
 
+    const INDEX: &'static str = "order";
+
     fn normalize(
         &self,
         ty: Option<Logical>,

@@ -291,7 +291,7 @@ mod tests {
         type E = OrderError<&'static str>;
         assert_eq!(
             E::Term(NormalizeError::NoDomain).to_string(),
-            "no order term: no equality domain for this kind of value"
+            "no order term: no domain for this kind of value"
         );
         assert_eq!(
             E::Unsupported {

@@ -219,7 +219,7 @@ mod tests {
         let error: PrfError<core::convert::Infallible> = NormalizeError::NoDomain.into();
         assert_eq!(
             error.to_string(),
-            "cannot derive an equality term: no equality domain for this kind of value"
+            "cannot derive an equality term: no domain for this kind of value"
         );
     }
 
