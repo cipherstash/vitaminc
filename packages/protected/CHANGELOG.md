@@ -3,20 +3,13 @@
 
 ### Breaking
 
-- **Breaking:** implement TimingSafeEq for bool, floats and references
-- **Breaking:** raise the MSRV to 1.88 and pin kms to the AWS SDK floor
-- **Breaking:** resolve the protected crate path so derives work without a use
+- **Breaking:** `TimingSafeEq` now has a blanket `impl<T: TimingSafeEq + ?Sized> TimingSafeEq for &T`, which replaces the old `&str` impl. If your crate has its own `impl TimingSafeEq for &YourType` where `YourType: TimingSafeEq`, it now conflicts with the blanket impl and fails to compile. Delete it; the blanket impl provides the same comparison. There is no `&mut T` impl.
+- **Breaking:** the crate now declares a minimum supported Rust version of 1.88. 0.5.1 declared none.
 
-### Fixes
+### Features
 
-- keep generics on the Debug impl OpaqueDebug emits for enums
-- do not let a field named f shadow the Debug formatter
-- keep generated locals clear of the input's generics
-- finish OpaqueDebug hygiene and bound shown generic fields
-- keep TimingSafeEq locals clear of const parameters and qualify its paths
-- stop in-scope items and const parameters capturing OpaqueDebug locals
-- share derive hygiene so items and consts named like generated locals can't capture them in bounds or TimingSafeEq
-- let the derives build under a caller's forbid(dead_code) and with uppercase field names
+- `TimingSafeEq` is implemented for `bool`, `f32`, `f64` and `str`, and for any `&T` where `T: TimingSafeEq` (so `&[u8]`, `&str` and `&[T; N]` work). `#[derive(TimingSafeEq)]` now accepts borrowed fields such as `&'a [u8]` and fields of these types. Floats compare by bit pattern, not IEEE `==`: a `NaN` equals a `NaN` with the same bits, and `-0.0` does not equal `0.0`. Do not derive std's `PartialOrd` or `Ord` beside `TimingSafeEq` on a type with float fields, since the two disagree on `NaN` and signed zero; nothing warns about this.
+- The re-exported `OpaqueDebug` and `TimingSafeEq` derives no longer need a `use` of the trait, work through the `vitaminc` umbrella crate or a renamed dependency, and accept a `crate = "..."` attribute. They also fix several inputs that failed to compile in 0.5.1. See the `vitaminc-protected-derive` 0.6.0 changelog, including one case that now fails to compile.
 
 ## [0.5.1] - 2026-10-05
 

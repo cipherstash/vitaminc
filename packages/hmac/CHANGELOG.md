@@ -3,18 +3,11 @@
 
 ### Breaking
 
-- **Breaking:** make Value equality terms an opt-in `value` feature
-- **Breaking:** raise the MSRV to 1.88 and pin kms to the AWS SDK floor
+- **Breaking:** the crate now declares a minimum supported Rust version of 1.88. 0.5.1 declared none.
 
 ### Features
 
-- derive canonical equality from values
-- take Normalized instead of &Value
-
-### Fixes
-
-- match equal integers across widths in equality terms
-- match equal floats across widths in equality terms
+- The backend derives the new equality terms from `vitaminc-prf` (`Normalized` and `EqualityTerm`, behind `vitaminc-prf`'s `normalize` feature) with no change to its own API. Every equality domain is pinned by an HMAC known-answer vector. Output for the inputs 0.5.1 accepted is unchanged, so terms you stored with 0.5.1 still match.
 
 ## [0.5.1] - 2026-10-05
 

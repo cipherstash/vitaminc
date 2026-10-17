@@ -3,7 +3,7 @@
 
 ### Breaking
 
-- **Breaking:** raise the MSRV to 1.88 and pin kms to the AWS SDK floor
+- **Breaking:** the crate now declares a minimum supported Rust version of 1.94.1, above the 1.88 the other vitaminc crates declare. 0.5.1 declared none. The AWS SDK releases this crate resolves to (`aws-config` 1.9 and `aws-sdk-kms` 1.112 and later) need Rust 1.94.1, and the crate now declares that floor so the MSRV-aware resolver and crates.io report it. The AWS SDK version requirements themselves are unchanged (`aws-sdk-kms` 1.109.0, `aws-config` 1.8.18), so nothing changes in your own AWS dependencies; you need Rust 1.94.1 or later to build this crate. The same floor applies to the `aws-kms` feature of the `vitaminc` crate.
 
 ## [0.5.1] - 2026-10-05
 

@@ -3,12 +3,8 @@
 
 ### Breaking
 
-- **Breaking:** raise the MSRV to 1.88 and pin kms to the AWS SDK floor
-- **Breaking:** remove Encrypt, Decipher, DecipherVisitor, SeqAccess and MapAccess
-
-### Fixes
-
-- give ContextTag its async methods and say what the walk authenticates
+- **Breaking:** the crate now declares a minimum supported Rust version of 1.88. 0.5.1 declared none.
+- **Breaking:** `Context::for_none` is removed. `vitaminc-aead` 0.6 encrypts `None` as a null leaf, so there is no absence marker left to derive. Every other derivation produces the same bytes as in 0.5.1.
 
 ## [0.5.1] - 2026-10-05
 

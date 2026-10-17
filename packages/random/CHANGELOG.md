@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Breaking
 
-- **Breaking:** raise the MSRV to 1.88 and pin kms to the AWS SDK floor
+- **Breaking:** the crate now declares a minimum supported Rust version of 1.88. 0.5.1 declared none.
 
 ## [0.5.1] - 2026-10-05
 
