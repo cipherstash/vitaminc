@@ -649,7 +649,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vitaminc-aead"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "bytes",
  "futures-util",
@@ -664,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-aead-derive"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -673,14 +673,14 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-aead-frame"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "vitaminc-aead",
 ]
 
 [[package]]
 name = "vitaminc-context"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "mutants",
  "vitaminc-protected",
@@ -688,7 +688,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-encrypt"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "aes-gcm",
  "aws-lc-rs",
@@ -700,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-protected"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "bitvec",
  "digest",
@@ -715,7 +715,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-protected-derive"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -725,7 +725,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-random"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "chacha20",
  "getrandom",
@@ -738,7 +738,7 @@ dependencies = [
 
 [[package]]
 name = "vitaminc-random-derives"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "proc-macro2",
  "quote",
