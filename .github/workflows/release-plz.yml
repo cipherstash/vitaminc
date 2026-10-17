@@ -73,15 +73,17 @@ jobs:
           release="$RUNNER_TEMP/release-branch"
           git worktree add "$release" FETCH_HEAD
           python3 .github/scripts/sync_nested_lockfiles.py "$release"
-          cd "$release"
-          if git diff --quiet; then exit 0; fi
-          # release-plz force-pushes its PR only while every commit after the
-          # first is by a `[bot]` login. A person's identity here would make
-          # it close and reopen the release PR on every push to main.
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore: re-sync the nested lockfiles to the release version"
-          git push origin "HEAD:refs/heads/$branch"
+          if git -C "$release" diff --quiet; then exit 0; fi
+          # main requires signed commits, and a commit made here with git and
+          # pushed is unsigned. GitHub signs a commit it creates through the
+          # API, attributed to the release-plz app: a `[bot]` login, which
+          # release-plz needs on every commit after the first, or it closes
+          # and reopens the release PR on every push to main. The commit's
+          # parent is the head fetched above, so a branch that moved since is
+          # refused rather than overwritten.
+          python3 .github/scripts/commit_on_branch.py "$release" "$GITHUB_REPOSITORY" "$branch" \
+            "chore: re-sync the nested lockfiles to the release version" \
+            | gh api graphql --input - --jq '.data.createCommitOnBranch.commit.url'
 
   release-plz-release:
     name: "Release"
