@@ -4,6 +4,10 @@ git_tag_enable = true
 git_release_enable = true
 publish = true
 semver_check = true
+# Publish only when the commit on main is a merged release PR. Without this,
+# every push to main publishes any version not yet on crates.io, so a crate
+# added at the current version would be released straight from main.
+release_always = false
 
 # All packages release together as a single version group.
 [[package]]
@@ -89,18 +93,25 @@ version_group = "vitaminc"
 # Test-only workspace members under packages/derive-tests/ (`publish = false`).
 # Each pins one way a caller can depend on the vitaminc-protected derives. They
 # are never released and are deliberately not in the version group above.
+# `publish = false` here as well as `release = false`: without it they inherit
+# `publish = true` from [workspace], which contradicts their Cargo.toml, and
+# release-plz then refuses to release anything.
 [[package]]
 name = "derive-tests-direct"
 release = false
+publish = false
 
 [[package]]
 name = "derive-tests-override"
 release = false
+publish = false
 
 [[package]]
 name = "derive-tests-renamed"
 release = false
+publish = false
 
 [[package]]
 name = "derive-tests-umbrella-only"
 release = false
+publish = false

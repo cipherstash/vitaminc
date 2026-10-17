@@ -30,10 +30,58 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: release-plz/action@v0.5
+        id: release-plz
         with:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      # Two test workspaces keep their own lockfiles, which pin the workspace
+      # crates by version and which release-plz does not update: the Node
+      # addon (built with --locked, so a stale pin fails CI) and the Go
+      # bindings' wasm guest. Re-sync both on the release branch after every
+      # regeneration.
+      #
+      # The PR comes from release-plz's own output (set whether it opened
+      # the PR or updated it), not from a search: GitHub's search index lags
+      # a just-opened PR, so a search right after would miss it.
+      #
+      # This step holds a token that can push, so it trusts nothing on the
+      # branch. release-plz picks its PR by branch prefix alone, so the step
+      # checks the PR is open against main, from this repository, and by the
+      # release-plz app, never a fork's or anyone else's `release-plz-*`
+      # branch. And it runs no cargo there, which would honour the branch's
+      # .cargo/config.toml: main's script edits the lockfiles as text, in a
+      # separate worktree, so nothing from the branch executes.
+      - name: Re-sync the nested lockfiles on the release branch
+        if: steps.release-plz.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ fromJSON(steps.release-plz.outputs.pr).number }}
+        run: |
+          branch=$(gh pr view "$PR_NUMBER" \
+            --json state,baseRefName,isCrossRepository,author,headRefName \
+            --jq 'select(.state == "OPEN" and .baseRefName == "main"
+                    and (.isCrossRepository | not)
+                    and .author.login == "app/cipherstash-release-plz"
+                    and (.headRefName | startswith("release-plz-"))) | .headRefName')
+          if [ -z "$branch" ]; then
+            echo "PR #$PR_NUMBER is not release-plz's own release PR; not re-syncing" >&2
+            exit 1
+          fi
+          git fetch origin "refs/heads/$branch"
+          release="$RUNNER_TEMP/release-branch"
+          git worktree add "$release" FETCH_HEAD
+          python3 .github/scripts/sync_nested_lockfiles.py "$release"
+          cd "$release"
+          if git diff --quiet; then exit 0; fi
+          # release-plz force-pushes its PR only while every commit after the
+          # first is by a `[bot]` login. A person's identity here would make
+          # it close and reopen the release PR on every push to main.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: re-sync the nested lockfiles to the release version"
+          git push origin "HEAD:refs/heads/$branch"
 
   release-plz-release:
     name: "Release"
