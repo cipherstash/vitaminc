@@ -1,4 +1,31 @@
 
+## [0.6.0] - 2026-10-17
+
+### Breaking
+
+- **Breaking:** make the value model reusable
+- **Breaking:** raise the MSRV to 1.88 and pin kms to the AWS SDK floor
+- **Breaking:** reduce Aes256Cipher to seal and open
+- **Breaking:** tag the static cipher's payloads so absence and a value cannot be swapped
+- **Breaking:** seal tagged leaves as wire version 2 so 0.5 ciphertext is refused, not misread
+- **Breaking:** remove Encrypt, Decipher, DecipherVisitor, SeqAccess and MapAccess
+- **Breaking:** name the source trait Encrypt so it pairs with Decrypt
+
+### Documentation
+
+- name every runtime failure a derived type can still hit, and say an Encrypt
+
+### Features
+
+- preserve database scalar kinds
+- implement the sink-based Cipher for Aes256Cipher
+
+### Fixes
+
+- validate a PassthroughFrame before it is spliced into the transport
+- wipe the static cipher's working copies of the plaintext
+- give ContextTag its async methods and say what the walk authenticates
+
 ## [0.5.1] - 2026-10-05
 
 ## [0.5.0] - 2026-09-20

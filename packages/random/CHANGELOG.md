@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-17
+
+### Breaking
+
+- **Breaking:** raise the MSRV to 1.88 and pin kms to the AWS SDK floor
+
 ## [0.5.1] - 2026-10-05
 
 ## [0.5.0] - 2026-09-20

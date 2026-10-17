@@ -1,4 +1,21 @@
 
+## [0.6.0] - 2026-10-17
+
+### Breaking
+
+- **Breaking:** make Value equality terms an opt-in `value` feature
+- **Breaking:** raise the MSRV to 1.88 and pin kms to the AWS SDK floor
+
+### Features
+
+- derive canonical equality from values
+- take Normalized instead of &Value
+
+### Fixes
+
+- match equal integers across widths in equality terms
+- match equal floats across widths in equality terms
+
 ## [0.5.1] - 2026-10-05
 
 ## [0.5.0] - 2026-09-20

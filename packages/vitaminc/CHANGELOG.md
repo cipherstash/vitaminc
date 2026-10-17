@@ -1,4 +1,20 @@
 
+## [0.6.0] - 2026-10-17
+
+### Breaking
+
+- **Breaking:** raise the MSRV to 1.88 and pin kms to the AWS SDK floor
+
+### Features
+
+- add vitaminc-normalize with the Terms sink
+- take Normalized instead of &Value
+- add vitaminc-ore, the sealed order encoding per kind and the scheme trait
+
+### Fixes
+
+- finish OpaqueDebug hygiene and bound shown generic fields
+
 ## [0.5.1] - 2026-10-05
 
 ## [0.5.0] - 2026-09-20

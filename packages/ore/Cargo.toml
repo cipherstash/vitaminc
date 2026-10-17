@@ -19,10 +19,10 @@ rust-version.workspace = true
 exclude = ["tools/"]
 
 [dependencies]
-vitaminc-aead = { version = "0.5.1", path = "../aead" }
-vitaminc-context = { version = "0.5.1", path = "../context" }
-vitaminc-normalize = { version = "0.5.1", path = "../normalize" }
-vitaminc-protected = { version = "0.5.1", path = "../protected" }
+vitaminc-aead = { version = "0.6.0", path = "../aead" }
+vitaminc-context = { version = "0.6.0", path = "../context" }
+vitaminc-normalize = { version = "0.6.0", path = "../normalize" }
+vitaminc-protected = { version = "0.6.0", path = "../protected" }
 thiserror = { workspace = true }
 
 # As in vitaminc-normalize: NFD and NFC are stable for assigned code
