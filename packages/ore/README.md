@@ -170,11 +170,18 @@ impl OrderScheme for FourBytes {
     }
 
     /// The scheme's own comparison, without a key. `None` for a term that
-    /// is not this scheme's; here, one of the wrong length.
+    /// is not this scheme's, or for two terms of different columns: here,
+    /// a term shorter than its four bytes, or two salts that differ.
     fn compare(a: &Vec<u8>, b: &Vec<u8>) -> Option<Ordering> {
-        (a.len() == b.len()).then(|| a.cmp(b))
+        let (a_salt, a_bytes) = a.split_at(a.len().checked_sub(4)?);
+        let (b_salt, b_bytes) = b.split_at(b.len().checked_sub(4)?);
+        (a_salt == b_salt).then(|| a_bytes.cmp(b_bytes))
     }
 }
+
+assert_eq!(FourBytes::compare(&b"salt\0\0\0\x01".to_vec(), &b"salt\0\0\0\x02".to_vec()), Some(Ordering::Less));
+assert_eq!(FourBytes::compare(&b"salt\0\0\0\x01".to_vec(), &b"SALT\0\0\0\x02".to_vec()), None);
+assert_eq!(FourBytes::compare(&vec![], &vec![]), None);
 ```
 
 The salt is `PAE("vitaminc/ore/v1", scheme, domain, context)`, derived
