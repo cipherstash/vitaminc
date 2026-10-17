@@ -15,7 +15,7 @@ use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
 use vitaminc_normalize::{domain as equality, normalize};
 use vitaminc_ore::{
     domain, order, Context, IntoContext, NormalizeError, OrderEncrypt, OrderError, OrderKeyInit,
-    OrderTarget, Raw,
+    OrderScheme, OrderTarget, Raw,
 };
 use vitaminc_protected::{Controlled, Protected};
 
@@ -191,7 +191,12 @@ fn every_kind_has_an_order_target_or_is_a_named_exception() {
             column.encrypt_term(&below).expect("mock"),
             column.encrypt_term(&above).expect("mock"),
         );
-        assert_eq!(x.cmp(&y), Ordering::Less, "{}", kind.domain);
+        assert_eq!(
+            column.compare(&x, &y),
+            Some(Ordering::Less),
+            "{}",
+            kind.domain
+        );
     }
     // The exceptions: no order term under any target, and the walk skips
     // them.
@@ -574,7 +579,13 @@ fn typed_values_encrypt_into_the_column_of_their_type() {
         date,
         typed(T::Date, Logical::Date, Physical::Int(Int::I32(19_000)))
     );
-    assert!(dates.encrypt(day.pred_opt().expect("date")).expect("date") < date);
+    assert_eq!(
+        dates.compare(
+            &dates.encrypt(day.pred_opt().expect("date")).expect("date"),
+            &date
+        ),
+        Some(Ordering::Less)
+    );
     let at = Utc
         .timestamp_opt(1_700_000_000, 123_456_789)
         .single()
@@ -610,11 +621,10 @@ fn typed_values_encrypt_into_the_column_of_their_type() {
 fn order_through_a_column_is_value_order(a: i32, b: i16, text_a: String, text_b: String) -> bool {
     let mock = Mock::new(key());
     let ints = mock.column(T::I64, "col");
-    let int_order = ints
-        .encrypt(a)
-        .expect("mock")
-        .cmp(&ints.encrypt(b).expect("mock"))
-        == i64::from(a).cmp(&i64::from(b));
+    let int_order = ints.compare(
+        &ints.encrypt(a).expect("mock"),
+        &ints.encrypt(b).expect("mock"),
+    ) == Some(i64::from(a).cmp(&i64::from(b)));
     // Bytes compare as bytes; text ties where it folds together, so only
     // bytes are checked for order here.
     let bytes = mock.column(T::Bytes, "col");
@@ -623,9 +633,45 @@ fn order_through_a_column_is_value_order(a: i32, b: i16, text_a: String, text_b:
             .encrypt(Raw(None, Physical::Bytes(s.as_bytes())))
             .expect("mock")
     };
-    let byte_order =
-        under(&text_a).cmp(&under(&text_b)) == text_a.as_bytes().cmp(text_b.as_bytes());
+    let byte_order = bytes.compare(&under(&text_a), &under(&text_b))
+        == Some(text_a.as_bytes().cmp(text_b.as_bytes()));
     int_order && byte_order
+}
+
+#[test]
+fn a_column_sorts_its_own_terms_and_refuses_another_columns() {
+    let mock = Mock::new(key());
+    let column = mock.column(T::I32, "col");
+    let mut terms: Vec<_> = [5i32, -3, 9, 0]
+        .into_iter()
+        .map(|v| column.encrypt(v).expect("mock"))
+        .collect();
+    // The column's comparison is total over its terms, so they sort by it.
+    terms.sort_by(|a, b| column.compare(a, b).expect("one column"));
+    assert_eq!(
+        terms.iter().map(|t| t.bytes.clone()).collect::<Vec<_>>(),
+        [-3i32, 0, 5, 9]
+            .into_iter()
+            .map(|v| (v as u32 ^ 0x8000_0000).to_be_bytes().to_vec())
+            .collect::<Vec<_>>()
+    );
+    // Another column's term, under another context, another key or another
+    // scheme, has no order against them: the mock can tell, a real scheme
+    // often cannot, so a caller never mixes them.
+    let own = &terms[0];
+    let other_context = mock.column(T::I32, "other").encrypt(1i32).expect("mock");
+    let other_key = Mock::new(Protected::new([8; 32]))
+        .column(T::I32, "col")
+        .encrypt(1i32)
+        .expect("mock");
+    let other_scheme = Fixed::<4>(Mock::new(key()))
+        .column(T::I32, "col")
+        .encrypt(1i32)
+        .expect("mock");
+    for foreign in [other_context, other_key, other_scheme] {
+        assert_eq!(column.compare(own, &foreign), None);
+        assert_eq!(Mock::compare(own, &foreign), None);
+    }
 }
 
 #[test]
