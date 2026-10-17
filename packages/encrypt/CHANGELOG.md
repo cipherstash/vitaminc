@@ -1,4 +1,26 @@
 
+## [0.6.0] - 2026-10-17
+
+### Breaking
+
+- **Breaking:** the crate now declares a minimum supported Rust version of 1.88. 0.5.1 declared none.
+- **Breaking:** `Aes256Cipher` follows `vitaminc-aead` 0.6's new data model (ADR 0001). It implements the new `Cipher` trait (`seal` and `open` one leaf) and nothing else. For a caller upgrading from 0.5.1:
+  - `encrypt(key, value)` becomes `encrypt_with_key(key, value)`. `encrypt` is now `vitaminc_aead::encrypt(value, &cipher, aad)`, re-exported here, with `decrypt::<T, _, _>(&cipher, ciphertext, aad)` and `decrypt_into`. `decrypt_with_key` is the one-shot form of `decrypt`.
+  - `Aes256Cipher::decrypt`, `decrypt_with_aad` and `decipher` are removed, with `AesDecipher`, `AesSeqCipher`, `AesMapCipher`, `BoxedPassthrough` and `decrypt_passthrough_as`. A passthrough field is decrypted by its type's `Decrypt`.
+  - `AesCipherText` is now `Node<LocalCipherText>`. Errors are `EncryptError` and `DecryptError` instead of `Unspecified`.
+  - `Key` no longer implements `Encrypt`. Wrap a key with `key.wrap(&kek, aad)` and read it back with `Key::from_wrapped(&kek, wrapped, aad)`.
+  - With the `hlist` feature, the static openers `open` and `open_entry` are renamed `open_encrypted` and `open_encrypted_entry`, so they no longer shadow `Cipher::open`.
+- **Breaking:** 0.5.x ciphertext does not decrypt under 0.6.0, and 0.6.0 ciphertext does not decrypt under 0.5.x. Leaves are sealed under wire version 2 and their plaintext now starts with a type tag. 0.5's `Encrypt` path sealed raw, untagged bytes under version 1, so `Aes256Cipher`, `decrypt`, `decrypt_with_key` and the `hlist` openers refuse every version 1 leaf with `DecryptError::Cipher` (or `Unspecified`) rather than read the first byte of the value as a tag. There is no in-place upgrade: decrypt 0.5 data with 0.5 and encrypt it again with 0.6. This covers keys wrapped with 0.5 too.
+- **Breaking:** with the `hlist` feature, `encrypt_bytes` seals a tagged bytes leaf and an absence is a null leaf sealed under the field's own AAD, the same leaves the sink-based path seals. A value and an absence cannot stand in for each other. Ciphertext from the 0.5 static cipher does not open.
+
+### Security
+
+- `Key` no longer implements `Encrypt`. In 0.5 any crate could walk a key into its own cipher and receive the key bytes. `Key::wrap` and `Key::from_wrapped` keep that walk inside this crate.
+
+### Features
+
+- `Aes256Cipher::opening_version_1()` gives a view that also opens version 1 leaves, for ciphertext from the tagged 0.5 `Value` path (`vitaminc-aead-value` and the Go binding). It still seals version 2. Do not use it for data from 0.5's `Encrypt` path: such a leaf can open as a different value with no error.
+
 ## [0.5.1] - 2026-10-05
 
 ## [0.5.0] - 2026-09-20

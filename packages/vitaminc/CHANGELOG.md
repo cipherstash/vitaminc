@@ -1,4 +1,15 @@
 
+## [0.6.0] - 2026-10-17
+
+### Breaking
+
+- **Breaking:** the crate now declares a minimum supported Rust version of 1.88. 0.5.1 declared none. The `aws-kms` feature needs Rust 1.94.1, because `vitaminc-kms` carries the AWS SDK's floor.
+
+### Features
+
+- New `normalize` feature, which re-exports `vitaminc-normalize` as `vitaminc::normalize` (normalized equality terms for the plaintext data model). It also turns on the `aead` feature. With `prf` enabled as well, it turns on `vitaminc-prf`'s `normalize` feature, so `vitaminc::prf::EqualityTerm` is available and `vitaminc::normalize::Normalized` implements `vitaminc::prf::PrfValue`.
+- New `ore` feature, which re-exports `vitaminc-ore` as `vitaminc::ore` (order terms for the plaintext data model). It turns on `normalize`.
+
 ## [0.5.1] - 2026-10-05
 
 ## [0.5.0] - 2026-09-20

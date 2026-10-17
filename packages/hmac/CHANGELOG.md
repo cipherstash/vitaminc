@@ -1,4 +1,14 @@
 
+## [0.6.0] - 2026-10-17
+
+### Breaking
+
+- **Breaking:** the crate now declares a minimum supported Rust version of 1.88. 0.5.1 declared none.
+
+### Features
+
+- The backend derives the new equality terms from `vitaminc-prf` (`Normalized` and `EqualityTerm`, behind `vitaminc-prf`'s `normalize` feature) with no change to its own API. Every equality domain is pinned by an HMAC known-answer vector. Output for the inputs 0.5.1 accepted is unchanged, so terms you stored with 0.5.1 still match.
+
 ## [0.5.1] - 2026-10-05
 
 ## [0.5.0] - 2026-09-20
