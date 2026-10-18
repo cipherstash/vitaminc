@@ -24,3 +24,8 @@ the property itself.
   named types. See `docs/adr/0002-leaves-are-authenticated-container-membership-and-order-are-not.md`.
   A leaf that is *not* bound to its context, key, role, type or version is
   still a real defect: report that.
+- **Emptiness is the exception, and is authenticated.** An empty sequence or
+  map is sealed as an authenticated marker (`EmptySequence`, `EmptyMap`),
+  and a reader refuses a sequence or map that holds no sealed leaf. So a
+  non-empty container can lose entries but cannot be emptied. A change that
+  weakens either check is a real defect: report it.
