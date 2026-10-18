@@ -19,9 +19,11 @@ description = "Gate on the CRAP (Change Risk Anti-Patterns) metric across the wo
 run = [
   # llvm-tools-preview is required by cargo-llvm-cov; adding it is idempotent.
   "rustup component add llvm-tools-preview",
-  # Default features, matching the primary `cargo test` gate (aws-lc-rs backend).
+  # Default features, matching the primary `cargo test` gate (aws-lc-rs backend),
+  # plus the optional features whose code would otherwise go uninstrumented and
+  # score as 0% covered (`missing = "pessimistic"`): `vitaminc-aead-frame/serde`.
   # Needs LocalStack running for the vitaminc-kms tests, same as `cargo test`.
-  "cargo llvm-cov --workspace --lcov --output-path {{ config_root }}/target/vitaminc-lcov.info",
+  "cargo llvm-cov --workspace --features vitaminc-aead-frame/serde --lcov --output-path {{ config_root }}/target/vitaminc-lcov.info",
   # Score against the threshold + exclude/allow rules in .cargo-crap.toml.
   # `--fail-above` mirrors the CI gate, so a green local run means a green CI run.
   "cargo crap --workspace --lcov {{ config_root }}/target/vitaminc-lcov.info --fail-above",
