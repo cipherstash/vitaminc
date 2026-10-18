@@ -112,14 +112,15 @@ jobs:
       - name: format
         run: cargo fmt -- --check
 
-      # The release workflow runs this script on main only, so its first
-      # real run would be after a change to it merged. The config test
+      # The release workflow runs these scripts on main only, so their first
+      # real run would be after a change to them merged. The config test
       # catches a workspace member that release-plz.toml would try to
       # publish although the crate is not publishable, which fails every
       # Release run and nothing else checks.
       - name: release lockfile re-sync and release-plz config (script tests)
         run: |
           python3 -m unittest discover -s .github/scripts -p 'test_sync_nested_lockfiles.py'
+          python3 -m unittest discover -s .github/scripts -p 'test_commit_on_branch.py'
           python3 -m unittest discover -s .github/scripts -p 'test_release_plz_config.py'
 
       # Broken intra-doc links are invisible without this: rustdoc warns and
