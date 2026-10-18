@@ -91,12 +91,16 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.has_rust_changes == 'true') }}
     runs-on: ubuntu-latest
     name: "🧬 Mutants gate"
+    # A PR run usually takes under 10 minutes, so one still going after an
+    # hour is mutating far more than its diff; fail it rather than hold the
+    # runner for GitHub's 6-hour default. A manual dispatch sweeps the whole
+    # workspace, so it keeps the full 6 hours.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 60 || 360 }}
 
     steps:
       - uses: actions/checkout@v7
         with:
-          # Full history so we can diff the PR against its base branch for
-          # `--in-diff`.
+          # The diff for `--in-diff` needs the test merge commit's parents.
           fetch-depth: 0
 
       - uses: actions/cache@v6
@@ -149,14 +153,22 @@ jobs:
 
       - name: Compute PR diff
         # cargo-mutants `--in-diff` mutates only lines added/changed by the PR.
-        # Diff the checked-out tree against the base branch tip; fetch it first
-        # since the PR checkout doesn't include it. PR-only: a manual
-        # `workflow_dispatch` has no `github.base_ref` to diff against, so it runs
-        # the whole workspace instead (see the run step below).
+        # The checkout is GitHub's test merge of the PR into its base, so its
+        # first parent is the base commit this tree was built on. Diff against
+        # that, not `github.base_ref`: the event payload records the base at
+        # trigger time, and a PR retargeted around a push (say, off a merged
+        # stacked branch onto main) gets a stale base name. Diffing the tree
+        # against that stale branch once fed 129 files to `--in-diff` for a
+        # 16-file PR, and the run went on for 40+ minutes. PR-only: a manual
+        # `workflow_dispatch` has no merge to diff, so it runs the whole
+        # workspace instead (see the run step below).
         if: github.event_name == 'pull_request'
         run: |
-          git fetch --no-tags origin "${{ github.base_ref }}"
-          git diff "origin/${{ github.base_ref }}" > pr.diff
+          if [ "$(git rev-list --parents -n 1 HEAD | wc -w)" -ne 3 ]; then
+            echo "::error::Expected the PR's test merge commit at HEAD; got $(git rev-parse HEAD)."
+            exit 1
+          fi
+          git diff HEAD^1 HEAD > pr.diff
           echo "Changed lines under mutation:"
           cat pr.diff
 
