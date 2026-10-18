@@ -155,6 +155,11 @@ jobs:
           cargo test -p vitaminc-aead --features uuid &&
           cargo test -p vitaminc-aead --all-features
 
+      - name: test (aead-frame serde feature)
+        # No workspace member enables `vitaminc-aead-frame/serde`, so the
+        # workspace run skips the serde format's tests and doctest.
+        run: cargo test -p vitaminc-aead-frame --features serde
+
       - name: test (equality term feature)
         # The workspace run unifies hmac's dev-dependency features, so test
         # prf alone without `normalize` as well as with it, and check that

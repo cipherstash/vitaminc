@@ -153,14 +153,16 @@ jobs:
 
       - name: Generate coverage and build CRAP report
         # Coverage uses default features to match the primary `cargo test` gate
-        # (the aws-lc-rs backend). `cargo crap` then renders the sticky-comment
+        # (the aws-lc-rs backend), plus `vitaminc-aead-frame/serde`, whose code
+        # would otherwise go uninstrumented and score as 0% covered (`missing =
+        # "pessimistic"`). `cargo crap` then renders the sticky-comment
         # report. Threshold, exclude and allow rules all live in
         # .cargo-crap.toml, so this step, the gate below, and `mise run crap`
         # stay in sync. No `--fail-above` here: this run must always write the
         # comment, even on a PR that the gate below will fail (a `--fail-above`
         # run writes an empty output file when it trips).
         run: |
-          cargo llvm-cov --workspace --lcov --output-path target/vitaminc-lcov.info
+          cargo llvm-cov --workspace --features vitaminc-aead-frame/serde --lcov --output-path target/vitaminc-lcov.info
           cargo crap \
             --workspace \
             --lcov target/vitaminc-lcov.info \
