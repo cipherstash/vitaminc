@@ -254,8 +254,9 @@ pub fn conformance<S: Supports<OrderTarget>>(a: &S, b: &S) {
 ///   value as `Equal`;
 /// - no query is empty;
 /// - a query made under another context, or another key, never compares
-///   equal to the term of the same value in this space, by the same
-///   argument as for terms.
+///   equal to the term of the same value in this space, and this space's
+///   query never compares equal to the term of the same value under
+///   another context or key, by the same argument as for terms.
 ///
 /// # Panics
 ///
@@ -268,7 +269,7 @@ pub fn query_conformance<S: OrderQuery + Supports<OrderTarget>>(a: &S, b: &S) {
         let other_key = b.target(row.target).context("conformance");
         let plaintext =
             |v: Physical<'_>| order(row.target, row.ty, v).expect("the inventory encodes");
-        let term = |v: Physical<'_>| {
+        let term = |space: &OrderSpace<'_, S>, v: Physical<'_>| {
             space
                 .encrypt_term(&plaintext(v))
                 .unwrap_or_else(|e| panic!("{name}: the scheme refused a term of its target: {e}"))
@@ -278,7 +279,7 @@ pub fn query_conformance<S: OrderQuery + Supports<OrderTarget>>(a: &S, b: &S) {
                 .encrypt_query_term(&plaintext(v))
                 .unwrap_or_else(|e| panic!("{name}: the scheme refused a query of its target: {e}"))
         };
-        let (below, above) = (term(row.below), term(row.above));
+        let (below, above) = (term(&space, row.below), term(&space, row.above));
         let (query_below, query_above) = (query(&space, row.below), query(&space, row.above));
         assert_eq!(
             space.compare_query(&query_below, &above),
@@ -300,7 +301,7 @@ pub fn query_conformance<S: OrderQuery + Supports<OrderTarget>>(a: &S, b: &S) {
             values.push(empty);
         }
         for v in values {
-            let own = term(v);
+            let own = term(&space, v);
             let own_query = query(&space, v);
             assert!(
                 !own_query.as_bytes().is_empty(),
@@ -315,6 +316,16 @@ pub fn query_conformance<S: OrderQuery + Supports<OrderTarget>>(a: &S, b: &S) {
                 S::compare_query(query(&other_key, v).raw(), own.raw()),
                 Some(Ordering::Equal),
                 "{name}: a query under another key compares equal to the term, so it does not depend on the key"
+            );
+            assert_ne!(
+                S::compare_query(own_query.raw(), term(&other_context, v).raw()),
+                Some(Ordering::Equal),
+                "{name}: a query compares equal to the term under another context, so it does not depend on the salt"
+            );
+            assert_ne!(
+                S::compare_query(own_query.raw(), term(&other_key, v).raw()),
+                Some(Ordering::Equal),
+                "{name}: a query compares equal to the term under another key, so it does not depend on the key"
             );
         }
     }
