@@ -72,6 +72,28 @@ impl CheckIntegrity for EncryptResponse {
     }
 }
 
+/// An [`EncryptResponse`] together with whether its request carried
+/// additional authenticated data. The response alone cannot say whether
+/// `verifiedAdditionalAuthenticatedDataCrc32c` should be set: Google
+/// leaves it false when no AAD was sent, and the SDK says to discard the
+/// response when AAD was sent and the flag is false.
+pub(super) struct Encrypted {
+    pub(super) response: EncryptResponse,
+    pub(super) aad_sent: bool,
+}
+
+impl CheckIntegrity for Encrypted {
+    fn check_integrity(&self) -> Result<(), Mismatch> {
+        if self.aad_sent {
+            verified(
+                self.response.verified_additional_authenticated_data_crc32c,
+                "verifiedAdditionalAuthenticatedDataCrc32c",
+            )?;
+        }
+        self.response.check_integrity()
+    }
+}
+
 impl CheckIntegrity for DecryptResponse {
     fn check_integrity(&self) -> Result<(), Mismatch> {
         // `Decrypt` has no `verifiedCiphertextCrc32c`: a corrupted
@@ -216,6 +238,30 @@ mod tests {
             response.check_integrity(),
             Err(Mismatch("verifiedPlaintextCrc32c"))
         );
+    }
+
+    #[test]
+    fn an_encrypt_with_aad_needs_the_aad_flag_too() {
+        let sent = |response| Encrypted {
+            response,
+            aad_sent: true,
+        };
+
+        assert_eq!(
+            sent(good_encrypt()).check_integrity(),
+            Err(Mismatch("verifiedAdditionalAuthenticatedDataCrc32c"))
+        );
+        assert_eq!(
+            sent(good_encrypt().set_verified_additional_authenticated_data_crc32c(true))
+                .check_integrity(),
+            Ok(())
+        );
+        // With no AAD sent, Google leaves the flag false, and that is fine.
+        let unsent = Encrypted {
+            response: good_encrypt(),
+            aad_sent: false,
+        };
+        assert_eq!(unsent.check_integrity(), Ok(()));
     }
 
     #[test]

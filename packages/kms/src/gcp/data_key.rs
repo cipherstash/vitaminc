@@ -1,4 +1,4 @@
-use super::integrity::{self, CallError};
+use super::integrity::{self, CallError, Encrypted};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
@@ -106,19 +106,27 @@ impl<const N: usize> GcpDataKeySource<N> {
         let aad = binding.as_bytes().to_vec();
         let aad_checksum = integrity::crc32c(&aad);
 
-        let response = integrity::checked_call(|| {
+        let aad_sent = !aad.is_empty();
+
+        let Encrypted { response, .. } = integrity::checked_call(|| {
             let mut request = self
                 .client
                 .encrypt()
                 .set_name(self.crypto_key_name.clone())
                 .set_plaintext(plaintext.clone())
                 .set_plaintext_crc32c(checksum);
-            if !aad.is_empty() {
+            if aad_sent {
                 request = request
                     .set_additional_authenticated_data(aad.clone())
                     .set_additional_authenticated_data_crc32c(aad_checksum);
             }
-            request.send()
+            let response = request.send();
+            async move {
+                Ok(Encrypted {
+                    response: response.await?,
+                    aad_sent,
+                })
+            }
         })
         .await?;
 
@@ -254,13 +262,14 @@ mod tests {
 
     /// What a healthy Google Cloud KMS returns for an `encrypt`: a
     /// ciphertext with its own checksum, and confirmation that the
-    /// request's checksum was verified.
+    /// request's checksums were verified.
     fn encrypt_response(ciphertext: Vec<u8>) -> EncryptResponse {
         EncryptResponse::new()
             .set_name(KEY)
             .set_ciphertext_crc32c(crc32c(&ciphertext))
             .set_ciphertext(ciphertext)
             .set_verified_plaintext_crc32c(true)
+            .set_verified_additional_authenticated_data_crc32c(true)
     }
 
     fn decrypt_response(plaintext: Vec<u8>) -> DecryptResponse {
@@ -539,6 +548,30 @@ mod tests {
             .retrieve_data_key(&generated.key_id, binding)
             .await
             .unwrap();
+    }
+
+    /// Google sets `verifiedAdditionalAuthenticatedDataCrc32c` when it
+    /// checked the AAD checksum. A response without it is discarded like
+    /// any other mismatch, so a key never comes back under AAD that Google
+    /// did not confirm it received intact.
+    #[tokio::test]
+    async fn an_unverified_aad_checksum_twice_is_an_integrity_error() {
+        let mut stub = MockKms::new();
+        stub.expect_encrypt().times(2).returning(|req, _| {
+            ok(encrypt_response(wrap(&req.plaintext))
+                .set_verified_additional_authenticated_data_crc32c(false))
+        });
+
+        let source = GcpDataKeySource::<32>::new(KeyManagementService::from_stub(stub), KEY);
+
+        let Err(error) = source.generate_data_key(Binding::from("users/email")).await else {
+            panic!("expected an integrity error");
+        };
+
+        assert!(matches!(
+            error,
+            Error::Integrity("verifiedAdditionalAuthenticatedDataCrc32c")
+        ));
     }
 
     /// `dedup_retrieve` keys on the whole `(KeyId, Binding)` pair. The same
