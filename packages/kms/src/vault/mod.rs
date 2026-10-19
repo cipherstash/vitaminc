@@ -155,6 +155,36 @@ mod tests {
         (client, name)
     }
 
+    /// A client for the dev-mode Vault whose token has only `policy`, made
+    /// with the root `client` that [`transit_key`] returns.
+    pub(crate) async fn least_privilege_client(
+        client: &vaultrs::client::VaultClient,
+        policy: &str,
+    ) -> vaultrs::client::VaultClient {
+        use vaultrs::api::token::requests::CreateTokenRequest;
+
+        let name = unique_key_name();
+        vaultrs::sys::policy::set(client, &name, policy)
+            .await
+            .unwrap();
+
+        let mut opts = CreateTokenRequest::builder();
+        opts.policies(vec![name]).no_default_policy(true).ttl("10m");
+        let token = vaultrs::token::new(client, Some(&mut opts))
+            .await
+            .unwrap()
+            .client_token;
+
+        vaultrs::client::VaultClient::new(
+            VaultClientSettingsBuilder::default()
+                .address(INTEGRATION_ADDRESS)
+                .token(token)
+                .build()
+                .unwrap(),
+        )
+        .unwrap()
+    }
+
     fn unique_key_name() -> String {
         use std::sync::atomic::{AtomicU64, Ordering};
         use std::time::{SystemTime, UNIX_EPOCH};

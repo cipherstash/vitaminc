@@ -69,10 +69,25 @@ fn into_sized<const N: usize>(bytes: Vec<u8>) -> Result<[u8; N], Error> {
 /// restriction HashiCorp's API reference omits). Batch retrieval is one
 /// round trip everywhere. Batch generation is one round trip on
 /// Enterprise and falls back to one `datakey` call per key on Community,
-/// after the server has once answered `404 unsupported path`; see
+/// after the server has once answered `404 unsupported path` or
+/// `403 permission denied`; see
 /// [`generate_data_keys`](BatchGenerateDataKey::generate_data_keys).
 /// Isolation is per value either way, so there is deliberately no pooled
 /// Vault source (ADR 0003).
+///
+/// # Token policy
+///
+/// The token needs `update` on these paths, with `<mount>` and `<name>`
+/// as given to [`new`](Self::new):
+///
+/// - `<mount>/datakey/plaintext/<name>` for generation;
+/// - `<mount>/decrypt/<name>` for retrieval and direct decryption;
+/// - `<mount>/encrypt/<name>` for direct encryption only.
+///
+/// `update` on `<mount>/datakeys/plaintext/<name>` is optional, and is
+/// useful only on Vault Enterprise: it lets a batch be one round trip.
+/// Without it, Vault answers that path with `403 permission denied`, and
+/// this source then uses the fan-out for every batch until it is rebuilt.
 ///
 /// `N` is the data key size in bytes and must be 16, 32 or 64; Vault
 /// accepts only 128-, 256- and 512-bit data keys.
@@ -89,9 +104,11 @@ pub struct VaultDataKeySource<const N: usize> {
     mount: String,
     name: String,
     /// Set once the server has answered the plural `datakeys` path with
-    /// `404 unsupported path` (Community Vault), so later batches go
-    /// straight to the fan-out without probing again. Never reset: an
-    /// edition does not change under a running client.
+    /// `404 unsupported path` (Community Vault) or `403 permission
+    /// denied` (a token without that path in its policy), so later
+    /// batches go straight to the fan-out without probing again. Never
+    /// reset: build a new source to probe again, for example after a
+    /// policy change.
     native_batch_unsupported: AtomicBool,
 }
 
@@ -112,14 +129,25 @@ where
         }
     }
 
+    /// True when the plural `datakeys` path is not available to this
+    /// client, so a batch must fan out instead.
+    ///
     /// Community Vault registers only the singular `datakey/...` path and
-    /// answers the plural one with this exact error.
-    fn is_unsupported_path(error: &Error) -> bool {
-        matches!(
-            error,
-            Error::Vault(vaultrs::error::ClientError::APIError { code: 404, errors })
-                if errors.iter().any(|e| e.contains("unsupported path"))
-        )
+    /// answers the plural one with `404 unsupported path`. Vault checks
+    /// the token's policy before it routes a request, so a token without
+    /// the plural path in its policy gets `403` first, on either edition.
+    /// A 403 that has another cause also makes the fan-out fail, with the
+    /// error of the singular path.
+    fn native_batch_unavailable(error: &Error) -> bool {
+        use vaultrs::error::ClientError::APIError;
+
+        match error {
+            Error::Vault(APIError { code: 404, errors }) => {
+                errors.iter().any(|e| e.contains("unsupported path"))
+            }
+            Error::Vault(APIError { code: 403, .. }) => true,
+            _ => false,
+        }
     }
 
     /// One round trip via the Enterprise-only `datakeys` endpoint.
@@ -236,11 +264,13 @@ where
     /// `POST {mount}/datakeys/:type/:name` is **Vault Enterprise only**,
     /// although HashiCorp's API reference does not mark it so: Community
     /// Vault registers only the singular `datakey/...` path and answers
-    /// this one with `404 unsupported path`. The first batch against a
-    /// Community server pays that one failed probe, then this adapter
-    /// remembers the answer and uses [`fan_out_generate`] for every batch
-    /// after it. The result is the same either way: `count` distinct keys
-    /// at `KeyIsolation::PerValue`; only the round-trip count differs.
+    /// this one with `404 unsupported path`. A token without `update` on
+    /// this path gets `403 permission denied` on either edition. The first
+    /// batch pays that one failed probe, then this adapter remembers the
+    /// answer and uses [`fan_out_generate`] for every batch after it, until
+    /// the source is rebuilt. The result is the same either way: `count`
+    /// distinct keys at `KeyIsolation::PerValue`; only the round-trip
+    /// count differs. See the [token policy](VaultDataKeySource#token-policy).
     ///
     /// [`retrieve_data_keys`](BatchRetrieveDataKey::retrieve_data_keys) is
     /// unaffected: `batch_input` on `decrypt` is in both editions.
@@ -254,7 +284,7 @@ where
 
         if !self.native_batch_unsupported.load(Ordering::Relaxed) {
             match self.generate_data_keys_natively(count).await {
-                Err(e) if Self::is_unsupported_path(&e) => {
+                Err(e) if Self::native_batch_unavailable(&e) => {
                     self.native_batch_unsupported.store(true, Ordering::Relaxed);
                 }
                 result => return result,
@@ -537,6 +567,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn batch_generate_falls_back_to_singular_calls_on_a_403() {
+        let server = MockServer::start_async().await;
+        let plural = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path(format!("/v1/transit/datakeys/plaintext/{KEY_NAME}"));
+                then.status(403).json_body(
+                    json!({ "errors": ["1 error occurred:\n\t* permission denied\n\n"] }),
+                );
+            })
+            .await;
+        let singular = server
+            .mock_async(|when, then| {
+                when.method(POST)
+                    .path(format!("/v1/transit/datakey/plaintext/{KEY_NAME}"))
+                    .json_body(json!({ "bits": 256 }));
+                then.status(200).json_body(data(json!({
+                    "plaintext": b64_encode(&[9u8; 32]),
+                    "ciphertext": "vault:v1:single",
+                })));
+            })
+            .await;
+
+        let source = VaultDataKeySource::<32>::new(test_client(&server), "transit", KEY_NAME);
+
+        let first = source.generate_data_keys(3).await.unwrap();
+        assert_eq!(first.len(), 3);
+        plural.assert_calls_async(1).await;
+        singular.assert_calls_async(3).await;
+
+        // The 403 is remembered too: a least-privilege token does not
+        // write a permission-denied audit entry on every batch.
+        let second = source.generate_data_keys(2).await.unwrap();
+        assert_eq!(second.len(), 2);
+        plural.assert_calls_async(1).await;
+        singular.assert_calls_async(5).await;
+    }
+
+    #[tokio::test]
     async fn batch_generate_does_not_treat_other_404s_as_community_vault() {
         let server = MockServer::start_async().await;
         let plural = server
@@ -739,6 +808,7 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
+    use crate::vault::tests::least_privilege_client;
     use crate::vault::tests::transit_key;
     use crate::vault::tests::DEFAULT_MOUNT;
     use vaultrs::api::transit::KeyType;
@@ -789,6 +859,35 @@ mod integration_tests {
         let ids: Vec<KeyId> = keys.iter().map(|k| k.key_id.clone()).collect();
         let retrieved = source.retrieve_data_keys(&ids).await.unwrap();
         assert_eq!(retrieved[4].clone().risky_unwrap(), material[4]);
+    }
+
+    /// A token with only the policy that the type's docs name gets `403`
+    /// on `datakeys`, on either edition, and must still mint a batch.
+    #[tokio::test]
+    async fn a_least_privilege_token_mints_a_batch_through_the_fan_out() {
+        let (root, name) = transit_key(KeyType::Aes256Gcm96).await;
+        let client = least_privilege_client(
+            &root,
+            &format!(
+                r#"
+                path "{DEFAULT_MOUNT}/datakey/plaintext/{name}" {{ capabilities = ["update"] }}
+                path "{DEFAULT_MOUNT}/decrypt/{name}" {{ capabilities = ["update"] }}
+                "#
+            ),
+        )
+        .await;
+        let source = VaultDataKeySource::<32>::new(client, DEFAULT_MOUNT, name);
+
+        let keys = source.generate_data_keys(3).await.unwrap();
+
+        assert_eq!(keys.len(), 3);
+        assert!(source.native_batch_unsupported.load(Ordering::Relaxed));
+        let ids: Vec<KeyId> = keys.iter().map(|k| k.key_id.clone()).collect();
+        let retrieved = source.retrieve_data_keys(&ids).await.unwrap();
+        assert_eq!(
+            retrieved[2].clone().risky_unwrap(),
+            keys[2].plaintext.clone().risky_unwrap()
+        );
     }
 
     /// Batch *retrieve* — `decrypt` with `batch_input` — is in Community

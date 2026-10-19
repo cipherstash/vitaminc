@@ -58,7 +58,11 @@ Design notes that apply across vendors:
   isolation for one round trip. Vault batches retrieval natively on every
   edition and generation natively on Vault Enterprise (on Community the
   adapter falls back to one call per key, see `docs/adr/0003`), always at
-  per-value isolation, so it needs no pooled variant.
+  per-value isolation, so it needs no pooled variant. The token needs
+  `update` on `<mount>/datakey/plaintext/<name>` and `<mount>/decrypt/<name>`;
+  `update` on `<mount>/datakeys/plaintext/<name>` is optional. If Vault
+  answers that path with `403`, the source uses the fan-out until it is
+  rebuilt.
 - **Signature algorithms** are named once, by [`SignatureAlgorithm`], and
   mapped by each adapter. ECDSA signatures are DER, public keys are DER
   `SubjectPublicKeyInfo`, whatever the vendor returns natively
