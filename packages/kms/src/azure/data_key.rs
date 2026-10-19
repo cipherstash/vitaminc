@@ -658,6 +658,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn every_oct_hsm_encryption_sends_a_fresh_iv() {
+        // The adapter makes the IV, not the vault, and an IV used twice under
+        // one AES-GCM key breaks both confidentiality and integrity. The stub
+        // responses can repeat an IV: the test reads the IVs from the requests.
+        let first = gcm_response("my-key", b"ciphertext-1", &[7u8; GCM_IV_LEN], &[8u8; 16]);
+        let second = gcm_response("my-key", b"ciphertext-2", &[7u8; GCM_IV_LEN], &[8u8; 16]);
+        let (client, transport) = stub_client(&[&first, &second]);
+        let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::OctHsm);
+
+        for _ in 0..2 {
+            source
+                .encrypt(Protected::new(b"hello".to_vec()))
+                .await
+                .unwrap();
+        }
+
+        let ivs: Vec<Vec<u8>> = transport
+            .requests()
+            .iter()
+            .map(|request| base64::decode_url_safe(request.json()["iv"].as_str().unwrap()).unwrap())
+            .collect();
+        assert_eq!(ivs.len(), 2);
+        assert_ne!(ivs[0], ivs[1]);
+    }
+
+    #[tokio::test]
     async fn encrypt_under_an_rsa_key_sends_no_iv() {
         let (client, transport) = stub_client(&[&operation_response("my-key", b"ciphertext")]);
         let source = AzureDataKeySource::<32>::new(client, "my-key", AzureKeyKind::Rsa);
