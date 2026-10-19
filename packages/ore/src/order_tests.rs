@@ -192,7 +192,7 @@ fn logical_types_order_by_their_equality_bytes() {
     assert_eq!(uuid.bytes().risky_ref(), &id);
     let raw = term(T::Bytes, None, Physical::Bytes(b"abc"));
     assert_eq!(raw.domain(), domain::BYTES);
-    assert_eq!(raw.bytes().risky_ref(), b"abc");
+    assert_eq!(raw.bytes().risky_ref(), b"\x01abc");
     // A timestamp's unit is folded: the same instant in millis is one term.
     assert_eq!(
         bytes(
@@ -212,8 +212,8 @@ fn logical_types_order_by_their_equality_bytes() {
 fn text_folds_accents_and_case_but_equality_does_not() {
     let ordered = term(T::Text, None, Physical::Text("École"));
     assert_eq!(ordered.domain(), domain::TEXT);
-    assert_eq!(ordered.bytes().risky_ref(), b"ecole");
-    assert_eq!(bytes(T::Text, None, Physical::Text("ecole")), b"ecole");
+    assert_eq!(ordered.bytes().risky_ref(), b"\x01ecole");
+    assert_eq!(bytes(T::Text, None, Physical::Text("ecole")), b"\x01ecole");
     assert_ne!(
         normalize(None, Physical::Text("École"))
             .expect("text")
@@ -228,6 +228,42 @@ fn text_folds_accents_and_case_but_equality_does_not() {
         order(T::Text, None, Physical::Text("\u{378}")).expect_err("refused"),
         NormalizeError::UnassignedCodePoint
     );
+}
+
+/// The stored format of a text or bytes term, with literal bytes: the
+/// marker, then the value. This is what both scheme crates fed their
+/// encryptors before the marker moved here, so a term made from these
+/// bytes is byte for byte the term they stored.
+#[test]
+fn text_and_bytes_start_with_the_marker_so_no_plaintext_is_empty() {
+    assert_eq!(VARIABLE_WIDTH_MARKER, 0x01);
+    assert_eq!(bytes(T::Text, None, Physical::Text("")), [0x01]);
+    assert_eq!(bytes(T::Bytes, None, Physical::Bytes(&[])), [0x01]);
+    assert_eq!(bytes(T::Text, None, Physical::Text("a")), [0x01, b'a']);
+    assert_eq!(
+        bytes(T::Bytes, None, Physical::Bytes(&[0xAB])),
+        [0x01, 0xAB]
+    );
+    assert_eq!(
+        text("").expect("empty text encodes").risky_ref(),
+        &[VARIABLE_WIDTH_MARKER]
+    );
+    // The marker is constant, so it keeps the order; and the empty value
+    // sorts first, as it did.
+    assert!(bytes(T::Text, None, Physical::Text("")) < bytes(T::Text, None, Physical::Text("a")));
+    assert!(
+        bytes(T::Bytes, None, Physical::Bytes(&[])) < bytes(T::Bytes, None, Physical::Bytes(&[0]))
+    );
+    // Fixed-width targets go in unchanged: no marker.
+    assert_eq!(int_bytes(T::U16, Int::U16(1)), [0, 1]);
+    // And the width table has no zero width, so a fixed-width target
+    // cannot be empty either (the conformance test encodes one value of
+    // every target and checks).
+    for target in OrderTarget::ALL {
+        if let Some(width) = target.width() {
+            assert!(width >= 1, "{target:?}");
+        }
+    }
 }
 
 #[test]

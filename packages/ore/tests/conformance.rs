@@ -13,9 +13,10 @@ use quickcheck_macros::quickcheck;
 use vitaminc_aead::plaintext::kinds::id::LAST_KNOWN;
 use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
 use vitaminc_normalize::{domain as equality, normalize};
+use vitaminc_ore::target::{Date, I32};
 use vitaminc_ore::{
-    domain, order, Context, IntoContext, NormalizeError, OrderEncrypt, OrderError, OrderKeyInit,
-    OrderScheme, OrderTarget, Raw,
+    domain, order, test_support, Context, IntoContext, NormalizeError, OrderEncrypt, OrderError,
+    OrderKeyInit, OrderScheme, OrderTarget, Raw, VARIABLE_WIDTH_MARKER,
 };
 use vitaminc_protected::{Controlled, Protected};
 
@@ -183,6 +184,11 @@ fn every_kind_has_an_order_target_or_is_a_named_exception() {
         );
         assert_eq!(below.domain(), kind.domain);
         assert_eq!(below.width(), kind.width, "{}", kind.domain);
+        assert!(
+            !below.bytes().risky_ref().is_empty(),
+            "{}: an order plaintext is never empty",
+            kind.domain
+        );
         if let Some(width) = kind.width {
             assert_eq!(below.bytes().risky_ref().len(), width, "{}", kind.domain);
         }
@@ -328,7 +334,8 @@ fn equality_and_order_agree_on_what_is_equal() {
         order(T::Text, None, Physical::Text("É")).expect("ord"),
     );
     assert_eq!(e.bytes().risky_ref(), big.bytes().risky_ref());
-    // Shared kinds share their bytes with the equality index exactly.
+    // Shared fixed-width kinds share their bytes with the equality index
+    // exactly.
     for (target, ty, v) in [
         (
             T::Date,
@@ -341,7 +348,6 @@ fn equality_and_order_agree_on_what_is_equal() {
             Physical::Int(Int::I64(-12_345)),
         ),
         (T::Uuid, Some(Logical::Uuid), Physical::Bytes(&[9; 16])),
-        (T::Bytes, None, Physical::Bytes(b"raw")),
         (T::F64, None, Physical::Float(Float::F64(2.5))),
     ] {
         assert_eq!(
@@ -349,6 +355,15 @@ fn equality_and_order_agree_on_what_is_equal() {
             order(target, ty, v).expect("ord").bytes().risky_ref()
         );
     }
+    // Bytes share them behind the marker, so an order term is never empty.
+    let (eq, ord) = (
+        normalize(None, Physical::Bytes(b"raw")).expect("eq"),
+        order(T::Bytes, None, Physical::Bytes(b"raw")).expect("ord"),
+    );
+    assert_eq!(
+        ord.bytes().risky_ref(),
+        &[&[VARIABLE_WIDTH_MARKER][..], eq.bytes.risky_ref()].concat()
+    );
     // And no order domain is an equality domain.
     for d in domain::ALL {
         assert!(!equality::ALL.contains(d), "{d}");
@@ -420,7 +435,7 @@ fn terms_compare_only_within_one_scheme_key_target_and_context() {
     // The same bytes under another target are another term.
     let as_i8 = mock.target(T::I8).encrypt_checked(0i8).expect("mock");
     let as_u8 = mock.target(T::U8).encrypt_checked(0x80u16).expect("mock");
-    assert_eq!(as_i8.raw().bytes, as_u8.raw().bytes);
+    assert_eq!(as_i8.raw().bytes(), as_u8.raw().bytes());
     assert_ne!(as_i8, as_u8);
 }
 
@@ -447,7 +462,7 @@ fn a_spaces_salt_binds_its_schemes_own_name() {
     assert_ne!(m.salt(), f.salt());
     // And the scheme binds the salt it is handed: the mocks' terms carry it.
     let term = m.encrypt_checked(1i8).expect("mock");
-    assert!(term.raw().salt.starts_with(expected("mock").as_bytes()));
+    assert!(term.raw().salt().starts_with(expected("mock").as_bytes()));
 }
 
 #[test]
@@ -673,7 +688,7 @@ fn a_space_sorts_its_own_terms_and_refuses_another_spaces() {
     assert_eq!(
         terms
             .iter()
-            .map(|t| t.raw().bytes.clone())
+            .map(|t| t.raw().bytes().to_vec())
             .collect::<Vec<_>>(),
         [-3i32, 0, 5, 9]
             .into_iter()
@@ -705,13 +720,49 @@ fn a_space_sorts_its_own_terms_and_refuses_another_spaces() {
     }
 }
 
+/// A mock term keeps the plaintext bytes after its salt and key, so the
+/// tests above are about the plaintext layer, not the mock.
 #[test]
-fn a_mock_term_is_the_plaintext_bytes() {
-    // So the tests above are about the plaintext layer, not the mock.
+fn a_mock_term_keeps_the_plaintext_bytes_after_its_salt_and_key() {
     let term: MockTerm = Mock::new(key())
         .target(T::U8)
         .encrypt_checked(9u16)
         .expect("mock")
         .into_raw();
-    assert_eq!(term.as_ref(), &[9]);
+    assert_eq!(term.bytes(), &[9]);
+}
+
+/// The checks a scheme crate runs against its real scheme pass for the
+/// mocks, which keep the contract, and catch a scheme that does not.
+#[test]
+fn the_conformance_checks_pass_for_a_scheme_that_keeps_the_contract() {
+    test_support::conformance(&Mock::new(key()), &Mock::new(Protected::new([8; 32])));
+    test_support::conformance(
+        &Fixed::<4>(Mock::new(key())),
+        &Fixed::<4>(Mock::new(Protected::new([8; 32]))),
+    );
+    test_support::static_target::<Mock, I32>();
+    test_support::static_target::<Fixed<4>, I32>();
+    test_support::static_target::<Fixed<4>, Date>();
+}
+
+/// A scheme whose empty term ignores the key and the salt, as the scheme
+/// crates' once did, fails the check by name.
+#[test]
+#[should_panic(
+    expected = "vitaminc/ore/value/text-folded/unicode-16/v1: a term compares equal to one under another context"
+)]
+fn the_conformance_checks_catch_a_term_that_ignores_the_salt() {
+    test_support::conformance(
+        &common::Unsalted(Mock::new(key())),
+        &common::Unsalted(Mock::new(Protected::new([8; 32]))),
+    );
+}
+
+/// A marker impl the runtime answer does not back fails the check by
+/// name.
+#[test]
+#[should_panic(expected = "lying implements Supports<I64> but refuses it at runtime")]
+fn the_conformance_checks_catch_a_marker_the_scheme_refuses_at_runtime() {
+    test_support::static_target::<common::Lying, vitaminc_ore::target::I64>();
 }

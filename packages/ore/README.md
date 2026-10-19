@@ -259,14 +259,42 @@ a new label.
 | `Date` | `vitaminc/ore/value/date/v1` | the equality encoding: orderable days from 0001-01-01 |
 | `Timestamp`, any unit | `vitaminc/ore/value/timestamp-micros/v1` | the equality encoding: orderable seconds, then nanoseconds truncated to microseconds |
 | `Decimal` | `vitaminc/ore/value/decimal/v1` | the equality encoding: the 14-byte orderable decimal, scale and signed zero normalized |
-| `Text` | `vitaminc/ore/value/text-folded/unicode-16/v1` | Unicode 16 NFC with accents and case folded, below |
-| `Bytes` | `vitaminc/ore/value/bytes/v1` | as they are |
+| `Text` | `vitaminc/ore/value/text-folded/unicode-16/v1` | `0x01`, then Unicode 16 NFC with accents and case folded, below |
+| `Bytes` | `vitaminc/ore/value/bytes/v1` | `0x01`, then the bytes as they are |
 | `Uuid` | `vitaminc/ore/value/uuid/v1` | the sixteen raw bytes |
 
 An integer of any width goes into an integer target it fits: `100` as
 an `i8` and `100` as a `u64` are one term of an `I32` space. There is
 no `f32` target: JavaScript numbers are always `f64`, and an `f32`
 widens to `f64` exactly.
+
+The two variable-width encodings, text and bytes, start with a marker
+byte, `VARIABLE_WIDTH_MARKER` (`0x01`), so that no order plaintext is
+ever empty. Without it an empty string and an empty byte string encoded
+to nothing, and both scheme crates encrypted that into a term that never
+touched the key or the salt: the same term under every key and context,
+which anyone could write into any index. A constant leading byte keeps
+the order. Fixed-width encodings are never empty and carry no marker. A
+scheme can rely on every plaintext having at least one byte, and every
+term it makes must depend on the key and the salt; `test_support`
+(behind the `test-support` feature) checks a real scheme for both.
+
+**A recorded exception to the label rule.** The marker changed the text
+and bytes encodings in vitaminc-ore 0.7 without a new domain label
+([cipherstash/vitaminc#471](https://github.com/cipherstash/vitaminc/issues/471)).
+That is allowed here, and only here, for two reasons. No released term
+was ever made from the old encodings: cllw-ore `0.5.2-rc.1`, the only
+release with its `vitaminc` feature, shipped with the marker already in
+front of what this crate handed it, and ore-rs's `vitaminc` feature was
+unreleased, so every stored term always had the marker. And after the
+change the labels describe what was actually stored all along. Moving
+the marker into this crate changes no stored byte: each scheme crate
+drops its own marker in the same release that moves it to vitaminc-ore
+0.7, and pins its stored format with literal bytes so a doubled or
+missing marker fails its tests. This is not a precedent for changing an
+encoding that has stored data. The rule itself is set in ADR 0002
+([cipherstash/stack#1139](https://github.com/cipherstash/stack/pull/1139)),
+which records the same exception.
 
 The integer and float encodings are the ones the frozen
 `orderable-bytes` 0.2.0 produces, checked against it byte for byte in

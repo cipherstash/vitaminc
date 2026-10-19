@@ -51,13 +51,16 @@ all-features = true
 chrono = ["dep:chrono", "vitaminc-aead/chrono"]
 rust_decimal = ["dep:rust_decimal", "vitaminc-aead/rust_decimal"]
 uuid = ["dep:uuid", "vitaminc-aead/uuid"]
+# The conformance checks a scheme crate runs against its real scheme, in
+# its tests. Not for a build that ships.
+test-support = []
 
 [dev-dependencies]
 # Path-only, so publish order does not matter. `test-support` for
 # `plaintext::render`, the path notation the tests assert against.
 vitaminc-aead = { path = "../aead", features = ["chrono", "rust_decimal", "uuid", "test-support"] }
 # This crate's own typed rows, on for its tests.
-vitaminc-ore = { path = ".", features = ["chrono", "rust_decimal", "uuid"] }
+vitaminc-ore = { path = ".", features = ["chrono", "rust_decimal", "uuid", "test-support"] }
 quickcheck = "1.1.0"
 # Typed values as callers hold them, for the tests that encrypt them.
 chrono = { version = "0.4.44", default-features = false, features = ["std"] }

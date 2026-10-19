@@ -8,28 +8,50 @@
 use core::cmp::Ordering;
 use core::convert::Infallible;
 
-use vitaminc_ore::{Context, OrderKeyInit, OrderPlaintext, OrderScheme};
+use vitaminc_ore::{Context, OrderKeyInit, OrderPlaintext, OrderScheme, OrderTarget};
 use vitaminc_protected::{Controlled, Protected};
 
-/// A term from a mock: the salt and key it was bound under and the
-/// plaintext bytes, which it "encrypts" by keeping. Terms under one salt
-/// and key compare as the values do; a mock refuses to compare terms of
-/// different columns, which a real scheme cannot always tell apart.
+/// A term from a mock: the salt and key it was bound under, then the
+/// plaintext bytes, which it "encrypts" by keeping. Its stored form is
+/// all three, so it depends on the key and the salt as a real term must.
+/// Terms under one salt and key compare as the values do; a mock refuses
+/// to compare terms of different spaces, which a real scheme cannot
+/// always tell apart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MockTerm {
-    pub salt: Vec<u8>,
-    pub bytes: Vec<u8>,
+    stored: Vec<u8>,
+    /// Where the plaintext bytes start.
+    split: usize,
 }
 
-/// The mocks' comparison: the values' order within one column, `None`
-/// across columns.
+impl MockTerm {
+    fn new(salt: Vec<u8>, bytes: &[u8]) -> Self {
+        let split = salt.len();
+        let mut stored = salt;
+        stored.extend_from_slice(bytes);
+        Self { stored, split }
+    }
+
+    /// The salt and key the term was bound under.
+    pub fn salt(&self) -> &[u8] {
+        &self.stored[..self.split]
+    }
+
+    /// The plaintext bytes.
+    pub fn bytes(&self) -> &[u8] {
+        &self.stored[self.split..]
+    }
+}
+
+/// The mocks' comparison: the values' order within one space, `None`
+/// across spaces.
 fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
-    (a.salt == b.salt).then(|| a.bytes.cmp(&b.bytes))
+    (a.salt() == b.salt()).then(|| a.bytes().cmp(b.bytes()))
 }
 
 impl AsRef<[u8]> for MockTerm {
     fn as_ref(&self) -> &[u8] {
-        &self.bytes
+        &self.stored
     }
 }
 
@@ -50,10 +72,7 @@ impl OrderScheme for Mock {
     ) -> Result<MockTerm, Infallible> {
         let mut salt = salt.as_bytes().to_vec();
         salt.extend_from_slice(self.key.risky_ref());
-        Ok(MockTerm {
-            salt,
-            bytes: plaintext.bytes().risky_ref().clone(),
-        })
+        Ok(MockTerm::new(salt, plaintext.bytes().risky_ref()))
     }
 
     fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
@@ -117,6 +136,66 @@ vitaminc_ore::supports_targets!(Fixed<1>; I8, U8);
 vitaminc_ore::supports_targets!(Fixed<2>; I16, U16);
 vitaminc_ore::supports_targets!(Fixed<4>; I32, U32, Date);
 vitaminc_ore::supports_targets!(Fixed<8>; I64, U64, F64);
+
+/// A four-byte scheme whose `Supports<I64>` impl, written by hand, lies:
+/// its runtime list refuses an `I64`. For the conformance check that
+/// catches the disagreement. Never open a space of `I64` on it: the
+/// space's debug assertion would fire, as it should.
+pub struct Lying(pub Fixed<4>);
+
+impl OrderScheme for Lying {
+    const NAME: &'static str = "lying";
+    type Term = MockTerm;
+    type Error = Infallible;
+
+    fn encrypt_plaintext(
+        &self,
+        plaintext: &OrderPlaintext,
+        salt: &Context<'_>,
+    ) -> Result<MockTerm, Infallible> {
+        self.0.encrypt_plaintext(plaintext, salt)
+    }
+
+    fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
+        compare(a, b)
+    }
+}
+
+vitaminc_ore::supports_targets!(Lying; I32, U32, Date);
+
+impl vitaminc_ore::Supports<vitaminc_ore::target::I64> for Lying {
+    fn supports(_: vitaminc_ore::target::I64) -> bool {
+        true
+    }
+}
+
+/// A scheme that forgets the salt and the key for a text term shorter
+/// than two bytes: the shape of the empty-term bug the scheme crates had,
+/// for the conformance checks to catch.
+pub struct Unsalted(pub Mock);
+
+impl OrderScheme for Unsalted {
+    const NAME: &'static str = "unsalted";
+    type Term = MockTerm;
+    type Error = Infallible;
+
+    fn encrypt_plaintext(
+        &self,
+        plaintext: &OrderPlaintext,
+        salt: &Context<'_>,
+    ) -> Result<MockTerm, Infallible> {
+        if plaintext.target() == OrderTarget::Text && plaintext.bytes().risky_ref().len() < 2 {
+            return Ok(MockTerm::new(Vec::new(), plaintext.bytes().risky_ref()));
+        }
+        self.0.encrypt_plaintext(plaintext, salt)
+    }
+
+    fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
+        compare(a, b)
+    }
+}
+
+vitaminc_ore::supports_every_target!(Unsalted);
 
 /// A scheme whose backend fails.
 pub struct Down;

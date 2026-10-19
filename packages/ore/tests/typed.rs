@@ -19,7 +19,7 @@ use OrderTarget as T;
 
 /// The plaintext bytes a term encrypts, which the mock keeps as they are.
 fn bytes<Tg: vitaminc_ore::Target>(term: &OrderTerm<MockTerm, Tg>) -> &[u8] {
-    &term.raw().bytes
+    term.raw().bytes()
 }
 
 // The borrows exercise the `&V` rows of the table, on purpose.

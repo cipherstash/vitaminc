@@ -29,9 +29,11 @@ const SALT_LABEL: &[u8] = b"vitaminc/ore/v1";
 /// value's order, encoded as the target they were made for.
 ///
 /// Only [`order`] builds one, so a scheme can rely on the bytes being the
-/// encoding of their target. A caller never needs one:
-/// [`OrderSpace::encrypt`] takes the value itself. `Debug` shows the
-/// domain and width and masks the bytes.
+/// encoding of their target, and on there being at least one: a
+/// fixed-width target encodes to its width, and text and bytes start with
+/// [`VARIABLE_WIDTH_MARKER`](crate::VARIABLE_WIDTH_MARKER). A caller
+/// never needs one: [`OrderSpace::encrypt`] takes the value itself.
+/// `Debug` shows the domain and width and masks the bytes.
 #[derive(OpaqueDebug)]
 pub struct OrderPlaintext {
     #[non_sensitive]
@@ -44,6 +46,10 @@ impl OrderPlaintext {
         debug_assert!(
             target.width().is_none_or(|w| w == bytes.risky_ref().len()),
             "{target:?} encodes to its width"
+        );
+        debug_assert!(
+            !bytes.risky_ref().is_empty(),
+            "an order plaintext is never empty"
         );
         Self { target, bytes }
     }
@@ -67,7 +73,7 @@ impl OrderPlaintext {
         self.target.width()
     }
 
-    /// The term's bytes, protected. A scheme reads them with
+    /// The term's bytes, protected, never empty. A scheme reads them with
     /// [`risky_ref`](Controlled::risky_ref) and nothing else should.
     pub fn bytes(&self) -> &Protected<Vec<u8>> {
         &self.bytes
@@ -131,7 +137,13 @@ pub enum OrderError<E> {
 /// Implemented by the scheme crates behind a `vitaminc` feature, and by a
 /// mock in this crate's tests. An implementation reads the plaintext's
 /// [`bytes`](OrderPlaintext::bytes) and binds `salt`; it never pads or
-/// truncates.
+/// truncates. The bytes are never empty (a variable-width encoding starts
+/// with [`VARIABLE_WIDTH_MARKER`](crate::VARIABLE_WIDTH_MARKER)), so a
+/// scheme can rely on running its keyed primitive at least once, and
+/// every term it makes must depend on the key and the salt: a term that
+/// is the same under every key could be written into any index by
+/// anyone. `test_support` (behind the `test-support` feature) checks a
+/// real scheme for this.
 pub trait OrderScheme {
     /// The scheme's name, bound into every term's salt and named in its
     /// refusals: `"cllw-ore"`, `"cllw-ope"`, `"block-ore"`.
@@ -173,6 +185,15 @@ pub trait OrderScheme {
     /// It cannot tell everything: two well-formed terms of different
     /// spaces may compare as noise, so a caller keeps a space's terms
     /// together, as [`OrderSpace::compare`] says.
+    ///
+    /// The noise is in the direction, never in equality. `Some(Equal)`
+    /// means the two terms encrypt one value in one space, up to the
+    /// scheme's own collision bound: a term that lacks every block, or
+    /// that ignores its key or salt, compares equal to one of another
+    /// space, and the `test_support` checks fail it for that. Block ORE
+    /// keeps this because equality needs every block's keyed tag to
+    /// agree, and an OPE because equality is equal bytes. A scheme that
+    /// cannot keep it answers `None` across spaces instead.
     fn compare(a: &Self::Term, b: &Self::Term) -> Option<Ordering>;
 }
 

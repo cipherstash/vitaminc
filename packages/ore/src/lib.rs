@@ -6,8 +6,10 @@ mod fold;
 mod order;
 mod scheme;
 pub mod target;
+#[cfg(feature = "test-support")]
+pub mod test_support;
 
-pub use order::{domain, order, order_terms, text, Order, OrderTarget};
+pub use order::{domain, order, order_terms, text, Order, OrderTarget, VARIABLE_WIDTH_MARKER};
 #[allow(deprecated)]
 pub use scheme::OrderColumn;
 pub use scheme::{

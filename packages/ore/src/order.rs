@@ -13,16 +13,31 @@
 //! Where an equality term folds every integer width into one encoding, an
 //! order term keeps the declared width, so block ORE over an `i32` column
 //! costs four blocks, not seventeen. A float, a date, a timestamp, a
-//! decimal, bytes and a uuid order by the same bytes they are matched by,
-//! so those come from `vitaminc_normalize` unchanged. Text alone folds
-//! further: an order term drops accents and case, which equality must
-//! not. See the crate docs for the table.
+//! decimal and a uuid order by the same bytes they are matched by, so
+//! those come from `vitaminc_normalize` unchanged. Bytes are the equality
+//! encoding behind [`VARIABLE_WIDTH_MARKER`], and text folds further: an
+//! order term drops accents and case, which equality must not. See the
+//! crate docs for the table.
 
 use vitaminc_aead::{Encrypt, Int, Logical, Physical};
 use vitaminc_normalize::{terms_by, Normalize, NormalizeError, Term, TermsError};
 use vitaminc_protected::{Controlled, Protected};
 
 use crate::{fold, OrderPlaintext};
+
+/// The byte every text and bytes order encoding starts with, so that no
+/// order plaintext is ever empty.
+///
+/// An empty string and an empty byte string are values with an order,
+/// and without the marker they encoded to nothing. Both scheme crates
+/// then encrypted them into a term that never touched the key or the
+/// salt: the same term under every key and context, which anyone could
+/// write into any index. A constant leading byte keeps the order of the
+/// encodings, and a fixed-width encoding is never empty, so it goes in
+/// unchanged. The scheme crates added this byte themselves before it
+/// moved here; see the README's Encodings section for why the domain
+/// labels did not change with it.
+pub const VARIABLE_WIDTH_MARKER: u8 = 0x01;
 
 /// Frozen domain labels for order terms, one per [`OrderTarget`].
 pub mod domain {
@@ -54,9 +69,11 @@ pub mod domain {
     pub const TIMESTAMP: &str = "vitaminc/ore/value/timestamp-micros/v1";
     /// A decimal, fourteen bytes, scale and signed zero normalized.
     pub const DECIMAL: &str = "vitaminc/ore/value/decimal/v1";
-    /// Text, as Unicode 16 NFC with accents and case folded.
+    /// Text: [`VARIABLE_WIDTH_MARKER`](super::VARIABLE_WIDTH_MARKER), then
+    /// Unicode 16 NFC with accents and case folded.
     pub const TEXT: &str = "vitaminc/ore/value/text-folded/unicode-16/v1";
-    /// Bytes.
+    /// Bytes: [`VARIABLE_WIDTH_MARKER`](super::VARIABLE_WIDTH_MARKER), then
+    /// the bytes as they are.
     pub const BYTES: &str = "vitaminc/ore/value/bytes/v1";
     /// A uuid, over its sixteen raw bytes.
     pub const UUID: &str = "vitaminc/ore/value/uuid/v1";
@@ -184,10 +201,12 @@ impl OrderTarget {
 ///
 /// An integer is converted to the target's width, then encoded
 /// big-endian, with the sign bit flipped when signed, so the bytes sort
-/// as the numbers do. A float, a date, a timestamp, a decimal, bytes and
-/// a uuid encode exactly as [`vitaminc_normalize::normalize`] encodes
-/// them for equality. Text is Unicode 16 NFC with accents and case
-/// folded, so `É` and `e` tie.
+/// as the numbers do. A float, a date, a timestamp, a decimal and a uuid
+/// encode exactly as [`vitaminc_normalize::normalize`] encodes them for
+/// equality. Bytes are the equality encoding behind
+/// [`VARIABLE_WIDTH_MARKER`], and text is the marker, then Unicode 16 NFC
+/// with accents and case folded, so `É` and `e` tie. The marker keeps a
+/// variable-width encoding from ever being empty.
 ///
 /// # Examples
 ///
@@ -242,7 +261,7 @@ pub fn order(
         }
         (T::F64, None, Physical::Float(f)) => vitaminc_normalize::float(f),
         (T::Text, None, Physical::Text(s)) => text(s)?,
-        (T::Bytes, None, Physical::Bytes(b)) => vitaminc_normalize::bytes(b),
+        (T::Bytes, None, Physical::Bytes(b)) => variable_width(b),
         (T::Date, Some(Logical::Date), Physical::Int(days)) => {
             vitaminc_normalize::date(days).ok_or(NormalizeError::Invalid)?
         }
@@ -325,15 +344,28 @@ fn int(value: Int) -> Protected<Vec<u8>> {
     }
 }
 
-/// Text as Unicode 16 NFC with accents and case folded. See the crate
-/// docs for the exact steps.
+/// The text order encoding: [`VARIABLE_WIDTH_MARKER`], then `text` as
+/// Unicode 16 NFC with accents and case folded. See the crate docs for
+/// the exact steps.
 ///
 /// # Errors
 ///
 /// [`NormalizeError::UnassignedCodePoint`] if `text` holds a code point
 /// Unicode 16 does not assign: its folding is not known.
 pub fn text(text: &str) -> Result<Protected<Vec<u8>>, NormalizeError> {
-    fold::folded(text)
+    let folded = fold::folded(text)?;
+    Ok(variable_width(folded.risky_ref()))
+    // `folded` drops here and is wiped.
+}
+
+/// A variable-width encoding: the marker, then `bytes`, in one protected
+/// buffer sized up front so it never reallocates and frees an unwiped
+/// partial copy. Never empty.
+fn variable_width(bytes: &[u8]) -> Protected<Vec<u8>> {
+    let mut out = Protected::new(Vec::with_capacity(bytes.len() + 1));
+    out.risky_inner_mut().push(VARIABLE_WIDTH_MARKER);
+    out.risky_inner_mut().extend_from_slice(bytes);
+    out
 }
 
 /// A fixed-width encoding as a protected vector, with the array wrapped
