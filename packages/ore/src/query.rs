@@ -1,5 +1,5 @@
-//! The query side of an order scheme: a term that compares against a
-//! space's stored terms but need not be stored itself.
+//! The query side of an order scheme: what a caller makes from the value
+//! it is searching for, to compare against a space's stored terms.
 //!
 //! A block ORE scheme (Lewi-Wu) has two halves. The right half is what
 //! a stored term needs to be compared against; the left half is what a
@@ -11,7 +11,8 @@
 //!
 //! A caller makes one through the space, as it makes a term:
 //! `space.encrypt_query(value)`, and compares it with
-//! `space.compare_query(&query, &term)`.
+//! `space.compare_query(&query, &term)`. A query exists for that
+//! comparison and is not persisted or logged; [`OrderQuery`] says why.
 
 use core::cmp::Ordering;
 
@@ -22,8 +23,9 @@ use crate::scheme::{OrderError, OrderPlaintext, OrderScheme, OrderSpace, OrderTe
 use crate::target::{FitsIn, StaticTarget, Supports, Target};
 use crate::OrderTarget;
 
-/// An order scheme that makes queries: terms that compare against the
-/// space's stored terms but need not be stored themselves.
+/// An order scheme that makes queries: what a caller makes from the
+/// value it is searching for, to compare against the space's stored
+/// terms.
 ///
 /// Implemented beside [`OrderScheme`] by a scheme that has a query side,
 /// and trivially, with `Query = Term`, by one whose terms are their own
@@ -31,6 +33,13 @@ use crate::OrderTarget;
 /// [`OrderSpace::encrypt_query`] and compares them through
 /// [`OrderSpace::compare_query`], so a query is bound to the same salt
 /// as the terms it is compared with.
+///
+/// A query exists for the comparison at hand, and should not be
+/// persisted or logged. Held beside the stored terms, it orders every
+/// one of them against the searched value, for whoever holds both. And
+/// block ORE's queries are deterministic, one value in one space giving
+/// one query, so `==` on two of its queries is equality of the values
+/// searched for, and a log of queries is a log of what was searched.
 pub trait OrderQuery: OrderScheme {
     /// What one query encrypts to. For a scheme whose terms are their own
     /// queries, [`Term`](OrderScheme::Term).
@@ -70,11 +79,22 @@ pub trait OrderQuery: OrderScheme {
 /// zero-sized type, so a query of one target cannot meet a term of
 /// another in [`OrderSpace::compare_query`]: that does not compile.
 /// Under an [`OrderTarget`] the label is stored, and a query and a term
-/// of different targets compare as `None` instead of as noise. A query
-/// is not a term: it has its own type, so it cannot be stored or
-/// compared where a term is expected.
+/// of different targets compare as `None` instead of as noise.
 ///
-/// `==` compares the bytes, not the value, as it does for a term.
+/// A query is not a term: it has its own type, so it cannot be compared
+/// where a term is expected, and the compiler refuses
+/// `space.compare(&query, &term)`. Its bytes are bytes, though, as a
+/// term's are: [`as_bytes`](Self::as_bytes) and `AsRef<[u8]>` are there
+/// so a caller can send the query to wherever the terms are, and nothing
+/// stops a caller writing them into a term's place. Under block ORE a
+/// query has no right half, so every later `compare` against those bytes
+/// returns `None`; under a scheme whose `Query` is its `Term` the mistake
+/// is invisible.
+///
+/// `==` compares the bytes. Whether that is equality of the values
+/// searched for depends on the scheme: under block ORE, whose queries are
+/// deterministic, it is. A query is for the comparison at hand and should
+/// not be persisted or logged, as [`OrderQuery`] explains.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryTerm<R, T: Target> {
     raw: R,
@@ -115,6 +135,10 @@ impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> Or
     /// Encrypt one scalar as a query of this space's target, checking it
     /// while the program runs, as
     /// [`encrypt_checked`](Self::encrypt_checked) checks a term.
+    ///
+    /// The query is for the comparison at hand: held beside the stored
+    /// terms it orders every one of them against the value, so it should
+    /// not be persisted or logged (see [`OrderQuery`]).
     ///
     /// # Errors
     ///
@@ -191,6 +215,12 @@ impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: StaticTarg
     /// as [`encrypt`](Self::encrypt) makes a term of one. The compiler
     /// refuses a value that might not fit, and names
     /// [`encrypt_query_checked`](Self::encrypt_query_checked) for it.
+    ///
+    /// The query is for the comparison at hand: held beside the stored
+    /// terms it orders every one of them against the value, so it should
+    /// not be persisted or logged. Under block ORE it is deterministic, so
+    /// a log of queries is a log of what was searched (see
+    /// [`OrderQuery`]).
     ///
     /// # Errors
     ///

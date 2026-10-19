@@ -120,8 +120,9 @@ impl OrderScheme for Mock {
 vitaminc_ore::supports_every_target!(Mock);
 
 /// A query from a mock: a term under another type, so a query cannot be
-/// stored or compared where a term is expected. The mocks' queries
-/// compare against their terms as the terms compare with each other.
+/// compared where a term is expected (its bytes are still bytes). The
+/// mocks' queries compare against their terms as the terms compare with
+/// each other.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MockQuery(pub MockTerm);
 

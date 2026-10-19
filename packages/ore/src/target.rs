@@ -185,7 +185,7 @@ macro_rules! supports_targets {
 }
 
 /// Implement [`Supports`] for every target, for a scheme that takes them
-/// all, as the CLLW schemes do: [`supports_targets!`] with the full list.
+/// all, as the CLWW schemes do: [`supports_targets!`] with the full list.
 ///
 /// ```
 /// # use vitaminc_ore::{Context, OrderPlaintext, OrderScheme};

@@ -129,7 +129,7 @@ pub enum OrderError<E> {
 /// before the scheme sees it.
 ///
 /// Terms compare only between terms of the same scheme, key, target and
-/// context: a space. The scheme keeps its own comparison (CLLW ORE and
+/// context: a space. The scheme keeps its own comparison (CLWW ORE and
 /// block ORE do not compare byte by byte) in [`compare`](Self::compare),
 /// and its own stored bytes through `AsRef<[u8]>`. A term is not `Ord`:
 /// that would promise an order between any two terms, and no term carries
@@ -163,7 +163,7 @@ pub trait OrderScheme {
     /// salt, so that it is derived for the space rather than for every
     /// term. Block ORE keeps the keys and cipher it derives under the
     /// salt; a scheme that passes the salt straight to its primitive, as
-    /// CLLW does, keeps the salt's bytes (`Protected<Vec<u8>>`).
+    /// CLWW does, keeps the salt's bytes (`Protected<Vec<u8>>`).
     ///
     /// It must wipe itself when it is dropped, because what a scheme
     /// derives from its key is as secret as the key. A space is dropped
@@ -247,9 +247,11 @@ pub trait OrderScheme {
 /// or just a value, and get terms. Implemented for every scheme and for
 /// nothing else, so a scheme cannot change how a space binds its terms.
 ///
-/// Every step of the chain is usable. A target alone is a space under the
-/// empty context; a context alone takes values whose Rust type says the
-/// target; a value alone uses both defaults.
+/// Every step of the chain is usable for terms. A target alone is a space
+/// under the empty context; a context alone takes values whose Rust type
+/// says the target; a value alone uses both defaults. Queries come only
+/// from a space, through [`OrderSpace::encrypt_query`], so a chain that
+/// makes one names its target.
 ///
 /// ```
 /// use std::cmp::Ordering;

@@ -13,7 +13,7 @@ for each scalar kind that can be ordered, a frozen **domain label** and
 an **order encoding**: bytes whose lexicographic order is the value's
 order. It seals the result as an [`OrderPlaintext`] that only it can
 build, and it defines [`OrderScheme`], the trait a scheme implements to
-encrypt one. The schemes themselves, block ORE in `ore-rs` and CLLW ORE
+encrypt one. The schemes themselves, block ORE in `ore-rs` and CLWW ORE
 and OPE in `cllw-ore`, depend on this crate and implement the trait, so
 no scheme can be handed bytes that skipped the encoding, and this crate
 depends on no scheme.
@@ -40,9 +40,10 @@ The set of terms that compare with each other is a **space**: one scheme
 and key, one target, and one context (a table and column, a tenant,
 whatever the terms must compare within). A caller opens a space by
 chaining a target and a context on a scheme, and encrypts values there.
-Every step of the chain is usable, and a step left out takes its
-default: a target alone is under the empty context, and a value alone is
-encoded as the target its Rust type is.
+Every step of the chain is usable for terms, and a step left out takes
+its default: a target alone is under the empty context, and a value
+alone is encoded as the target its Rust type is. Queries come from a
+space, so a chain that makes one names its target.
 
 ```rust
 use std::cmp::Ordering;
@@ -151,10 +152,22 @@ A query is a `QueryTerm`, labelled the same way, from `encrypt_query`
 or `encrypt_query_checked` on a scheme that implements `OrderQuery`.
 Block ORE has one: the half of a term a comparison needs from the
 searching side, smaller than a stored term. A scheme whose terms are
-their own queries, as the CLWW schemes are, has `Query = Term`. A query
-has its own type, so it cannot be stored or compared where a term is
-expected; `compare_query(&query, &term)` gives the order of the queried
-value relative to the stored one.
+their own queries, as the CLWW schemes are, has `Query = Term`.
+`compare_query(&query, &term)` gives the order of the queried value
+relative to the stored one. A query has its own type, so it cannot be
+compared where a term is expected: `compare(&query, &term)` does not
+compile. Its bytes are bytes, though, which a caller needs in order to
+send the query to wherever the terms are, and nothing stops a caller
+writing them into a term's place. Under block ORE every later `compare`
+against those bytes returns `None`; under a scheme whose query is its
+term the mistake is invisible.
+
+A query exists for the comparison at hand, and should not be persisted
+or logged. Held beside the stored terms, it orders every one of them
+against the searched value. And block ORE's queries are deterministic,
+one value in one space giving one query, so `==` on two queries is
+equality of the values searched for, and a log of queries is a log of
+what was searched.
 
 A layer above maps its own column types onto targets: an EQL `int`
 column is `OrderTarget::I32`. This crate knows nothing of that layer.
@@ -286,7 +299,7 @@ assert_eq!(FourBytes::compare(&vec![], &vec![]), None);
 
 The salt is `PAE("vitaminc/ore/v1", scheme, domain, context)`, derived
 once when the space is made, so every scheme binds the same three
-things: a CLLW scheme passes it as its salt, and a scheme without one,
+things: a CLWW scheme passes it as its salt, and a scheme without one,
 block ORE, derives its keys under it. The scheme does that per space,
 not per term, in `open`, which the space calls when its first value is
 encrypted (or earlier, through `OrderSpace::open`); `open` may run again
@@ -404,5 +417,5 @@ The fixed-width block ORE scheme in `ore-rs` takes one to fifteen
 bytes, so `i128`, `u128` and
 uuid terms have no fixed-width block ORE, and nor do text and bytes,
 whose terms vary in length; `ore-rs`'s chained block ORE scheme and the
-CLLW schemes take every domain. A scheme reports such a refusal as
+CLWW schemes take every domain. A scheme reports such a refusal as
 [`OrderError::Unsupported`].
