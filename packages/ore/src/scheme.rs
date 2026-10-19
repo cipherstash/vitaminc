@@ -873,23 +873,23 @@ mod tests {
     #[test]
     fn the_salt_binds_label_scheme_domain_and_context() {
         let context = ("tenant", 1u64).into_context().encode();
-        let salted = salt("mock", OrderTarget::I8, &context);
+        let salted = salt("mock", OrderTarget::I16, &context);
         assert_eq!(
             salted,
             Context::pae(&[
                 b"vitaminc/ore/v1",
                 b"mock",
-                domain::INT8.as_bytes(),
+                domain::INT16.as_bytes(),
                 context.as_bytes()
             ])
         );
-        assert_ne!(salted, salt("other", OrderTarget::I8, &context));
-        assert_ne!(salted, salt("mock", OrderTarget::U8, &context));
+        assert_ne!(salted, salt("other", OrderTarget::I16, &context));
+        assert_ne!(salted, salt("mock", OrderTarget::U16, &context));
         assert_ne!(
             salted,
             salt(
                 "mock",
-                OrderTarget::I8,
+                OrderTarget::I16,
                 &("tenant", 2u64).into_context().encode()
             )
         );
@@ -956,7 +956,7 @@ mod tests {
             Err(ScalarError::NotScalar)
         ));
         assert!(matches!(
-            true.visit(Scalar(OrderTarget::U8)),
+            true.visit(Scalar(OrderTarget::U16)),
             Err(ScalarError::Term(NormalizeError::NoDomain))
         ));
     }

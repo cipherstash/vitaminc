@@ -52,18 +52,11 @@ fn inventory() -> Vec<Orderable<'static>> {
         width,
     };
     vec![
-        plain(T::I8, I(Int::I8(-1)), I(Int::U8(1)), domain::INT8, Some(1)),
-        plain(
-            T::U8,
-            I(Int::I8(0)),
-            I(Int::U8(255)),
-            domain::UINT8,
-            Some(1),
-        ),
+        // 8-bit values go in; the narrowest target is sixteen bits.
         plain(
             T::I16,
-            I(Int::I16(i16::MIN)),
-            I(Int::I16(i16::MAX)),
+            I(Int::I8(i8::MIN)),
+            I(Int::U8(u8::MAX)),
             domain::INT16,
             Some(2),
         ),
@@ -175,7 +168,7 @@ fn every_kind_has_an_order_target_or_is_a_named_exception() {
     for target in OrderTarget::ALL {
         assert!(targets.contains(target), "{target:?} has no row");
     }
-    assert_eq!(domain::ALL.len(), 17);
+    assert_eq!(domain::ALL.len(), 15);
     let scheme = Mock::new(key());
     for kind in &kinds {
         let (below, above) = (
@@ -377,7 +370,7 @@ fn a_scheme_refuses_a_target_by_name_not_by_counting_bytes() {
     assert!(fixed.target(T::Date).encrypt_checked(day).is_ok());
     assert!(fixed.target(T::I32).encrypt_checked(1i8).is_ok());
     for (target, value, domain) in [
-        (T::I8, Raw(None, Physical::Int(Int::I8(1))), domain::INT8),
+        (T::I16, Raw(None, Physical::Int(Int::I8(1))), domain::INT16),
         (T::Text, Raw(None, Physical::Text("abcd")), domain::TEXT),
         (
             T::Bytes,
@@ -405,13 +398,13 @@ fn terms_compare_only_within_one_scheme_key_target_and_context() {
     let tenant = |n: u64| ("tenant", n);
     let mock = Mock::new(key());
     let under_one = mock
-        .target(T::I8)
+        .target(T::I16)
         .context(tenant(1))
         .encrypt_checked(0i8)
         .expect("mock");
     assert_ne!(
         under_one,
-        mock.target(T::I8)
+        mock.target(T::I16)
             .context(tenant(2))
             .encrypt_checked(0i8)
             .expect("mock")
@@ -419,24 +412,27 @@ fn terms_compare_only_within_one_scheme_key_target_and_context() {
     assert_ne!(
         under_one,
         Mock::new(Protected::new([8; 32]))
-            .target(T::I8)
+            .target(T::I16)
             .context(tenant(1))
             .encrypt_checked(0i8)
             .expect("mock")
     );
     assert_ne!(
         under_one,
-        Fixed::<1>(Mock::new(key()))
-            .target(T::I8)
+        Fixed::<2>(Mock::new(key()))
+            .target(T::I16)
             .context(tenant(1))
             .encrypt_checked(0i8)
             .expect("fixed")
     );
     // The same bytes under another target are another term.
-    let as_i8 = mock.target(T::I8).encrypt_checked(0i8).expect("mock");
-    let as_u8 = mock.target(T::U8).encrypt_checked(0x80u16).expect("mock");
-    assert_eq!(as_i8.raw().bytes(), as_u8.raw().bytes());
-    assert_ne!(as_i8, as_u8);
+    let as_i16 = mock.target(T::I16).encrypt_checked(0i8).expect("mock");
+    let as_u16 = mock
+        .target(T::U16)
+        .encrypt_checked(0x8000u16)
+        .expect("mock");
+    assert_eq!(as_i16.raw().bytes(), as_u16.raw().bytes());
+    assert_ne!(as_i16, as_u16);
 }
 
 /// The space derives the salt from the scheme's own name, so two schemes
@@ -448,14 +444,14 @@ fn a_spaces_salt_binds_its_schemes_own_name() {
         Context::pae(&[
             b"vitaminc/ore/v1",
             scheme.as_bytes(),
-            domain::INT8.as_bytes(),
+            domain::INT16.as_bytes(),
             context.as_bytes(),
         ])
     };
-    let (mock, fixed) = (Mock::new(key()), Fixed::<1>(Mock::new(key())));
+    let (mock, fixed) = (Mock::new(key()), Fixed::<2>(Mock::new(key())));
     let (m, f) = (
-        mock.target(T::I8).context(("tenant", 1u64)),
-        fixed.target(T::I8).context(("tenant", 1u64)),
+        mock.target(T::I16).context(("tenant", 1u64)),
+        fixed.target(T::I16).context(("tenant", 1u64)),
     );
     assert_eq!(m.salt(), &expected("mock"));
     assert_eq!(f.salt(), &expected("fixed"));
@@ -484,7 +480,7 @@ fn the_space_refuses_before_the_scheme_and_passes_the_schemes_failure_through() 
         Err(OrderError::Term(NormalizeError::Mismatch))
     ));
     assert!(matches!(
-        mock.target(T::U8).encrypt_checked(300u16),
+        mock.target(T::U16).encrypt_checked(70_000u32),
         Err(OrderError::Term(NormalizeError::OutOfRange))
     ));
     assert!(matches!(
@@ -492,7 +488,7 @@ fn the_space_refuses_before_the_scheme_and_passes_the_schemes_failure_through() 
             .encrypt_checked(Raw(Some(Logical::Uuid), Physical::Bytes(&[0; 3]))),
         Err(OrderError::Term(NormalizeError::Invalid))
     ));
-    let failed = Down.target(T::I8).encrypt_checked(1i8).expect_err("down");
+    let failed = Down.target(T::I16).encrypt_checked(1i8).expect_err("down");
     assert!(matches!(failed, OrderError::Backend(_)));
     assert_eq!(
         failed.to_string(),
@@ -582,7 +578,7 @@ fn a_space_debugs_as_its_target_with_the_rest_masked() {
 #[test]
 fn a_scheme_is_keyed_like_a_prf() {
     let from_bytes = Mock::try_from_bytes(Protected::new(vec![7; 32])).expect("32 bytes");
-    let term = |scheme: &Mock| scheme.target(T::I8).encrypt_checked(1i8).expect("mock");
+    let term = |scheme: &Mock| scheme.target(T::I16).encrypt_checked(1i8).expect("mock");
     assert_eq!(term(&from_bytes), term(&Mock::new(key())));
     let short = Mock::try_from_bytes(Protected::new(vec![7; 16]))
         .err()
@@ -725,11 +721,11 @@ fn a_space_sorts_its_own_terms_and_refuses_another_spaces() {
 #[test]
 fn a_mock_term_keeps_the_plaintext_bytes_after_its_salt_and_key() {
     let term: MockTerm = Mock::new(key())
-        .target(T::U8)
+        .target(T::U16)
         .encrypt_checked(9u16)
         .expect("mock")
         .into_raw();
-    assert_eq!(term.bytes(), &[9]);
+    assert_eq!(term.bytes(), &[0, 9]);
 }
 
 /// The checks a scheme crate runs against its real scheme pass for the

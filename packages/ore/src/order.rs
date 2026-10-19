@@ -41,11 +41,12 @@ pub const VARIABLE_WIDTH_MARKER: u8 = 0x01;
 
 /// Frozen domain labels for order terms, one per [`OrderTarget`].
 pub mod domain {
-    /// An `i8`, one byte.
-    pub const INT8: &str = "vitaminc/ore/value/int8/v1";
-    /// A `u8`, one byte.
-    pub const UINT8: &str = "vitaminc/ore/value/uint8/v1";
-    /// An `i16`, two bytes.
+    // Retired in 0.7, never to be reused with another meaning:
+    // `vitaminc/ore/value/int8/v1` and `vitaminc/ore/value/uint8/v1`, the
+    // one-byte targets 0.6 published. See `OrderTarget` for why.
+
+    /// An `i16`, two bytes. The narrowest integer target: see
+    /// [`OrderTarget`](super::OrderTarget) for why there is no 8-bit one.
     pub const INT16: &str = "vitaminc/ore/value/int16/v1";
     /// A `u16`, two bytes.
     pub const UINT16: &str = "vitaminc/ore/value/uint16/v1";
@@ -80,8 +81,8 @@ pub mod domain {
     /// Every domain, for a test or an index layer that enumerates them. A
     /// slice, so a domain added later does not change its type.
     pub const ALL: &[&str] = &[
-        INT8, UINT8, INT16, UINT16, INT32, UINT32, INT64, UINT64, INT128, UINT128, FLOAT64, DATE,
-        TIMESTAMP, DECIMAL, TEXT, BYTES, UUID,
+        INT16, UINT16, INT32, UINT32, INT64, UINT64, INT128, UINT128, FLOAT64, DATE, TIMESTAMP,
+        DECIMAL, TEXT, BYTES, UUID,
     ];
 }
 
@@ -96,14 +97,32 @@ pub mod domain {
 /// its own kind; anything else is [`NormalizeError::Mismatch`]. An
 /// integer is not a float, a date or a decimal, so none of those take
 /// one.
+///
+/// # What has no target
+///
+/// An order term reveals the order of the values it encrypts. That is
+/// the point of the scheme, and it is safe only when the set of possible
+/// values is large enough that knowing the order of the rows does not
+/// give the values away. A boolean has two values, so an order term over
+/// a boolean column says which rows are `true`: [`order`] refuses one
+/// with [`NormalizeError::NoDomain`]. An 8-bit integer has 256, so an
+/// order index over such a column is a frequency table of the column with
+/// the order on top, and anyone who knows a handful of rows' values, or
+/// the rough distribution of the data (ages, quantities, ratings), reads
+/// the rest off. So the narrowest integer target is sixteen bits. An
+/// `i8` or `u8` **value** still goes into any wider target it fits; what
+/// there is not is a one-byte space.
+///
+/// The floor removes only the case where the *type* guarantees few
+/// values. An `I16` or `I32` column that holds ages or ratings leaks the
+/// same frequency table, since the leak is a property of how many
+/// distinct values the column holds, not of the width. Whether a column
+/// should have an order index at all is a question about its data; a
+/// column of few distinct values wants an equality index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum OrderTarget {
-    /// An `i8`.
-    I8,
-    /// A `u8`.
-    U8,
-    /// An `i16`.
+    /// An `i16`. The narrowest integer target; see above for why.
     I16,
     /// A `u16`.
     U16,
@@ -138,8 +157,6 @@ pub enum OrderTarget {
 impl OrderTarget {
     /// Every target, for a test or an index layer that enumerates them.
     pub const ALL: &[OrderTarget] = &[
-        Self::I8,
-        Self::U8,
         Self::I16,
         Self::U16,
         Self::I32,
@@ -160,8 +177,6 @@ impl OrderTarget {
     /// The frozen domain label of every term of this target.
     pub fn domain(self) -> &'static str {
         match self {
-            Self::I8 => domain::INT8,
-            Self::U8 => domain::UINT8,
             Self::I16 => domain::INT16,
             Self::U16 => domain::UINT16,
             Self::I32 => domain::INT32,
@@ -181,10 +196,10 @@ impl OrderTarget {
     }
 
     /// The width of every term of this target, or `None` for text and
-    /// bytes, whose terms vary in length.
+    /// bytes, whose terms vary in length. Never one byte: see the type's
+    /// docs.
     pub fn width(self) -> Option<usize> {
         match self {
-            Self::I8 | Self::U8 => Some(1),
             Self::I16 | Self::U16 => Some(2),
             Self::I32 | Self::U32 | Self::Date => Some(4),
             Self::I64 | Self::U64 | Self::F64 => Some(8),
@@ -231,8 +246,8 @@ impl OrderTarget {
 ///
 /// # Errors
 ///
-/// [`NormalizeError::NoDomain`] for a null, a boolean, an `undefined` or a
-/// logical type this build does not know; [`NormalizeError::Invalid`] for
+/// [`NormalizeError::NoDomain`] for a null, a boolean (see [`OrderTarget`]
+/// for why), an `undefined` or a logical type this build does not know; [`NormalizeError::Invalid`] for
 /// a value that does not fit its own logical type;
 /// [`NormalizeError::Mismatch`] for a value of another kind than
 /// `target`; [`NormalizeError::OutOfRange`] for an integer outside
@@ -287,9 +302,7 @@ impl OrderTarget {
     fn is_int(self) -> bool {
         matches!(
             self,
-            Self::I8
-                | Self::U8
-                | Self::I16
+            Self::I16
                 | Self::U16
                 | Self::I32
                 | Self::U32
@@ -312,8 +325,6 @@ fn convert(target: OrderTarget, value: Int) -> Option<Int> {
         };
     };
     match target {
-        OrderTarget::I8 => i8::try_from(v).ok().map(Int::I8),
-        OrderTarget::U8 => u8::try_from(v).ok().map(Int::U8),
         OrderTarget::I16 => i16::try_from(v).ok().map(Int::I16),
         OrderTarget::U16 => u16::try_from(v).ok().map(Int::U16),
         OrderTarget::I32 => i32::try_from(v).ok().map(Int::I32),
@@ -331,8 +342,9 @@ fn convert(target: OrderTarget, value: Int) -> Option<Int> {
 /// bytes `orderable-bytes` produces, checked against it in the tests.
 fn int(value: Int) -> Protected<Vec<u8>> {
     match value {
-        Int::I8(v) => fixed(((v as u8) ^ (1 << 7)).to_be_bytes()),
-        Int::U8(v) => fixed(v.to_be_bytes()),
+        // `convert` widens every 8-bit value to its target, so no
+        // one-byte encoding is ever made: there is no 8-bit target.
+        Int::I8(_) | Int::U8(_) => unreachable!("convert widens every 8-bit value to its target"),
         Int::I16(v) => fixed(((v as u16) ^ (1 << 15)).to_be_bytes()),
         Int::U16(v) => fixed(v.to_be_bytes()),
         Int::I32(v) => fixed(((v as u32) ^ (1 << 31)).to_be_bytes()),

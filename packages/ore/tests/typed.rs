@@ -90,8 +90,6 @@ fn every_fits_in_row_encrypts_at_its_extremes() {
     let i128s = [i128::MIN, 0, i128::MAX];
     let u128s = [0, u128::MAX];
 
-    let s = mock.target(target::I8);
-    row(&s, &i8s);
     let s = mock.target(target::I16);
     row(&s, &i8s);
     row(&s, &i16s);
@@ -360,7 +358,7 @@ fn a_runtime_target_the_scheme_does_not_take_is_refused_before_the_value() {
 #[test]
 fn a_fitting_value_fails_only_as_the_scheme_fails() {
     assert!(matches!(
-        Down.target(target::I8).encrypt(1i8),
+        Down.target(target::I16).encrypt(1i8),
         Err(BackendDown)
     ));
     assert!(matches!(Down.encrypt(1i64), Err(BackendDown)));

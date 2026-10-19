@@ -117,7 +117,7 @@ fn a_logical_type_with_no_order_domain_stops_the_walk() {
         "x",
         Raw(Logical::from_wire(200, 1), Physical::Int(Int::I8(1))),
     );
-    let err = order_terms(OrderTarget::I8, doc).expect_err("refused");
+    let err = order_terms(OrderTarget::I16, doc).expect_err("refused");
     let term = err.term().expect("refused by the normalizer");
     assert_eq!(term.error(), NormalizeError::NoDomain);
     assert_eq!(render(term.path()), ".x");

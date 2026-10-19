@@ -24,9 +24,9 @@ help: the following other types implement trait `FitsIn<T>`
    |               `&i64` implements `FitsIn<vitaminc_ore::target::I64>`
 ...
    | / fits! {
-   | |     I8: i8;
    | |     I16: i8, i16;
    | |     U16: u16;
+   | |     I32: i8, i16, i32, u16;
 ...  |
    | |     Bytes: Vec<u8>;
    | | }

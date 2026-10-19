@@ -33,9 +33,7 @@ fn every_width(v: u8) -> [Int; 10] {
     ]
 }
 
-const INT_TARGETS: [(OrderTarget, &str, usize); 10] = [
-    (T::I8, domain::INT8, 1),
-    (T::U8, domain::UINT8, 1),
+const INT_TARGETS: [(OrderTarget, &str, usize); 8] = [
     (T::I16, domain::INT16, 2),
     (T::U16, domain::UINT16, 2),
     (T::I32, domain::INT32, 4),
@@ -94,8 +92,8 @@ fn an_integer_outside_the_target_is_refused_not_truncated() {
     refused(T::I32, Int::I64(i64::from(i32::MIN) - 1));
     refused(T::I32, Int::U32(u32::MAX));
     refused(T::U32, Int::I8(-1));
-    refused(T::U8, Int::U16(256));
-    refused(T::I8, Int::U8(128));
+    refused(T::U16, Int::U32(65_536));
+    refused(T::I16, Int::U16(32_768));
     refused(T::I64, Int::U64(u64::MAX));
     refused(T::I128, Int::U128(u128::MAX));
     refused(T::U128, Int::I128(-1));
@@ -103,8 +101,8 @@ fn an_integer_outside_the_target_is_refused_not_truncated() {
     for (target, i) in [
         (T::I32, Int::I64(i32::MAX.into())),
         (T::I32, Int::I64(i32::MIN.into())),
-        (T::U8, Int::U16(255)),
-        (T::I8, Int::I128(-128)),
+        (T::U16, Int::U32(65_535)),
+        (T::I16, Int::I128(-32_768)),
         (T::U128, Int::U128(u128::MAX)),
         (T::I128, Int::I128(i128::MIN)),
     ] {
@@ -117,12 +115,15 @@ fn an_integer_outside_the_target_is_refused_not_truncated() {
 
 #[test]
 fn integers_are_big_endian_with_the_sign_bit_flipped() {
-    assert_eq!(int_bytes(T::I8, Int::I8(-1)), [0x7f]);
-    assert_eq!(int_bytes(T::I8, Int::I8(0)), [0x80]);
-    assert_eq!(int_bytes(T::I8, Int::I8(i8::MIN)), [0x00]);
-    assert_eq!(int_bytes(T::I8, Int::I8(i8::MAX)), [0xff]);
-    assert_eq!(int_bytes(T::U8, Int::U8(0)), [0x00]);
-    assert_eq!(int_bytes(T::U8, Int::U8(255)), [0xff]);
+    assert_eq!(int_bytes(T::I16, Int::I16(-1)), [0x7f, 0xff]);
+    assert_eq!(int_bytes(T::I16, Int::I16(0)), [0x80, 0x00]);
+    assert_eq!(int_bytes(T::I16, Int::I16(i16::MIN)), [0x00, 0x00]);
+    assert_eq!(int_bytes(T::I16, Int::I16(i16::MAX)), [0xff, 0xff]);
+    assert_eq!(int_bytes(T::U16, Int::U16(0)), [0x00, 0x00]);
+    assert_eq!(int_bytes(T::U16, Int::U16(255)), [0x00, 0xff]);
+    // An 8-bit value goes into a wider target at the target's width.
+    assert_eq!(int_bytes(T::I16, Int::I8(-1)), [0x7f, 0xff]);
+    assert_eq!(int_bytes(T::U16, Int::U8(255)), [0x00, 0xff]);
     assert_eq!(int_bytes(T::I32, Int::I32(-2)), [0x7f, 0xff, 0xff, 0xfe]);
     assert_eq!(int_bytes(T::I32, Int::I8(-2)), [0x7f, 0xff, 0xff, 0xfe]);
     assert_eq!(int_bytes(T::U32, Int::U32(1)), [0, 0, 0, 1]);
@@ -283,7 +284,7 @@ fn scalars_with_no_order_are_refused_with_the_reason() {
     }
     let unknown = Logical::from_wire(200, 1).expect("unknown");
     assert_eq!(
-        order(T::I8, Some(unknown), Physical::Int(Int::I8(1))).expect_err("refused"),
+        order(T::I16, Some(unknown), Physical::Int(Int::I8(1))).expect_err("refused"),
         NormalizeError::NoDomain
     );
     // Not valid for the logical type: refused before the target is looked at.
@@ -305,7 +306,7 @@ fn scalars_with_no_order_are_refused_with_the_reason() {
         NormalizeError::Invalid
     );
     assert_eq!(
-        order(T::I8, Some(Logical::Undefined), Physical::Int(Int::I8(1))).expect_err("refused"),
+        order(T::I16, Some(Logical::Undefined), Physical::Int(Int::I8(1))).expect_err("refused"),
         NormalizeError::Invalid
     );
 }
@@ -343,7 +344,7 @@ fn every_domain_is_distinct_and_listed_once() {
     all.sort_unstable();
     all.dedup();
     assert_eq!(all.len(), domain::ALL.len());
-    assert_eq!(domain::ALL.len(), 17);
+    assert_eq!(domain::ALL.len(), 15);
     // One target per domain, in the same order.
     let by_target: Vec<_> = OrderTarget::ALL.iter().map(|t| t.domain()).collect();
     assert_eq!(by_target, domain::ALL);
@@ -374,12 +375,6 @@ fn integer_byte_order_is_value_order(a: i64, b: i64) -> bool {
     // One row per target: the two encodings, and how the values compare.
     let rows = [
         ordered(
-            T::I8,
-            Int::I8(a as i8),
-            Int::I8(b as i8),
-            (a as i8).cmp(&(b as i8)),
-        ),
-        ordered(
             T::I16,
             Int::I16(a as i16),
             Int::I16(b as i16),
@@ -397,12 +392,6 @@ fn integer_byte_order_is_value_order(a: i64, b: i64) -> bool {
             Int::I128(wide(a)),
             Int::I128(wide(b)),
             wide(a).cmp(&wide(b)),
-        ),
-        ordered(
-            T::U8,
-            Int::U8(a as u8),
-            Int::U8(b as u8),
-            (a as u8).cmp(&(b as u8)),
         ),
         ordered(
             T::U16,
@@ -441,6 +430,16 @@ fn values_of_any_width_order_as_numbers_in_a_wide_target(a: i8, b: u64) -> bool 
         int_bytes(T::I128, Int::U64(b)),
     );
     x.cmp(&y) == i128::from(a).cmp(&i128::from(b))
+}
+
+/// The whole 8-bit range, signed and unsigned, orders as the numbers in
+/// the narrowest target, `I16`: there is no 8-bit target, so this is the
+/// space an 8-bit column lands in.
+#[quickcheck]
+fn every_8_bit_value_orders_as_a_number_in_an_i16_target(a: i8, b: u8) -> bool {
+    let (x, y) = (int_bytes(T::I16, Int::I8(a)), int_bytes(T::I16, Int::U8(b)));
+    x.cmp(&y) == i16::from(a).cmp(&i16::from(b))
+        && int_bytes(T::I16, Int::U8(b)) == int_bytes(T::I16, Int::I16(i16::from(b)))
 }
 
 #[quickcheck]
@@ -491,24 +490,20 @@ mod oracle {
     #[quickcheck]
     fn integers_match_orderable_bytes(v: i128, w: u128) -> bool {
         let ours = [
-            int_bytes(T::I8, Int::I8(v as i8)),
             int_bytes(T::I16, Int::I16(v as i16)),
             int_bytes(T::I32, Int::I32(v as i32)),
             int_bytes(T::I64, Int::I64(v as i64)),
             int_bytes(T::I128, Int::I128(v)),
-            int_bytes(T::U8, Int::U8(w as u8)),
             int_bytes(T::U16, Int::U16(w as u16)),
             int_bytes(T::U32, Int::U32(w as u32)),
             int_bytes(T::U64, Int::U64(w as u64)),
             int_bytes(T::U128, Int::U128(w)),
         ];
         let frozen = [
-            (v as i8).to_orderable_bytes().to_vec(),
             (v as i16).to_orderable_bytes().to_vec(),
             (v as i32).to_orderable_bytes().to_vec(),
             (v as i64).to_orderable_bytes().to_vec(),
             v.to_orderable_bytes().to_vec(),
-            (w as u8).to_orderable_bytes().to_vec(),
             (w as u16).to_orderable_bytes().to_vec(),
             (w as u32).to_orderable_bytes().to_vec(),
             (w as u64).to_orderable_bytes().to_vec(),

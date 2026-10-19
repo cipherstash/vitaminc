@@ -85,8 +85,6 @@ fn rows() -> Vec<Row> {
         empty: None,
     };
     vec![
-        plain(T::I8, I(Int::I8(-1)), I(Int::I8(1))),
-        plain(T::U8, I(Int::U8(0)), I(Int::U8(255))),
         plain(T::I16, I(Int::I16(i16::MIN)), I(Int::I16(i16::MAX))),
         plain(T::U16, I(Int::U16(0)), I(Int::U16(u16::MAX))),
         plain(T::I32, I(Int::I32(i32::MIN)), I(Int::I32(i32::MAX))),

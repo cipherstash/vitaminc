@@ -8,6 +8,7 @@ error[E0277]: `Option<i64>` has no order target of its own
    |
    = help: the trait `OwnTarget` is not implemented for `Option<i64>`
    = note: name the target: `scheme.target(I64).encrypt_checked(value)`
+   = note: there is no 8-bit target: an order term over 256 values reveals them, so an `i8` goes into `I16` or wider by name (`scheme.target(I16).encrypt(value)`), or into an equality index
    = help: the following other types implement trait `OwnTarget`:
              &String
              &Vec<u8>

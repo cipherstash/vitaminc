@@ -271,8 +271,8 @@ a new label.
 
 | Target | Domain | Bytes |
 | --- | --- | --- |
-| `I8`, `I16`, `I32`, `I64`, `I128` | `vitaminc/ore/value/int{8,16,32,64,128}/v1` | big-endian at the target's width, sign bit flipped |
-| `U8`, `U16`, `U32`, `U64`, `U128` | `vitaminc/ore/value/uint{8,16,32,64,128}/v1` | big-endian at the target's width |
+| `I16`, `I32`, `I64`, `I128` | `vitaminc/ore/value/int{16,32,64,128}/v1` | big-endian at the target's width, sign bit flipped |
+| `U16`, `U32`, `U64`, `U128` | `vitaminc/ore/value/uint{16,32,64,128}/v1` | big-endian at the target's width |
 | `F64` | `vitaminc/ore/value/float64/v1` | the `f64` equality encoding: `-0.0` folded to `0.0`, every NaN to one quiet NaN, then negatives flip every bit and positives the sign bit; an `f32` widened exactly first |
 | `Date` | `vitaminc/ore/value/date/v1` | the equality encoding: orderable days from 0001-01-01 |
 | `Timestamp`, any unit | `vitaminc/ore/value/timestamp-micros/v1` | the equality encoding: orderable seconds, then nanoseconds truncated to microseconds |
@@ -284,7 +284,8 @@ a new label.
 An integer of any width goes into an integer target it fits: `100` as
 an `i8` and `100` as a `u64` are one term of an `I32` space. There is
 no `f32` target: JavaScript numbers are always `f64`, and an `f32`
-widens to `f64` exactly.
+widens to `f64` exactly. There is no 8-bit target either, for the reason
+under Known exceptions: an `i8` or `u8` value goes into `I16` or wider.
 
 The two variable-width encodings, text and bytes, start with a marker
 byte, `VARIABLE_WIDTH_MARKER` (`0x01`), so that no order plaintext is
@@ -340,6 +341,22 @@ published crate.
 ## Known exceptions
 
 Booleans, nulls and `undefined` have no order term under any target.
+An order term reveals the order of the values it encrypts, which is
+safe only when there are enough possible values that the order of the
+rows does not give the values away. A boolean has two, so an order term
+over a boolean column says which rows are `true`. The same argument
+holds at 256: an order index over an 8-bit column is a frequency table
+of the column with the order on top, and anyone who knows a few rows'
+values, or the rough shape of the data (ages, quantities, ratings),
+reads the rest off. So the narrowest integer target is `I16`. An `i8`
+or `u8` value still goes into any wider target, and
+`scheme.encrypt(42i8)` does not compile, because an `i8` has no target
+of its own. The floor removes only the case where the type guarantees
+few values: an `I16` or `I32` column of ages or ratings leaks the same
+frequency table, because the leak is about how many distinct values the
+column holds, not its width. Whether a column should have an order
+index at all is a question about its data; a column of few distinct
+values wants an equality index.
 The fixed-width block ORE scheme in `ore-rs` takes one to fifteen
 bytes, so `i128`, `u128` and
 uuid terms have no fixed-width block ORE, and nor do text and bytes,

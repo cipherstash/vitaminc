@@ -177,7 +177,6 @@ impl<const N: usize> OrderScheme for Fixed<N> {
 }
 
 // The targets of each width the tests use, both answers from one list.
-vitaminc_ore::supports_targets!(Fixed<1>; I8, U8);
 vitaminc_ore::supports_targets!(Fixed<2>; I16, U16);
 vitaminc_ore::supports_targets!(Fixed<4>; I32, U32, Date);
 vitaminc_ore::supports_targets!(Fixed<8>; I64, U64, F64);

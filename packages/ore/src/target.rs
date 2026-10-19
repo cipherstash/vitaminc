@@ -61,7 +61,7 @@ impl Target for OrderTarget {
 ///
 /// | Target | Takes |
 /// | --- | --- |
-/// | an integer target | every integer type whose whole range it holds, so `I32` takes `i8`, `i16`, `i32` and `u16` (a `u8` is not a scalar of the data model: `Vec<u8>` is bytes) |
+/// | an integer target | every integer type whose whole range it holds, so `I32` takes `i8`, `i16`, `i32` and `u16` (a `u8` is not a scalar of the data model: `Vec<u8>` is bytes). There is no 8-bit target, so an `i8` fits `I16` and up: see [`OrderTarget`] |
 /// | `F64` | `f32`, `f64` |
 /// | `Bytes` | `&[u8]`, `Vec<u8>`, `[u8; N]`, [`Bytes`](vitaminc_aead::Bytes) |
 /// | `Date` | `chrono::NaiveDate` (feature `chrono`) |
@@ -93,14 +93,18 @@ pub trait FitsIn<T: StaticTarget>: Encrypt + private::Sealed {}
 /// is never inferred from a value: a JavaScript `BigInt` arrives as the
 /// narrowest integer that holds it, and inferring from the value would
 /// scatter one index across several domains. A newtype names its target
-/// with [`OrderEncrypt::target`].
+/// with [`OrderEncrypt::target`]. An `i8` has no own target: an order
+/// term over 256 values reveals them (see [`OrderTarget`]), so an `i8`
+/// goes into a wider target it fits, by name:
+/// `scheme.target(I16).encrypt(value)`.
 ///
 /// [`OrderEncrypt::encrypt`]: crate::OrderEncrypt::encrypt
 /// [`OrderEncrypt::target`]: crate::OrderEncrypt::target
 #[diagnostic::on_unimplemented(
     message = "`{Self}` has no order target of its own",
     label = "has no order target of its own",
-    note = "name the target: `scheme.target(I64).encrypt_checked(value)`"
+    note = "name the target: `scheme.target(I64).encrypt_checked(value)`",
+    note = "there is no 8-bit target: an order term over 256 values reveals them, so an `i8` goes into `I16` or wider by name (`scheme.target(I16).encrypt(value)`), or into an equality index"
 )]
 pub trait OwnTarget: Encrypt + private::Sealed {
     /// The target this type is.
@@ -156,7 +160,7 @@ pub trait Supports<T: Target>: OrderScheme {
 /// #     fn compare(a: &Vec<u8>, b: &Vec<u8>) -> Option<core::cmp::Ordering> { Some(a.cmp(b)) }
 /// # }
 /// // A fixed-width scheme over at most ten bytes.
-/// vitaminc_ore::supports_targets!(TenBytes; I8, U8, I16, U16, I32, U32, I64, U64, F64, Date);
+/// vitaminc_ore::supports_targets!(TenBytes; I16, U16, I32, U32, I64, U64, F64, Date);
 /// ```
 #[macro_export]
 macro_rules! supports_targets {
@@ -206,7 +210,7 @@ macro_rules! supports_targets {
 macro_rules! supports_every_target {
     ($scheme:ty) => {
         $crate::supports_targets!($scheme;
-            I8, U8, I16, U16, I32, U32, I64, U64, I128, U128,
+            I16, U16, I32, U32, I64, U64, I128, U128,
             F64, Date, Timestamp, Decimal, Text, Bytes, Uuid);
     };
 }
@@ -236,11 +240,8 @@ macro_rules! markers {
 }
 
 markers! {
-    /// [`OrderTarget::I8`].
-    I8,
-    /// [`OrderTarget::U8`].
-    U8,
-    /// [`OrderTarget::I16`].
+    /// [`OrderTarget::I16`]. The narrowest integer target: an 8-bit one
+    /// would reveal its values, as [`OrderTarget`] explains.
     I16,
     /// [`OrderTarget::U16`].
     U16,
@@ -337,7 +338,6 @@ impl<const N: usize> private::Sealed for &[u8; N] {}
 // not a scalar of the data model (a `Vec<u8>` is bytes), so it has no
 // `Encrypt` impl to fit with.
 fits! {
-    I8: i8;
     I16: i8, i16;
     U16: u16;
     I32: i8, i16, i32, u16;
@@ -357,7 +357,6 @@ impl<const N: usize> FitsIn<Bytes> for [u8; N] {}
 impl<const N: usize> FitsIn<Bytes> for &[u8; N] {}
 
 own! {
-    i8 => I8,
     i16 => I16,
     u16 => U16,
     i32 => I32,
@@ -478,8 +477,6 @@ mod tests {
             assert_eq!(T::TARGET, expected);
             assert_eq!(T::default().runtime(), expected);
         }
-        check::<I8>(OrderTarget::I8);
-        check::<U8>(OrderTarget::U8);
         check::<I16>(OrderTarget::I16);
         check::<U16>(OrderTarget::U16);
         check::<I32>(OrderTarget::I32);
