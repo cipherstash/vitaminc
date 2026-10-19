@@ -807,6 +807,19 @@ fn the_conformance_checks_catch_a_stored_term_without_its_key() {
     test_support::conformance(&forgetful(key()), &forgetful(Protected::new([8; 32])));
 }
 
+/// A scheme whose empty query ignores the key and the salt fails the
+/// query check by name.
+#[test]
+#[should_panic(
+    expected = "vitaminc/ore/value/text-folded/unicode-16/v1: a query under another context compares equal to the term, so it does not depend on the salt"
+)]
+fn the_conformance_checks_catch_a_query_that_ignores_the_salt() {
+    test_support::query_conformance(
+        &common::Unsalted(Mock::new(key())),
+        &common::Unsalted(Mock::new(Protected::new([8; 32]))),
+    );
+}
+
 /// A marker impl the runtime answer does not back fails the check by
 /// name.
 #[test]

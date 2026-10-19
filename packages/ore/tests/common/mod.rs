@@ -294,6 +294,24 @@ impl OrderScheme for Unsalted {
     }
 }
 
+impl OrderQuery for Unsalted {
+    type Query = MockQuery;
+
+    /// The same forgetfulness on the query side: a short text query
+    /// ignores the salt and the key, for `query_conformance` to catch.
+    fn encrypt_query(
+        &self,
+        space: &MockSpace,
+        plaintext: &OrderPlaintext,
+    ) -> Result<MockQuery, Infallible> {
+        self.encrypt_plaintext(space, plaintext).map(MockQuery)
+    }
+
+    fn compare_query(query: &MockQuery, term: &MockTerm) -> Option<Ordering> {
+        compare(&query.0, term)
+    }
+}
+
 vitaminc_ore::supports_every_target!(Unsalted);
 
 /// A scheme whose term for a text shorter than two bytes is empty: the
