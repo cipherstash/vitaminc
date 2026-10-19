@@ -4,15 +4,13 @@ All notable changes to `vitaminc-aead` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
-
-## [0.6.1] - 2026-10-18
+## 0.6.1 — 2026-10-18
 
 ### Features
 
 - `FrameWriter::at_depth` and `FrameWriter::depth`, for writing a subtree to a buffer of its own while `MAX_DEPTH` still counts from the top of the document.
 
-## [0.6.0] - 2026-10-17
+## 0.6.0 — 2026-10-17
 
 ### Breaking
 
@@ -51,9 +49,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - A sequence's order and length are not authenticated. Each element is bound to its sequence, not to its index, so elements can be reordered or dropped without a cipher failure. This was also true in 0.5. Put them in a map or in the AAD if you need that.
 
-## [0.5.1] - 2026-10-05
+## 0.5.1 — 2026-10-05
 
-## [0.5.0] - 2026-09-20
+## 0.5.0 — 2026-09-20
 
 ### Breaking
 
@@ -63,7 +61,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - show the typed context in the Element example, not the raw-byte escape hatch
 
-## [0.4.0] - 2026-09-12
+## 0.4.0 — 2026-09-12
 
 ### Breaking
 
@@ -73,7 +71,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Runtime `AadPiece` contexts now support PRF derivation and `NonEmpty`, matching equivalent Rust contexts. Existing ciphertexts remain compatible. ([#338](https://github.com/cipherstash/vitaminc/pull/338))
 
-## [0.3.0] - 2026-09-07
+## 0.3.0 — 2026-09-07
 
 ### Breaking
 
@@ -85,7 +83,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - a context exposes its parts as an `AadPiece` tree, not only its bytes
 - `ContextTag` hands its cipher the context's parts at no extra cost
 
-## [0.2.0] - 2026-09-03
+## 0.2.0 — 2026-09-03
 
 ### Breaking
 

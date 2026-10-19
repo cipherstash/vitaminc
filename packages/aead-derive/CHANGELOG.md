@@ -1,7 +1,8 @@
+# vitaminc-aead-derive
 
-## [0.6.1] - 2026-10-18
+## 0.6.1 — 2026-10-18
 
-## [0.6.0] - 2026-10-17
+## 0.6.0 — 2026-10-17
 
 ### Breaking
 
@@ -16,19 +17,19 @@
 - `#[aead(skip)]` leaves a field out and rebuilds it with `Default` on decryption. `#[aead(take)]` moves a field out with `mem::take`, so a `ZeroizeOnDrop` type can derive.
 - A derived type nested deeper than `MAX_DEPTH` fails to compile, so it is never refused as too deep at runtime unless it is recursive. Mark mutually recursive types with `#[aead(recursive)]`, or rustc reports a const-evaluation cycle (E0391).
 
-## [0.5.1] - 2026-10-05
+## 0.5.1 — 2026-10-05
 
-## [0.5.0] - 2026-09-20
+## 0.5.0 — 2026-09-20
 
 ### Breaking
 
 - **Breaking:** one canonical context encoding shared by AAD and PRF derivations
 
-## [0.4.0] - 2026-09-12
+## 0.4.0 — 2026-09-12
 
-## [0.3.0] - 2026-09-07
+## 0.3.0 — 2026-09-07
 
-## [0.2.0] - 2026-09-03
+## 0.2.0 — 2026-09-03
 
 First release.
 

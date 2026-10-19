@@ -1,7 +1,8 @@
+# vitaminc-protected
 
-## [0.6.1] - 2026-10-18
+## 0.6.1 — 2026-10-18
 
-## [0.6.0] - 2026-10-17
+## 0.6.0 — 2026-10-17
 
 ### Breaking
 
@@ -13,9 +14,9 @@
 - `TimingSafeEq` is implemented for `bool`, `f32`, `f64` and `str`, and for any `&T` where `T: TimingSafeEq` (so `&[u8]`, `&str` and `&[T; N]` work). `#[derive(TimingSafeEq)]` now accepts borrowed fields such as `&'a [u8]` and fields of these types. Floats compare by bit pattern, not IEEE `==`: a `NaN` equals a `NaN` with the same bits, and `-0.0` does not equal `0.0`. Do not derive std's `PartialOrd` or `Ord` beside `TimingSafeEq` on a type with float fields, since the two disagree on `NaN` and signed zero; nothing warns about this.
 - The re-exported `OpaqueDebug` and `TimingSafeEq` derives no longer need a `use` of the trait, work through the `vitaminc` umbrella crate or a renamed dependency, and accept a `crate = "..."` attribute. They also fix several inputs that failed to compile in 0.5.1. See the `vitaminc-protected-derive` 0.6.0 changelog, including one case that now fails to compile.
 
-## [0.5.1] - 2026-10-05
+## 0.5.1 — 2026-10-05
 
-## [0.5.0] - 2026-09-20
+## 0.5.0 — 2026-09-20
 
 ### Documentation
 
@@ -33,9 +34,9 @@
 - `Locked` relocks every protection, zeroizes `T` before dropping it, and survives a local review
 - a process that cannot track forks says so on every `Locked` value
 
-## [0.4.0] - 2026-09-12
+## 0.4.0 — 2026-09-12
 
-## [0.3.0] - 2026-09-07
+## 0.3.0 — 2026-09-07
 
 ### Breaking
 
@@ -57,7 +58,7 @@
 - bound `NonEmpty::with` on `MaybeEmpty` and document its shape
 - lift the `MaybeEmpty` bound from `with`'s tail; mark constructors `#[must_use]`
 
-## [0.2.0] - 2026-09-03
+## 0.2.0 — 2026-09-03
 
 ### Breaking
 

@@ -1,7 +1,8 @@
+# vitaminc-aead-napi
 
-## [0.6.1] - 2026-10-18
+## 0.6.1 — 2026-10-18
 
-## [0.6.0] - 2026-10-17
+## 0.6.0 — 2026-10-17
 
 ### Breaking
 
@@ -36,15 +37,15 @@
 - A `Proxy` over a `Map`, `Date` or other exotic object is refused, because the prototype check now runs the proxy's `getPrototypeOf` trap. A proxy over a plain object still encrypts through its traps.
 - A refused typed array, or a ciphertext leaf that is not a `Buffer`, no longer stays referenced until the environment exits.
 
-## [0.5.1] - 2026-10-05
+## 0.5.1 — 2026-10-05
 
-## [0.5.0] - 2026-09-20
+## 0.5.0 — 2026-09-20
 
-## [0.4.0] - 2026-09-12
+## 0.4.0 — 2026-09-12
 
-## [0.3.0] - 2026-09-07
+## 0.3.0 — 2026-09-07
 
-## [0.2.0] - 2026-09-03
+## 0.2.0 — 2026-09-03
 
 First release.
 

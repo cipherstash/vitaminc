@@ -1,7 +1,8 @@
+# vitaminc-encrypt
 
-## [0.6.1] - 2026-10-18
+## 0.6.1 — 2026-10-18
 
-## [0.6.0] - 2026-10-17
+## 0.6.0 — 2026-10-17
 
 ### Breaking
 
@@ -23,9 +24,9 @@
 
 - `Aes256Cipher::opening_version_1()` gives a view that also opens version 1 leaves, for ciphertext from the tagged 0.5 `Value` path (`vitaminc-aead-value` and the Go binding). It still seals version 2. Do not use it for data from 0.5's `Encrypt` path: such a leaf can open as a different value with no error.
 
-## [0.5.1] - 2026-10-05
+## 0.5.1 — 2026-10-05
 
-## [0.5.0] - 2026-09-20
+## 0.5.0 — 2026-09-20
 
 ### Breaking
 
@@ -35,11 +36,11 @@
 
 - preserve Aad compatibility
 
-## [0.4.0] - 2026-09-12
+## 0.4.0 — 2026-09-12
 
-## [0.3.0] - 2026-09-07
+## 0.3.0 — 2026-09-07
 
-## [0.2.0] - 2026-09-03
+## 0.2.0 — 2026-09-03
 
 ### Breaking
 

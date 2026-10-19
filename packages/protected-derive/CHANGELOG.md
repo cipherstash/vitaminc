@@ -1,7 +1,8 @@
+# vitaminc-protected-derive
 
-## [0.6.1] - 2026-10-18
+## 0.6.1 — 2026-10-18
 
-## [0.6.0] - 2026-10-17
+## 0.6.0 — 2026-10-17
 
 ### Breaking
 
@@ -19,15 +20,15 @@
 - `OpaqueDebug` output fixes: a `#[non_sensitive]` enum field named `tn` printed the type name instead of its value, and raw identifier fields printed as `r#type:` instead of `type:`. An `#[opaque_debug(...)]` attribute with an unknown key is now a compile error; in 0.5.1 it was ignored and the mask fell back to `***`.
 - `OpaqueDebug` enum output now matches struct output and `#[derive(Debug)]`: `path::E::V { a: "***", b: 2 }` instead of `path::E::V {a: "***", b: 2}`, and `{:#?}` now prints the multi-line layout instead of being ignored. Code that matched the exact 0.5.1 enum text will see different output.
 
-## [0.5.1] - 2026-10-05
+## 0.5.1 — 2026-10-05
 
-## [0.5.0] - 2026-09-20
+## 0.5.0 — 2026-09-20
 
-## [0.4.0] - 2026-09-12
+## 0.4.0 — 2026-09-12
 
-## [0.3.0] - 2026-09-07
+## 0.3.0 — 2026-09-07
 
-## [0.2.0] - 2026-09-03
+## 0.2.0 — 2026-09-03
 
 ### Dependencies
 

@@ -1,5 +1,6 @@
+# vitaminc-aead-frame
 
-## [0.6.1] - 2026-10-18
+## 0.6.1 — 2026-10-18
 
 ### Features
 
@@ -8,7 +9,7 @@
 - An `Error` never contains a value. It names the kind of value found and the path to it (`Error::path`, `Error::field`), and drops a type's own message, such as one from a `try_from` or `serialize_with` check, since it may print the value it refused. A type's `expecting` text is kept, so a hand-written one must not include a value. A map key that is data, or a key or variant name the type does not declare, never appears in an error; such an entry is placed by position.
 - Reading is strict. The whole frame is validated before serde sees it, so a malformed frame or a repeated key is refused up front. A container must be read to its end, each kind reads only as itself (a struct never from an array, text never as bytes), and a map key out of turn is refused, so a type that stops early cannot misread what follows. Writing refuses a value nested past `MAX_DEPTH` instead of overflowing the stack, and wipes its buffers if it fails part way.
 
-## [0.6.0] - 2026-10-17
+## 0.6.0 — 2026-10-17
 
 ### Breaking
 
@@ -30,27 +31,27 @@
 
 - `encode_ciphertext` refuses a tree the decoder would refuse, and then leaves the output untouched: duplicate map keys, a tree deeper than `MAX_DEPTH`, and a passthrough payload that is not exactly one frame node. In 0.5.1 such a tree was written and only refused when it was read back.
 
-## [0.5.1] - 2026-10-05
+## 0.5.1 — 2026-10-05
 
 ### Features
 
 - name an FfiValue's kind without a value
 
-## [0.5.0] - 2026-09-20
+## 0.5.0 — 2026-09-20
 
 ### Breaking
 
 - **Breaking:** one canonical context encoding shared by AAD and PRF derivations
 
-## [0.4.0] - 2026-09-12
+## 0.4.0 — 2026-09-12
 
-## [0.3.0] - 2026-09-07
+## 0.3.0 — 2026-09-07
 
 ### Features
 
 - `LeafTypeAad` names its parts
 
-## [0.2.0] - 2026-09-03
+## 0.2.0 — 2026-09-03
 
 First release.
 

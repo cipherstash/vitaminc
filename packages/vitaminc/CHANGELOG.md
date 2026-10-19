@@ -1,7 +1,8 @@
+# vitaminc
 
-## [0.6.1] - 2026-10-18
+## 0.6.1 — 2026-10-18
 
-## [0.6.0] - 2026-10-17
+## 0.6.0 — 2026-10-17
 
 ### Breaking
 
@@ -12,9 +13,9 @@
 - New `normalize` feature, which re-exports `vitaminc-normalize` as `vitaminc::normalize` (normalized equality terms for the plaintext data model). It also turns on the `aead` feature. With `prf` enabled as well, it turns on `vitaminc-prf`'s `normalize` feature, so `vitaminc::prf::EqualityTerm` is available and `vitaminc::normalize::Normalized` implements `vitaminc::prf::PrfValue`.
 - New `ore` feature, which re-exports `vitaminc-ore` as `vitaminc::ore` (order terms for the plaintext data model). It turns on `normalize`.
 
-## [0.5.1] - 2026-10-05
+## 0.5.1 — 2026-10-05
 
-## [0.5.0] - 2026-09-20
+## 0.5.0 — 2026-09-20
 
 ### Breaking
 
@@ -24,11 +25,11 @@
 
 - show the typed context in the Element example, not the raw-byte escape hatch
 
-## [0.4.0] - 2026-09-12
+## 0.4.0 — 2026-09-12
 
-## [0.3.0] - 2026-09-07
+## 0.3.0 — 2026-09-07
 
-## [0.2.0] - 2026-09-03
+## 0.2.0 — 2026-09-03
 
 ### Features
 

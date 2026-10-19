@@ -4,19 +4,17 @@ All notable changes to the `vitaminc-random` crate will be documented in this fi
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## 0.6.1 — 2026-10-18
 
-## [0.6.1] - 2026-10-18
-
-## [0.6.0] - 2026-10-17
+## 0.6.0 — 2026-10-17
 
 ### Breaking
 
 - **Breaking:** the crate now declares a minimum supported Rust version of 1.88. 0.5.1 declared none.
 
-## [0.5.1] - 2026-10-05
+## 0.5.1 — 2026-10-05
 
-## [0.5.0] - 2026-09-20
+## 0.5.0 — 2026-09-20
 
 ### Breaking
 
@@ -38,11 +36,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - correct the bias ceiling and the claims around it
 - the NonZeroU16 draw's distance is just under 2⁻⁶⁴, not exactly
 
-## [0.4.0] - 2026-09-12
+## 0.4.0 — 2026-09-12
 
-## [0.3.0] - 2026-09-07
+## 0.3.0 — 2026-09-07
 
-## [0.2.0] - 2026-09-03
+## 0.2.0 — 2026-09-03
 
 ### Breaking
 

@@ -1,7 +1,8 @@
+# vitaminc-prf
 
-## [0.6.1] - 2026-10-18
+## 0.6.1 — 2026-10-18
 
-## [0.6.0] - 2026-10-17
+## 0.6.0 — 2026-10-17
 
 ### Breaking
 
@@ -14,21 +15,21 @@
 - These terms match equal values across widths: every integer width shares one domain, so a JavaScript `BigInt` read as `i8` matches the same number written as `i64` from Go, and `f32` and `f64` share one domain (an `f32` widens exactly, so `f32` 0.1 and `f64` 0.1 are different numbers and do not match). Integers and floats are separate, so a JavaScript `number` 5 does not match an `i64` 5. Text is Unicode 16 NFC with no case or accent folding.
 - Terms from the existing `PrfValue` impls (`String`, `&str`, byte containers, `u8`..`i128`) are unchanged, so terms you stored with 0.5.1 still match. They use different domains from the `normalize` terms, so a `u32` derived through its built-in impl does not match the same number as a `Normalized` term. Use the same input API and context for writes and queries.
 
-## [0.5.1] - 2026-10-05
+## 0.5.1 — 2026-10-05
 
-## [0.5.0] - 2026-09-20
+## 0.5.0 — 2026-09-20
 
 ### Breaking
 
 - **Breaking:** one canonical context encoding shared by AAD and PRF derivations
 
-## [0.4.0] - 2026-09-12
+## 0.4.0 — 2026-09-12
 
 ### Breaking
 
 - **Breaking:** `Some(x)` PRF contexts now match equivalent runtime contexts built from `AadPiece`. Derived terms change for contexts containing `Some`; regenerate any saved terms using those contexts. `None` and optional-value encoding are unchanged. ([#338](https://github.com/cipherstash/vitaminc/pull/338))
 
-## [0.3.0] - 2026-09-07
+## 0.3.0 — 2026-09-07
 
 ### Breaking
 
@@ -38,7 +39,7 @@
 
 - `NonEmpty::with` and `From<integer>` for `NonEmpty`
 
-## [0.2.0] - 2026-09-03
+## 0.2.0 — 2026-09-03
 
 First release.
 
