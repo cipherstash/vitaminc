@@ -42,7 +42,8 @@ Every key in a batch carries a [`Binding`]: bytes the caller attaches when
 the key is minted and must present again to retrieve it. A backend either
 binds those bytes into the key server-side or ignores them, and says which
 through [`BindingSupport`], so a caller that needs binding can check
-before it depends on it. The four vendor sources are `Unbound` today.
+before it depends on it. The AWS KMS and Google Cloud KMS sources are
+`Bound`. The Azure Key Vault and Vault Transit sources are `Unbound`.
 
 Every vendor data key source in this crate implements [`KeyProvider`], so
 the same consumer runs on any of them. The pieces built on top:

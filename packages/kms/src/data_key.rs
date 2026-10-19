@@ -54,10 +54,11 @@ impl<'a> From<&'a str> for Binding<'a> {
 /// `Bound`: the source has its backend bind the bytes into the data key, so
 /// retrieving with a different binding fails. ZeroKMS binds its descriptor
 /// and logs it per retrieval; AWS KMS binds an `EncryptionContext`; Google
-/// Cloud KMS and Azure Key Vault bind additional authenticated data.
+/// Cloud KMS binds additional authenticated data.
 ///
 /// `Unbound`: the source ignores the bytes, and the caller's own
-/// authenticated data is the only thing tying a key to its context. A
+/// authenticated data is the only thing tying a key to its context. Azure
+/// Key Vault's wrap algorithms take no additional authenticated data, a
 /// non-derived Vault Transit key has nothing to bind with, and a pooled
 /// source cannot bind — one key shared across a batch cannot carry the
 /// batch's several bindings.

@@ -55,8 +55,7 @@ fn into_sized<const N: usize>(bytes: Vec<u8>) -> Result<[u8; N], Error> {
 /// `N` bytes locally with the workspace CSPRNG and wraps them with
 /// `cryptoKeys.encrypt`; the returned ciphertext *is* the
 /// [`KeyId`](crate::KeyId), and [`RetrieveDataKey`] unwraps it with
-/// `cryptoKeys.decrypt`. Neither call passes additional authenticated
-/// data.
+/// `cryptoKeys.decrypt`.
 ///
 /// The binding is a `CryptoKey`, never a `CryptoKeyVersion`: encrypt uses
 /// whichever version is primary at the time, and decrypt cannot be pointed
@@ -90,7 +89,6 @@ impl<const N: usize> GcpDataKeySource<N> {
     /// The plaintext is copied into the request body, which the SDK owns
     /// and this crate cannot zeroize; that copy lives until the request is
     /// dropped.
-    /// One `cryptoKeys.encrypt` call, checksummed both ways.
     ///
     /// A non-empty `binding` goes as the additional authenticated data,
     /// checksummed like the plaintext. An **empty** binding sets no AAD at
