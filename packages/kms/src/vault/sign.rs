@@ -169,15 +169,24 @@ impl Sign for VaultSigningKey {
 impl Verify for VaultSigningKey {
     type Error = Error;
 
-    /// Vault's `verify` answers `{"valid": false}` even for a malformed
-    /// signature rather than failing, so it maps straight onto
-    /// `Ok(false)`.
+    /// Vault's `verify` answers `{"valid": false}` for a bad RSA
+    /// signature, but answers `400 supplied signature is invalid` for
+    /// ECDSA bytes that are not DER. The adapter returns `Ok(false)` for
+    /// both: it parses an ECDSA signature before the round trip, and it
+    /// maps that 400 to `Ok(false)` in case Vault's parser rejects an
+    /// input that this crate's parser accepts.
     async fn verify(
         &self,
         digest: &Protected<Vec<u8>>,
         signature: &[u8],
     ) -> Result<bool, Self::Error> {
         let input = self.checked_digest(digest)?;
+
+        if let Some(field_len) = self.algorithm.ecdsa_field_len() {
+            if crate::encoding::ecdsa_der_to_raw(signature, field_len).is_err() {
+                return Ok(false);
+            }
+        }
 
         let mut opts = VerifySignedDataRequest::builder();
         opts.hash_algorithm(hash_algorithm(self.algorithm));
@@ -196,9 +205,19 @@ impl Verify for VaultSigningKey {
             &input,
             Some(&mut opts),
         )
-        .await?;
+        .await;
 
-        Ok(response.valid)
+        match response {
+            Ok(response) => Ok(response.valid),
+            Err(vaultrs::error::ClientError::APIError { code: 400, errors })
+                if errors
+                    .iter()
+                    .any(|e| e.contains("supplied signature is invalid")) =>
+            {
+                Ok(false)
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 }
 
@@ -400,6 +419,8 @@ mod tests {
 
     #[tokio::test]
     async fn verify_rebuilds_the_prefix_and_reports_false_as_ok() {
+        // Valid DER, so the adapter's own parse lets it through to Vault.
+        let signature = crate::encoding::ecdsa_raw_to_der(&[1u8; 64], 32).unwrap();
         let server = MockServer::start_async().await;
         let mock = server
             .mock_async(|when, then| {
@@ -410,7 +431,7 @@ mod tests {
                         "input": b64_encode(&DIGEST_32),
                         "prehashed": true,
                         "marshaling_algorithm": "asn1",
-                        "signature": format!("vault:v2:{}", b64_encode(b"der-signature")),
+                        "signature": format!("vault:v2:{}", b64_encode(&signature)),
                     }));
                 then.status(200).json_body(data(json!({ "valid": false })));
             })
@@ -424,8 +445,78 @@ mod tests {
             SignatureAlgorithm::EcdsaP256Sha256,
         );
 
-        assert!(!key.verify(&digest(32), b"der-signature").await.unwrap());
+        assert!(!key.verify(&digest(32), &signature).await.unwrap());
         mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn an_ecdsa_signature_that_is_not_der_is_false_with_no_round_trip() {
+        let server = MockServer::start_async().await;
+        let anything = server
+            .mock_async(|when, then| {
+                when.any_request();
+                then.status(200).json_body(data(json!({ "valid": true })));
+            })
+            .await;
+
+        let key = VaultSigningKey::new(
+            test_client(&server),
+            "transit",
+            KEY_NAME,
+            1,
+            SignatureAlgorithm::EcdsaP256Sha256,
+        );
+
+        assert!(!key.verify(&digest(32), b"garbage").await.unwrap());
+        assert!(!key.verify(&digest(32), b"").await.unwrap());
+        anything.assert_calls_async(0).await;
+    }
+
+    #[tokio::test]
+    async fn vault_rejecting_the_signature_encoding_is_false() {
+        let server = MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(POST);
+                then.status(400)
+                    .json_body(json!({ "errors": ["supplied signature is invalid"] }));
+            })
+            .await;
+
+        let key = VaultSigningKey::new(
+            test_client(&server),
+            "transit",
+            KEY_NAME,
+            1,
+            SignatureAlgorithm::RsaPkcs1Sha256,
+        );
+
+        assert!(!key.verify(&digest(32), b"anything").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn other_vault_errors_on_verify_stay_errors() {
+        let server = MockServer::start_async().await;
+        server
+            .mock_async(|when, then| {
+                when.method(POST);
+                then.status(403)
+                    .json_body(json!({ "errors": ["permission denied"] }));
+            })
+            .await;
+
+        let key = VaultSigningKey::new(
+            test_client(&server),
+            "transit",
+            KEY_NAME,
+            1,
+            SignatureAlgorithm::RsaPkcs1Sha256,
+        );
+
+        assert!(matches!(
+            key.verify(&digest(32), b"anything").await.unwrap_err(),
+            Error::Vault(_)
+        ));
     }
 
     #[tokio::test]
@@ -571,6 +662,27 @@ mod integration_tests {
     #[tokio::test]
     async fn rsa_pkcs1_signs_and_verifies_a_digest() {
         assert_round_trip(KeyType::Rsa2048, SignatureAlgorithm::RsaPkcs1Sha256).await;
+    }
+
+    /// Vault answers 400, not `{"valid": false}`, for ECDSA bytes that
+    /// are not DER. RSA keys get `{"valid": false}`. Both must be
+    /// `Ok(false)`.
+    #[tokio::test]
+    async fn a_signature_that_is_not_a_signature_is_false() {
+        for (key_type, algorithm) in [
+            (KeyType::EcdsaP256, SignatureAlgorithm::EcdsaP256Sha256),
+            (KeyType::Rsa2048, SignatureAlgorithm::RsaPssSha256),
+        ] {
+            let key = signing_key(key_type, algorithm).await;
+            let digest = digest(algorithm);
+
+            for signature in [&b"garbage"[..], &[]] {
+                assert!(
+                    !key.verify(&digest, signature).await.unwrap(),
+                    "{algorithm:?} should reject {signature:?}"
+                );
+            }
+        }
     }
 
     #[tokio::test]

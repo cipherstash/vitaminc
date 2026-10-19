@@ -586,9 +586,10 @@ policy-deny mechanism at `.../verify/:name/sha1`), `input` (required unless
 `salt_length`, `reference`, `batch_input`.
 
 **Response:** `{ "valid": <bool> }` or `batch_results` of `{ "valid": bool }`
-per item (note: an unparseable/malformed input yields `{"valid": false}`,
-not necessarily an `error` item — verify is designed to always answer
-true/false where structurally possible rather than throw).
+per item. A bad RSA signature yields `{"valid": false}`. An ECDSA signature
+that is not DER (with `marshaling_algorithm: asn1`), or an empty one, yields
+`400 {"errors":["supplied signature is invalid"]}`, not `{"valid": false}`.
+Verified against `hashicorp/vault:2.1.0`.
 
 ### Generate CMAC **(Enterprise)** — `POST /transit/cmac/:name(/:url_mac_length)`
 
