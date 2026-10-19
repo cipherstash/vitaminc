@@ -563,7 +563,10 @@ on Ed25519 activates Ed25519ph **(Enterprise)**; combined with
 `PKCSv1_5_DERnull`), `signature_algorithm` (RSA only, default `"pss"`, or
 `pkcs1v15`), `marshaling_algorithm` (ECDSA only, default `"asn1"`, or `"jws"`
 — also switches output to URL-safe base64), `salt_length` (RSA-PSS only,
-default `"auto"`, or `"hash"`, or an explicit integer), `reference`,
+default `"auto"`, or `"hash"`, or an explicit integer; on sign, `"auto"` is
+the **largest** possible salt, not the digest length — 222 bytes for
+`rsa-2048` with SHA-256, verified against `hashicorp/vault:2.1.0` — so use
+`"hash"` for a digest-length salt), `reference`,
 `batch_input` (array of `{input, context}` — a derived-`ed25519` batch
 response additionally includes a `publickey` field per item, the derived
 public key for that item's context).

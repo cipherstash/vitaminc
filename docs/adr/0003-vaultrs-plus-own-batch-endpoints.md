@@ -31,11 +31,21 @@ round-trip count depends on the edition. We kept the native endpoint rather
 than dropping it because Enterprise users get the benefit for free and the
 fallback costs Community users one extra request per adapter instance.
 
+## Sign and verify are ours too
+
+The `vaultrs` 0.8 `sign` and `verify` requests have no `salt_length` field.
+For RSA-PSS, Vault's default (`auto`) gives the largest possible salt on
+`sign`: 222 bytes for `rsa-2048` with SHA-256. The `RsaPss*` members of
+`SignatureAlgorithm` promise a digest-length salt, and a verifier that
+requires that salt rejects Vault's default signature. So the adapter also
+defines `sign` and `verify` with `rustify`, and sends `salt_length: "hash"`
+for RSA-PSS. Verified against `hashicorp/vault:2.1.0`.
+
 ## Consequences
 
 - The adapter honours the rule that the caller builds and authenticates the
   vendor client.
-- `vaultrs` has effectively one maintainer. If it stalls, the two endpoint
+- `vaultrs` has effectively one maintainer. If it stalls, our own endpoint
   definitions show how to replace the rest with `rustify` or `reqwest`
   calls without changing the adapter's public surface.
 - A consumer that needs one-round-trip batch generation on Vault needs

@@ -1,11 +1,11 @@
+use super::batch::{SignRequest, VerifyRequest};
 use super::{b64_decode, b64_encode, strip_key_version, with_key_version};
 use crate::algorithm::SignatureAlgorithm;
 use crate::encoding::{pem_public_key_to_der, EncodingError};
 use crate::sign::{GetPublicKey, Sign, Verify};
 use thiserror::Error;
-use vaultrs::api::transit::requests::{
-    ExportKeyType, ExportVersion, SignDataRequest, VerifySignedDataRequest,
-};
+use vaultrs::api::transit::requests::{ExportKeyType, ExportVersion};
+use vaultrs::api::transit::responses::{SignDataResponse, VerifySignedDataResponse};
 use vaultrs::api::transit::{
     HashAlgorithm, MarshalingAlgorithm, SignatureAlgorithm as VaultSignatureAlgorithm,
 };
@@ -45,10 +45,11 @@ pub enum Error {
 /// [`Sign`] takes a pre-computed digest, which the adapter sends with
 /// `prehashed: true`. ECDSA signatures use `marshaling_algorithm: asn1`,
 /// so they are already the DER `SEQUENCE { INTEGER r, INTEGER s }` ADR
-/// 0001 promises; RSA signatures are the raw signature bytes either way.
-/// For RSA-PSS the adapter leaves Vault's `salt_length` at its `auto`
-/// default, which is the digest length — what
+/// 0002 promises; RSA signatures are the raw signature bytes either way.
+/// For RSA-PSS the adapter sends `salt_length: "hash"` on `sign` and
+/// `verify`, so the salt is the digest length that
 /// [`SignatureAlgorithm::RsaPssSha256`] and its siblings document.
+/// Vault's `auto` default would give the largest possible salt on `sign`.
 ///
 /// # Why the key version is part of construction
 ///
@@ -98,6 +99,17 @@ const fn signature_algorithm(algorithm: SignatureAlgorithm) -> Option<VaultSigna
     }
 }
 
+/// Vault's RSA-PSS-only `salt_length`. `"hash"` is the digest length; see
+/// [`SignRequest`] for why the `auto` default is wrong here.
+const fn salt_length(algorithm: SignatureAlgorithm) -> Option<&'static str> {
+    match algorithm {
+        SignatureAlgorithm::RsaPssSha256
+        | SignatureAlgorithm::RsaPssSha384
+        | SignatureAlgorithm::RsaPssSha512 => Some("hash"),
+        _ => None,
+    }
+}
+
 impl VaultSigningKey {
     /// `mount` is the Transit mount path — `"transit"` unless the engine
     /// was mounted elsewhere — `name` the Transit key, `key_version` the
@@ -136,23 +148,20 @@ impl Sign for VaultSigningKey {
         // Checked first, so a wrong-sized digest costs no round trip.
         let input = self.checked_digest(digest)?;
 
-        let mut opts = SignDataRequest::builder();
-        opts.key_version(u64::from(self.key_version));
-        opts.hash_algorithm(hash_algorithm(self.algorithm));
-        opts.prehashed(true);
-        opts.marshaling_algorithm(MarshalingAlgorithm::Asn1);
-        if let Some(signature_algorithm) = signature_algorithm(self.algorithm) {
-            opts.signature_algorithm(signature_algorithm);
-        }
+        let endpoint = SignRequest {
+            mount: self.mount.clone(),
+            name: self.name.clone(),
+            input,
+            key_version: u64::from(self.key_version),
+            hash_algorithm: hash_algorithm(self.algorithm),
+            prehashed: true,
+            marshaling_algorithm: MarshalingAlgorithm::Asn1,
+            signature_algorithm: signature_algorithm(self.algorithm),
+            salt_length: salt_length(self.algorithm),
+        };
 
-        let response = vaultrs::transit::data::sign(
-            &self.client,
-            &self.mount,
-            &self.name,
-            &input,
-            Some(&mut opts),
-        )
-        .await?;
+        let response: SignDataResponse =
+            vaultrs::api::exec_with_result(&self.client, endpoint).await?;
 
         let payload =
             strip_key_version(&response.signature, self.key_version).ok_or_else(|| {
@@ -188,24 +197,21 @@ impl Verify for VaultSigningKey {
             }
         }
 
-        let mut opts = VerifySignedDataRequest::builder();
-        opts.hash_algorithm(hash_algorithm(self.algorithm));
-        opts.prehashed(true);
-        opts.marshaling_algorithm(MarshalingAlgorithm::Asn1);
-        if let Some(signature_algorithm) = signature_algorithm(self.algorithm) {
-            opts.signature_algorithm(signature_algorithm);
-        }
-        // Vault needs its own prefix back; the trait boundary dropped it.
-        opts.signature(with_key_version(self.key_version, signature));
+        let endpoint = VerifyRequest {
+            mount: self.mount.clone(),
+            name: self.name.clone(),
+            input,
+            // Vault needs its own prefix back; the trait boundary dropped it.
+            signature: with_key_version(self.key_version, signature),
+            hash_algorithm: hash_algorithm(self.algorithm),
+            prehashed: true,
+            marshaling_algorithm: MarshalingAlgorithm::Asn1,
+            signature_algorithm: signature_algorithm(self.algorithm),
+            salt_length: salt_length(self.algorithm),
+        };
 
-        let response = vaultrs::transit::data::verify(
-            &self.client,
-            &self.mount,
-            &self.name,
-            &input,
-            Some(&mut opts),
-        )
-        .await;
+        let response: Result<VerifySignedDataResponse, _> =
+            vaultrs::api::exec_with_result(&self.client, endpoint).await;
 
         match response {
             Ok(response) => Ok(response.valid),
@@ -308,6 +314,7 @@ mod tests {
                         "prehashed": true,
                         "marshaling_algorithm": "asn1",
                         "signature_algorithm": "pss",
+                        "salt_length": "hash",
                     }));
                 then.status(200).json_body(data(json!({
                     "signature": format!("vault:v1:{}", b64_encode(b"raw-rsa")),
@@ -683,6 +690,32 @@ mod integration_tests {
                 );
             }
         }
+    }
+
+    /// Vault's `auto` salt on `sign` is the largest possible salt.
+    /// `rsa::pss::VerifyingKey` takes only the digest-length salt that
+    /// [`SignatureAlgorithm::RsaPssSha256`] promises, so this fails if the
+    /// adapter stops sending `salt_length: "hash"`.
+    #[tokio::test]
+    async fn an_rsa_pss_signature_uses_a_digest_length_salt() {
+        use rsa::pkcs8::DecodePublicKey;
+        use rsa::signature::hazmat::PrehashVerifier;
+
+        let algorithm = SignatureAlgorithm::RsaPssSha256;
+        let key = signing_key(KeyType::Rsa2048, algorithm).await;
+        let digest = digest(algorithm);
+
+        let signature = key.sign(&digest).await.unwrap();
+        let public_key =
+            rsa::RsaPublicKey::from_public_key_der(&key.get_public_key().await.unwrap()).unwrap();
+        let verifier = rsa::pss::VerifyingKey::<sha2::Sha256>::new(public_key);
+
+        verifier
+            .verify_prehash(
+                &digest.risky_unwrap(),
+                &rsa::pss::Signature::try_from(signature.as_slice()).unwrap(),
+            )
+            .expect("a digest-length salt");
     }
 
     #[tokio::test]

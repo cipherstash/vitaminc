@@ -1,4 +1,5 @@
-//! The two Transit batch endpoints `vaultrs` does not define.
+//! The Transit endpoints `vaultrs` does not define, or defines without a
+//! field the adapter needs.
 //!
 //! `vaultrs` covers every single-item Transit call, but neither
 //! `POST {mount}/datakeys/:type/:name` nor `batch_input` on
@@ -8,12 +9,17 @@
 //! `vaultrs` uses — and executing them through the caller's
 //! [`vaultrs::client::VaultClient`] via [`vaultrs::api::exec_with_result`].
 //!
-//! Both request structs mirror `vaultrs`'s own shape: `mount` and `name`
+//! `sign` and `verify` are here too, because the `vaultrs` 0.8 requests
+//! have no `salt_length` field, and RSA-PSS needs it (see [`SignRequest`]).
+//!
+//! Every request struct mirrors `vaultrs`'s own shape: `mount` and `name`
 //! build the path and are `#[endpoint(skip)]`ped out of the body, and
 //! every remaining field is serialised into the JSON body.
 
 use rustify_derive::Endpoint;
 use serde::{Deserialize, Serialize};
+use vaultrs::api::transit::responses::{SignDataResponse, VerifySignedDataResponse};
+use vaultrs::api::transit::{HashAlgorithm, MarshalingAlgorithm, SignatureAlgorithm};
 
 /// `POST {mount}/datakeys/plaintext/{name}` — mint `count` distinct data
 /// keys of `bits` bits in one round trip.
@@ -101,4 +107,64 @@ pub(super) struct BatchDecryptResponse {
 pub(super) struct BatchDecryptResult {
     pub plaintext: Option<String>,
     pub error: Option<String>,
+}
+
+/// `POST {mount}/sign/{name}` — the single-item sign call, with the
+/// `salt_length` field that `vaultrs` 0.8's `SignDataRequest` does not
+/// have.
+///
+/// For RSA-PSS, Vault's `salt_length` default is `auto`. On `sign`, `auto`
+/// gives the largest salt the key allows (222 bytes for `rsa-2048` with
+/// SHA-256), not the digest-length salt that
+/// [`RsaPssSha256`](crate::algorithm::SignatureAlgorithm::RsaPssSha256)
+/// and its siblings promise. The adapter sends `"hash"`, which is the
+/// digest length. Verified against `hashicorp/vault:2.1.0`.
+#[derive(Debug, Endpoint)]
+#[endpoint(
+    path = "{self.mount}/sign/{self.name}",
+    method = "POST",
+    response = "SignDataResponse"
+)]
+pub(super) struct SignRequest {
+    #[endpoint(skip)]
+    pub mount: String,
+    #[endpoint(skip)]
+    pub name: String,
+    pub input: String,
+    pub key_version: u64,
+    pub hash_algorithm: HashAlgorithm,
+    pub prehashed: bool,
+    pub marshaling_algorithm: MarshalingAlgorithm,
+    /// RSA only. Vault documents it as unused for ECDSA.
+    pub signature_algorithm: Option<SignatureAlgorithm>,
+    /// RSA-PSS only. See the struct docs.
+    pub salt_length: Option<&'static str>,
+}
+
+/// `POST {mount}/verify/{name}` — the single-item verify call, with the
+/// `salt_length` field that `vaultrs` 0.8's `VerifySignedDataRequest` does
+/// not have.
+///
+/// With `"hash"`, Vault accepts only a digest-length PSS salt, which is the
+/// salt [`SignRequest`] asks for. With the `auto` default, Vault would
+/// accept any salt length.
+#[derive(Debug, Endpoint)]
+#[endpoint(
+    path = "{self.mount}/verify/{self.name}",
+    method = "POST",
+    response = "VerifySignedDataResponse"
+)]
+pub(super) struct VerifyRequest {
+    #[endpoint(skip)]
+    pub mount: String,
+    #[endpoint(skip)]
+    pub name: String,
+    pub input: String,
+    /// `vault:v<N>:<base64>`.
+    pub signature: String,
+    pub hash_algorithm: HashAlgorithm,
+    pub prehashed: bool,
+    pub marshaling_algorithm: MarshalingAlgorithm,
+    pub signature_algorithm: Option<SignatureAlgorithm>,
+    pub salt_length: Option<&'static str>,
 }

@@ -64,7 +64,8 @@ sha2 = { version = "0.11.0", optional = true }
 # --- `vault` feature ---------------------------------------------------------
 # `vaultrs` covers every single-item Transit call but no batch endpoint; the
 # adapter defines `datakeys` and batch `decrypt` itself with `rustify`, the
-# same endpoint macro `vaultrs` uses (ADR 0002).
+# same endpoint macro `vaultrs` uses (ADR 0003). It also defines `sign` and
+# `verify`, because `vaultrs` has no `salt_length` field for RSA-PSS.
 vaultrs = { version = "0.8", optional = true }
 rustify = { version = "0.7", optional = true }
 # The `#[derive(Endpoint)]` macro lives in its own crate, exactly as
@@ -104,6 +105,10 @@ serde_json = "1"
 # `vaultrs` exposes no mock seam, so the Vault adapter's zero-network unit
 # tests point a real `VaultClient` at a local HTTP mock server instead.
 httpmock = "0.8"
+# The Vault dev-server tests check an RSA-PSS signature with an independent
+# verifier that takes only the digest-length salt.
+rsa = "0.10.0-rc.18"
+sha2 = "0.11.0"
 
 [features]
 default = ["aws", "caching"]
