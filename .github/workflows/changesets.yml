@@ -1,0 +1,48 @@
+name: Changesets
+
+# A change to what a crate ships carries its changelog entry as a changeset
+# (.sampo/changesets/*.md), written in the same PR. check_changesets.py says
+# what a changeset must hold. A PR that needs no entry carries the
+# `no-changeset` label, and the release PR consumes changesets rather than
+# adding them, so neither is checked.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  changesets:
+    name: "📝 Changesets"
+    if: >-
+      github.head_ref != 'release/main'
+      && !contains(github.event.pull_request.labels.*.name, 'no-changeset')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check the changesets
+        run: python3 .github/scripts/check_changesets.py . "origin/${{ github.base_ref }}"
+
+      # sampo reads the changesets the way the release will, so one it would
+      # refuse fails here rather than on main. It exits 2 when there is
+      # nothing pending.
+      - name: Install sampo
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf \
+            https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall -y sampo@0.22.0
+
+      - name: Plan the release
+        env:
+          SAMPO_RELEASE_BRANCH: main
+        run: |
+          status=0
+          sampo release --dry-run || status=$?
+          [ "$status" -eq 0 ] || [ "$status" -eq 2 ]

@@ -1,0 +1,52 @@
+# sampo configuration. sampo owns the version and the changelogs: the Release
+# PR job in .github/workflows/release-plz.yml runs `sampo release`, which
+# turns the changesets in .sampo/changesets/ into the next version and each
+# crate's CHANGELOG.md entries. release-plz only publishes. See RELEASING.md.
+version = 1
+
+[git]
+default_branch = "main"
+
+[github]
+repository = "cipherstash/vitaminc"
+
+# The heading each entry goes under, given in parentheses after the bump:
+# `cargo/vitaminc-aead: minor (Breaking)`. The release lists them in this
+# order (.github/scripts/tidy_changelogs.py sorts them), so Breaking leads.
+[changesets]
+tags = ["Breaking", "Features", "Fixes", "Performance", "Documentation", "Dependencies"]
+
+# Entries are written for the crate's users, so they carry neither a commit
+# link nor a "Thanks @..." line.
+[changelog]
+show_commit_hash = false
+show_acknowledgments = false
+
+[packages]
+# The derive-tests crates are `publish = false` and never released.
+ignore_unpublished = true
+# Every published crate shares one version: a changeset for any of them
+# bumps all of them by the same level. test_release_plz_config.py checks this
+# list is exactly the published workspace members.
+fixed = [[
+  "cargo/vitaminc",
+  "cargo/vitaminc-aead",
+  "cargo/vitaminc-aead-derive",
+  "cargo/vitaminc-aead-frame",
+  "cargo/vitaminc-aead-napi",
+  "cargo/vitaminc-async-traits",
+  "cargo/vitaminc-context",
+  "cargo/vitaminc-encrypt",
+  "cargo/vitaminc-hmac",
+  "cargo/vitaminc-kms",
+  "cargo/vitaminc-normalize",
+  "cargo/vitaminc-ore",
+  "cargo/vitaminc-password",
+  "cargo/vitaminc-permutation",
+  "cargo/vitaminc-prf",
+  "cargo/vitaminc-protected",
+  "cargo/vitaminc-protected-derive",
+  "cargo/vitaminc-random",
+  "cargo/vitaminc-random-derives",
+  "cargo/vitaminc-traits",
+]]

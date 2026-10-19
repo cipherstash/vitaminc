@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """Print the GraphQL request that commits a worktree's edits to its branch.
 
-The release workflow re-syncs the nested lockfiles on the release branch.
-A commit it made with git and pushed was unsigned, and the ruleset on main
-requires signed commits, so every release PR needed its maintainer to
-re-sign that commit before it could merge. GitHub signs a commit it creates
+The release workflow commits a release (versions, changelogs, lockfiles) to
+the release branch. A commit it made with git and pushed would be unsigned,
+and the ruleset on main requires signed commits, so the release PR could not
+merge until a maintainer re-signed it. GitHub signs a commit it creates
 itself through the `createCommitOnBranch` mutation, attributed to the app
-whose token made the call; for the release workflow that is the release-plz
-app, a `[bot]` login, so release-plz still force-pushes its PR afterwards.
+whose token made the call.
 
-This builds that request from the worktree's modified files. The commit's
-parent is the worktree's HEAD (`expectedHeadOid`), so GitHub refuses the
-commit if the branch moved since it was checked out. Only modified files are
-supported: the re-sync never adds, deletes or renames one, and a change of
-that kind means something else has edited the worktree.
+This builds that request from the worktree's changes. The commit's parent is
+the worktree's HEAD (`expectedHeadOid`), so GitHub refuses the commit if the
+branch moved since it was checked out. A release modifies files and deletes
+the changesets it consumed from `.sampo/changesets/`; nothing else is
+supported. A release never adds or renames a file, or deletes any other, so
+a change of that kind means something else has edited the worktree.
 
 Usage: commit_on_branch.py <worktree> <owner/repo> <branch> <headline>
 Pipe the output to `gh api graphql --input -`.
@@ -32,6 +32,8 @@ MUTATION = (
     " createCommitOnBranch(input: $input) { commit { oid url } } }"
 )
 
+CHANGESETS = ".sampo/changesets/"
+
 
 def git(worktree: Path, *args: str) -> str:
     return subprocess.run(
@@ -39,21 +41,35 @@ def git(worktree: Path, *args: str) -> str:
     ).stdout
 
 
+def consumed_changeset(path: str) -> bool:
+    """Whether a path is a changeset file, which a release deletes once consumed."""
+    name = path.removeprefix(CHANGESETS)
+    return name != path and "/" not in name and name.endswith(".md")
+
+
 def request(worktree: Path, repository: str, branch: str, headline: str) -> dict:
-    """The request body, or ValueError if the worktree holds anything but modifications."""
+    """The request body, or ValueError if the worktree holds anything but a release's changes."""
     status = [line for line in git(worktree, "status", "--porcelain=v1", "-z").split("\0") if line]
-    other = [line for line in status if line[:2] != " M"]
+    modified = sorted(line[3:] for line in status if line[:2] == " M")
+    deleted = sorted(line[3:] for line in status if line[:2] == " D" and consumed_changeset(line[3:]))
+    other = [line for line in status if line[3:] not in modified and line[3:] not in deleted]
     if other:
-        raise ValueError(f"only modified, unstaged files can be committed: {other}")
+        raise ValueError(
+            f"only modified files and consumed changesets, unstaged, can be committed: {other}"
+        )
     if not status:
         raise ValueError("nothing to commit")
-    additions = [
-        {
-            "path": path,
-            "contents": base64.b64encode((worktree / path).read_bytes()).decode("ascii"),
-        }
-        for path in sorted(line[3:] for line in status)
-    ]
+    file_changes: dict = {
+        "additions": [
+            {
+                "path": path,
+                "contents": base64.b64encode((worktree / path).read_bytes()).decode("ascii"),
+            }
+            for path in modified
+        ]
+    }
+    if deleted:
+        file_changes["deletions"] = [{"path": path} for path in deleted]
     return {
         "query": MUTATION,
         "variables": {
@@ -61,7 +77,7 @@ def request(worktree: Path, repository: str, branch: str, headline: str) -> dict
                 "branch": {"repositoryNameWithOwner": repository, "branchName": branch},
                 "expectedHeadOid": git(worktree, "rev-parse", "HEAD").strip(),
                 "message": {"headline": headline},
-                "fileChanges": {"additions": additions},
+                "fileChanges": file_changes,
             }
         },
     }

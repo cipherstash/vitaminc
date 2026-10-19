@@ -1,15 +1,25 @@
+# release-plz only publishes. sampo (.sampo/config.toml) owns the version and
+# the changelogs: the Release PR job turns pending changesets into a release
+# PR, and the Release job runs `release-plz release` once it merges, which
+# publishes every crate not yet on crates.io at its version, tags it, and
+# makes a GitHub release from the newest section of its CHANGELOG.md. There
+# is no `release-plz release-pr`: it would version the crates from commit
+# messages and fight sampo.
 [workspace]
-changelog_config = "cliff.toml"
 git_tag_enable = true
 git_release_enable = true
 publish = true
-semver_check = true
 # Publish only when the commit on main is a merged release PR. Without this,
 # every push to main publishes any version not yet on crates.io, so a crate
 # added at the current version would be released straight from main.
 release_always = false
+# The release PR's branch, which the Release PR job writes. release-plz
+# publishes only for a merge from a branch with this prefix.
+pr_branch_prefix = "release/main"
 
-# All packages release together as a single version group.
+# All packages release together as a single version group. sampo's `fixed`
+# group is what keeps their versions equal now; this one stays so that
+# release-plz reads the workspace the same way.
 [[package]]
 name = "vitaminc"
 version_group = "vitaminc"

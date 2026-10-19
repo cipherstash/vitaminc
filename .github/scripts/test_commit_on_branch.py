@@ -31,6 +31,9 @@ def repository(root: Path) -> None:
     (root / "a").mkdir()
     (root / "a" / "Cargo.lock").write_text("version = 1\n")
     (root / "b.lock").write_text("version = 1\n")
+    (root / ".sampo" / "changesets").mkdir(parents=True)
+    (root / ".sampo" / "changesets" / "x.md").write_text("---\ncargo/a: patch\n---\n\nx\n")
+    (root / ".sampo" / "changesets" / "notes.txt").write_text("x\n")
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "init")
 
@@ -84,6 +87,24 @@ class RequestTest(unittest.TestCase):
                     git(root, "add", "b.lock")
                 with self.assertRaisesRegex(ValueError, "only modified"):
                     request(root, "o/r", "b", "h")
+
+    def test_a_consumed_changeset_is_deleted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repository(root)
+            (root / "b.lock").write_text("version = 2\n")
+            (root / ".sampo" / "changesets" / "x.md").unlink()
+            changes = request(root, "o/r", "b", "h")["variables"]["input"]["fileChanges"]
+            self.assertEqual([a["path"] for a in changes["additions"]], ["b.lock"])
+            self.assertEqual(changes["deletions"], [{"path": ".sampo/changesets/x.md"}])
+
+    def test_deleting_anything_but_a_changeset_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repository(root)
+            (root / ".sampo" / "changesets" / "notes.txt").unlink()
+            with self.assertRaisesRegex(ValueError, "only modified"):
+                request(root, "o/r", "b", "h")
 
 
 class MainTest(unittest.TestCase):

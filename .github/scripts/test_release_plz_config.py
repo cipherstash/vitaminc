@@ -30,6 +30,19 @@ class ReleasePlzConfigTest(unittest.TestCase):
                 with self.subTest(package["name"]):
                     self.assertIs(entries.get(package["name"], {}).get("publish", default), False)
 
+    def test_sampo_versions_every_published_member_together(self):
+        # A published crate missing from the fixed group would be versioned on
+        # its own, and the 0.x lockstep that release-plz.toml's version group
+        # promised would quietly split.
+        config = tomllib.loads((REPO / ".sampo" / "config.toml").read_text())
+        [group] = config["packages"]["fixed"]
+        members = set()
+        for member in toml("Cargo.toml")["workspace"]["members"]:
+            package = toml(f"{member}/Cargo.toml")["package"]
+            if package.get("publish", True) not in (False, []):
+                members.add(f"cargo/{package['name']}")
+        self.assertEqual(set(group), members)
+
 
 if __name__ == "__main__":
     unittest.main()
