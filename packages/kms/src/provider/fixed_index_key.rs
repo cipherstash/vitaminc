@@ -124,6 +124,51 @@ mod tests {
         }
     }
 
+    /// Records every `retrieve_keys` request as `(id, binding bytes)` and
+    /// answers each with a zero key.
+    #[derive(Default)]
+    struct Recording(std::sync::Mutex<Vec<(KeyId, Vec<u8>)>>);
+
+    impl KeyProvider<4> for Recording {
+        type Error = std::convert::Infallible;
+        const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
+        const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
+        const BINDING: BindingSupport = BindingSupport::Bound;
+
+        async fn generate_keys(
+            &self,
+            _bindings: &[Binding<'_>],
+        ) -> Result<Vec<GeneratedDataKey<4>>, Self::Error> {
+            unreachable!("load_index_key never generates")
+        }
+
+        async fn retrieve_keys(
+            &self,
+            requests: &[(KeyId, Binding<'_>)],
+        ) -> Result<Vec<Protected<[u8; 4]>>, Self::Error> {
+            let mut seen = self.0.lock().unwrap();
+            seen.extend(
+                requests
+                    .iter()
+                    .map(|(id, binding)| (id.clone(), binding.as_bytes().to_vec())),
+            );
+            Ok(requests.iter().map(|_| Protected::new([0; 4])).collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn load_index_key_requests_the_configured_id_under_an_empty_binding() {
+        let index_key_id = KeyId::new(vec![42, 43]);
+        let source = FixedIndexKeySource::new(Recording::default(), index_key_id.clone());
+
+        source.load_index_key().await.unwrap();
+
+        assert_eq!(
+            *source.inner().0.lock().unwrap(),
+            vec![(index_key_id, Vec::new())]
+        );
+    }
+
     #[tokio::test]
     async fn the_index_key_is_the_one_key_retrieved_under_an_empty_binding() {
         let source = FixedIndexKeySource::new(Misbehaving(1), KeyId::new(vec![1]));
