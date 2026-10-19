@@ -17,22 +17,25 @@ Vitamin C is a suite of crates for cryptography and handling sensitive data. The
 - Use conventional commit messages: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`, `perf:`, `ci:`
 - Write commit subjects that describe the *why*, not just the *what*
 - Scope commits to the affected crate when possible (e.g. `feat(aead): add streaming encryption support`)
-- These messages feed into automated changelog generation via git-cliff, so clarity matters
+- Commit messages are for contributors; the changelog comes from changesets, not commits
+
+## Changesets
+
+A PR that changes what a published crate ships adds a changeset in `.sampo/changesets/`: the changelog entry, written in the PR that makes the change. `.sampo/README.md` has the format; the `📝 Changesets` check enforces it.
+
+- Bump `patch`, or `minor` for a breaking change. Never `major`: the crates are 0.x, and sampo would release 1.0.0
+- Tag every entry: `Breaking`, `Features`, `Fixes`, `Performance`, `Documentation` or `Dependencies`
+- Name only the crates the entry is about; every crate gets the new version regardless
+- Write from the user's perspective: what changed and why it matters, not implementation details
+- Lead a breaking change with **Breaking:** and say what the caller has to do; state a wire-format change's compatibility consequence
+- One changeset per change. When review changes the change, update its changeset in the same PR
+- A PR that ships nothing (CI, tests, internal refactoring) gets the `no-changeset` label instead
 
 ## Releases
 
-Releases are automated with release-plz. See `RELEASING.md` for the full process.
+sampo versions the crates and writes the changelogs; release-plz publishes. See `RELEASING.md` for the full process.
 
-- Do NOT manually edit `CHANGELOG.md` files on feature branches — release-plz manages them
-- Do NOT manually bump versions in `Cargo.toml` — release-plz handles this
-- All 19 crates release together as a single version group
-
-## Changelogs on release PRs
-
-When working on a release PR (created by release-plz), you may be asked to rewrite the auto-generated changelog entries. Follow these guidelines:
-
-- Write entries from the user's perspective, not the developer's
-- Focus on what changed and why it matters, not implementation details
-- Group related commits into a single entry where it makes sense
-- Call out breaking changes prominently with a **Breaking:** prefix
-- Keep entries concise — one line per change is ideal
+- Do NOT manually edit `CHANGELOG.md` files on feature branches — write a changeset
+- Do NOT manually bump versions in `Cargo.toml` — sampo does it from the changesets
+- Do NOT edit the release PR (`release/main`): it is rebuilt on every push to `main`. Fix an entry by editing its changeset on `main`
+- All 20 published crates release together as one `fixed` group in `.sampo/config.toml`
