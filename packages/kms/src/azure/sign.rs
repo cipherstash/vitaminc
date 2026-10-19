@@ -57,13 +57,18 @@ pub enum Error {
 pub struct AzureSigningKey {
     client: KeyClient,
     key_name: String,
-    key_version: Option<String>,
+    key_version: String,
     algorithm: SignatureAlgorithm,
 }
 
 impl AzureSigningKey {
-    /// Binds to the key named `key_name` in the vault `client` points at,
-    /// signing with `algorithm`.
+    /// Binds to version `key_version` of the key named `key_name` in the
+    /// vault `client` points at, signing with `algorithm`.
+    ///
+    /// The version is required. A signature verifies only against the key
+    /// version that produced it, so a key that followed the vault's current
+    /// version would make every older signature verify as `false` after a
+    /// rotation, and [`GetPublicKey`] could return a different key.
     ///
     /// Key Vault locks an EC key's curve to one algorithm (`ES256` needs
     /// P-256, `ES384` needs P-384, `ES512` needs P-521). Nothing local can
@@ -72,36 +77,20 @@ impl AzureSigningKey {
     pub fn new(
         client: KeyClient,
         key_name: impl Into<String>,
+        key_version: impl Into<String>,
         algorithm: SignatureAlgorithm,
     ) -> Self {
         Self {
             client,
             key_name: key_name.into(),
-            key_version: None,
+            key_version: key_version.into(),
             algorithm,
         }
-    }
-
-    /// Pins every operation to one key version instead of the vault's
-    /// current one.
-    ///
-    /// A signature only verifies against the version that produced it, so
-    /// pinning is how a caller keeps signing and verification on the same
-    /// version across a rotation.
-    #[must_use]
-    pub fn with_key_version(mut self, key_version: impl Into<String>) -> Self {
-        self.key_version = Some(key_version.into());
-        self
     }
 
     /// The algorithm this key was constructed with.
     pub fn algorithm(&self) -> SignatureAlgorithm {
         self.algorithm
-    }
-
-    /// The version path segment. Empty means the vault's current version.
-    fn version(&self) -> &str {
-        self.key_version.as_deref().unwrap_or_default()
     }
 
     fn azure_algorithm(&self) -> AzureSignatureAlgorithm {
@@ -168,7 +157,7 @@ impl Sign for AzureSigningKey {
             value: Some(digest),
         };
         let options = KeyClientSignOptions {
-            key_version: self.key_version.clone(),
+            key_version: Some(self.key_version.clone()),
             ..Default::default()
         };
         let result = self
@@ -214,7 +203,12 @@ impl Verify for AzureSigningKey {
         };
         let result = self
             .client
-            .verify(&self.key_name, self.version(), parameters.try_into()?, None)
+            .verify(
+                &self.key_name,
+                &self.key_version,
+                parameters.try_into()?,
+                None,
+            )
             .await?
             .into_model()?;
 
@@ -227,7 +221,7 @@ impl GetPublicKey for AzureSigningKey {
 
     async fn get_public_key(&self) -> Result<Vec<u8>, Self::Error> {
         let options = azure_security_keyvault_keys::models::KeyClientGetKeyOptions {
-            key_version: self.key_version.clone(),
+            key_version: Some(self.key_version.clone()),
             ..Default::default()
         };
         let key = self
@@ -273,7 +267,7 @@ mod tests {
     #[tokio::test]
     async fn sign_converts_the_vaults_raw_ecdsa_signature_to_der() {
         let (client, transport) = stub_client(&[&sign_response(&raw_p256_signature())]);
-        let key = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::EcdsaP256Sha256);
+        let key = AzureSigningKey::new(client, "my-key", "v7", SignatureAlgorithm::EcdsaP256Sha256);
 
         let signature = key.sign(&Protected::new(vec![1u8; 32])).await.unwrap();
 
@@ -291,7 +285,7 @@ mod tests {
     #[tokio::test]
     async fn sign_passes_an_rsa_signature_through_untouched() {
         let (client, transport) = stub_client(&[&sign_response(&[0xABu8; 256])]);
-        let key = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::RsaPssSha256);
+        let key = AzureSigningKey::new(client, "my-key", "v7", SignatureAlgorithm::RsaPssSha256);
 
         let signature = key.sign(&Protected::new(vec![1u8; 32])).await.unwrap();
 
@@ -319,7 +313,7 @@ mod tests {
                 None => vec![0xABu8; 256],
             };
             let (client, transport) = stub_client(&[&sign_response(&signature)]);
-            let key = AzureSigningKey::new(client, "my-key", algorithm);
+            let key = AzureSigningKey::new(client, "my-key", "v7", algorithm);
 
             key.sign(&Protected::new(vec![1u8; digest_len]))
                 .await
@@ -332,7 +326,7 @@ mod tests {
     #[tokio::test]
     async fn a_digest_of_the_wrong_length_makes_no_call_at_all() {
         let (client, transport) = stub_client(&[]);
-        let key = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::RsaPkcs1Sha256);
+        let key = AzureSigningKey::new(client, "my-key", "v7", SignatureAlgorithm::RsaPkcs1Sha256);
 
         let error = key.sign(&Protected::new(vec![1u8; 31])).await.unwrap_err();
 
@@ -359,7 +353,7 @@ mod tests {
     async fn verify_sends_the_raw_form_of_a_der_ecdsa_signature() {
         let der = ecdsa_raw_to_der(&raw_p256_signature(), 32).unwrap();
         let (client, transport) = stub_client(&[r#"{"value":true}"#]);
-        let key = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::EcdsaP256Sha256);
+        let key = AzureSigningKey::new(client, "my-key", "v7", SignatureAlgorithm::EcdsaP256Sha256);
 
         assert!(key
             .verify(&Protected::new(vec![1u8; 32]), &der)
@@ -377,7 +371,7 @@ mod tests {
     #[tokio::test]
     async fn a_signature_that_is_not_der_is_ok_false_not_an_error() {
         let (client, transport) = stub_client(&[]);
-        let key = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::EcdsaP256Sha256);
+        let key = AzureSigningKey::new(client, "my-key", "v7", SignatureAlgorithm::EcdsaP256Sha256);
 
         let verdict = key
             .verify(&Protected::new(vec![1u8; 32]), b"not DER at all")
@@ -391,7 +385,7 @@ mod tests {
     #[tokio::test]
     async fn a_false_verdict_maps_to_ok_false() {
         let (client, _) = stub_client(&[r#"{"value":false}"#]);
-        let key = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::RsaPssSha256);
+        let key = AzureSigningKey::new(client, "my-key", "v7", SignatureAlgorithm::RsaPssSha256);
 
         let verdict = key
             .verify(&Protected::new(vec![1u8; 32]), &[0u8; 256])
@@ -411,7 +405,7 @@ mod tests {
             base64::encode_url_safe(&e)
         );
         let (client, _) = stub_client(&[&response]);
-        let key = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::RsaPssSha256);
+        let key = AzureSigningKey::new(client, "my-key", "v7", SignatureAlgorithm::RsaPssSha256);
 
         let spki = key.get_public_key().await.unwrap();
 
@@ -429,7 +423,7 @@ mod tests {
             base64::encode_url_safe(&y)
         );
         let (client, _) = stub_client(&[&response]);
-        let key = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::EcdsaP256Sha256);
+        let key = AzureSigningKey::new(client, "my-key", "v7", SignatureAlgorithm::EcdsaP256Sha256);
 
         let spki = key.get_public_key().await.unwrap();
 
@@ -437,26 +431,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_public_key_reads_the_pinned_version_of_the_key() {
+    async fn every_operation_uses_the_bound_version() {
         let response = format!(
             r#"{{"key":{{"kid":"{VAULT}/keys/my-key/{VERSION}","kty":"RSA","n":"{}","e":"{}"}}}}"#,
             base64::encode_url_safe([0xC3u8; 256]),
             base64::encode_url_safe([0x01, 0x00, 0x01])
         );
+        let (client, transport) =
+            stub_client(&[&sign_response(&[3u8; 256]), r#"{"value":true}"#, &response]);
+        let key = AzureSigningKey::new(client, "my-key", "v7", SignatureAlgorithm::RsaPssSha256);
 
-        let (client, pinned_transport) = stub_client(&[&response]);
-        let pinned = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::RsaPssSha256)
-            .with_key_version("v7");
-        pinned.get_public_key().await.unwrap();
+        let digest = Protected::new(vec![1u8; 32]);
+        let signature = key.sign(&digest).await.unwrap();
+        key.verify(&digest, &signature).await.unwrap();
+        key.get_public_key().await.unwrap();
 
-        let (client, current_transport) = stub_client(&[&response]);
-        let current = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::RsaPssSha256);
-        current.get_public_key().await.unwrap();
-
-        // Pinned, the version the caller named is in the path; unpinned,
-        // the empty segment asks the vault for its current version.
-        assert_eq!(pinned_transport.requests()[0].path(), "/keys/my-key/v7");
-        assert_eq!(current_transport.requests()[0].path(), "/keys/my-key/");
+        let requests = transport.requests();
+        assert_eq!(requests[0].path(), "/keys/my-key/v7/sign");
+        assert_eq!(requests[1].path(), "/keys/my-key/v7/verify");
+        assert_eq!(requests[2].path(), "/keys/my-key/v7");
     }
 
     #[tokio::test]
@@ -464,7 +457,7 @@ mod tests {
         let response =
             format!(r#"{{"key":{{"kid":"{VAULT}/keys/my-key/{VERSION}","kty":"oct-HSM"}}}}"#);
         let (client, _) = stub_client(&[&response]);
-        let key = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::RsaPssSha256);
+        let key = AzureSigningKey::new(client, "my-key", "v7", SignatureAlgorithm::RsaPssSha256);
 
         let error = key.get_public_key().await.unwrap_err();
 
@@ -477,7 +470,7 @@ mod tests {
             r#"{{"key":{{"kid":"{VAULT}/keys/my-key/{VERSION}","kty":"EC","crv":"P-256K","x":"EQ","y":"Ig"}}}}"#
         );
         let (client, _) = stub_client(&[&response]);
-        let key = AzureSigningKey::new(client, "my-key", SignatureAlgorithm::EcdsaP256Sha256);
+        let key = AzureSigningKey::new(client, "my-key", "v7", SignatureAlgorithm::EcdsaP256Sha256);
 
         let error = key.get_public_key().await.unwrap_err();
 
@@ -505,7 +498,7 @@ mod tests {
             &[KeyOperation::Sign, KeyOperation::Verify],
         )
         .await;
-        AzureSigningKey::new(client, key_name, algorithm).with_key_version(version)
+        AzureSigningKey::new(client, key_name, version, algorithm)
     }
 
     #[tokio::test]

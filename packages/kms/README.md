@@ -68,9 +68,9 @@ Design notes that apply across vendors:
   `SubjectPublicKeyInfo`, whatever the vendor returns natively
   (`docs/adr/0002`).
 - **Key versions.** Azure `KeyId`s and ciphertexts carry the key version
-  the vault used, so retrieval survives rotation. Google MAC and signing
-  keys, and Vault MAC and signing keys, bind to an explicit key version at
-  construction.
+  the vault used, so retrieval survives rotation. MAC and signing keys from
+  Azure, Google and Vault bind to an explicit key version at construction,
+  so a rotation does not make old tags or signatures fail to verify.
 - **Google Cloud integrity.** Every GCP call sets CRC32C request checksums
   and verifies the response checksums, retrying once on a mismatch.
 

@@ -11,11 +11,17 @@
 //! Every adapter takes a ready [`azure_security_keyvault_keys::KeyClient`];
 //! credentials and endpoint are the caller's concern.
 //!
-//! Each adapter binds to one key *name*. New work goes to whichever version
-//! the vault currently considers current, and anything that has to be
-//! reversed later — a [`KeyId`](crate::KeyId), a ciphertext — records the
-//! exact version that produced it, so rotating a key never strands data.
-//! `with_key_version` pins a version where a caller needs one.
+//! [`AzureDataKeySource`] binds to one key *name*. New work goes to
+//! whichever version the vault currently considers current, and anything
+//! that has to be reversed later — a [`KeyId`](crate::KeyId), a
+//! ciphertext — records the exact version that produced it, so rotating a
+//! key never strands data. `with_key_version` pins a version where a caller
+//! needs one.
+//!
+//! [`AzureMacKey`] and [`AzureSigningKey`] take a key version at
+//! construction. A tag or signature records no version, so it can only be
+//! checked against the version that produced it; following the current
+//! version would make every older one verify as `false` after a rotation.
 
 mod data_key;
 mod envelope;

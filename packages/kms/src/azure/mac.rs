@@ -38,38 +38,29 @@ pub enum Error {
 pub struct AzureMacKey<const N: usize> {
     client: KeyClient,
     key_name: String,
-    key_version: Option<String>,
+    key_version: String,
 }
 
 impl<const N: usize> AzureMacKey<N>
 where
     Self: ValidMacSize<N>,
 {
-    /// Binds to the `oct-HSM` key named `key_name` in the vault `client`
-    /// points at.
-    pub fn new(client: KeyClient, key_name: impl Into<String>) -> Self {
+    /// Binds to version `key_version` of the `oct-HSM` key named `key_name`
+    /// in the vault `client` points at.
+    ///
+    /// The version is required. A MAC verifies only against the key version
+    /// that produced it, so a key that followed the vault's current version
+    /// would make every older tag verify as `false` after a rotation.
+    pub fn new(
+        client: KeyClient,
+        key_name: impl Into<String>,
+        key_version: impl Into<String>,
+    ) -> Self {
         Self {
             client,
             key_name: key_name.into(),
-            key_version: None,
+            key_version: key_version.into(),
         }
-    }
-
-    /// Pins both operations to one key version instead of the vault's
-    /// current one.
-    ///
-    /// A MAC is only meaningful against the key version that produced it, so
-    /// pinning is how a caller keeps generation and verification on the same
-    /// version across a rotation.
-    #[must_use]
-    pub fn with_key_version(mut self, key_version: impl Into<String>) -> Self {
-        self.key_version = Some(key_version.into());
-        self
-    }
-
-    /// The version path segment. Empty means the vault's current version.
-    fn version(&self) -> &str {
-        self.key_version.as_deref().unwrap_or_default()
     }
 }
 
@@ -85,7 +76,7 @@ where
             value: Some(message.clone().risky_unwrap()),
         };
         let options = KeyClientSignOptions {
-            key_version: self.key_version.clone(),
+            key_version: Some(self.key_version.clone()),
             ..Default::default()
         };
         let result = self
@@ -121,7 +112,12 @@ where
         };
         let result = self
             .client
-            .verify(&self.key_name, self.version(), parameters.try_into()?, None)
+            .verify(
+                &self.key_name,
+                &self.key_version,
+                parameters.try_into()?,
+                None,
+            )
             .await?
             .into_model()?;
 
@@ -181,7 +177,7 @@ mod tests {
     #[tokio::test]
     async fn generate_mac_signs_the_message_with_hs256() {
         let (client, transport) = stub_client(&[&sign_response(&[5u8; 32])]);
-        let key = AzureMacKey::<32>::new(client, "my-key");
+        let key = AzureMacKey::<32>::new(client, "my-key", "v7");
 
         let tag = key
             .generate_mac(&Protected::new(b"a message".to_vec()))
@@ -190,7 +186,7 @@ mod tests {
 
         assert_eq!(tag, [5u8; 32]);
         let request = &transport.requests()[0];
-        assert_eq!(request.path(), "/keys/my-key//sign");
+        assert_eq!(request.path(), "/keys/my-key/v7/sign");
         let body = request.json();
         assert_eq!(body["alg"], "HS256");
         assert_eq!(
@@ -202,14 +198,14 @@ mod tests {
     #[tokio::test]
     async fn the_tag_length_picks_the_algorithm() {
         let (client, transport) = stub_client(&[&sign_response(&[5u8; 48])]);
-        AzureMacKey::<48>::new(client, "my-key")
+        AzureMacKey::<48>::new(client, "my-key", "v7")
             .generate_mac(&Protected::new(b"m".to_vec()))
             .await
             .unwrap();
         assert_eq!(transport.requests()[0].json()["alg"], "HS384");
 
         let (client, transport) = stub_client(&[&sign_response(&[5u8; 64])]);
-        AzureMacKey::<64>::new(client, "my-key")
+        AzureMacKey::<64>::new(client, "my-key", "v7")
             .generate_mac(&Protected::new(b"m".to_vec()))
             .await
             .unwrap();
@@ -219,7 +215,7 @@ mod tests {
     #[tokio::test]
     async fn a_tag_of_the_wrong_length_is_an_error_not_a_panic() {
         let (client, _) = stub_client(&[&sign_response(&[5u8; 16])]);
-        let key = AzureMacKey::<32>::new(client, "my-key");
+        let key = AzureMacKey::<32>::new(client, "my-key", "v7");
 
         let error = key
             .generate_mac(&Protected::new(b"m".to_vec()))
@@ -238,7 +234,7 @@ mod tests {
     #[tokio::test]
     async fn verify_maps_the_vaults_boolean_straight_through() {
         let (client, transport) = stub_client(&[r#"{"value":true}"#]);
-        let key = AzureMacKey::<32>::new(client, "my-key");
+        let key = AzureMacKey::<32>::new(client, "my-key", "v7");
 
         assert!(key
             .verify_mac(&Protected::new(b"a message".to_vec()), &[5u8; 32])
@@ -246,7 +242,7 @@ mod tests {
             .unwrap());
 
         let request = &transport.requests()[0];
-        assert_eq!(request.path(), "/keys/my-key//verify");
+        assert_eq!(request.path(), "/keys/my-key/v7/verify");
         let body = request.json();
         assert_eq!(body["alg"], "HS256");
         assert_eq!(
@@ -262,7 +258,7 @@ mod tests {
     #[tokio::test]
     async fn a_tag_that_does_not_match_is_ok_false_not_an_error() {
         let (client, _) = stub_client(&[r#"{"value":false}"#]);
-        let key = AzureMacKey::<32>::new(client, "my-key");
+        let key = AzureMacKey::<32>::new(client, "my-key", "v7");
 
         let verdict = key
             .verify_mac(&Protected::new(b"a message".to_vec()), &[0u8; 32])
@@ -273,9 +269,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_pinned_version_is_used_for_both_operations() {
+    async fn the_bound_version_is_used_for_both_operations() {
         let (client, transport) = stub_client(&[&sign_response(&[5u8; 32]), r#"{"value":true}"#]);
-        let key = AzureMacKey::<32>::new(client, "my-key").with_key_version("v7");
+        let key = AzureMacKey::<32>::new(client, "my-key", "v7");
 
         let message = Protected::new(b"m".to_vec());
         let tag = key.generate_mac(&message).await.unwrap();
