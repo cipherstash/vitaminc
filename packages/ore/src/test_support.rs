@@ -20,7 +20,11 @@
 //! #     const NAME: &'static str = "keyed";
 //! #     type Term = Vec<u8>;
 //! #     type Error = core::convert::Infallible;
-//! #     fn encrypt_plaintext(&self, p: &OrderPlaintext, salt: &Context<'_>) -> Result<Vec<u8>, Self::Error> {
+//! #     type Space = Context<'static>;
+//! #     fn open(&self, salt: &Context<'_>) -> Result<Context<'static>, Self::Error> {
+//! #         Ok(salt.clone().into_owned())
+//! #     }
+//! #     fn encrypt_plaintext(&self, salt: &Context<'static>, p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
 //! #         let mut t = vec![self.0];
 //! #         t.extend_from_slice(&(salt.as_bytes().len() as u32).to_be_bytes());
 //! #         t.extend_from_slice(salt.as_bytes());

@@ -6,7 +6,7 @@ mod common;
 
 use std::cmp::Ordering;
 
-use common::{key, BackendDown, Down, Fixed, Mock, MockTerm};
+use common::{key, BackendDown, Down, Fixed, Flaky, Gated, Mock, MockTerm};
 use vitaminc_aead::{Bytes, Int, Logical, Physical};
 use vitaminc_ore::target::{self, StaticTarget};
 use vitaminc_ore::{
@@ -392,11 +392,117 @@ fn spaces_contexts_and_terms_debug_without_the_key() {
     let space = context.target(target::I32);
     let shown = format!("{space:?}");
     assert!(
-        shown.ends_with(r#"OrderSpace<'_, typed::common::Mock, vitaminc_ore::target::I32> { scheme: "***", target: I32, salt: "***" }"#),
+        shown.ends_with(r#"OrderSpace<'_, typed::common::Mock, vitaminc_ore::target::I32> { scheme: "***", target: I32, salt: "***", opened: "***" }"#),
         "{shown}"
     );
     let term = space.encrypt(1i32).expect("mock");
     let shown = format!("{term:?}");
     assert!(shown.starts_with("OrderTerm { raw: MockTerm {"), "{shown}");
     assert!(shown.ends_with("target: I32 }"), "{shown}");
+}
+
+/// A space opens the scheme once, at its first value, however many
+/// values it encrypts, and another space opens it again.
+#[test]
+fn a_space_opens_the_scheme_once_for_all_its_terms() {
+    let mock = Mock::new(key());
+    let space = mock.target(target::I32).context("c");
+    assert_eq!(mock.opens(), 0, "making a space derives nothing yet");
+    for v in 0..10i32 {
+        space.encrypt(v).expect("mock");
+    }
+    space.encrypt_checked(10i64).expect("mock");
+    let p = order(T::I32, None, Physical::Int(Int::I8(1))).expect("term");
+    space.encrypt_term(&p).expect("mock");
+    assert_eq!(mock.opens(), 1);
+    // Opening up front is the same opening.
+    space.open().expect("mock");
+    assert_eq!(mock.opens(), 1);
+    // Another context, or the same chain again, is another space.
+    space.context("d").encrypt(1i32).expect("mock");
+    mock.target(target::I32).context("c").open().expect("mock");
+    assert_eq!(mock.opens(), 3);
+    // A one-shot chain opens once too.
+    mock.encrypt(1i64).expect("mock");
+    assert_eq!(mock.opens(), 4);
+}
+
+/// A scheme that fails to open reports it from the value, through both
+/// methods, and is asked again on the next.
+#[test]
+fn a_scheme_that_cannot_open_reports_it_from_the_value_and_is_asked_again() {
+    let flaky = Flaky::new(Mock::new(key()));
+    let space = flaky.target(target::I32);
+    assert!(matches!(space.encrypt(1i32), Err(BackendDown)));
+    assert_eq!(flaky.inner.opens(), 0);
+    let term = space.encrypt(1i32).expect("opens the second time");
+    assert_eq!(flaky.inner.opens(), 1);
+    assert_eq!(
+        space.compare(&term, &space.encrypt(2i32).expect("open")),
+        Some(Ordering::Less)
+    );
+    assert_eq!(flaky.inner.opens(), 1, "the recovered opening is kept");
+    // Opening up front reports the failure too.
+    assert!(matches!(
+        Flaky::new(Mock::new(key())).target(target::I32).open(),
+        Err(BackendDown)
+    ));
+
+    let flaky = Flaky::new(Mock::new(key()));
+    let space = flaky.target(T::I32);
+    let failed = space.encrypt_checked(1i32).expect_err("down");
+    assert!(matches!(failed, OrderError::Backend(BackendDown)));
+    assert_eq!(
+        failed.to_string(),
+        "the order scheme failed: the backend is down"
+    );
+    assert!(space.open().is_ok());
+    assert!(space.encrypt_checked(1i32).is_ok());
+}
+
+/// A space is `Send` and `Sync` when the scheme is `Sync` and what it
+/// opens is `Send` and `Sync`, so an index layer can share one across
+/// threads.
+#[test]
+fn a_space_of_a_sync_scheme_is_sync() {
+    fn is_send_sync<X: Send + Sync>(_: &X) {}
+    let mock = Mock::new(key());
+    let space = mock.target(target::I32).context("c");
+    is_send_sync(&space);
+    space.open().expect("mock");
+    std::thread::scope(|scope| {
+        for _ in 0..4 {
+            scope.spawn(|| {
+                space.encrypt(1i32).expect("mock");
+            });
+        }
+    });
+    assert_eq!(mock.opens(), 1, "the threads read what was opened");
+}
+
+/// Threads that race to a space's first value may each open the scheme;
+/// one result is kept, every term is the kept space's, and nothing opens
+/// after.
+#[test]
+fn threads_racing_to_open_a_space_keep_one_opening() {
+    let gated = Gated::<4>::new(Mock::new(key()));
+    let space = gated.target(target::I32).context("c");
+    let terms: Vec<_> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .map(|_| scope.spawn(|| space.encrypt(1i32).expect("mock")))
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("no panic"))
+            .collect()
+    });
+    // Every thread got through the barrier, so every thread opened.
+    assert_eq!(gated.inner.opens(), 4);
+    for term in &terms {
+        assert_eq!(term, &terms[0], "every term is the one space's");
+    }
+    // What was kept serves every later term, so nothing opens again.
+    let later = space.encrypt(2i32).expect("mock");
+    assert_eq!(gated.inner.opens(), 4);
+    assert_eq!(space.compare(&terms[0], &later), Some(Ordering::Less));
 }

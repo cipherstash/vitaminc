@@ -7,6 +7,8 @@
 
 use core::cmp::Ordering;
 use core::convert::Infallible;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering as Atomic};
+use std::sync::Barrier;
 
 use vitaminc_ore::{Context, OrderKeyInit, OrderPlaintext, OrderScheme, OrderTarget};
 use vitaminc_protected::{Controlled, Protected};
@@ -55,24 +57,46 @@ impl AsRef<[u8]> for MockTerm {
     }
 }
 
-/// Takes every domain.
+/// Takes every domain. Counts how often it is opened, so a test can
+/// check a space opens it once.
 pub struct Mock {
     key: Protected<[u8; 32]>,
+    opens: AtomicU32,
 }
+
+impl Mock {
+    /// How many spaces this scheme has opened.
+    pub fn opens(&self) -> u32 {
+        self.opens.load(Atomic::SeqCst)
+    }
+}
+
+/// What a mock keeps for a space: the salt and its key, which it "derives"
+/// by concatenating them once.
+pub struct MockSpace(Vec<u8>);
 
 impl OrderScheme for Mock {
     const NAME: &'static str = "mock";
     type Term = MockTerm;
     type Error = Infallible;
+    type Space = MockSpace;
+
+    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        self.opens.fetch_add(1, Atomic::SeqCst);
+        let mut derived = salt.as_bytes().to_vec();
+        derived.extend_from_slice(self.key.risky_ref());
+        Ok(MockSpace(derived))
+    }
 
     fn encrypt_plaintext(
         &self,
+        space: &MockSpace,
         plaintext: &OrderPlaintext,
-        salt: &Context<'_>,
     ) -> Result<MockTerm, Infallible> {
-        let mut salt = salt.as_bytes().to_vec();
-        salt.extend_from_slice(self.key.risky_ref());
-        Ok(MockTerm::new(salt, plaintext.bytes().risky_ref()))
+        Ok(MockTerm::new(
+            space.0.clone(),
+            plaintext.bytes().risky_ref(),
+        ))
     }
 
     fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
@@ -92,7 +116,10 @@ impl OrderKeyInit for Mock {
     type KeyError = WrongKeyLength;
 
     fn new(key: Self::Key) -> Self {
-        Self { key }
+        Self {
+            key,
+            opens: AtomicU32::new(0),
+        }
     }
 
     fn try_from_bytes(key: Protected<Vec<u8>>) -> Result<Self, WrongKeyLength> {
@@ -116,14 +143,19 @@ impl<const N: usize> OrderScheme for Fixed<N> {
     const NAME: &'static str = "fixed";
     type Term = MockTerm;
     type Error = Infallible;
+    type Space = MockSpace;
+
+    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        self.0.open(salt)
+    }
 
     fn encrypt_plaintext(
         &self,
+        space: &MockSpace,
         plaintext: &OrderPlaintext,
-        salt: &Context<'_>,
     ) -> Result<MockTerm, Infallible> {
         assert_eq!(plaintext.width(), Some(N), "the space let a width through");
-        self.0.encrypt_plaintext(plaintext, salt)
+        self.0.encrypt_plaintext(space, plaintext)
     }
 
     fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
@@ -147,13 +179,18 @@ impl OrderScheme for Lying {
     const NAME: &'static str = "lying";
     type Term = MockTerm;
     type Error = Infallible;
+    type Space = MockSpace;
+
+    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        self.0.open(salt)
+    }
 
     fn encrypt_plaintext(
         &self,
+        space: &MockSpace,
         plaintext: &OrderPlaintext,
-        salt: &Context<'_>,
     ) -> Result<MockTerm, Infallible> {
-        self.0.encrypt_plaintext(plaintext, salt)
+        self.0.encrypt_plaintext(space, plaintext)
     }
 
     fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
@@ -178,16 +215,21 @@ impl OrderScheme for Unsalted {
     const NAME: &'static str = "unsalted";
     type Term = MockTerm;
     type Error = Infallible;
+    type Space = MockSpace;
+
+    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        self.0.open(salt)
+    }
 
     fn encrypt_plaintext(
         &self,
+        space: &MockSpace,
         plaintext: &OrderPlaintext,
-        salt: &Context<'_>,
     ) -> Result<MockTerm, Infallible> {
         if plaintext.target() == OrderTarget::Text && plaintext.bytes().risky_ref().len() < 2 {
             return Ok(MockTerm::new(Vec::new(), plaintext.bytes().risky_ref()));
         }
-        self.0.encrypt_plaintext(plaintext, salt)
+        self.0.encrypt_plaintext(space, plaintext)
     }
 
     fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
@@ -206,16 +248,21 @@ impl OrderScheme for Empty {
     const NAME: &'static str = "empty";
     type Term = MockTerm;
     type Error = Infallible;
+    type Space = MockSpace;
+
+    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        self.0.open(salt)
+    }
 
     fn encrypt_plaintext(
         &self,
+        space: &MockSpace,
         plaintext: &OrderPlaintext,
-        salt: &Context<'_>,
     ) -> Result<MockTerm, Infallible> {
         if plaintext.target() == OrderTarget::Text && plaintext.bytes().risky_ref().len() < 2 {
             return Ok(MockTerm::new(Vec::new(), &[]));
         }
-        self.0.encrypt_plaintext(plaintext, salt)
+        self.0.encrypt_plaintext(space, plaintext)
     }
 
     fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
@@ -227,20 +274,25 @@ vitaminc_ore::supports_every_target!(Empty);
 
 /// A scheme that binds the salt but not the key, for the conformance
 /// checks to catch a term that does not depend on the key.
-pub struct Unkeyed(pub Mock);
+pub struct Unkeyed;
 
 impl OrderScheme for Unkeyed {
     const NAME: &'static str = "unkeyed";
     type Term = MockTerm;
     type Error = Infallible;
+    type Space = MockSpace;
+
+    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        Ok(MockSpace(salt.as_bytes().to_vec()))
+    }
 
     fn encrypt_plaintext(
         &self,
+        space: &MockSpace,
         plaintext: &OrderPlaintext,
-        salt: &Context<'_>,
     ) -> Result<MockTerm, Infallible> {
         Ok(MockTerm::new(
-            salt.as_bytes().to_vec(),
+            space.0.clone(),
             plaintext.bytes().risky_ref(),
         ))
     }
@@ -253,9 +305,9 @@ impl OrderScheme for Unkeyed {
 vitaminc_ore::supports_every_target!(Unkeyed);
 
 /// A term whose comparison knows the salt and key it was bound under,
-/// but whose stored bytes leave out the key, and the salt too unless
-/// `keeps_salt`: the shape of a scheme that keys its terms in memory and
-/// drops what it keyed them with when it stores them.
+/// but whose stored bytes leave out the key, and the salt too unless the
+/// scheme `keeps_salt`: the shape of a scheme that keys its terms in
+/// memory and drops what it keyed them with when it stores them.
 pub struct ForgetfulTerm {
     bound: Vec<u8>,
     stored: Vec<u8>,
@@ -276,25 +328,42 @@ pub struct Forgetful {
     pub keeps_salt: bool,
 }
 
+/// What a forgetful scheme keeps for a space: the salt and key its
+/// comparison binds, and the prefix its stored terms keep.
+pub struct ForgetfulSpace {
+    bound: Vec<u8>,
+    stored: Vec<u8>,
+}
+
 impl OrderScheme for Forgetful {
     const NAME: &'static str = "forgetful";
     type Term = ForgetfulTerm;
     type Error = Infallible;
+    type Space = ForgetfulSpace;
 
-    fn encrypt_plaintext(
-        &self,
-        plaintext: &OrderPlaintext,
-        salt: &Context<'_>,
-    ) -> Result<ForgetfulTerm, Infallible> {
-        let mut bound = salt.as_bytes().to_vec();
-        bound.extend_from_slice(self.mock.key.risky_ref());
-        let mut stored = if self.keeps_salt {
+    fn open(&self, salt: &Context<'_>) -> Result<ForgetfulSpace, Infallible> {
+        let stored = if self.keeps_salt {
             salt.as_bytes().to_vec()
         } else {
             Vec::new()
         };
+        Ok(ForgetfulSpace {
+            bound: self.mock.open(salt)?.0,
+            stored,
+        })
+    }
+
+    fn encrypt_plaintext(
+        &self,
+        space: &ForgetfulSpace,
+        plaintext: &OrderPlaintext,
+    ) -> Result<ForgetfulTerm, Infallible> {
+        let mut stored = space.stored.clone();
         stored.extend_from_slice(plaintext.bytes().risky_ref());
-        Ok(ForgetfulTerm { bound, stored })
+        Ok(ForgetfulTerm {
+            bound: space.bound.clone(),
+            stored,
+        })
     }
 
     fn compare(a: &ForgetfulTerm, b: &ForgetfulTerm) -> Option<Ordering> {
@@ -304,7 +373,7 @@ impl OrderScheme for Forgetful {
 
 vitaminc_ore::supports_every_target!(Forgetful);
 
-/// A scheme whose backend fails.
+/// A scheme whose backend fails: it opens, and every term fails.
 pub struct Down;
 
 #[derive(Debug, thiserror::Error)]
@@ -315,12 +384,13 @@ impl OrderScheme for Down {
     const NAME: &'static str = "down";
     type Term = MockTerm;
     type Error = BackendDown;
+    type Space = ();
 
-    fn encrypt_plaintext(
-        &self,
-        _: &OrderPlaintext,
-        _: &Context<'_>,
-    ) -> Result<MockTerm, BackendDown> {
+    fn open(&self, _: &Context<'_>) -> Result<(), BackendDown> {
+        Ok(())
+    }
+
+    fn encrypt_plaintext(&self, _: &(), _: &OrderPlaintext) -> Result<MockTerm, BackendDown> {
         Err(BackendDown)
     }
 
@@ -330,6 +400,95 @@ impl OrderScheme for Down {
 }
 
 vitaminc_ore::supports_every_target!(Down);
+
+/// A scheme that fails to open the first time it is asked, as one whose
+/// random number generator could not be seeded might, and opens after.
+pub struct Flaky {
+    pub inner: Mock,
+    failed_once: AtomicBool,
+}
+
+impl Flaky {
+    pub fn new(inner: Mock) -> Self {
+        Self {
+            inner,
+            failed_once: AtomicBool::new(false),
+        }
+    }
+}
+
+impl OrderScheme for Flaky {
+    const NAME: &'static str = "flaky";
+    type Term = MockTerm;
+    type Error = BackendDown;
+    type Space = MockSpace;
+
+    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, BackendDown> {
+        if !self.failed_once.swap(true, Atomic::SeqCst) {
+            return Err(BackendDown);
+        }
+        Ok(self.inner.open(salt).unwrap_or_else(|never| match never {}))
+    }
+
+    fn encrypt_plaintext(
+        &self,
+        space: &MockSpace,
+        plaintext: &OrderPlaintext,
+    ) -> Result<MockTerm, BackendDown> {
+        Ok(self
+            .inner
+            .encrypt_plaintext(space, plaintext)
+            .unwrap_or_else(|never| match never {}))
+    }
+
+    fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
+        compare(a, b)
+    }
+}
+
+vitaminc_ore::supports_every_target!(Flaky);
+
+/// A scheme whose `open` waits until `N` threads are opening at once, so
+/// a test can make the race for a space's first value certain.
+pub struct Gated<const N: usize> {
+    pub inner: Mock,
+    barrier: Barrier,
+}
+
+impl<const N: usize> Gated<N> {
+    pub fn new(inner: Mock) -> Self {
+        Self {
+            inner,
+            barrier: Barrier::new(N),
+        }
+    }
+}
+
+impl<const N: usize> OrderScheme for Gated<N> {
+    const NAME: &'static str = "gated";
+    type Term = MockTerm;
+    type Error = Infallible;
+    type Space = MockSpace;
+
+    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        self.barrier.wait();
+        self.inner.open(salt)
+    }
+
+    fn encrypt_plaintext(
+        &self,
+        space: &MockSpace,
+        plaintext: &OrderPlaintext,
+    ) -> Result<MockTerm, Infallible> {
+        self.inner.encrypt_plaintext(space, plaintext)
+    }
+
+    fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
+        compare(a, b)
+    }
+}
+
+vitaminc_ore::supports_every_target!(Gated<4>);
 
 pub fn key() -> Protected<[u8; 32]> {
     Protected::new([7; 32])

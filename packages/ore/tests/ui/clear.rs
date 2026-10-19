@@ -12,12 +12,13 @@ impl OrderScheme for Clear {
     const NAME: &'static str = "clear";
     type Term = Vec<u8>;
     type Error = core::convert::Infallible;
+    type Space = ();
 
-    fn encrypt_plaintext(
-        &self,
-        p: &OrderPlaintext,
-        _: &Context<'_>,
-    ) -> Result<Vec<u8>, Self::Error> {
+    fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
         Ok(p.bytes().risky_ref().clone())
     }
 
@@ -35,12 +36,13 @@ impl OrderScheme for FourBytes {
     const NAME: &'static str = "four-bytes";
     type Term = Vec<u8>;
     type Error = core::convert::Infallible;
+    type Space = ();
 
-    fn encrypt_plaintext(
-        &self,
-        p: &OrderPlaintext,
-        _: &Context<'_>,
-    ) -> Result<Vec<u8>, Self::Error> {
+    fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
         Ok(p.bytes().risky_ref().clone())
     }
 
@@ -58,12 +60,13 @@ impl OrderScheme for Forgetful {
     const NAME: &'static str = "forgetful";
     type Term = Vec<u8>;
     type Error = core::convert::Infallible;
+    type Space = ();
 
-    fn encrypt_plaintext(
-        &self,
-        p: &OrderPlaintext,
-        _: &Context<'_>,
-    ) -> Result<Vec<u8>, Self::Error> {
+    fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
         Ok(p.bytes().risky_ref().clone())
     }
 

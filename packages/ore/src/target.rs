@@ -145,7 +145,11 @@ pub trait Supports<T: Target>: OrderScheme {
 /// #     const NAME: &'static str = "ten-bytes";
 /// #     type Term = Vec<u8>;
 /// #     type Error = core::convert::Infallible;
-/// #     fn encrypt_plaintext(&self, p: &OrderPlaintext, _: &Context<'_>) -> Result<Vec<u8>, Self::Error> {
+/// #     type Space = ();
+/// #     fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+/// #         Ok(())
+/// #     }
+/// #     fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
 /// #         use vitaminc_protected::Controlled;
 /// #         Ok(p.bytes().risky_ref().clone())
 /// #     }
@@ -186,7 +190,11 @@ macro_rules! supports_targets {
 /// #     const NAME: &'static str = "cllw";
 /// #     type Term = Vec<u8>;
 /// #     type Error = core::convert::Infallible;
-/// #     fn encrypt_plaintext(&self, p: &OrderPlaintext, _: &Context<'_>) -> Result<Vec<u8>, Self::Error> {
+/// #     type Space = ();
+/// #     fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+/// #         Ok(())
+/// #     }
+/// #     fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
 /// #         use vitaminc_protected::Controlled;
 /// #         Ok(p.bytes().risky_ref().clone())
 /// #     }

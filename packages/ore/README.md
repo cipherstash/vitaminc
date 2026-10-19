@@ -55,7 +55,11 @@ use vitaminc_ore::{NormalizeError, OrderEncrypt, OrderError, OrderTarget};
 #     const NAME: &'static str = "clear";
 #     type Term = Vec<u8>;
 #     type Error = core::convert::Infallible;
-#     fn encrypt_plaintext(&self, p: &OrderPlaintext, _: &Context<'_>) -> Result<Vec<u8>, Self::Error> {
+#     type Space = ();
+#     fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+#         Ok(())
+#     }
+#     fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
 #         use vitaminc_protected::Controlled;
 #         Ok(p.bytes().risky_ref().clone())
 #     }
@@ -172,13 +176,14 @@ target.
 
 ## Implementing a scheme
 
-A scheme implements `encrypt_plaintext` over the sealed
-[`OrderPlaintext`] the space builds from the caller's value and the salt
-the space derives, `compare` over its own terms, and says which targets
-it takes through `Supports`. It reads the plaintext's bytes and binds
-the salt. It never pads, truncates or refuses by width: the space asks
-`Supports` and refuses a target the scheme does not take before the
-scheme sees a plaintext of it. Callers reach every scheme through
+A scheme implements `open`, which derives what it keeps for one space
+from the salt the space derives, `encrypt_plaintext` over that and the
+sealed [`OrderPlaintext`] the space builds from the caller's value,
+`compare` over its own terms, and says which targets it takes through
+`Supports`. It reads the plaintext's bytes and binds the salt through
+what it opened. It never pads, truncates or refuses by width: the space
+asks `Supports` and refuses a target the scheme does not take before
+the scheme sees a plaintext of it. Callers reach every scheme through
 [`OrderEncrypt`], which is implemented for every scheme and cannot be
 overridden, so no scheme can change what its terms are bound to.
 
@@ -195,11 +200,19 @@ impl OrderScheme for FourBytes {
     const NAME: &'static str = "four-bytes";
     type Term = Vec<u8>;
     type Error = Infallible;
+    /// What it keeps for a space. A scheme that derives keys from the
+    /// salt keeps them; this one has nothing to derive and keeps the
+    /// salt.
+    type Space = Context<'static>;
+
+    fn open(&self, salt: &Context<'_>) -> Result<Context<'static>, Infallible> {
+        Ok(salt.clone().into_owned())
+    }
 
     fn encrypt_plaintext(
         &self,
+        salt: &Context<'static>,
         plaintext: &OrderPlaintext,
-        salt: &Context<'_>,
     ) -> Result<Vec<u8>, Infallible> {
         // Bind the salt and encrypt the bytes; here, concatenate them.
         let mut term = salt.as_bytes().to_vec();
@@ -229,12 +242,17 @@ assert_eq!(FourBytes::compare(&vec![], &vec![]), None);
 ```
 
 The salt is `PAE("vitaminc/ore/v1", scheme, domain, context)`, derived
-once when the space is opened, so every scheme binds the same three
+once when the space is made, so every scheme binds the same three
 things: a CLLW scheme passes it as its salt, and a scheme without one,
-block ORE, derives its keys under it. [`OrderKeyInit`] keys a scheme
-from a protected array or from bytes of a length only known at runtime,
-the way a PRF is keyed, so an index layer constructs any scheme the same
-way.
+block ORE, derives its keys under it. The scheme does that per space,
+not per term, in `open`, which the space calls when its first value is
+encrypted (or earlier, through `OrderSpace::open`); `open` may run again
+after a failure or when threads race, so it is a pure derivation. A
+space is `Send` when the scheme is `Sync` and what it opened is `Send`,
+and `Sync` when that is `Sync` too.
+[`OrderKeyInit`] keys a scheme from a protected array or from bytes of
+a length only known at runtime, the way a PRF is keyed, so an index
+layer constructs any scheme the same way.
 
 A term compares only with terms of the same scheme, key, target and
 context, which is what a space is, through `space.compare(&a, &b)` (the

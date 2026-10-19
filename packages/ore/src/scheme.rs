@@ -4,14 +4,15 @@
 //! A caller opens a space on a scheme, with the target every value in it
 //! is encoded as and the context its terms compare within, and encrypts
 //! values: `scheme.target(I32).context(("orders", "total")).encrypt(42i16)`.
-//! It never sees the encoding. A scheme implements one method over the
-//! sealed [`OrderPlaintext`] and the salt the space derives, and never
-//! sees bytes that skipped the encoding (the only way to make a plaintext
-//! is [`order`]) or a salt it could derive differently from another
-//! scheme.
+//! It never sees the encoding. A scheme opens a space once, under the
+//! salt the space derives, and encrypts the sealed [`OrderPlaintext`]s of
+//! that space with what it derived; it never sees bytes that skipped the
+//! encoding (the only way to make a plaintext is [`order`]) or a salt it
+//! could derive differently from another scheme.
 
 use core::cmp::Ordering;
 use core::fmt;
+use std::sync::OnceLock;
 
 use vitaminc_aead::plaintext::{self, SourceError};
 use vitaminc_aead::{Encrypt, Logical, MapSink, Physical, SeqSink, Sink};
@@ -117,12 +118,14 @@ pub enum OrderError<E> {
 /// An order scheme: encrypts one sealed plaintext so that the terms still
 /// compare.
 ///
-/// A scheme implements [`encrypt_plaintext`](OrderScheme::encrypt_plaintext)
-/// and [`compare`](OrderScheme::compare), and says which targets it takes
-/// through [`Supports`]. A caller does not call it: it opens a space with
-/// [`OrderEncrypt::target`], which every scheme has, and encrypts values
-/// there. The space derives the salt the scheme binds, so no scheme can
-/// leave a part of it out, and refuses a target the scheme does not take
+/// A scheme implements [`open`](OrderScheme::open), which derives what it
+/// keeps for one space from the salt, [`encrypt_plaintext`](OrderScheme::encrypt_plaintext)
+/// over that, and [`compare`](OrderScheme::compare); and it says which
+/// targets it takes through [`Supports`]. A caller does not call any of
+/// them: it opens a space with [`OrderEncrypt::target`], which every
+/// scheme has, and encrypts values there. The space derives the salt the
+/// scheme binds, so no scheme can leave a part of it out, opens the
+/// scheme under it once, and refuses a target the scheme does not take
 /// before the scheme sees it.
 ///
 /// Terms compare only between terms of the same scheme, key, target and
@@ -136,8 +139,8 @@ pub enum OrderError<E> {
 ///
 /// Implemented by the scheme crates behind a `vitaminc` feature, and by a
 /// mock in this crate's tests. An implementation reads the plaintext's
-/// [`bytes`](OrderPlaintext::bytes) and binds `salt`; it never pads or
-/// truncates. The bytes are never empty (a variable-width encoding starts
+/// [`bytes`](OrderPlaintext::bytes) and binds the salt through what
+/// [`open`](Self::open) derived from it; it never pads or truncates. The bytes are never empty (a variable-width encoding starts
 /// with [`VARIABLE_WIDTH_MARKER`](crate::VARIABLE_WIDTH_MARKER)), so a
 /// scheme can rely on running its keyed primitive at least once, and
 /// every term it makes must depend on the key and the salt: a term that
@@ -156,10 +159,43 @@ pub trait OrderScheme {
     /// for a scheme that cannot fail once keyed.
     type Error: core::error::Error + Send + Sync + 'static;
 
-    /// Encrypt a sealed plaintext, binding `salt`: `PAE("vitaminc/ore/v1",
-    /// NAME, domain, context)`, which the space derives. A CLLW scheme
-    /// passes it as its salt; a scheme without one, block ORE, derives its
-    /// keys under it.
+    /// What the scheme keeps for one space: whatever it derives from the
+    /// salt, so that it is derived for the space rather than for every
+    /// term. Block ORE keeps the keys and cipher it derives under the
+    /// salt; a scheme that passes the salt straight to its primitive, as
+    /// CLLW does, keeps the salt itself (`Context<'static>`).
+    ///
+    /// vitaminc places no bound on it and applies no wipe when it is
+    /// dropped, with the [`OrderSpace`] or as the loser of a race to open
+    /// (see [`open`](Self::open)). A `Space` that holds derived keys keeps
+    /// them in [`Protected`] or implements `ZeroizeOnDrop` itself.
+    ///
+    /// An [`OrderSpace`] holds a reference to the scheme and one of these,
+    /// so it is `Send` when the scheme is `Sync` and this is `Send`, and
+    /// `Sync` when this is `Sync` too. A scheme that keeps a random number
+    /// generator behind a `RefCell` here has a space per thread.
+    type Space;
+
+    /// Open a space: derive what [`Space`](Self::Space) keeps, binding
+    /// `salt`: `PAE("vitaminc/ore/v1", NAME, domain, context)`, which the
+    /// space derives. Called when a space's first value is encrypted, or
+    /// from [`OrderSpace::open`], and not for every term.
+    ///
+    /// It may run more than once for one space: again after it fails, and
+    /// by more than one thread at once if they race to the first value,
+    /// in which case one result is kept and the rest dropped. So it must
+    /// be a pure derivation from `salt` and the scheme's key, with no
+    /// side effect that assumes it runs once.
+    ///
+    /// # Errors
+    ///
+    /// The scheme's own failure: seeding its random number generator,
+    /// say. The space reports it from every encryption, and tries again
+    /// on the next.
+    fn open(&self, salt: &Context<'_>) -> Result<Self::Space, Self::Error>;
+
+    /// Encrypt a sealed plaintext of `space`, which [`open`](Self::open)
+    /// made under the space's salt.
     ///
     /// The plaintext is of a target the scheme [`Supports`]: the space
     /// checks before calling. So the only failure is the scheme's own.
@@ -169,8 +205,8 @@ pub trait OrderScheme {
     /// The scheme's own failure: its random number generator, say.
     fn encrypt_plaintext(
         &self,
+        space: &Self::Space,
         plaintext: &OrderPlaintext,
-        salt: &Context<'_>,
     ) -> Result<Self::Term, Self::Error>;
 
     /// The order of two terms of one space, as the order of the values
@@ -216,7 +252,11 @@ pub trait OrderScheme {
 /// #     const NAME: &'static str = "clear";
 /// #     type Term = Vec<u8>;
 /// #     type Error = core::convert::Infallible;
-/// #     fn encrypt_plaintext(&self, p: &OrderPlaintext, _: &Context<'_>) -> Result<Vec<u8>, Self::Error> {
+/// #     type Space = ();
+/// #     fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+/// #         Ok(())
+/// #     }
+/// #     fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
 /// #         use vitaminc_protected::Controlled;
 /// #         Ok(p.bytes().risky_ref().clone())
 /// #     }
@@ -268,7 +308,9 @@ pub trait OrderEncrypt: OrderScheme {
     }
 
     /// Encrypt a value as the target its Rust type is, under the empty
-    /// context: `scheme.target(V::Target).encrypt(value)`.
+    /// context: `scheme.target(V::Target).encrypt(value)`. A one-shot
+    /// chain makes a space per call, so the scheme opens per value; hold
+    /// `scheme.target(..).context(..)` to derive once for many values.
     ///
     /// # Errors
     ///
@@ -381,21 +423,39 @@ impl<'s, S: OrderScheme + ?Sized> OrderContext<'s, S> {
 
 /// One space of an order index on a scheme: the set of terms that compare
 /// with each other, under one scheme, key, target and context. It holds
-/// the target and the salt its terms are bound under, fixed when it is
-/// opened so every term of it agrees. From [`OrderEncrypt::target`] or
-/// [`OrderContext::target`]. `Debug` shows the target and masks the
-/// scheme, whose key it holds, and the salt.
+/// the target, the salt its terms are bound under, fixed when it is made
+/// so every term of it agrees, and what the scheme derives under that
+/// salt ([`OrderScheme::Space`]), derived once for every term of the
+/// space. From [`OrderEncrypt::target`] or [`OrderContext::target`].
+/// `Debug` shows the target and masks the scheme, whose key it holds,
+/// the salt and what was derived.
+///
+/// The scheme opens the space when its first value is encrypted, or when
+/// [`open`](Self::open) is called, so making one cannot fail and a chain
+/// never needs a `?` before its value. If the scheme fails to open, every
+/// encryption reports it and the next tries again. A one-shot chain
+/// (`scheme.encrypt(v)`, `scheme.target(I32).encrypt(v)`) makes a space
+/// per call and so opens the scheme per value; hold the space to derive
+/// once for many values.
 ///
 /// `T` is the target: a marker from [`target`](crate::target), whose
 /// values the compiler checks through [`encrypt`](Self::encrypt), or
 /// [`OrderTarget`], chosen while the program runs, whose values
 /// [`encrypt_checked`](Self::encrypt_checked) checks then.
+///
+/// A space holds a reference to the scheme and the scheme's
+/// [`Space`](OrderScheme::Space), so it is `Send` when the scheme is
+/// `Sync` and its `Space` is `Send`, and `Sync` when its `Space` is `Sync`
+/// too. A space of a scheme that keeps a random number generator behind
+/// a `RefCell` is opened per thread.
 #[derive(OpaqueDebug)]
 pub struct OrderSpace<'s, S: OrderScheme + ?Sized, T: Target = OrderTarget> {
     scheme: &'s S,
     #[non_sensitive]
     target: T,
     salt: Context<'static>,
+    /// What the scheme derived under the salt, once it has.
+    opened: OnceLock<S::Space>,
 }
 
 /// `OrderSpace` under a target chosen while the program runs, as the 0.6
@@ -420,7 +480,33 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
             scheme,
             target,
             salt: salt(S::NAME, target.runtime(), context),
+            opened: OnceLock::new(),
         }
+    }
+
+    /// Open the space now rather than at its first value: have the scheme
+    /// derive what it keeps for the space under the salt. Encrypting does
+    /// this when it has not been done; call it to hear about a scheme
+    /// that cannot open before the first value, or to pay for the
+    /// derivation up front.
+    ///
+    /// # Errors
+    ///
+    /// The scheme's own failure, from [`OrderScheme::open`]. Nothing is
+    /// kept, so the next call tries again.
+    pub fn open(&self) -> Result<(), S::Error> {
+        self.opened().map(|_| ())
+    }
+
+    /// What the scheme keeps for this space, opening it if it has not
+    /// been. Two threads may open it at once; one result is kept and the
+    /// other dropped, and both are as good.
+    fn opened(&self) -> Result<&S::Space, S::Error> {
+        if let Some(opened) = self.opened.get() {
+            return Ok(opened);
+        }
+        let opened = self.scheme.open(&self.salt)?;
+        Ok(self.opened.get_or_init(|| opened))
     }
 
     /// This target under `context` instead: a new space, whose terms do
@@ -534,10 +620,18 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
         &self,
         plaintext: &OrderPlaintext,
     ) -> Result<OrderTerm<S::Term, T>, OrderError<S::Error>> {
+        self.encrypt_opened(plaintext).map_err(OrderError::Backend)
+    }
+
+    /// Open the space if it is not, then encrypt one plaintext of it.
+    fn encrypt_opened(
+        &self,
+        plaintext: &OrderPlaintext,
+    ) -> Result<OrderTerm<S::Term, T>, S::Error> {
+        let opened = self.opened()?;
         self.scheme
-            .encrypt_plaintext(plaintext, &self.salt)
+            .encrypt_plaintext(opened, plaintext)
             .map(|raw| self.term(raw))
-            .map_err(OrderError::Backend)
     }
 }
 
@@ -560,9 +654,7 @@ impl<S: Supports<T> + Supports<OrderTarget> + ?Sized, T: StaticTarget> OrderSpac
             // extremes, so no value reaches here.
             Err(refused) => unreachable!("a `FitsIn` value was refused: {refused}"),
         };
-        self.scheme
-            .encrypt_plaintext(&plaintext, &self.salt)
-            .map(|raw| self.term(raw))
+        self.encrypt_opened(&plaintext)
     }
 }
 

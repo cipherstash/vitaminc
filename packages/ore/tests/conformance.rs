@@ -574,7 +574,7 @@ fn a_space_debugs_as_its_target_with_the_rest_masked() {
     let space = mock.target(T::I32).context(("orders", "total"));
     let shown = format!("{space:?}");
     assert!(
-        shown.ends_with(r#"OrderSpace<'_, conformance::common::Mock> { scheme: "***", target: I32, salt: "***" }"#),
+        shown.ends_with(r#"OrderSpace<'_, conformance::common::Mock> { scheme: "***", target: I32, salt: "***", opened: "***" }"#),
         "{shown}"
     );
 }
@@ -777,10 +777,7 @@ fn the_conformance_checks_catch_an_empty_term() {
 #[test]
 #[should_panic(expected = "a term compares equal to one under another key")]
 fn the_conformance_checks_catch_a_term_that_ignores_the_key() {
-    test_support::conformance(
-        &common::Unkeyed(Mock::new(key())),
-        &common::Unkeyed(Mock::new(Protected::new([8; 32]))),
-    );
+    test_support::conformance(&common::Unkeyed, &common::Unkeyed);
 }
 
 /// A scheme whose comparison tells spaces apart, but whose stored terms
