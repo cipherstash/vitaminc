@@ -10,8 +10,8 @@ use common::{key, BackendDown, Down, Fixed, Mock, MockTerm};
 use vitaminc_aead::{Bytes, Int, Logical, Physical};
 use vitaminc_ore::target::{self, StaticTarget};
 use vitaminc_ore::{
-    order, FitsIn, IntoContext, NormalizeError, OrderEncrypt, OrderError, OrderKeyInit, OrderSpace,
-    OrderTarget, OrderTerm, Raw, Supports,
+    order, FitsIn, IntoContext, NormalizeError, OrderEncrypt, OrderError, OrderKeyInit,
+    OrderScheme, OrderSpace, OrderTarget, OrderTerm, Raw, Supports,
 };
 use vitaminc_protected::Controlled;
 
@@ -294,6 +294,16 @@ fn a_term_under_a_runtime_target_compares_only_with_its_own() {
     assert_eq!(i64s.compare(&a, &a), None);
     let c = i32s.encrypt_checked(2i32).expect("mock");
     assert_eq!(i32s.compare(&a, &c), Some(Ordering::Less));
+    // Both terms must be the space's, not either: a term of this space's
+    // raw bytes labelled as another target's is refused on the label
+    // alone, from either side, though the scheme would order the bytes.
+    let mislabelled = i64s.term(a.raw().clone());
+    assert_eq!(
+        Mock::compare(a.raw(), mislabelled.raw()),
+        Some(Ordering::Equal)
+    );
+    assert_eq!(i32s.compare(&a, &mislabelled), None);
+    assert_eq!(i32s.compare(&mislabelled, &a), None);
     // A raw term read back is labelled as the space's, and compares.
     let read_back = i32s.term(a.raw().clone());
     assert_eq!(read_back, a);
