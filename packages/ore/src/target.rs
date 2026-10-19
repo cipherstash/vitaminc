@@ -146,7 +146,7 @@ pub trait Supports<T: Target>: OrderScheme {
 /// #     type Term = Vec<u8>;
 /// #     type Error = core::convert::Infallible;
 /// #     type Space = ();
-/// #     fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+/// #     fn open(&self, _: vitaminc_ore::OrderTarget, _: &Context<'_>) -> Result<(), Self::Error> {
 /// #         Ok(())
 /// #     }
 /// #     fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
@@ -191,7 +191,7 @@ macro_rules! supports_targets {
 /// #     type Term = Vec<u8>;
 /// #     type Error = core::convert::Infallible;
 /// #     type Space = ();
-/// #     fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+/// #     fn open(&self, _: vitaminc_ore::OrderTarget, _: &Context<'_>) -> Result<(), Self::Error> {
 /// #         Ok(())
 /// #     }
 /// #     fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {

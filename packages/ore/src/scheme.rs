@@ -181,6 +181,13 @@ pub trait OrderScheme {
     /// space derives. Called when a space's first value is encrypted, or
     /// from [`OrderSpace::open`], and not for every term.
     ///
+    /// `target` is the space's, the one every plaintext the space hands
+    /// to [`encrypt_plaintext`](Self::encrypt_plaintext) is encoded as.
+    /// The salt binds its domain but does not give it back, and a scheme
+    /// that keys one of several engines by width, or pads text and not
+    /// bytes, decides that here, once, rather than for every term. A
+    /// scheme with one engine for every target ignores it.
+    ///
     /// It may run more than once for one space: again after it fails, and
     /// by more than one thread at once if they race to the first value,
     /// in which case one result is kept and the rest dropped. So it must
@@ -192,7 +199,7 @@ pub trait OrderScheme {
     /// The scheme's own failure: seeding its random number generator,
     /// say. The space reports it from every encryption, and tries again
     /// on the next.
-    fn open(&self, salt: &Context<'_>) -> Result<Self::Space, Self::Error>;
+    fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<Self::Space, Self::Error>;
 
     /// Encrypt a sealed plaintext of `space`, which [`open`](Self::open)
     /// made under the space's salt.
@@ -253,7 +260,7 @@ pub trait OrderScheme {
 /// #     type Term = Vec<u8>;
 /// #     type Error = core::convert::Infallible;
 /// #     type Space = ();
-/// #     fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+/// #     fn open(&self, _: vitaminc_ore::OrderTarget, _: &Context<'_>) -> Result<(), Self::Error> {
 /// #         Ok(())
 /// #     }
 /// #     fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
@@ -505,7 +512,7 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
         if let Some(opened) = self.opened.get() {
             return Ok(opened);
         }
-        let opened = self.scheme.open(&self.salt)?;
+        let opened = self.scheme.open(self.target.runtime(), &self.salt)?;
         Ok(self.opened.get_or_init(|| opened))
     }
 

@@ -56,7 +56,7 @@ use vitaminc_ore::{NormalizeError, OrderEncrypt, OrderError, OrderTarget};
 #     type Term = Vec<u8>;
 #     type Error = core::convert::Infallible;
 #     type Space = ();
-#     fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+#     fn open(&self, _: vitaminc_ore::OrderTarget, _: &Context<'_>) -> Result<(), Self::Error> {
 #         Ok(())
 #     }
 #     fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
@@ -205,7 +205,7 @@ impl OrderScheme for FourBytes {
     /// salt.
     type Space = Context<'static>;
 
-    fn open(&self, salt: &Context<'_>) -> Result<Context<'static>, Infallible> {
+    fn open(&self, _: vitaminc_ore::OrderTarget, salt: &Context<'_>) -> Result<Context<'static>, Infallible> {
         Ok(salt.clone().into_owned())
     }
 

@@ -72,8 +72,12 @@ impl Mock {
 }
 
 /// What a mock keeps for a space: the salt and its key, which it "derives"
-/// by concatenating them once.
-pub struct MockSpace(Vec<u8>);
+/// by concatenating them once, and the target the space was opened with,
+/// so the mock can check every plaintext it is handed is of that target.
+pub struct MockSpace {
+    derived: Vec<u8>,
+    target: OrderTarget,
+}
 
 impl OrderScheme for Mock {
     const NAME: &'static str = "mock";
@@ -81,11 +85,11 @@ impl OrderScheme for Mock {
     type Error = Infallible;
     type Space = MockSpace;
 
-    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+    fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
         self.opens.fetch_add(1, Atomic::SeqCst);
         let mut derived = salt.as_bytes().to_vec();
         derived.extend_from_slice(self.key.risky_ref());
-        Ok(MockSpace(derived))
+        Ok(MockSpace { derived, target })
     }
 
     fn encrypt_plaintext(
@@ -93,8 +97,13 @@ impl OrderScheme for Mock {
         space: &MockSpace,
         plaintext: &OrderPlaintext,
     ) -> Result<MockTerm, Infallible> {
+        assert_eq!(
+            plaintext.target(),
+            space.target,
+            "the space opened under one target and encrypts another"
+        );
         Ok(MockTerm::new(
-            space.0.clone(),
+            space.derived.clone(),
             plaintext.bytes().risky_ref(),
         ))
     }
@@ -145,8 +154,8 @@ impl<const N: usize> OrderScheme for Fixed<N> {
     type Error = Infallible;
     type Space = MockSpace;
 
-    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
-        self.0.open(salt)
+    fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        self.0.open(target, salt)
     }
 
     fn encrypt_plaintext(
@@ -181,8 +190,8 @@ impl OrderScheme for Lying {
     type Error = Infallible;
     type Space = MockSpace;
 
-    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
-        self.0.open(salt)
+    fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        self.0.open(target, salt)
     }
 
     fn encrypt_plaintext(
@@ -217,8 +226,8 @@ impl OrderScheme for Unsalted {
     type Error = Infallible;
     type Space = MockSpace;
 
-    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
-        self.0.open(salt)
+    fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        self.0.open(target, salt)
     }
 
     fn encrypt_plaintext(
@@ -250,8 +259,8 @@ impl OrderScheme for Empty {
     type Error = Infallible;
     type Space = MockSpace;
 
-    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
-        self.0.open(salt)
+    fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        self.0.open(target, salt)
     }
 
     fn encrypt_plaintext(
@@ -282,8 +291,11 @@ impl OrderScheme for Unkeyed {
     type Error = Infallible;
     type Space = MockSpace;
 
-    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
-        Ok(MockSpace(salt.as_bytes().to_vec()))
+    fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        Ok(MockSpace {
+            derived: salt.as_bytes().to_vec(),
+            target,
+        })
     }
 
     fn encrypt_plaintext(
@@ -292,7 +304,7 @@ impl OrderScheme for Unkeyed {
         plaintext: &OrderPlaintext,
     ) -> Result<MockTerm, Infallible> {
         Ok(MockTerm::new(
-            space.0.clone(),
+            space.derived.clone(),
             plaintext.bytes().risky_ref(),
         ))
     }
@@ -341,14 +353,14 @@ impl OrderScheme for Forgetful {
     type Error = Infallible;
     type Space = ForgetfulSpace;
 
-    fn open(&self, salt: &Context<'_>) -> Result<ForgetfulSpace, Infallible> {
+    fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<ForgetfulSpace, Infallible> {
         let stored = if self.keeps_salt {
             salt.as_bytes().to_vec()
         } else {
             Vec::new()
         };
         Ok(ForgetfulSpace {
-            bound: self.mock.open(salt)?.0,
+            bound: self.mock.open(target, salt)?.derived,
             stored,
         })
     }
@@ -386,7 +398,7 @@ impl OrderScheme for Down {
     type Error = BackendDown;
     type Space = ();
 
-    fn open(&self, _: &Context<'_>) -> Result<(), BackendDown> {
+    fn open(&self, _: OrderTarget, _: &Context<'_>) -> Result<(), BackendDown> {
         Ok(())
     }
 
@@ -423,11 +435,14 @@ impl OrderScheme for Flaky {
     type Error = BackendDown;
     type Space = MockSpace;
 
-    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, BackendDown> {
+    fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<MockSpace, BackendDown> {
         if !self.failed_once.swap(true, Atomic::SeqCst) {
             return Err(BackendDown);
         }
-        Ok(self.inner.open(salt).unwrap_or_else(|never| match never {}))
+        Ok(self
+            .inner
+            .open(target, salt)
+            .unwrap_or_else(|never| match never {}))
     }
 
     fn encrypt_plaintext(
@@ -470,9 +485,9 @@ impl<const N: usize> OrderScheme for Gated<N> {
     type Error = Infallible;
     type Space = MockSpace;
 
-    fn open(&self, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+    fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
         self.barrier.wait();
-        self.inner.open(salt)
+        self.inner.open(target, salt)
     }
 
     fn encrypt_plaintext(

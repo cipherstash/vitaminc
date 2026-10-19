@@ -21,7 +21,7 @@
 //! #     type Term = Vec<u8>;
 //! #     type Error = core::convert::Infallible;
 //! #     type Space = Context<'static>;
-//! #     fn open(&self, salt: &Context<'_>) -> Result<Context<'static>, Self::Error> {
+//! #     fn open(&self, _: vitaminc_ore::OrderTarget, salt: &Context<'_>) -> Result<Context<'static>, Self::Error> {
 //! #         Ok(salt.clone().into_owned())
 //! #     }
 //! #     fn encrypt_plaintext(&self, salt: &Context<'static>, p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {

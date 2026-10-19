@@ -14,7 +14,7 @@ impl OrderScheme for Clear {
     type Error = core::convert::Infallible;
     type Space = ();
 
-    fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+    fn open(&self, _: vitaminc_ore::OrderTarget, _: &Context<'_>) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -38,7 +38,7 @@ impl OrderScheme for FourBytes {
     type Error = core::convert::Infallible;
     type Space = ();
 
-    fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+    fn open(&self, _: vitaminc_ore::OrderTarget, _: &Context<'_>) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -62,7 +62,7 @@ impl OrderScheme for Forgetful {
     type Error = core::convert::Infallible;
     type Space = ();
 
-    fn open(&self, _: &Context<'_>) -> Result<(), Self::Error> {
+    fn open(&self, _: vitaminc_ore::OrderTarget, _: &Context<'_>) -> Result<(), Self::Error> {
         Ok(())
     }
 
