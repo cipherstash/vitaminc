@@ -389,6 +389,91 @@ mod tests {
         assert_eq!(two.num_calls(), 1);
     }
 
+    #[tokio::test]
+    async fn key_provider_generate_mints_one_key_per_binding() {
+        use crate::provider::{Binding, KeyProvider};
+
+        let generate_rule = mock!(Client::generate_data_key).then_output(|| {
+            GenerateDataKeyOutput::builder()
+                .plaintext(Blob::new(fixed_plaintext().to_vec()))
+                .ciphertext_blob(Blob::new(fixed_ciphertext_blob()))
+                .key_id(TEST_KEY_ID)
+                .build()
+        });
+        let client = mock_client!(aws_sdk_kms, RuleMode::MatchAny, &[&generate_rule]);
+        let per_value = AwsDataKeySource::<32>::new(client.clone(), TEST_KEY_ID);
+        let pooled: AwsPooledDataKeySource<32> =
+            PooledDataKeySource::new(AwsDataKeySource::new(client, TEST_KEY_ID));
+        let bindings = [
+            Binding::from("users/email"),
+            Binding::from("users/age"),
+            Binding::from("users/name"),
+        ];
+
+        // Per-value isolation: one round trip per binding.
+        let keys = per_value.generate_keys(&bindings).await.unwrap();
+        assert_eq!(keys.len(), 3);
+        assert_eq!(generate_rule.num_calls(), 3);
+        assert_eq!(
+            <AwsDataKeySource<32> as KeyProvider<32>>::ISOLATION,
+            KeyIsolation::PerValue
+        );
+
+        // Pooled isolation: one round trip for the whole batch.
+        let keys = pooled.generate_keys(&bindings).await.unwrap();
+        assert_eq!(keys.len(), 3);
+        assert_eq!(generate_rule.num_calls(), 4);
+        assert_eq!(
+            <AwsPooledDataKeySource<32> as KeyProvider<32>>::ISOLATION,
+            KeyIsolation::Pooled
+        );
+    }
+
+    #[tokio::test]
+    async fn key_provider_retrieve_returns_keys_in_request_order() {
+        use crate::provider::{Binding, KeyProvider};
+
+        let one = mock!(Client::decrypt)
+            .match_requests(|input| {
+                input.ciphertext_blob().unwrap().as_ref() == b"blob-one".as_slice()
+            })
+            .then_output(|| {
+                DecryptOutput::builder()
+                    .plaintext(Blob::new(vec![1u8; 32]))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+        let two = mock!(Client::decrypt)
+            .match_requests(|input| {
+                input.ciphertext_blob().unwrap().as_ref() == b"blob-two".as_slice()
+            })
+            .then_output(|| {
+                DecryptOutput::builder()
+                    .plaintext(Blob::new(vec![2u8; 32]))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+        let client = mock_client!(aws_sdk_kms, RuleMode::MatchAny, &[&one, &two]);
+        let source = AwsDataKeySource::<32>::new(client, TEST_KEY_ID);
+
+        let requests = [
+            (
+                KeyId::new(b"blob-two".to_vec()),
+                Binding::from("users/email"),
+            ),
+            (KeyId::new(b"blob-one".to_vec()), Binding::from("users/age")),
+            (KeyId::new(b"blob-two".to_vec()), Binding::EMPTY),
+        ];
+        let keys = source.retrieve_keys(&requests).await.unwrap();
+
+        assert_eq!(keys.len(), 3);
+        assert_eq!(keys[0].clone().risky_unwrap(), [2u8; 32]);
+        assert_eq!(keys[1].clone().risky_unwrap(), [1u8; 32]);
+        assert_eq!(keys[2].clone().risky_unwrap(), [2u8; 32]);
+        assert_eq!(one.num_calls(), 1);
+        assert_eq!(two.num_calls(), 1);
+    }
+
     /// Against LocalStack on `localhost:4566` — see the crate README for
     /// how to bring it up.
     mod localstack {
