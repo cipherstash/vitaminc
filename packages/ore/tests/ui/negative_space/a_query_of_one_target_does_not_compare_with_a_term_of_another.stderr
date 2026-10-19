@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/negative_space/a_query_of_one_target_does_not_compare_with_a_term_of_another.rs:12:40
+   |
+12 |     let _ = i32s.compare_query(&query, &term);
+   |                  -------------         ^^^^^ expected `&OrderTerm<Vec<u8>, I32>`, found `&OrderTerm<Vec<u8>, I64>`
+   |                  |
+   |                  arguments to this method are incorrect
+   |
+   = note: expected reference `&OrderTerm<Vec<u8>, vitaminc_ore::target::I32>`
+              found reference `&OrderTerm<Vec<u8>, vitaminc_ore::target::I64>`
+note: method defined here
+  --> src/query.rs
+   |
+   |     pub fn compare_query(
+   |            ^^^^^^^^^^^^^

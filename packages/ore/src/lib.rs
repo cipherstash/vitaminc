@@ -4,12 +4,14 @@
 mod casefold_unicode16;
 mod fold;
 mod order;
+mod query;
 mod scheme;
 pub mod target;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 
 pub use order::{domain, order, order_terms, text, Order, OrderTarget, VARIABLE_WIDTH_MARKER};
+pub use query::{OrderQuery, QueryTerm};
 #[allow(deprecated)]
 pub use scheme::OrderColumn;
 pub use scheme::{

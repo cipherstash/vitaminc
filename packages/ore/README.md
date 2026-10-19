@@ -68,6 +68,16 @@ use vitaminc_ore::{NormalizeError, OrderEncrypt, OrderError, OrderTarget};
 #     }
 # }
 # vitaminc_ore::supports_every_target!(Clear);
+# impl vitaminc_ore::OrderQuery for Clear {
+#     type Query = Vec<u8>;
+#     fn encrypt_query(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
+#         use vitaminc_protected::Controlled;
+#         Ok(p.bytes().risky_ref().clone())
+#     }
+#     fn compare_query(q: &Vec<u8>, t: &Vec<u8>) -> Option<Ordering> {
+#         Some(q.cmp(t))
+#     }
+# }
 # let scheme = Clear;
 
 // Held, for many values. The target is a marker, so the compiler checks
@@ -79,6 +89,11 @@ let three = total.encrypt(3i8)?;
 let forty = total.encrypt_checked(40i64)?;
 // The space compares its terms; a term alone has no order.
 assert_eq!(total.compare(&three, &forty), Some(Ordering::Less));
+// A query is made from the value searched for and compared against the
+// stored terms; it is not a term, and need not be stored.
+let at_least_ten = total.encrypt_query(10i8)?;
+assert_eq!(total.compare_query(&at_least_ten, &three), Some(Ordering::Greater));
+assert_eq!(total.compare_query(&at_least_ten, &forty), Some(Ordering::Less));
 
 // Outside the target, or of another kind: refused.
 assert!(matches!(
@@ -132,6 +147,15 @@ label is a zero-sized type, so two targets' terms cannot meet in
 different targets compare as `None` rather than as noise. Storage reads
 the scheme's bytes through `AsRef<[u8]>`.
 
+A query is a `QueryTerm`, labelled the same way, from `encrypt_query`
+or `encrypt_query_checked` on a scheme that implements `OrderQuery`.
+Block ORE has one: the half of a term a comparison needs from the
+searching side, smaller than a stored term. A scheme whose terms are
+their own queries, as the CLWW schemes are, has `Query = Term`. A query
+has its own type, so it cannot be stored or compared where a term is
+expected; `compare_query(&query, &term)` gives the order of the queried
+value relative to the stored one.
+
 A layer above maps its own column types onto targets: an EQL `int`
 column is `OrderTarget::I32`. This crate knows nothing of that layer.
 
@@ -177,10 +201,12 @@ target.
 ## Implementing a scheme
 
 A scheme implements `open`, which derives what it keeps for one space
-from the salt the space derives, `encrypt_plaintext` over that and the
-sealed [`OrderPlaintext`] the space builds from the caller's value,
-`compare` over its own terms, and says which targets it takes through
-`Supports`. It reads the plaintext's bytes and binds the salt through
+from the salt the space derives and the space's target, `encrypt_plaintext`
+over that and the sealed [`OrderPlaintext`] the space builds from the
+caller's value, `compare` over its own terms, and says which targets it
+takes through `Supports`. A scheme with a query side implements
+`OrderQuery` beside it; one whose terms are their own queries does so
+with `Query = Term`. It reads the plaintext's bytes and binds the salt through
 what it opened. It never pads, truncates or refuses by width: the space
 asks `Supports` and refuses a target the scheme does not take before
 the scheme sees a plaintext of it. Callers reach every scheme through
@@ -190,7 +216,7 @@ overridden, so no scheme can change what its terms are bound to.
 ```rust
 use core::cmp::Ordering;
 use core::convert::Infallible;
-use vitaminc_ore::{Context, OrderPlaintext, OrderScheme};
+use vitaminc_ore::{Context, OrderPlaintext, OrderQuery, OrderScheme};
 use vitaminc_protected::{Controlled, Protected};
 
 /// A toy scheme over exactly four bytes.
@@ -235,6 +261,23 @@ impl OrderScheme for FourBytes {
 // `scheme.target(Text)` does not compile. A scheme that takes every
 // target writes `vitaminc_ore::supports_every_target!(Scheme)`.
 vitaminc_ore::supports_targets!(FourBytes; I32, U32, Date);
+
+// Its terms are their own queries, so the query side is the term side.
+impl OrderQuery for FourBytes {
+    type Query = Vec<u8>;
+
+    fn encrypt_query(
+        &self,
+        salt: &Self::Space,
+        plaintext: &OrderPlaintext,
+    ) -> Result<Vec<u8>, Infallible> {
+        self.encrypt_plaintext(salt, plaintext)
+    }
+
+    fn compare_query(query: &Vec<u8>, term: &Vec<u8>) -> Option<Ordering> {
+        Self::compare(query, term)
+    }
+}
 
 assert_eq!(FourBytes::compare(&b"salt\0\0\0\x01".to_vec(), &b"salt\0\0\0\x02".to_vec()), Some(Ordering::Less));
 assert_eq!(FourBytes::compare(&b"salt\0\0\0\x01".to_vec(), &b"SALT\0\0\0\x02".to_vec()), None);

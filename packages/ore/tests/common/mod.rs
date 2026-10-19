@@ -10,7 +10,7 @@ use core::convert::Infallible;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering as Atomic};
 use std::sync::Barrier;
 
-use vitaminc_ore::{Context, OrderKeyInit, OrderPlaintext, OrderScheme, OrderTarget};
+use vitaminc_ore::{Context, OrderKeyInit, OrderPlaintext, OrderQuery, OrderScheme, OrderTarget};
 use vitaminc_protected::{Controlled, Protected};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -119,6 +119,34 @@ impl OrderScheme for Mock {
 
 vitaminc_ore::supports_every_target!(Mock);
 
+/// A query from a mock: a term under another type, so a query cannot be
+/// stored or compared where a term is expected. The mocks' queries
+/// compare against their terms as the terms compare with each other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MockQuery(pub MockTerm);
+
+impl AsRef<[u8]> for MockQuery {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl OrderQuery for Mock {
+    type Query = MockQuery;
+
+    fn encrypt_query(
+        &self,
+        space: &MockSpace,
+        plaintext: &OrderPlaintext,
+    ) -> Result<MockQuery, Infallible> {
+        self.encrypt_plaintext(space, plaintext).map(MockQuery)
+    }
+
+    fn compare_query(query: &MockQuery, term: &MockTerm) -> Option<Ordering> {
+        compare(&query.0, term)
+    }
+}
+
 /// Why a mock refused key material.
 #[derive(Debug, thiserror::Error)]
 #[error("a mock key is thirty-two bytes, not {0}")]
@@ -177,6 +205,23 @@ impl<const N: usize> OrderScheme for Fixed<N> {
 }
 
 // The targets of each width the tests use, both answers from one list.
+impl<const N: usize> OrderQuery for Fixed<N> {
+    type Query = MockQuery;
+
+    fn encrypt_query(
+        &self,
+        space: &MockSpace,
+        plaintext: &OrderPlaintext,
+    ) -> Result<MockQuery, Infallible> {
+        assert_eq!(plaintext.width(), Some(N), "the space let a width through");
+        self.0.encrypt_query(space, plaintext)
+    }
+
+    fn compare_query(query: &MockQuery, term: &MockTerm) -> Option<Ordering> {
+        compare(&query.0, term)
+    }
+}
+
 vitaminc_ore::supports_targets!(Fixed<2>; I16, U16);
 vitaminc_ore::supports_targets!(Fixed<4>; I32, U32, Date);
 vitaminc_ore::supports_targets!(Fixed<8>; I64, U64, F64);
@@ -462,6 +507,25 @@ impl OrderScheme for Flaky {
 
     fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
         compare(a, b)
+    }
+}
+
+impl OrderQuery for Flaky {
+    type Query = MockQuery;
+
+    fn encrypt_query(
+        &self,
+        space: &MockSpace,
+        plaintext: &OrderPlaintext,
+    ) -> Result<MockQuery, BackendDown> {
+        Ok(self
+            .inner
+            .encrypt_query(space, plaintext)
+            .unwrap_or_else(|never| match never {}))
+    }
+
+    fn compare_query(query: &MockQuery, term: &MockTerm) -> Option<Ordering> {
+        compare(&query.0, term)
     }
 }
 

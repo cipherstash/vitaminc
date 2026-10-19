@@ -460,9 +460,9 @@ impl<'s, S: OrderScheme + ?Sized> OrderContext<'s, S> {
 /// a `RefCell` is opened per thread.
 #[derive(OpaqueDebug)]
 pub struct OrderSpace<'s, S: OrderScheme + ?Sized, T: Target = OrderTarget> {
-    scheme: &'s S,
+    pub(crate) scheme: &'s S,
     #[non_sensitive]
-    target: T,
+    pub(crate) target: T,
     salt: Context<'static>,
     /// What the scheme derived under the salt, once it has.
     opened: OnceLock<S::Space>,
@@ -511,7 +511,7 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
     /// What the scheme keeps for this space, opening it if it has not
     /// been. Two threads may open it at once; one result is kept and the
     /// other dropped, and both are as good.
-    fn opened(&self) -> Result<&S::Space, S::Error> {
+    pub(crate) fn opened(&self) -> Result<&S::Space, S::Error> {
         if let Some(opened) = self.opened.get() {
             return Ok(opened);
         }
@@ -615,7 +615,7 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
     /// Refuse a target the scheme does not take, by the scheme's runtime
     /// list. A marker's impl already vouched for its target when the
     /// space was opened; asking again costs a match.
-    fn supported(&self) -> Result<(), OrderError<S::Error>> {
+    pub(crate) fn supported(&self) -> Result<(), OrderError<S::Error>> {
         if <S as Supports<OrderTarget>>::supports(self.target.runtime()) {
             Ok(())
         } else {
@@ -745,11 +745,11 @@ pub trait OrderKeyInit: OrderScheme + Sized {
 /// The sink one scalar is walked into: it encodes the scalar as its
 /// target with [`order`] and refuses a container.
 #[derive(Clone, Copy)]
-struct Scalar(OrderTarget);
+pub(crate) struct Scalar(pub(crate) OrderTarget);
 
 /// How one scalar fails to become a plaintext.
 #[derive(Debug, thiserror::Error)]
-enum ScalarError {
+pub(crate) enum ScalarError {
     #[error(transparent)]
     Term(NormalizeError),
     #[error("not a scalar")]
@@ -803,7 +803,7 @@ impl Sink for Scalar {
 
 /// The container sink [`Scalar`] never hands out. Uninhabited, so it
 /// cannot be built.
-enum Never {}
+pub(crate) enum Never {}
 
 impl SeqSink for Never {
     type Ok = OrderPlaintext;

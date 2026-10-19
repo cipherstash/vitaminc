@@ -6,12 +6,12 @@ mod common;
 
 use std::cmp::Ordering;
 
-use common::{key, BackendDown, Down, Fixed, Flaky, Gated, Mock, MockTerm};
+use common::{key, BackendDown, Down, Fixed, Flaky, Gated, Mock, MockQuery, MockTerm};
 use vitaminc_aead::{Bytes, Int, Logical, Physical};
 use vitaminc_ore::target::{self, StaticTarget};
 use vitaminc_ore::{
-    order, FitsIn, IntoContext, NormalizeError, OrderEncrypt, OrderError, OrderKeyInit,
-    OrderScheme, OrderSpace, OrderTarget, OrderTerm, Raw, Supports,
+    order, FitsIn, IntoContext, NormalizeError, OrderEncrypt, OrderError, OrderKeyInit, OrderQuery,
+    OrderScheme, OrderSpace, OrderTarget, OrderTerm, QueryTerm, Raw, Supports,
 };
 use vitaminc_protected::Controlled;
 
@@ -530,4 +530,119 @@ fn threads_racing_to_open_a_space_keep_one_opening() {
     let later = space.encrypt(2i32).expect("mock");
     assert_eq!(gated.inner.opens(), 4);
     assert_eq!(space.compare(&terms[0], &later), Some(Ordering::Less));
+}
+
+/// A query compares against the space's terms as the queried value
+/// compares with the stored one, through both encrypt methods and from a
+/// collected plaintext, and a query is not a term.
+#[test]
+fn a_query_compares_against_the_space_s_terms() {
+    let mock = Mock::new(key());
+    let quantity = mock.target(target::I32).context(("orders", "quantity"));
+    let terms: Vec<OrderTerm<MockTerm, target::I32>> = (0..3i32)
+        .map(|v| quantity.encrypt(v).expect("mock"))
+        .collect();
+    let one = quantity.encrypt_query(1i16).expect("an i16 always fits");
+    assert_eq!(
+        quantity.compare_query(&one, &terms[0]),
+        Some(Ordering::Greater)
+    );
+    assert_eq!(
+        quantity.compare_query(&one, &terms[1]),
+        Some(Ordering::Equal)
+    );
+    assert_eq!(
+        quantity.compare_query(&one, &terms[2]),
+        Some(Ordering::Less)
+    );
+    assert_eq!(one.target(), T::I32);
+    assert_eq!(one.as_bytes(), one.raw().as_ref());
+
+    let checked = quantity
+        .encrypt_query_checked(1i64)
+        .expect("fits when checked");
+    assert_eq!(checked, one, "the mock is deterministic");
+    assert!(matches!(
+        quantity.encrypt_query_checked(1i64 << 40),
+        Err(OrderError::Term(NormalizeError::OutOfRange))
+    ));
+    let p = order(T::I32, None, Physical::Int(Int::I8(1))).expect("term");
+    assert_eq!(quantity.encrypt_query_term(&p).expect("mock"), one);
+    let other = order(T::I64, None, Physical::Int(Int::I8(1))).expect("term");
+    assert!(matches!(
+        quantity.encrypt_query_term(&other),
+        Err(OrderError::Term(NormalizeError::Mismatch))
+    ));
+
+    // The query's raw form is the scheme's own, under its own type.
+    let raw: MockQuery = one.clone().into_raw();
+    assert_eq!(quantity.query(raw), one);
+    assert_eq!(mock.opens(), 1, "queries and terms share the opened space");
+}
+
+/// Under a target chosen while the program runs, a query and a term of
+/// different targets, or of another target than the space's, are `None`,
+/// from either side, as two terms are.
+#[test]
+fn a_query_under_a_runtime_target_compares_only_with_its_own_terms() {
+    let mock = Mock::new(key());
+    let (i32s, i64s) = (mock.target(T::I32), mock.target(T::I64));
+    let query = i32s.encrypt_query_checked(1i32).expect("mock");
+    let (own, other) = (
+        i32s.encrypt_checked(2i32).expect("mock"),
+        i64s.encrypt_checked(2i32).expect("mock"),
+    );
+    assert_eq!(query.target(), T::I32);
+    assert_eq!(i32s.compare_query(&query, &own), Some(Ordering::Less));
+    assert_eq!(i32s.compare_query(&query, &other), None);
+    assert_eq!(i64s.compare_query(&query, &other), None);
+    assert_eq!(i64s.compare_query(&query, &own), None);
+    // Relabelled as another target's, a query is refused on the label
+    // alone, though the scheme would order the bytes.
+    let mislabelled: QueryTerm<MockQuery, OrderTarget> = i64s.query(query.raw().clone());
+    assert_eq!(
+        Mock::compare_query(mislabelled.raw(), own.raw()),
+        Some(Ordering::Less)
+    );
+    assert_eq!(i32s.compare_query(&mislabelled, &own), None);
+    assert_eq!(i64s.compare_query(&mislabelled, &own), None);
+}
+
+/// A scheme that cannot open reports it from the query too, and a scheme
+/// that does not take the target refuses a query before the value.
+#[test]
+fn a_query_fails_as_a_term_fails() {
+    let flaky = Flaky::new(Mock::new(key()));
+    let space = flaky.target(target::I32);
+    assert!(matches!(space.encrypt_query(1i32), Err(BackendDown)));
+    assert!(space.encrypt_query(1i32).is_ok(), "opens the second time");
+    assert_eq!(flaky.inner.opens(), 1);
+    let failed = Flaky::new(Mock::new(key()))
+        .target(T::I32)
+        .encrypt_query_checked(1i32)
+        .expect_err("down");
+    assert!(matches!(failed, OrderError::Backend(BackendDown)));
+
+    let fixed = Fixed::<4>(Mock::new(key()));
+    assert!(matches!(
+        fixed.target(T::I64).encrypt_query_checked(1i64),
+        Err(OrderError::Unsupported {
+            scheme: "fixed",
+            ..
+        })
+    ));
+    assert!(fixed.target(target::I32).encrypt_query(1i32).is_ok());
+}
+
+/// Queries are `Debug`, `Clone`, `Eq` and `AsRef<[u8]>`, as terms are.
+#[test]
+fn a_query_term_carries_what_a_term_carries() {
+    let mock = Mock::new(key());
+    let space = mock.target(target::I32);
+    let query = space.encrypt_query(7i32).expect("mock");
+    let shown = format!("{query:?}");
+    assert!(shown.starts_with("QueryTerm {"), "{shown}");
+    assert_eq!(query.clone(), query);
+    let bytes: &[u8] = query.as_ref();
+    assert_eq!(bytes, query.as_bytes());
 }

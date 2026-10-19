@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 use core::cmp::Ordering;
-use vitaminc_ore::{Context, OrderPlaintext, OrderScheme};
+use vitaminc_ore::{Context, OrderPlaintext, OrderQuery, OrderScheme};
 use vitaminc_protected::Controlled;
 
 /// Takes every target.
@@ -28,6 +28,19 @@ impl OrderScheme for Clear {
 }
 
 vitaminc_ore::supports_every_target!(Clear);
+
+/// Its terms are their own queries.
+impl OrderQuery for Clear {
+    type Query = Vec<u8>;
+
+    fn encrypt_query(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
+        Ok(p.bytes().risky_ref().clone())
+    }
+
+    fn compare_query(query: &Vec<u8>, term: &Vec<u8>) -> Option<Ordering> {
+        Some(query.cmp(term))
+    }
+}
 
 /// Takes four-byte targets only, as a block ORE scheme of that width does.
 pub struct FourBytes;

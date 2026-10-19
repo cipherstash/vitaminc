@@ -55,7 +55,7 @@ use core::cmp::Ordering;
 use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
 
 use crate::target::StaticTarget;
-use crate::{order, OrderEncrypt, OrderSpace, OrderTarget, Supports};
+use crate::{order, OrderEncrypt, OrderQuery, OrderSpace, OrderTarget, Supports};
 
 /// A target and two values in order as it, with the empty value where
 /// the target has one.
@@ -238,6 +238,83 @@ pub fn conformance<S: Supports<OrderTarget>>(a: &S, b: &S) {
                 own.as_bytes(),
                 under_other_key.as_bytes(),
                 "{name}: a term is the same under another key, so it does not depend on the key, or `a` and `b` hold one key"
+            );
+        }
+    }
+}
+
+/// Check a scheme's query side against its contract, for every target it
+/// takes. `a` and `b` are the scheme under two keys that differ, as for
+/// [`conformance`], which this does not repeat.
+///
+/// For every target [`Supports::supports`] admits:
+///
+/// - the query of a value compares against the terms of the values on
+///   either side of it in their order, and against a term of the same
+///   value as `Equal`;
+/// - no query is empty;
+/// - a query made under another context, or another key, never compares
+///   equal to the term of the same value in this space, by the same
+///   argument as for terms.
+///
+/// # Panics
+///
+/// On the first check the scheme fails, naming the target.
+pub fn query_conformance<S: OrderQuery + Supports<OrderTarget>>(a: &S, b: &S) {
+    for row in rows().iter().filter(|row| S::supports(row.target)) {
+        let name = row.target.domain();
+        let space = a.target(row.target).context("conformance");
+        let other_context = a.target(row.target).context("other");
+        let other_key = b.target(row.target).context("conformance");
+        let plaintext =
+            |v: Physical<'_>| order(row.target, row.ty, v).expect("the inventory encodes");
+        let term = |v: Physical<'_>| {
+            space
+                .encrypt_term(&plaintext(v))
+                .unwrap_or_else(|e| panic!("{name}: the scheme refused a term of its target: {e}"))
+        };
+        let query = |space: &OrderSpace<'_, S>, v: Physical<'_>| {
+            space
+                .encrypt_query_term(&plaintext(v))
+                .unwrap_or_else(|e| panic!("{name}: the scheme refused a query of its target: {e}"))
+        };
+        let (below, above) = (term(row.below), term(row.above));
+        let (query_below, query_above) = (query(&space, row.below), query(&space, row.above));
+        assert_eq!(
+            space.compare_query(&query_below, &above),
+            Some(Ordering::Less),
+            "{name}: the query of a lower value does not compare below the term of a higher"
+        );
+        assert_eq!(
+            space.compare_query(&query_above, &below),
+            Some(Ordering::Greater),
+            "{name}: the query of a higher value does not compare above the term of a lower"
+        );
+        assert_eq!(
+            space.compare_query(&query_below, &below),
+            Some(Ordering::Equal),
+            "{name}: the query of a value does not compare equal to its term"
+        );
+        let mut values = vec![row.below, row.above];
+        if let Some(empty) = row.empty {
+            values.push(empty);
+        }
+        for v in values {
+            let own = term(v);
+            let own_query = query(&space, v);
+            assert!(
+                !own_query.as_bytes().is_empty(),
+                "{name}: a query is empty, so it depends on nothing"
+            );
+            assert_ne!(
+                S::compare_query(query(&other_context, v).raw(), own.raw()),
+                Some(Ordering::Equal),
+                "{name}: a query under another context compares equal to the term, so it does not depend on the salt"
+            );
+            assert_ne!(
+                S::compare_query(query(&other_key, v).raw(), own.raw()),
+                Some(Ordering::Equal),
+                "{name}: a query under another key compares equal to the term, so it does not depend on the key"
             );
         }
     }

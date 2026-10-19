@@ -737,6 +737,11 @@ fn the_conformance_checks_pass_for_a_scheme_that_keeps_the_contract() {
         &Fixed::<4>(Mock::new(key())),
         &Fixed::<4>(Mock::new(Protected::new([8; 32]))),
     );
+    test_support::query_conformance(&Mock::new(key()), &Mock::new(Protected::new([8; 32])));
+    test_support::query_conformance(
+        &Fixed::<4>(Mock::new(key())),
+        &Fixed::<4>(Mock::new(Protected::new([8; 32]))),
+    );
     test_support::static_target::<Mock, I32>();
     test_support::static_target::<Fixed<4>, I32>();
     test_support::static_target::<Fixed<4>, Date>();
