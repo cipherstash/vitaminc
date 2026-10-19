@@ -26,10 +26,17 @@ type CacheKey = (KeyId, Vec<u8>);
 /// effect instead of the explicit choice
 /// [`pooled_key_generate`](crate::pooled_key_generate) makes a caller name.
 ///
-/// `max_entries` and `ttl` bound memory, and how long plaintext key
-/// material sits in memory — not correctness. Nothing here ever needs
-/// invalidating for staleness. Cached entries are [`Protected`] and zeroize
-/// on drop, so eviction or expiry wipes the material.
+/// `max_entries` bounds memory and `ttl` bounds how long a cached key can be
+/// served — not correctness. Nothing here ever needs invalidating for
+/// staleness. Cached entries are [`Protected`] and zeroize on drop, so
+/// eviction or expiry wipes the material.
+///
+/// `ttl` does not bound how long plaintext key material stays in memory.
+/// The cache has no background task: it drops an expired entry, and so
+/// zeroizes it, only during maintenance, which runs on later cache calls.
+/// An idle cache keeps its expired entries until then. A caller that needs
+/// a hard bound calls [`purge_expired`](Self::purge_expired) on its own
+/// schedule.
 ///
 /// **Opt in deliberately; never a default.** Against a
 /// [`Bound`](BindingSupport::Bound) backend such as ZeroKMS, every
@@ -43,10 +50,11 @@ pub struct CachingKeyProvider<T, const N: usize> {
 }
 
 impl<T, const N: usize> CachingKeyProvider<T, N> {
-    /// Wrap `inner`, holding at most `max_entries` keys for at most `ttl`
-    /// each. Both are deliberate, caller-chosen limits on how much
-    /// plaintext key material lives in this process and for how long, so
-    /// there is no default for either.
+    /// Wrap `inner`, holding at most `max_entries` keys and serving each for
+    /// at most `ttl`. Both are deliberate, caller-chosen limits on how much
+    /// plaintext key material this process holds and for how long it uses
+    /// it, so there is no default for either. See the type's docs for when
+    /// expired entries leave memory.
     pub fn new(inner: T, max_entries: u64, ttl: Duration) -> Self {
         Self {
             inner,
@@ -60,6 +68,16 @@ impl<T, const N: usize> CachingKeyProvider<T, N> {
     /// The provider this one caches in front of.
     pub fn inner(&self) -> &T {
         &self.inner
+    }
+
+    /// Drop, and so zeroize, every entry whose `ttl` has passed.
+    ///
+    /// The cache drops expired entries only during maintenance, which runs
+    /// on later cache calls. Call this on a timer to put a hard bound on
+    /// how long expired plaintext key material stays in memory when the
+    /// cache can sit idle.
+    pub async fn purge_expired(&self) {
+        self.cache.run_pending_tasks().await;
     }
 
     fn cache_key(id: &KeyId, binding: Binding<'_>) -> CacheKey {
@@ -384,6 +402,21 @@ mod tests {
 
         cache.retrieve_keys(&request).await.unwrap();
         assert_eq!(cache.inner().retrieve_calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn purge_expired_drops_an_expired_entry_from_memory() {
+        let cache = caching(Duration::from_millis(50));
+        let request = [(KeyId::new(vec![1]), Binding::from("users/email"))];
+
+        cache.retrieve_keys(&request).await.unwrap();
+        cache.purge_expired().await;
+        assert_eq!(cache.cache.entry_count(), 1);
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        cache.purge_expired().await;
+        assert_eq!(cache.cache.entry_count(), 0);
     }
 
     #[test]
