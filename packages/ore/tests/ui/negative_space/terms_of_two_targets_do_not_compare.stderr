@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/negative_space/terms_of_two_targets_do_not_compare.rs:12:30
+   |
+12 |     let _ = i32s.compare(&a, &b);
+   |                  -------     ^^ expected `&OrderTerm<Vec<u8>, I32>`, found `&OrderTerm<Vec<u8>, I64>`
+   |                  |
+   |                  arguments to this method are incorrect
+   |
+   = note: expected reference `&OrderTerm<Vec<u8>, vitaminc_ore::target::I32>`
+              found reference `&OrderTerm<Vec<u8>, vitaminc_ore::target::I64>`
+note: method defined here
+  --> src/scheme.rs
+   |
+   |     pub fn compare(
+   |            ^^^^^^^

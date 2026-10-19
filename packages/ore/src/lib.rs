@@ -5,11 +5,16 @@ mod casefold_unicode16;
 mod fold;
 mod order;
 mod scheme;
+pub mod target;
 
 pub use order::{domain, order, order_terms, text, Order, OrderTarget};
+#[allow(deprecated)]
+pub use scheme::OrderColumn;
 pub use scheme::{
-    OrderColumn, OrderEncrypt, OrderError, OrderKeyInit, OrderPlaintext, OrderScheme,
+    OrderContext, OrderEncrypt, OrderError, OrderKeyInit, OrderPlaintext, OrderScheme, OrderSpace,
+    OrderTerm,
 };
+pub use target::{FitsIn, OwnTarget, StaticTarget, Supports, Target};
 // The types in this crate's signatures, so a caller needs no second import:
 // a scheme encrypts values of the data model, and a typed scalar goes in
 // as `Raw(ty, physical)`, without depending on vitaminc-aead.

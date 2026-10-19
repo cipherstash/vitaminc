@@ -20,6 +20,12 @@ exclude = ["tools/"]
 
 [dependencies]
 vitaminc-aead = { version = "0.6.1", path = "../aead" }
+# The typed values callers hold, for the rows of the `FitsIn` and
+# `OwnTarget` tables that name them. Each turns on the matching
+# `vitaminc-aead` feature, which has the `Encrypt` impls.
+chrono = { version = "0.4.44", default-features = false, features = ["std"], optional = true }
+rust_decimal = { version = "1.41", default-features = false, features = ["std"], optional = true }
+uuid = { version = "1", default-features = false, optional = true }
 vitaminc-context = { version = "0.6.1", path = "../context" }
 vitaminc-normalize = { version = "0.6.1", path = "../normalize" }
 vitaminc-protected = { version = "0.6.1", path = "../protected" }
@@ -37,16 +43,28 @@ version = "0.1.24"
 [dependencies.unicode-general-category]
 version = "=1.1.0"
 
+# docs.rs shows the typed rows of the `FitsIn` and `OwnTarget` tables.
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+chrono = ["dep:chrono", "vitaminc-aead/chrono"]
+rust_decimal = ["dep:rust_decimal", "vitaminc-aead/rust_decimal"]
+uuid = ["dep:uuid", "vitaminc-aead/uuid"]
+
 [dev-dependencies]
 # Path-only, so publish order does not matter. `test-support` for
 # `plaintext::render`, the path notation the tests assert against.
 vitaminc-aead = { path = "../aead", features = ["chrono", "rust_decimal", "uuid", "test-support"] }
+# This crate's own typed rows, on for its tests.
+vitaminc-ore = { path = ".", features = ["chrono", "rust_decimal", "uuid"] }
 quickcheck = "1.1.0"
 # Typed values as callers hold them, for the tests that encrypt them.
 chrono = { version = "0.4.44", default-features = false, features = ["std"] }
 rust_decimal = { version = "1.41", default-features = false, features = ["std"] }
 uuid = { version = "1", default-features = false }
 quickcheck_macros = "1.2.0"
+trybuild = "1.0.118"
 
 # The frozen release the integer and float encodings were ported from, so
 # the tests can check them byte for byte. Not a dependency of the crate:

@@ -1,0 +1,39 @@
+error[E0277]: `i64` is not a value that always fits `vitaminc_ore::target::I32`
+  --> tests/ui/negative_space/an_i64_may_not_fit_i32.rs:11:46
+   |
+11 |     let _ = clear::Clear.target(I32).encrypt(42i64);
+   |                                      ------- ^^^^^ does not always fit `vitaminc_ore::target::I32`
+   |                                      |
+   |                                      required by a bound introduced by this call
+   |
+   = help: the trait `FitsIn<vitaminc_ore::target::I32>` is not implemented for `i64`
+   = note: `encrypt` takes a value the encoding never refuses: a narrower integer, an `f32`, bytes, or a typed value such as a `NaiveDate`
+   = note: a value the encoding can refuse (an integer that may be out of range, text, a `DateTime<Utc>`, or any other `Encrypt` value) goes through `encrypt_checked`, which checks it while the program runs
+help: the following other types implement trait `FitsIn<T>`
+  --> src/target.rs
+   |
+   |               impl FitsIn<$target> for $ty {}
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |               |
+   |               `i64` implements `FitsIn<vitaminc_ore::target::I128>`
+   |               `i64` implements `FitsIn<vitaminc_ore::target::I64>`
+   |               impl FitsIn<$target> for &$ty {}
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |               |
+   |               `&i64` implements `FitsIn<vitaminc_ore::target::I128>`
+   |               `&i64` implements `FitsIn<vitaminc_ore::target::I64>`
+...
+   | / fits! {
+   | |     I8: i8;
+   | |     I16: i8, i16;
+   | |     U16: u16;
+...  |
+   | |     Bytes: Vec<u8>;
+   | | }
+   | |_- in this macro invocation
+note: required by a bound in `OrderSpace::<'_, S, T>::encrypt`
+  --> src/scheme.rs
+   |
+   |     pub fn encrypt<V: FitsIn<T>>(&self, value: V) -> Result<OrderTerm<S::Term, T>, S::Error> {
+   |                       ^^^^^^^^^ required by this bound in `OrderSpace::<'_, S, T>::encrypt`
+   = note: this error originates in the macro `fits` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -6,7 +6,7 @@
 //! encrypts, encoded as that target: bytes whose lexicographic order is
 //! the value's order, and the frozen domain label of the target. The
 //! target, not the value, decides the domain and the width, so values
-//! from every host compare in one column. A JavaScript `BigInt` arrives as
+//! from every host compare in one space. A JavaScript `BigInt` arrives as
 //! the narrowest integer that holds it, and a Rust field at its own type;
 //! both widen to the target, and a value outside it is refused.
 //!
@@ -194,13 +194,13 @@ impl OrderTarget {
 /// ```
 /// use vitaminc_ore::{domain, order, Int, NormalizeError, OrderTarget, Physical};
 ///
-/// // Every integer width widens to the column's type.
+/// // Every integer width widens to the target.
 /// let small = order(OrderTarget::I32, None, Physical::Int(Int::I8(100)))?;
 /// let large = order(OrderTarget::I32, None, Physical::Int(Int::U64(300)))?;
 /// assert_eq!(small.domain(), domain::INT32);
 /// assert_eq!(large.domain(), domain::INT32);
 ///
-/// // A value the column cannot hold is refused, not truncated.
+/// // A value the target cannot hold is refused, not truncated.
 /// let big = Physical::Int(Int::I64(1 << 40));
 /// assert_eq!(order(OrderTarget::I32, None, big).err(), Some(NormalizeError::OutOfRange));
 /// assert_eq!(
@@ -232,7 +232,7 @@ pub fn order(
     }
     let bytes = match (target, ty, v) {
         // A null, a boolean or an `undefined` has no order, whatever the
-        // column, and a walk skips it.
+        // target, and a walk skips it.
         (_, None, Physical::Null | Physical::Bool(_)) | (_, Some(Logical::Undefined), _) => {
             return Err(NormalizeError::NoDomain)
         }
@@ -255,7 +255,7 @@ pub fn order(
         (T::Uuid, Some(Logical::Uuid), Physical::Bytes(b)) => {
             vitaminc_normalize::uuid(b).ok_or(NormalizeError::Invalid)?
         }
-        // Another kind than the column's, including a logical type added
+        // Another kind than the target's, including a logical type added
         // to the data model later: it has no term here until it is given
         // a target.
         _ => return Err(NormalizeError::Mismatch),

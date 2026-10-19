@@ -25,24 +25,29 @@ values are equal. They differ where ordering needs it: an order term
 keeps an integer at the width its column declares, and folds accents
 and case out of text, which an equality term must not.
 
-## One column
+## One space
 
-An order index declares the type of what it holds, as an
-[`OrderTarget`]: an `i32` column, a date column, a text column. The
-target, not the value, decides the encoding, so values from every
-language land in one domain and compare. A JavaScript `BigInt` arrives
-as the narrowest integer that holds it (`100n` as an `i8`, `300n` as an
-`i16`) and a Rust field at its own type; both widen to the column's
-target. A value that does not fit is refused, never truncated, and a
-value of another kind is refused too: an integer is not a float, a date
-or a decimal.
+An order index declares the type of what it holds: its **target**. An
+`i32` column, a date column, a text column. The target, not the value,
+decides the encoding, so values from every language land in one domain
+and compare. A JavaScript `BigInt` arrives as the narrowest integer that
+holds it (`100n` as an `i8`, `300n` as an `i16`) and a Rust field at its
+own type; both widen to the target. A value that does not fit is refused,
+never truncated, and a value of another kind is refused too: an integer
+is not a float, a date or a decimal.
 
-A caller opens a column on a scheme with its target and the context
-its terms compare within, and encrypts values there:
+The set of terms that compare with each other is a **space**: one scheme
+and key, one target, and one context (a table and column, a tenant,
+whatever the terms must compare within). A caller opens a space by
+chaining a target and a context on a scheme, and encrypts values there.
+Every step of the chain is usable, and a step left out takes its
+default: a target alone is under the empty context, and a value alone is
+encoded as the target its Rust type is.
 
 ```rust
 use std::cmp::Ordering;
-use vitaminc_ore::{Int, Logical, NormalizeError, OrderEncrypt, OrderError, OrderTarget, Physical, Raw};
+use vitaminc_ore::target::{Date, I32};
+use vitaminc_ore::{NormalizeError, OrderEncrypt, OrderError, OrderTarget};
 # use vitaminc_ore::{Context, OrderPlaintext, OrderScheme};
 # /// Keeps the bytes as they are, for the example. Any scheme will do.
 # struct Clear;
@@ -50,7 +55,7 @@ use vitaminc_ore::{Int, Logical, NormalizeError, OrderEncrypt, OrderError, Order
 #     const NAME: &'static str = "clear";
 #     type Term = Vec<u8>;
 #     type Error = core::convert::Infallible;
-#     fn encrypt_plaintext(&self, p: &OrderPlaintext, _: &Context<'_>) -> Result<Vec<u8>, OrderError<Self::Error>> {
+#     fn encrypt_plaintext(&self, p: &OrderPlaintext, _: &Context<'_>) -> Result<Vec<u8>, Self::Error> {
 #         use vitaminc_protected::Controlled;
 #         Ok(p.bytes().risky_ref().clone())
 #     }
@@ -58,35 +63,70 @@ use vitaminc_ore::{Int, Logical, NormalizeError, OrderEncrypt, OrderError, Order
 #         Some(a.cmp(b))
 #     }
 # }
+# vitaminc_ore::supports_every_target!(Clear);
 # let scheme = Clear;
 
-let total = scheme.column(OrderTarget::I32, ("orders", "total"));
+// Held, for many values. The target is a marker, so the compiler checks
+// what goes in: an `i8` always fits an `i32`.
+let total = scheme.target(I32).context(("orders", "total"));
 let three = total.encrypt(3i8)?;
-let forty = total.encrypt(40i64)?;
-// The column compares its terms; a term alone has no order.
+// An `i64` may not fit, so `encrypt(40i64)` does not compile; it is
+// checked while the program runs instead.
+let forty = total.encrypt_checked(40i64)?;
+// The space compares its terms; a term alone has no order.
 assert_eq!(total.compare(&three, &forty), Some(Ordering::Less));
 
-// Outside the column's type, or of another kind: refused.
+// Outside the target, or of another kind: refused.
 assert!(matches!(
-    total.encrypt(1i64 << 40),
+    total.encrypt_checked(1i64 << 40),
     Err(OrderError::Term(NormalizeError::OutOfRange))
 ));
 assert!(matches!(
-    total.encrypt("40"),
+    total.encrypt_checked("40"),
     Err(OrderError::Term(NormalizeError::Mismatch))
 ));
 
-// A typed scalar goes into the column of its type.
-let placed = scheme.column(OrderTarget::Date, ("orders", "placed"));
-let day = placed.encrypt(Raw(Some(Logical::Date), Physical::Int(Int::I32(19_000))))?;
+// One-shot chains.
+scheme.target(I32).encrypt(3i8)?; // under the empty context
+scheme.context("tenant-7").encrypt(40i64)?; // as the type's own target, I64
+scheme.encrypt(40i64)?; // both defaults
 
-// A scalar with no order term is refused rather than returning nothing.
+// A typed value goes into the space of its type.
+let day = chrono::NaiveDate::from_ymd_opt(2022, 1, 8).expect("a date");
+scheme.target(Date).context(("orders", "placed")).encrypt(day)?;
+scheme.encrypt(day)?;
+
+// A target chosen while the program runs, as an index layer that reads
+// its column types from a schema needs. Every value is checked then.
+let index = scheme.target(OrderTarget::I32).context(("orders", "total"));
+index.encrypt_checked(3i8)?;
 assert!(matches!(
-    total.encrypt(true),
+    index.encrypt_checked(true),
     Err(OrderError::Term(NormalizeError::NoDomain))
 ));
-# Ok::<(), OrderError<core::convert::Infallible>>(())
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
+
+`encrypt` takes a value that always fits, as the sealed `FitsIn` table
+says: a narrower integer, an `f32` into `F64`, bytes (`&[u8]`,
+`Vec<u8>`, `[u8; N]`) into `Bytes`, a `chrono::NaiveDate` into `Date`,
+a `vitaminc_aead::Timestamp` into `Timestamp`, a `rust_decimal::Decimal`
+into `Decimal`, a `uuid::Uuid` into `Uuid` (the typed rows behind the
+`chrono`, `rust_decimal` and `uuid` features). Its only error is the
+scheme's own, so a scheme whose error is `Infallible` cannot fail at
+all. `encrypt_checked` takes any value of the data model and checks it
+while the program runs: an integer that may not fit, text (a code point
+Unicode 16 does not assign is refused), a `chrono::DateTime<Utc>` (a
+leap second has no count, which is what `vitaminc_aead::Timestamp`
+refuses when it is built), or a value whose type the index layer does
+not know. A chain that names no target uses the Rust type's own, from
+the sealed `OwnTarget` table; a target is never inferred from a value.
+
+A term is an `OrderTerm`, labelled with its target. Under a marker the
+label is a zero-sized type, so two targets' terms cannot meet in
+`compare`. Under an `OrderTarget` the label is stored, and two terms of
+different targets compare as `None` rather than as noise. Storage reads
+the scheme's bytes through `AsRef<[u8]>`.
 
 A layer above maps its own column types onto targets: an EQL `int`
 column is `OrderTarget::I32`. This crate knows nothing of that layer.
@@ -127,24 +167,25 @@ assert_eq!(equality.len(), order.len());
 A null, a boolean or an `undefined` has no order term and does not stop
 the walk. Anything else without a term stops it: a term silently missing
 from an index is worse than an error. A collected term goes into its
-column with `OrderColumn::encrypt_term`, which refuses a term of another
+space with `OrderSpace::encrypt_term`, which refuses a term of another
 target.
 
 ## Implementing a scheme
 
-A scheme implements one method, `encrypt_plaintext`, over the sealed
-[`OrderPlaintext`] the column builds from the caller's value and the
-salt the column derives. It reads the plaintext's bytes, binds the salt,
-and refuses what it cannot take by target. It never pads or truncates: a
-fixed-width scheme reads [`OrderPlaintext::width`] and refuses a target,
-not a value. Callers reach every scheme through [`OrderEncrypt`], which
-is implemented for every scheme and cannot be overridden, so no scheme
-can change what its terms are bound to.
+A scheme implements `encrypt_plaintext` over the sealed
+[`OrderPlaintext`] the space builds from the caller's value and the salt
+the space derives, `compare` over its own terms, and says which targets
+it takes through `Supports`. It reads the plaintext's bytes and binds
+the salt. It never pads, truncates or refuses by width: the space asks
+`Supports` and refuses a target the scheme does not take before the
+scheme sees a plaintext of it. Callers reach every scheme through
+[`OrderEncrypt`], which is implemented for every scheme and cannot be
+overridden, so no scheme can change what its terms are bound to.
 
 ```rust
 use core::cmp::Ordering;
 use core::convert::Infallible;
-use vitaminc_ore::{Context, OrderError, OrderPlaintext, OrderScheme};
+use vitaminc_ore::{Context, OrderPlaintext, OrderScheme};
 use vitaminc_protected::Controlled;
 
 /// A toy scheme over exactly four bytes.
@@ -159,10 +200,7 @@ impl OrderScheme for FourBytes {
         &self,
         plaintext: &OrderPlaintext,
         salt: &Context<'_>,
-    ) -> Result<Vec<u8>, OrderError<Infallible>> {
-        if plaintext.width() != Some(4) {
-            return Err(OrderError::unsupported::<Self>(plaintext));
-        }
+    ) -> Result<Vec<u8>, Infallible> {
         // Bind the salt and encrypt the bytes; here, concatenate them.
         let mut term = salt.as_bytes().to_vec();
         term.extend_from_slice(plaintext.bytes().risky_ref());
@@ -170,7 +208,7 @@ impl OrderScheme for FourBytes {
     }
 
     /// The scheme's own comparison, without a key. `None` for a term that
-    /// is not this scheme's, or for two terms of different columns: here,
+    /// is not this scheme's, or for two terms of different spaces: here,
     /// a term shorter than its four bytes, or two salts that differ.
     fn compare(a: &Vec<u8>, b: &Vec<u8>) -> Option<Ordering> {
         let (a_salt, a_bytes) = a.split_at(a.len().checked_sub(4)?);
@@ -179,13 +217,19 @@ impl OrderScheme for FourBytes {
     }
 }
 
+// Which targets it takes, from one list: the answer for a target chosen
+// while the program runs, and one `Supports` impl per marker, so that
+// `scheme.target(Text)` does not compile. A scheme that takes every
+// target writes `vitaminc_ore::supports_every_target!(Scheme)`.
+vitaminc_ore::supports_targets!(FourBytes; I32, U32, Date);
+
 assert_eq!(FourBytes::compare(&b"salt\0\0\0\x01".to_vec(), &b"salt\0\0\0\x02".to_vec()), Some(Ordering::Less));
 assert_eq!(FourBytes::compare(&b"salt\0\0\0\x01".to_vec(), &b"SALT\0\0\0\x02".to_vec()), None);
 assert_eq!(FourBytes::compare(&vec![], &vec![]), None);
 ```
 
 The salt is `PAE("vitaminc/ore/v1", scheme, domain, context)`, derived
-once when the column is opened, so every scheme binds the same three
+once when the space is opened, so every scheme binds the same three
 things: a CLLW scheme passes it as its salt, and a scheme without one,
 block ORE, derives its keys under it. [`OrderKeyInit`] keys a scheme
 from a protected array or from bytes of a length only known at runtime,
@@ -193,13 +237,14 @@ the way a PRF is keyed, so an index layer constructs any scheme the same
 way.
 
 A term compares only with terms of the same scheme, key, target and
-context, which is what a column is, through `column.compare(&a, &b)`
-(the scheme's [`OrderScheme::compare`], which needs no key). A term is
-plain bytes and records nothing of its column, so it is not `Ord`: a
-promise to order any two terms is one no order scheme can keep across
-columns, and a caller keeps a column's terms together. A column's leakage is the combined
-leakage of every term it holds: an order term reveals order, an equality
-term reveals equality, and a column that carries both reveals both.
+context, which is what a space is, through `space.compare(&a, &b)` (the
+scheme's [`OrderScheme::compare`], which needs no key). The scheme's own
+term is plain bytes and records nothing of its space, so it is not
+`Ord`: a promise to order any two terms is one no order scheme can keep
+across spaces, and a caller keeps a space's terms together. A space's
+leakage is the combined leakage of every term it holds: an order term
+reveals order, an equality term reveals equality, and a column that
+carries both reveals both.
 
 ## Encodings
 
@@ -219,7 +264,7 @@ a new label.
 | `Uuid` | `vitaminc/ore/value/uuid/v1` | the sixteen raw bytes |
 
 An integer of any width goes into an integer target it fits: `100` as
-an `i8` and `100` as a `u64` are one term of an `I32` column. There is
+an `i8` and `100` as a `u64` are one term of an `I32` space. There is
 no `f32` target: JavaScript numbers are always `f64`, and an `f32`
 widens to `f64` exactly.
 

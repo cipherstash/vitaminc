@@ -1,0 +1,56 @@
+error[E0277]: `&str` is not a value that always fits `vitaminc_ore::target::Text`
+  --> tests/ui/negative_space/text_may_be_refused.rs:11:47
+   |
+11 |     let _ = clear::Clear.target(Text).encrypt("abc");
+   |                                       ------- ^^^^^ does not always fit `vitaminc_ore::target::Text`
+   |                                       |
+   |                                       required by a bound introduced by this call
+   |
+   = help: the trait `FitsIn<vitaminc_ore::target::Text>` is not implemented for `&str`
+   = note: `encrypt` takes a value the encoding never refuses: a narrower integer, an `f32`, bytes, or a typed value such as a `NaiveDate`
+   = note: a value the encoding can refuse (an integer that may be out of range, text, a `DateTime<Utc>`, or any other `Encrypt` value) goes through `encrypt_checked`, which checks it while the program runs
+   = help: the following other types implement trait `FitsIn<T>`:
+             `&Vec<u8>` implements `FitsIn<vitaminc_ore::target::Bytes>`
+             `&[u8; N]` implements `FitsIn<vitaminc_ore::target::Bytes>`
+             `&[u8]` implements `FitsIn<vitaminc_ore::target::Bytes>`
+             `&chrono::naive::date::NaiveDate` implements `FitsIn<vitaminc_ore::target::Date>`
+             `&f32` implements `FitsIn<vitaminc_ore::target::F64>`
+             `&f64` implements `FitsIn<vitaminc_ore::target::F64>`
+             `&i128` implements `FitsIn<vitaminc_ore::target::I128>`
+             `&i16` implements `FitsIn<vitaminc_ore::target::I128>`
+           and $N others
+note: required by a bound in `OrderSpace::<'_, S, T>::encrypt`
+  --> src/scheme.rs
+   |
+   |     pub fn encrypt<V: FitsIn<T>>(&self, value: V) -> Result<OrderTerm<S::Term, T>, S::Error> {
+   |                       ^^^^^^^^^ required by this bound in `OrderSpace::<'_, S, T>::encrypt`
+
+error[E0277]: `&str` is not a value that always fits `vitaminc_ore::target::Text`
+  --> tests/ui/negative_space/text_may_be_refused.rs:12:34
+   |
+12 |     let _ = clear::Clear.encrypt("abc");
+   |                          ------- ^^^^^ does not always fit `vitaminc_ore::target::Text`
+   |                          |
+   |                          required by a bound introduced by this call
+   |
+   = help: the trait `FitsIn<vitaminc_ore::target::Text>` is not implemented for `&str`
+   = note: `encrypt` takes a value the encoding never refuses: a narrower integer, an `f32`, bytes, or a typed value such as a `NaiveDate`
+   = note: a value the encoding can refuse (an integer that may be out of range, text, a `DateTime<Utc>`, or any other `Encrypt` value) goes through `encrypt_checked`, which checks it while the program runs
+   = help: the following other types implement trait `FitsIn<T>`:
+             `&Vec<u8>` implements `FitsIn<vitaminc_ore::target::Bytes>`
+             `&[u8; N]` implements `FitsIn<vitaminc_ore::target::Bytes>`
+             `&[u8]` implements `FitsIn<vitaminc_ore::target::Bytes>`
+             `&chrono::naive::date::NaiveDate` implements `FitsIn<vitaminc_ore::target::Date>`
+             `&f32` implements `FitsIn<vitaminc_ore::target::F64>`
+             `&f64` implements `FitsIn<vitaminc_ore::target::F64>`
+             `&i128` implements `FitsIn<vitaminc_ore::target::I128>`
+             `&i16` implements `FitsIn<vitaminc_ore::target::I128>`
+           and $N others
+note: required by a bound in `encrypt`
+  --> src/scheme.rs
+   |
+   |     fn encrypt<V>(&self, value: V) -> Result<OrderTerm<Self::Term, V::Target>, Self::Error>
+   |        ------- required by a bound in this associated function
+   |     where
+   |         V: OwnTarget + FitsIn<V::Target>,
+   |                        ^^^^^^^^^^^^^^^^^ required by this bound in `OrderEncrypt::encrypt`

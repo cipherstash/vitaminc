@@ -2816,12 +2816,14 @@ dependencies = [
  "quickcheck_macros",
  "rust_decimal",
  "thiserror",
+ "trybuild",
  "unicode-general-category",
  "unicode-normalization",
  "uuid",
  "vitaminc-aead",
  "vitaminc-context",
  "vitaminc-normalize",
+ "vitaminc-ore",
  "vitaminc-protected",
 ]
 
