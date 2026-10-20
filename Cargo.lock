@@ -2825,6 +2825,7 @@ dependencies = [
  "vitaminc-normalize",
  "vitaminc-ore",
  "vitaminc-protected",
+ "zeroize",
 ]
 
 [[package]]

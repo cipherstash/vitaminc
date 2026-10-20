@@ -12,7 +12,7 @@
 //!
 //! ```
 //! # use vitaminc_ore::{Context, OrderPlaintext, OrderScheme};
-//! # use vitaminc_protected::Controlled;
+//! # use vitaminc_protected::{Controlled, Protected};
 //! # /// A toy: the key byte, the salt's length and the salt, then the
 //! # /// plaintext. Terms compare when their key and salt agree.
 //! # struct Keyed(u8);
@@ -20,14 +20,15 @@
 //! #     const NAME: &'static str = "keyed";
 //! #     type Term = Vec<u8>;
 //! #     type Error = core::convert::Infallible;
-//! #     type Space = Context<'static>;
-//! #     fn open(&self, _: vitaminc_ore::OrderTarget, salt: &Context<'_>) -> Result<Context<'static>, Self::Error> {
-//! #         Ok(salt.clone().into_owned())
+//! #     type Space = Protected<Vec<u8>>;
+//! #     fn open(&self, _: vitaminc_ore::OrderTarget, salt: &Context<'_>) -> Result<Self::Space, Self::Error> {
+//! #         Ok(Protected::new(salt.as_bytes().to_vec()))
 //! #     }
-//! #     fn encrypt_plaintext(&self, salt: &Context<'static>, p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
+//! #     fn encrypt_plaintext(&self, salt: &Self::Space, p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
+//! #         let salt = salt.risky_ref();
 //! #         let mut t = vec![self.0];
-//! #         t.extend_from_slice(&(salt.as_bytes().len() as u32).to_be_bytes());
-//! #         t.extend_from_slice(salt.as_bytes());
+//! #         t.extend_from_slice(&(salt.len() as u32).to_be_bytes());
+//! #         t.extend_from_slice(salt);
 //! #         t.extend_from_slice(p.bytes().risky_ref());
 //! #         Ok(t)
 //! #     }

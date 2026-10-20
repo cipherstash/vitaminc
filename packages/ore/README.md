@@ -191,7 +191,7 @@ overridden, so no scheme can change what its terms are bound to.
 use core::cmp::Ordering;
 use core::convert::Infallible;
 use vitaminc_ore::{Context, OrderPlaintext, OrderScheme};
-use vitaminc_protected::Controlled;
+use vitaminc_protected::{Controlled, Protected};
 
 /// A toy scheme over exactly four bytes.
 struct FourBytes;
@@ -200,22 +200,22 @@ impl OrderScheme for FourBytes {
     const NAME: &'static str = "four-bytes";
     type Term = Vec<u8>;
     type Error = Infallible;
-    /// What it keeps for a space. A scheme that derives keys from the
-    /// salt keeps them; this one has nothing to derive and keeps the
-    /// salt.
-    type Space = Context<'static>;
+    /// What it keeps for a space, which must wipe itself on drop. A real
+    /// scheme keeps what it derives from the salt under its key, which is
+    /// secret; this toy has nothing to derive and keeps the salt's bytes.
+    type Space = Protected<Vec<u8>>;
 
-    fn open(&self, _: vitaminc_ore::OrderTarget, salt: &Context<'_>) -> Result<Context<'static>, Infallible> {
-        Ok(salt.clone().into_owned())
+    fn open(&self, _: vitaminc_ore::OrderTarget, salt: &Context<'_>) -> Result<Self::Space, Infallible> {
+        Ok(Protected::new(salt.as_bytes().to_vec()))
     }
 
     fn encrypt_plaintext(
         &self,
-        salt: &Context<'static>,
+        salt: &Self::Space,
         plaintext: &OrderPlaintext,
     ) -> Result<Vec<u8>, Infallible> {
         // Bind the salt and encrypt the bytes; here, concatenate them.
-        let mut term = salt.as_bytes().to_vec();
+        let mut term = salt.risky_ref().clone();
         term.extend_from_slice(plaintext.bytes().risky_ref());
         Ok(term)
     }

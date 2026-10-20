@@ -163,18 +163,21 @@ pub trait OrderScheme {
     /// salt, so that it is derived for the space rather than for every
     /// term. Block ORE keeps the keys and cipher it derives under the
     /// salt; a scheme that passes the salt straight to its primitive, as
-    /// CLLW does, keeps the salt itself (`Context<'static>`).
+    /// CLLW does, keeps the salt's bytes (`Protected<Vec<u8>>`).
     ///
-    /// vitaminc places no bound on it and applies no wipe when it is
-    /// dropped, with the [`OrderSpace`] or as the loser of a race to open
-    /// (see [`open`](Self::open)). A `Space` that holds derived keys keeps
-    /// them in [`Protected`] or implements `ZeroizeOnDrop` itself.
+    /// It must wipe itself when it is dropped, because what a scheme
+    /// derives from its key is as secret as the key. A space is dropped
+    /// with its [`OrderSpace`], and also as the loser of a race to open
+    /// (see [`open`](Self::open)), where nothing else would wipe it. Keep
+    /// derived bytes in [`Protected`], hold a cipher whose crate wipes it
+    /// on drop, or use `()` for a scheme that keeps nothing. A `Vec<u8>`
+    /// of derived keys does not compile.
     ///
     /// An [`OrderSpace`] holds a reference to the scheme and one of these,
     /// so it is `Send` when the scheme is `Sync` and this is `Send`, and
     /// `Sync` when this is `Sync` too. A scheme that keeps a random number
     /// generator behind a `RefCell` here has a space per thread.
-    type Space;
+    type Space: zeroize::ZeroizeOnDrop;
 
     /// Open a space: derive what [`Space`](Self::Space) keeps, binding
     /// `salt`: `PAE("vitaminc/ore/v1", NAME, domain, context)`, which the

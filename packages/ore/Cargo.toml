@@ -29,6 +29,7 @@ uuid = { version = "1", default-features = false, optional = true }
 vitaminc-context = { version = "0.6.1", path = "../context" }
 vitaminc-normalize = { version = "0.6.1", path = "../normalize" }
 vitaminc-protected = { version = "0.6.1", path = "../protected" }
+zeroize = { workspace = true }
 thiserror = { workspace = true }
 
 # As in vitaminc-normalize: NFD and NFC are stable for assigned code

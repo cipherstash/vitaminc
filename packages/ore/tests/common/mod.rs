@@ -12,6 +12,7 @@ use std::sync::Barrier;
 
 use vitaminc_ore::{Context, OrderKeyInit, OrderPlaintext, OrderScheme, OrderTarget};
 use vitaminc_protected::{Controlled, Protected};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A term from a mock: the salt and key it was bound under, then the
 /// plaintext bytes, which it "encrypts" by keeping. Its stored form is
@@ -74,8 +75,11 @@ impl Mock {
 /// What a mock keeps for a space: the salt and its key, which it "derives"
 /// by concatenating them once, and the target the space was opened with,
 /// so the mock can check every plaintext it is handed is of that target.
+/// It wipes the derived bytes on drop, as a space must.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct MockSpace {
     derived: Vec<u8>,
+    #[zeroize(skip)]
     target: OrderTarget,
 }
 
@@ -342,6 +346,7 @@ pub struct Forgetful {
 
 /// What a forgetful scheme keeps for a space: the salt and key its
 /// comparison binds, and the prefix its stored terms keep.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct ForgetfulSpace {
     bound: Vec<u8>,
     stored: Vec<u8>,
@@ -360,7 +365,7 @@ impl OrderScheme for Forgetful {
             Vec::new()
         };
         Ok(ForgetfulSpace {
-            bound: self.mock.open(target, salt)?.derived,
+            bound: self.mock.open(target, salt)?.derived.clone(),
             stored,
         })
     }
