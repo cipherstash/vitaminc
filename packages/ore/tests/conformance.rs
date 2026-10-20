@@ -816,3 +816,13 @@ fn the_conformance_checks_catch_a_stored_term_without_its_key() {
 fn the_conformance_checks_catch_a_marker_the_scheme_refuses_at_runtime() {
     test_support::static_target::<common::Lying, vitaminc_ore::target::I64>();
 }
+
+/// Opening a space under a marker the runtime list refuses trips the
+/// space's debug assertion, so a scheme crate's own tests catch the
+/// disagreement even without `static_target`.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "lying implements Supports<I64> but refuses it at runtime")]
+fn a_space_under_a_marker_the_scheme_refuses_at_runtime_panics_in_debug() {
+    let _ = common::Lying(Fixed::<4>(Mock::new(key()))).target(vitaminc_ore::target::I64);
+}

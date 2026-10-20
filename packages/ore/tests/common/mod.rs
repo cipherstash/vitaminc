@@ -139,8 +139,8 @@ vitaminc_ore::supports_targets!(Fixed<8>; I64, U64, F64);
 
 /// A four-byte scheme whose `Supports<I64>` impl, written by hand, lies:
 /// its runtime list refuses an `I64`. For the conformance check that
-/// catches the disagreement. Never open a space of `I64` on it: the
-/// space's debug assertion would fire, as it should.
+/// catches the disagreement, and for the space's debug assertion, which
+/// fires when a space of `I64` is opened on it.
 pub struct Lying(pub Fixed<4>);
 
 impl OrderScheme for Lying {
