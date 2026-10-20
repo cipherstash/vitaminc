@@ -41,9 +41,19 @@ use crate::OrderTarget;
 /// block ORE's queries are deterministic, one value in one space giving
 /// one query, so `==` on two of its queries is equality of the values
 /// searched for, and a log of queries is a log of what was searched.
+///
+/// That is the whole of what a query is guarded against: being kept. It
+/// is not wiped from memory when it drops, and `Query` has no bound that
+/// would make it wipe itself, unlike a scheme's
+/// [`Space`](OrderScheme::Space). A query is made to be sent to the
+/// database, which sees it in order to compare with it, and the process
+/// that made it also holds the plaintext it came from and the scheme's
+/// key. Bytes of a query left in that process's memory give away less
+/// than what sits beside them.
 pub trait OrderQuery: OrderScheme {
     /// What one query encrypts to. For a scheme whose terms are their own
-    /// queries, [`Term`](OrderScheme::Term).
+    /// queries, [`Term`](OrderScheme::Term). It need not wipe itself; see
+    /// above for why.
     type Query: AsRef<[u8]>;
 
     /// Encrypt a sealed plaintext of `space` as a query, with what
