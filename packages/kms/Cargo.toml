@@ -34,7 +34,7 @@ aws-sdk-kms = { version = "1.109.0", optional = true }
 # Neither Azure Key Vault nor Google Cloud KMS has a "generate data key"
 # call, so those adapters mint the plaintext locally with this workspace's
 # own CSPRNG before wrapping it.
-vitaminc-random = { version = "0.5.0", path = "../random", optional = true }
+vitaminc-random = { version = "0.8.0", path = "../random", optional = true }
 
 # --- `azure` feature ---------------------------------------------------------
 # Official Microsoft SDK (GA). The pre-1.0 `azure_security_keyvault` crate is
