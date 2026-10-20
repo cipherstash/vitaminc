@@ -1,13 +1,13 @@
 
 ## [0.7.0] - 2026-10-20
 
-### Documentation
-
-- say exactly when the normalization buffers move to the heap and what they leave behind
-
 ### Fixes
 
-- have each encoder own the wiped buffer it writes, so no caller can pass one that is not
+- Each fixed-width and decimal encoder writes straight into the wiped buffer it returns, so no unwiped intermediate copy of an encoded value is made. The encoded bytes, and so stored terms, do not change.
+
+### Not guaranteed
+
+- `vitaminc_normalize::text` runs text through the `unicode-normalization` iterators, whose small internal buffers move to the heap as soon as a character's combining marks pass four code points (four marks followed by any character is enough), and are then freed without being wiped. This is outside this crate's control (#488).
 
 ## [0.6.1] - 2026-10-18
 
