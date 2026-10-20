@@ -55,10 +55,11 @@ exclude_re = [
     # and the port is checked byte for byte against the frozen crate besides.
     "replace \\| with \\^ in (orderable|strip_trailing_zeros)$",
     # Unreachable, not untested: `Nothing` (vitaminc-aead typed.rs) is an
-    # uninhabited enum, so no value exists to call `scalar` or `passthrough`
-    # on and replacing either body with `Ok(())` cannot be observed. Its
-    # `seq` and `map` mutants are unviable for the same reason.
-    "replace <impl Sink for Nothing>::(scalar|passthrough) ",
+    # uninhabited enum, so no value exists to call `scalar`, `typed_null` or
+    # `passthrough` on and replacing any of those bodies with `Ok(())` cannot
+    # be observed. Its `seq` and `map` mutants are unviable for the same
+    # reason.
+    "replace <impl Sink for Nothing>::(scalar|typed_null|passthrough) ",
     # Equivalent mutant: `max` (vitaminc-aead plaintext/depth.rs) picks the
     # larger of two depths, and when they are equal `a > b` and `a >= b`
     # return the same number, so no input can tell them apart.
