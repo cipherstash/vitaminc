@@ -348,7 +348,11 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     ///
     /// **Use with caution!**
     ///
+    /// The returned value is bare: nothing wipes it any more. A result that
+    /// is not used is dropped on the spot, unwiped, so the compiler warns
+    /// when that happens.
     // TODO: Consider feature flagging this method
+    #[must_use = "the bare value is dropped unwiped if it is not used"]
     fn risky_unwrap(self) -> Self::Inner;
 
     /// Provides a reference to the inner value.

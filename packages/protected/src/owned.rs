@@ -60,7 +60,9 @@ impl<'a, T: Zeroize> Owned<'a, T> {
     /// Move the bare value out, wiping the slot it leaves behind.
     ///
     /// After this the value is no longer wiped on drop: the caller owns that,
-    /// until the value is wrapped again.
+    /// until the value is wrapped again. A result that is not used is
+    /// dropped on the spot, unwiped, so the compiler warns when that happens.
+    #[must_use = "the bare value is dropped unwiped if it is not used"]
     pub fn into_inner(self) -> T {
         let this = ManuallyDrop::new(self);
         // SAFETY: `dead` is false (it is only set here and in `drop`, and

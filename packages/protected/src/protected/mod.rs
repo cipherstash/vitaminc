@@ -36,8 +36,7 @@ impl<T: Zeroize> Protected<T> {
     ///
     /// Ownership of the (still sensitive) value transfers to the caller, which
     /// becomes responsible for its lifecycle. See [`crate::move_inner_out`] for
-    /// the shared primitive and the rationale (including why the source slot is
-    /// not scrubbed).
+    /// the shared primitive, which also wipes the slot the value leaves.
     fn into_inner_unchecked(self) -> T {
         crate::move_inner_out(self)
     }
