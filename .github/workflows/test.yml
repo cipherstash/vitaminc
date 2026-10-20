@@ -68,15 +68,17 @@ jobs:
       matrix:
         # The run id is shared by every entry, so each RunsOn label must
         # differ, or one entry's runner can be taken by another.
+        # The default root volume leaves ~10 GiB free, which the feature
+        # builds below fill; rust-lld then dies with SIGBUS (signal 7).
         include:
           - name: github
             label: ubuntu-latest
           - name: runs-on 2cpu
-            label: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64
+            label: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/volume=80gb
           - name: runs-on 4cpu
-            label: runs-on=${{ github.run_id }}/runner=4cpu-linux-x64
+            label: runs-on=${{ github.run_id }}/runner=4cpu-linux-x64/volume=80gb
           - name: runs-on 8cpu
-            label: runs-on=${{ github.run_id }}/runner=8cpu-linux-x64
+            label: runs-on=${{ github.run_id }}/runner=8cpu-linux-x64/volume=80gb
 
     steps:
       - uses: actions/checkout@v7
