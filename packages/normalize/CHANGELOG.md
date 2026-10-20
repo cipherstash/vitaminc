@@ -1,4 +1,14 @@
 
+## [0.7.0] - 2026-10-20
+
+### Fixes
+
+- Each fixed-width and decimal encoder writes straight into the wiped buffer it returns, so no unwiped intermediate copy of an encoded value is made. The encoded bytes, and so stored terms, do not change.
+
+### Not guaranteed
+
+- `vitaminc_normalize::text` runs text through the `unicode-normalization` iterators, whose small internal buffers move to the heap as soon as a character's combining marks pass four code points (four marks followed by any character is enough), and are then freed without being wiped. This is outside this crate's control (#488).
+
 ## [0.6.1] - 2026-10-18
 
 ## [0.6.0] - 2026-10-17
