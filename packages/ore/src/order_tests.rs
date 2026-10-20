@@ -532,3 +532,40 @@ mod oracle {
         );
     }
 }
+
+/// Whether `bytes` holds exactly `len` bytes in a buffer with room for
+/// exactly `len`, checked inside the protected value with `zip_ref` so
+/// the encoding never leaves its wrapper. Only the answer, which is not
+/// secret, is taken out.
+fn fills_exactly(bytes: &Protected<Vec<u8>>, len: usize) -> bool {
+    Protected::new(len)
+        .zip_ref(bytes, |len, bytes: &Vec<u8>| {
+            bytes.len() == len && bytes.capacity() == len
+        })
+        .risky_unwrap()
+}
+
+/// A `Vec` that grows frees its old buffer without wiping it, and spare
+/// capacity is a sign the buffer was not made at its final size. So the
+/// integer encoder must return a buffer whose length is its capacity, at
+/// every width.
+mod given_an_integer_at_any_width {
+    use super::*;
+
+    #[test]
+    fn returns_a_buffer_with_no_spare_capacity() {
+        let values = [
+            (Int::I16(i16::MIN), 2),
+            (Int::U16(u16::MAX), 2),
+            (Int::I32(-1), 4),
+            (Int::U32(u32::MAX), 4),
+            (Int::I64(i64::MIN), 8),
+            (Int::U64(1), 8),
+            (Int::I128(i128::MIN), 16),
+            (Int::U128(u128::MAX), 16),
+        ];
+        for (value, width) in values {
+            assert!(fills_exactly(&int(value), width), "{value:?}");
+        }
+    }
+}
