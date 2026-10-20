@@ -555,17 +555,21 @@ mod given_an_integer_at_any_width {
     #[test]
     fn returns_a_buffer_with_no_spare_capacity() {
         let values = [
-            (Int::I16(i16::MIN), 2),
-            (Int::U16(u16::MAX), 2),
-            (Int::I32(-1), 4),
-            (Int::U32(u32::MAX), 4),
-            (Int::I64(i64::MIN), 8),
-            (Int::U64(1), 8),
-            (Int::I128(i128::MIN), 16),
-            (Int::U128(u128::MAX), 16),
+            (T::I16, Int::I16(i16::MIN), 2),
+            (T::U16, Int::U16(u16::MAX), 2),
+            (T::I32, Int::I32(-1), 4),
+            (T::U32, Int::U32(u32::MAX), 4),
+            (T::I64, Int::I64(i64::MIN), 8),
+            (T::U64, Int::U64(1), 8),
+            (T::I128, Int::I128(i128::MIN), 16),
+            (T::U128, Int::U128(u128::MAX), 16),
         ];
-        for (value, width) in values {
-            assert!(fills_exactly(&int(value), width), "{value:?}");
+        for (target, value, width) in values {
+            let bytes = int(target, value).expect("the value fits its target");
+            assert!(
+                fills_exactly(&bytes, width),
+                "{value:?} at {target:?} fills its buffer exactly"
+            );
         }
     }
 }

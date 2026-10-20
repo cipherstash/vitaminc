@@ -272,7 +272,7 @@ pub fn order(
         }
         (_, Some(Logical::Unknown(_)), _) => return Err(NormalizeError::NoDomain),
         (target, None, Physical::Int(i)) if target.is_int() => {
-            int(convert(target, i).ok_or(NormalizeError::OutOfRange)?)
+            int(target, i).ok_or(NormalizeError::OutOfRange)?
         }
         (T::F64, None, Physical::Float(f)) => vitaminc_normalize::float(f),
         (T::Text, None, Physical::Text(s)) => text(s)?,
@@ -314,46 +314,62 @@ impl OrderTarget {
     }
 }
 
-/// `value` at an integer target's width, or `None` if it does not fit.
+/// `value` at integer `target`'s width: big-endian, with the sign bit
+/// flipped for a signed width, so two's complement sorts as the numbers
+/// do. The same bytes `orderable-bytes` produces, checked against it in
+/// the tests. `None` if `value` does not fit `target`, or `target` is not
+/// an integer target.
+///
 /// Every width converts through `i128`, except a `u128` above
 /// `i128::MAX`, which only a `u128` target holds.
-fn convert(target: OrderTarget, value: Int) -> Option<Int> {
+///
+/// The value is converted and written in one step, rather than first made
+/// into an [`Int`] at the target's width and then encoded. An `Int` is 32
+/// bytes, so passing one to a function that is not inlined puts a copy of
+/// the value in a slot on the caller's stack, and nothing wipes that slot.
+/// Done in one step, the converted value stays in a register until it is
+/// written to the protected buffer. This was checked in the compiled code
+/// for AArch64; Rust does not promise it.
+fn int(target: OrderTarget, value: Int) -> Option<Protected<Vec<u8>>> {
+    use OrderTarget as T;
     let Some(v) = value.to_i128() else {
         return match (target, value) {
-            (OrderTarget::U128, Int::U128(v)) => Some(Int::U128(v)),
+            (T::U128, Int::U128(v)) => Some(fixed(|b| *b = v.to_be_bytes())),
             _ => None,
         };
     };
-    match target {
-        OrderTarget::I16 => i16::try_from(v).ok().map(Int::I16),
-        OrderTarget::U16 => u16::try_from(v).ok().map(Int::U16),
-        OrderTarget::I32 => i32::try_from(v).ok().map(Int::I32),
-        OrderTarget::U32 => u32::try_from(v).ok().map(Int::U32),
-        OrderTarget::I64 => i64::try_from(v).ok().map(Int::I64),
-        OrderTarget::U64 => u64::try_from(v).ok().map(Int::U64),
-        OrderTarget::I128 => Some(Int::I128(v)),
-        OrderTarget::U128 => u128::try_from(v).ok().map(Int::U128),
-        _ => None,
-    }
-}
-
-/// An integer at its own width: big-endian, with the sign bit flipped for
-/// a signed width, so two's complement sorts as the numbers do. The same
-/// bytes `orderable-bytes` produces, checked against it in the tests.
-fn int(value: Int) -> Protected<Vec<u8>> {
-    match value {
-        // `convert` widens every 8-bit value to its target, so no
-        // one-byte encoding is ever made: there is no 8-bit target.
-        Int::I8(_) | Int::U8(_) => unreachable!("convert widens every 8-bit value to its target"),
-        Int::I16(v) => fixed(|b| *b = ((v as u16) ^ (1 << 15)).to_be_bytes()),
-        Int::U16(v) => fixed(|b| *b = v.to_be_bytes()),
-        Int::I32(v) => fixed(|b| *b = ((v as u32) ^ (1 << 31)).to_be_bytes()),
-        Int::U32(v) => fixed(|b| *b = v.to_be_bytes()),
-        Int::I64(v) => fixed(|b| *b = ((v as u64) ^ (1 << 63)).to_be_bytes()),
-        Int::U64(v) => fixed(|b| *b = v.to_be_bytes()),
-        Int::I128(v) => fixed(|b| *b = ((v as u128) ^ (1 << 127)).to_be_bytes()),
-        Int::U128(v) => fixed(|b| *b = v.to_be_bytes()),
-    }
+    Some(match target {
+        T::I16 => {
+            let v = i16::try_from(v).ok()?;
+            fixed(|b| *b = ((v as u16) ^ (1 << 15)).to_be_bytes())
+        }
+        T::U16 => {
+            let v = u16::try_from(v).ok()?;
+            fixed(|b| *b = v.to_be_bytes())
+        }
+        T::I32 => {
+            let v = i32::try_from(v).ok()?;
+            fixed(|b| *b = ((v as u32) ^ (1 << 31)).to_be_bytes())
+        }
+        T::U32 => {
+            let v = u32::try_from(v).ok()?;
+            fixed(|b| *b = v.to_be_bytes())
+        }
+        T::I64 => {
+            let v = i64::try_from(v).ok()?;
+            fixed(|b| *b = ((v as u64) ^ (1 << 63)).to_be_bytes())
+        }
+        T::U64 => {
+            let v = u64::try_from(v).ok()?;
+            fixed(|b| *b = v.to_be_bytes())
+        }
+        T::I128 => fixed(|b| *b = ((v as u128) ^ (1 << 127)).to_be_bytes()),
+        T::U128 => {
+            let v = u128::try_from(v).ok()?;
+            fixed(|b| *b = v.to_be_bytes())
+        }
+        _ => return None,
+    })
 }
 
 /// The text order encoding: [`VARIABLE_WIDTH_MARKER`], then `text` as
