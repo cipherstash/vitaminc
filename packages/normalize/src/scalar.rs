@@ -241,10 +241,19 @@ pub fn decimal(scale: u8, mantissa: Int) -> Option<Protected<Vec<u8>>> {
 /// NFC in the pinned Unicode version, without case or accent folding.
 ///
 /// The result is written into one protected buffer sized exactly up front,
-/// so it never reallocates and frees an unwiped partial copy. The
-/// `unicode-normalization` iterator keeps its own small buffers of pending
-/// code points (inline for four, spilling to the heap for longer combining
-/// sequences); those are not wiped and are out of this crate's control.
+/// so it never reallocates and frees an unwiped partial copy.
+///
+/// The `unicode-normalization` iterators keep pending code points in small
+/// buffers of their own, with room for four code points inside the
+/// iterator. Decomposition holds the combining marks that follow a
+/// character in the same buffer as the decomposed form of the next
+/// character, so the buffer moves to the heap as soon as those together
+/// pass four code points: four marks followed by any character is enough.
+/// Composition moves its buffer to the heap when five marks after one
+/// character do not combine with it. Once a buffer is on the heap it stays
+/// there for the rest of the string, so every later character passes
+/// through it, and it is freed without being wiped. That is out of this
+/// crate's control (see #488).
 pub fn text(text: &str) -> Result<Protected<Vec<u8>>, NormalizeError> {
     if text
         .chars()

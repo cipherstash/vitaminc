@@ -30,9 +30,18 @@ use crate::casefold_unicode16::FOLD;
 
 /// The folded form of `text`, in one protected buffer sized exactly up
 /// front (the pipeline runs twice, once to measure), so it never
-/// reallocates and frees an unwiped partial copy. As with NFC in
-/// `vitaminc_normalize`, the normalization iterators' own small buffers
-/// are out of this crate's control.
+/// reallocates and frees an unwiped partial copy.
+///
+/// The normalization iterators keep pending code points in small buffers
+/// of their own, with room for four code points inside the iterator.
+/// Decomposition holds the combining marks that follow a character in the
+/// same buffer as the decomposed form of the next character, so the
+/// buffer moves to the heap as soon as those together pass four code
+/// points: four marks followed by any character is enough. Once a buffer
+/// is on the heap it stays there for the rest of the string, so every
+/// later character passes through it, and it is freed without being
+/// wiped. That is out of this crate's control (see #488). NFC in
+/// `vitaminc_normalize` has the same limit.
 pub(crate) fn folded(text: &str) -> Result<Protected<Vec<u8>>, NormalizeError> {
     if text
         .chars()
