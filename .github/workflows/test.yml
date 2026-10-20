@@ -56,9 +56,27 @@ jobs:
       - name: cargo check
         run: cargo check --locked ${{ matrix.args }}
 
+  # RunsOn trial: the same job on GitHub's runner and on RunsOn sizes, for a
+  # side-by-side timing comparison. GitHub's public-repo ubuntu-latest is
+  # 4 vCPU / 16 GB, so `4cpu` is the like-for-like entry. Collapse back to a
+  # single runner before merging.
   test:
-    runs-on: ubuntu-latest
-    name: "🧪 Test"
+    runs-on: ${{ matrix.label }}
+    name: "🧪 Test (${{ matrix.name }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        # The run id is shared by every entry, so each RunsOn label must
+        # differ, or one entry's runner can be taken by another.
+        include:
+          - name: github
+            label: ubuntu-latest
+          - name: runs-on 2cpu
+            label: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64
+          - name: runs-on 4cpu
+            label: runs-on=${{ github.run_id }}/runner=4cpu-linux-x64
+          - name: runs-on 8cpu
+            label: runs-on=${{ github.run_id }}/runner=8cpu-linux-x64
 
     steps:
       - uses: actions/checkout@v7
