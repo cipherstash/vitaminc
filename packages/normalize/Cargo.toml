@@ -37,6 +37,9 @@ uuid = { version = "1", default-features = false }
 quickcheck = "1.1.0"
 quickcheck_macros = "1.2.0"
 futures-executor = "0.3.31"
+# `Zeroizing`, so a test helper that takes a plain copy of an encoding out
+# of a `Protected` wipes it when it is dropped.
+zeroize = { workspace = true }
 
 # The frozen release the decimal and float encodings were ported from, so
 # the tests can check them byte for byte. It is not a dependency of the

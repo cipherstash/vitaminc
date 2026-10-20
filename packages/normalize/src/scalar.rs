@@ -21,7 +21,9 @@
 
 use unicode_general_category::{get_general_category, GeneralCategory};
 use unicode_normalization::UnicodeNormalization;
-use vitaminc_aead::plaintext::kinds::{timestamp_nanos, MAX_DATE_DAYS, MIN_DATE_DAYS};
+use vitaminc_aead::plaintext::kinds::{
+    MAX_DATE_DAYS, MAX_TIMESTAMP_NANOS, MIN_DATE_DAYS, MIN_TIMESTAMP_NANOS,
+};
 use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
 use vitaminc_protected::{Controlled, OpaqueDebug, Protected};
 
@@ -152,10 +154,35 @@ pub fn normalize(ty: Option<Logical>, v: Physical<'_>) -> Result<Normalized, Nor
 }
 
 /// An integer of any width: a sign byte, then the big-endian 128-bit word.
+///
+/// The sign byte is 1 for zero and above and 0 below zero. The word is the
+/// value sign-extended (or zero-extended) to 128 bits. These are the parts
+/// [`Int::sign_and_word`] gives.
 pub fn integer(value: Int) -> Protected<Vec<u8>> {
-    let (negative, word) = value.sign_and_word();
+    // The sign and word are worked out here, inside the closure that writes
+    // the protected buffer, rather than by calling `sign_and_word`. That
+    // call is not inlined across the crate boundary, and it returns its
+    // 32-byte result through a slot on this function's stack, which nothing
+    // wipes. Worked out here, they stay in registers until they are written
+    // to the buffer (checked in the compiled code for AArch64; Rust does not
+    // promise it). As in `sign_and_word`, only the width is branched on:
+    // the sign is the word's top bit, taken by shift, so no branch depends
+    // on the value.
     fixed::<17>(|b| {
-        b[0] = u8::from(!negative);
+        let (word, signed) = match value {
+            Int::I8(v) => (i128::from(v) as u128, 1),
+            Int::I16(v) => (i128::from(v) as u128, 1),
+            Int::I32(v) => (i128::from(v) as u128, 1),
+            Int::I64(v) => (i128::from(v) as u128, 1),
+            Int::I128(v) => (v as u128, 1),
+            Int::U8(v) => (u128::from(v), 0),
+            Int::U16(v) => (u128::from(v), 0),
+            Int::U32(v) => (u128::from(v), 0),
+            Int::U64(v) => (u128::from(v), 0),
+            Int::U128(v) => (v, 0),
+        };
+        let negative = ((word >> 127) as u8) & signed;
+        b[0] = negative ^ 1;
         b[1..].copy_from_slice(&word.to_be_bytes());
     })
 }
@@ -189,7 +216,17 @@ pub fn date(days: Int) -> Option<Protected<Vec<u8>>> {
 /// chrono's `DateTime<Utc>` orders by, truncated). `None` outside the
 /// timestamp range.
 pub fn timestamp(unit: TimeUnit, count: Int) -> Option<Protected<Vec<u8>>> {
-    let nanos = timestamp_nanos(unit, count)?;
+    // The nanosecond count is worked out here, the same way
+    // `vitaminc_aead::plaintext::kinds::timestamp_nanos` does, rather than
+    // by calling it. That call is not inlined across the crate boundary,
+    // and it returns the count through a 32-byte slot on this function's
+    // stack, which nothing wipes. Worked out here, the count stays in
+    // registers in a release build (checked in the compiled code for
+    // AArch64; Rust does not promise it).
+    let nanos = count.to_i128()?.checked_mul(unit.nanos())?;
+    if !(MIN_TIMESTAMP_NANOS..=MAX_TIMESTAMP_NANOS).contains(&nanos) {
+        return None;
+    }
     let seconds = i64::try_from(nanos.div_euclid(NANOS_PER_SECOND)).ok()?;
     let sub = (nanos.rem_euclid(NANOS_PER_SECOND) as u32) / 1_000 * 1_000;
     Some(fixed::<12>(|b| {

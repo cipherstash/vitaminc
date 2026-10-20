@@ -189,14 +189,21 @@ mod tests {
 
     const U96_MAX: u128 = (1u128 << 96) - 1;
 
-    /// The encoding of an in-range value, taken out of its protected
-    /// vector. The tests below index, sort and compare the bytes against
-    /// another crate's plain arrays, so this is the one place they leave
-    /// the wrapper.
+    /// The encoding of an in-range value, copied out of its protected
+    /// vector into a plain array. The tests below index, sort and compare
+    /// the bytes against another crate's plain arrays, so this is the one
+    /// place they leave the wrapper. The inputs are test values, not real
+    /// plaintext, so a plain array of them is fine here.
+    ///
+    /// The bytes are copied through a borrow, so the vector itself is never
+    /// taken out of its `Protected`, and it is wiped when it drops at the
+    /// end of this function.
     fn encode(mantissa: i128, scale: u32) -> [u8; ENCODED_LEN] {
         let scale = u8::try_from(scale).expect("scale fits u8");
-        let bytes = orderable(mantissa, scale).expect("in range").risky_unwrap();
-        <[u8; ENCODED_LEN]>::try_from(bytes).expect("the encoding is ENCODED_LEN bytes")
+        let mut encoded = orderable(mantissa, scale).expect("in range");
+        let mut out = [0u8; ENCODED_LEN];
+        encoded.update(|bytes| out.copy_from_slice(bytes));
+        out
     }
 
     /// Whether the encoder accepts `mantissa` and `scale`.
