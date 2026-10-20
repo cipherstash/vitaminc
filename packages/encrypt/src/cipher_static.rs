@@ -8,9 +8,10 @@ use vitaminc_aead::{tags, IntoAad, Unspecified};
 use vitaminc_protected::{Controlled, Protected};
 use zeroize::Zeroizing;
 
-/// What an [`Absent`] seals: the null leaf, as `None` is everywhere else
-/// (ADR 0001). No separate absence derivation is needed, because the leaf
-/// itself says what it is.
+/// What an [`Absent`] seals: the null leaf, as a `None` of bytes is
+/// everywhere else (ADR 0001). No separate absence derivation is needed,
+/// because the leaf itself says what it is. An [`Encrypted`] holds bytes,
+/// which are variable width, so its absence is not padded.
 const NULL_LEAF: [u8; 1] = [tags::NULL];
 
 /// What an [`Encrypted`] seals: the caller's bytes as a tagged bytes leaf,
@@ -71,8 +72,8 @@ impl StaticCipher for &Aes256Cipher {
         A: IntoAad<'a>,
     {
         // The marker is a sealed null leaf under the slot's own AAD: the same
-        // bytes `encrypt` seals for a `None` there, so the static and the
-        // sink-based paths agree on what absence is. An `Encrypted` is a
+        // bytes `encrypt` seals for a `None::<Vec<u8>>` there, so the static
+        // and the sink-based paths agree on what an absent byte string is. An `Encrypted` is a
         // tagged bytes leaf, so neither can stand in for the other:
         // `verify_absent` requires the null leaf and `open_encrypted` the
         // bytes tag.
@@ -490,7 +491,7 @@ mod test {
     }
 
     // An `Absent` is a sealed null leaf, which is what `encrypt` seals for
-    // a `None` too, so the two paths agree on absence. An `Encrypted` is a
+    // a `None::<Vec<u8>>` too, so the two paths agree on absence. An `Encrypted` is a
     // tagged bytes leaf, which is what `encrypt` seals for a `Vec<u8>`.
 
     #[test]
