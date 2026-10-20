@@ -25,6 +25,9 @@
 //! some targets.
 
 use vitaminc_aead::plaintext::kinds::MAX_DECIMAL_SCALE;
+use vitaminc_protected::Protected;
+
+use crate::scalar::fixed;
 
 /// Width of the padded-significand field in bytes (104 bits).
 const MANTISSA_BYTES: usize = 13;
@@ -60,12 +63,17 @@ const MAX_DIV_5: u128 = u128::MAX / 5;
 /// The encoding of `mantissa × 10^(-scale)`. Two equal values give the
 /// same bytes, and the bytes sort as the values do. `None` if the mantissa
 /// does not fit 96 bits or the scale is above 28.
-pub(crate) fn orderable(mantissa: i128, scale: u8) -> Option<[u8; ENCODED_LEN]> {
+///
+/// The encoder makes the protected vector it returns and writes every
+/// byte of the encoding straight into it, so no caller has to supply a
+/// buffer and remember to wipe it. The working values below are plain
+/// integers, which the compiler keeps in registers or short-lived stack
+/// slots that Rust cannot promise to wipe.
+pub(crate) fn orderable(mantissa: i128, scale: u8) -> Option<Protected<Vec<u8>>> {
     if scale > MAX_DECIMAL_SCALE || mantissa.unsigned_abs() >= MANTISSA_LIMIT {
         return None;
     }
     let scale = u32::from(scale);
-    let mut out = [0u8; ENCODED_LEN];
 
     // The pipeline runs unconditionally: zero goes through the same steps
     // as every other value (the helpers give it significand 0, digits 0,
@@ -103,29 +111,33 @@ pub(crate) fn orderable(mantissa: i128, scale: u8) -> Option<[u8; ENCODED_LEN]> 
         let stepped = padded_mantissa.wrapping_mul(10);
         padded_mantissa = (padded_mantissa & !mask) | (stepped & mask);
     }
-    let mant_be = padded_mantissa.to_be_bytes();
     debug_assert!(
-        mant_be[..16 - MANTISSA_BYTES].iter().all(|&b| b == 0),
+        padded_mantissa >> (8 * MANTISSA_BYTES) == 0,
         "padded mantissa overflowed 104 bits"
     );
-    let mant_field = &mant_be[16 - MANTISSA_BYTES..];
 
     // One mask handles the sign: 0xFF for a negative, 0x00 otherwise. Byte
     // 0 keeps the sign bit only when positive and XORs the exponent bits
     // with the mask; each significand byte is XORed with it too.
     let neg_mask = (mantissa >> 127) as u8;
-    out[0] = (SIGN_BIT & !neg_mask) | (biased_exp ^ (neg_mask & EXP_MASK));
-    for (i, &b) in mant_field.iter().enumerate() {
-        out[1 + i] = b ^ neg_mask;
-    }
 
     // The zero plaintext, applied branchlessly: the tail is already all
     // zero, so only byte 0 is replaced, by the bare sign bit, when the
     // mantissa is zero.
     let mant_nonzero_bit = ((abs_mantissa | abs_mantissa.wrapping_neg()) >> 127) as u8;
     let zero_mask = 0u8.wrapping_sub(mant_nonzero_bit ^ 1);
-    out[0] = (out[0] & !zero_mask) | (SIGN_BIT & zero_mask);
-    Some(out)
+
+    // Every byte is written. The significand bytes are taken from the
+    // integer by shifting, most significant first, rather than through a
+    // plain array of its bytes.
+    Some(fixed::<ENCODED_LEN>(|out| {
+        let head = (SIGN_BIT & !neg_mask) | (biased_exp ^ (neg_mask & EXP_MASK));
+        out[0] = (head & !zero_mask) | (SIGN_BIT & zero_mask);
+        for i in 0..MANTISSA_BYTES {
+            let shift = 8 * (MANTISSA_BYTES - 1 - i);
+            out[1 + i] = (padded_mantissa >> shift) as u8 ^ neg_mask;
+        }
+    }))
 }
 
 /// Divide by ten while the trailing digit is zero: the stripped value and
@@ -173,13 +185,23 @@ mod tests {
     use orderable_bytes::OrderableBytes;
     use quickcheck_macros::quickcheck;
     use rust_decimal::Decimal;
+    use vitaminc_protected::Controlled;
 
     const U96_MAX: u128 = (1u128 << 96) - 1;
 
-    /// The encoding of an in-range value.
+    /// The encoding of an in-range value, taken out of its protected
+    /// vector. The tests below index, sort and compare the bytes against
+    /// another crate's plain arrays, so this is the one place they leave
+    /// the wrapper.
     fn encode(mantissa: i128, scale: u32) -> [u8; ENCODED_LEN] {
         let scale = u8::try_from(scale).expect("scale fits u8");
-        orderable(mantissa, scale).expect("in range")
+        let bytes = orderable(mantissa, scale).expect("in range").risky_unwrap();
+        <[u8; ENCODED_LEN]>::try_from(bytes).expect("the encoding is ENCODED_LEN bytes")
+    }
+
+    /// Whether the encoder accepts `mantissa` and `scale`.
+    fn accepts(mantissa: i128, scale: u8) -> bool {
+        orderable(mantissa, scale).is_some()
     }
 
     /// The frozen encoding this one was ported from.
@@ -340,15 +362,34 @@ mod tests {
 
     /// The encoder checks its own range, so no caller can hand it a
     /// mantissa whose top bits it would drop.
-    #[test]
-    fn a_mantissa_or_scale_out_of_range_is_refused() {
-        let limit = 1i128 << 96;
-        assert!(orderable(limit - 1, 0).is_some(), "the largest mantissa");
-        assert!(orderable(1 - limit, 0).is_some(), "the smallest mantissa");
-        assert!(orderable(limit, 0).is_none(), "one past the largest");
-        assert!(orderable(-limit, 0).is_none(), "one past the smallest");
-        assert!(orderable(1, 28).is_some(), "the largest scale");
-        assert!(orderable(1, 29).is_none(), "one past the largest scale");
+    mod given_a_mantissa_or_scale_at_the_edge_of_the_range {
+        use super::*;
+
+        #[test]
+        fn returns_an_encoding() {
+            let limit = 1i128 << 96;
+            assert!(accepts(limit - 1, 0), "the largest mantissa is accepted");
+            assert!(accepts(1 - limit, 0), "the smallest mantissa is accepted");
+            assert!(accepts(1, 28), "the largest scale is accepted");
+        }
+    }
+
+    mod given_a_mantissa_or_scale_one_past_the_range {
+        use super::*;
+
+        #[test]
+        fn returns_none() {
+            let limit = 1i128 << 96;
+            assert!(
+                !accepts(limit, 0),
+                "one past the largest mantissa is refused"
+            );
+            assert!(
+                !accepts(-limit, 0),
+                "one past the smallest mantissa is refused"
+            );
+            assert!(!accepts(1, 29), "one past the largest scale is refused");
+        }
     }
 
     /// Every digit count, with and without trailing zeros, at every scale

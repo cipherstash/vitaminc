@@ -427,10 +427,23 @@ fn f64_canonicalisation_is_idempotent(bits: u64) -> bool {
     canonical_f64(value).to_bits() == value.to_bits()
 }
 
-#[quickcheck]
-fn orderable_f64_agrees_with_orderable_bytes(bits: u64) -> bool {
-    let value = canonical_f64(f64::from_bits(bits));
-    orderable_f64(value) == value.to_orderable_bytes()
+/// Whether `bytes` holds exactly `expected`, compared inside the
+/// protected value with `zip_ref` so the encoding never leaves its
+/// wrapper. Only the answer, which is not secret, is taken out.
+fn holds(bytes: &Protected<Vec<u8>>, expected: &[u8]) -> bool {
+    Protected::new(expected.to_vec())
+        .zip_ref(bytes, |expected, bytes: &Vec<u8>| *bytes == expected)
+        .risky_unwrap()
+}
+
+mod given_any_canonical_f64 {
+    use super::*;
+
+    #[quickcheck]
+    fn returns_the_bytes_orderable_bytes_gives(bits: u64) -> bool {
+        let value = canonical_f64(f64::from_bits(bits));
+        holds(&orderable_f64(value), &value.to_orderable_bytes())
+    }
 }
 
 #[test]
@@ -448,19 +461,47 @@ fn timestamps_one_past_chronos_range_are_invalid() {
     }
 }
 
-/// A `Vec` that grows frees its old buffer without wiping it, so the
-/// encoders that append in steps must start at their final size.
-#[test]
-fn incremental_encoders_never_outgrow_their_buffer() {
-    for value in [Int::I8(-1), Int::U128(u128::MAX), Int::I128(i128::MIN)] {
-        let bytes = integer(value);
-        assert_eq!(bytes.risky_ref().len(), 17);
-        assert_eq!(bytes.risky_ref().capacity(), 17);
-    }
-    for count in [Int::I64(-1), Int::I64(1_700_000_000_123)] {
-        let bytes = timestamp(TimeUnit::Millis, count).expect("in range");
-        assert_eq!(bytes.risky_ref().len(), 12);
-        assert_eq!(bytes.risky_ref().capacity(), 12);
+/// Whether `bytes` holds exactly `len` bytes in a buffer with room for
+/// exactly `len`, checked inside the protected value with `zip_ref` so
+/// the encoding never leaves its wrapper. Only the answer, which is not
+/// secret, is taken out.
+fn fills_exactly(bytes: &Protected<Vec<u8>>, len: usize) -> bool {
+    Protected::new(len)
+        .zip_ref(bytes, |len, bytes: &Vec<u8>| {
+            bytes.len() == len && bytes.capacity() == len
+        })
+        .risky_unwrap()
+}
+
+/// A `Vec` that grows frees its old buffer without wiping it, and spare
+/// capacity is a sign the buffer was not made at its final size. So every
+/// fixed-width encoder must return a buffer whose length is its capacity.
+mod given_a_fixed_width_encoder {
+    use super::*;
+
+    #[test]
+    fn returns_a_buffer_with_no_spare_capacity() {
+        for value in [Int::I8(-1), Int::U128(u128::MAX), Int::I128(i128::MIN)] {
+            assert!(fills_exactly(&integer(value), 17), "integer {value:?}");
+        }
+        for value in [Float::F32(-1.5), Float::F64(f64::MAX), Float::F64(f64::NAN)] {
+            assert!(fills_exactly(&float(value), 8), "float {value:?}");
+        }
+        for days in [Int::I32(-1), Int::I32(0), Int::I32(20_000)] {
+            let bytes = date(days).expect("in range");
+            assert!(fills_exactly(&bytes, 4), "date {days:?}");
+        }
+        for count in [Int::I64(-1), Int::I64(1_700_000_000_123)] {
+            let bytes = timestamp(TimeUnit::Millis, count).expect("in range");
+            assert!(fills_exactly(&bytes, 12), "timestamp {count:?}");
+        }
+        for (scale, mantissa) in [(0, Int::I64(0)), (2, Int::I64(-12_345)), (28, Int::I128(1))] {
+            let bytes = decimal(scale, mantissa).expect("in range");
+            assert!(
+                fills_exactly(&bytes, 14),
+                "decimal {mantissa:?} at scale {scale}"
+            );
+        }
     }
 }
 

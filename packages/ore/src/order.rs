@@ -345,14 +345,14 @@ fn int(value: Int) -> Protected<Vec<u8>> {
         // `convert` widens every 8-bit value to its target, so no
         // one-byte encoding is ever made: there is no 8-bit target.
         Int::I8(_) | Int::U8(_) => unreachable!("convert widens every 8-bit value to its target"),
-        Int::I16(v) => fixed(((v as u16) ^ (1 << 15)).to_be_bytes()),
-        Int::U16(v) => fixed(v.to_be_bytes()),
-        Int::I32(v) => fixed(((v as u32) ^ (1 << 31)).to_be_bytes()),
-        Int::U32(v) => fixed(v.to_be_bytes()),
-        Int::I64(v) => fixed(((v as u64) ^ (1 << 63)).to_be_bytes()),
-        Int::U64(v) => fixed(v.to_be_bytes()),
-        Int::I128(v) => fixed(((v as u128) ^ (1 << 127)).to_be_bytes()),
-        Int::U128(v) => fixed(v.to_be_bytes()),
+        Int::I16(v) => fixed(|b| *b = ((v as u16) ^ (1 << 15)).to_be_bytes()),
+        Int::U16(v) => fixed(|b| *b = v.to_be_bytes()),
+        Int::I32(v) => fixed(|b| *b = ((v as u32) ^ (1 << 31)).to_be_bytes()),
+        Int::U32(v) => fixed(|b| *b = v.to_be_bytes()),
+        Int::I64(v) => fixed(|b| *b = ((v as u64) ^ (1 << 63)).to_be_bytes()),
+        Int::U64(v) => fixed(|b| *b = v.to_be_bytes()),
+        Int::I128(v) => fixed(|b| *b = ((v as u128) ^ (1 << 127)).to_be_bytes()),
+        Int::U128(v) => fixed(|b| *b = v.to_be_bytes()),
     }
 }
 
@@ -380,11 +380,23 @@ fn variable_width(bytes: &[u8]) -> Protected<Vec<u8>> {
     out
 }
 
-/// A fixed-width encoding as a protected vector, with the array wrapped
-/// before it is copied so neither copy is dropped bare.
-fn fixed<const N: usize>(bytes: [u8; N]) -> Protected<Vec<u8>> {
-    let bytes = Protected::new(bytes);
-    Protected::new(bytes.risky_ref().to_vec())
+/// A fixed-width encoding, written by `write` straight into the protected
+/// vector that is returned.
+///
+/// The vector is allocated once at its final size, so it never
+/// reallocates, and `write` fills it in place. No separate array of the
+/// encoding is made and copied, so there is no extra copy to wipe. The
+/// compiler can still make short-lived temporaries while `write` runs, for
+/// example the array that `to_be_bytes` returns, and Rust cannot promise
+/// to wipe those.
+fn fixed<const N: usize>(mut write: impl FnMut(&mut [u8; N])) -> Protected<Vec<u8>> {
+    let mut bytes = Protected::new(vec![0u8; N]);
+    bytes.update(|bytes| {
+        let array = <&mut [u8; N]>::try_from(bytes.as_mut_slice())
+            .expect("the vector was made with exactly N bytes");
+        write(array);
+    });
+    bytes
 }
 
 /// The order normalizer, for [`vitaminc_normalize::Terms::by`]: [`order`]

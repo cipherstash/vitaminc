@@ -154,11 +154,10 @@ pub fn normalize(ty: Option<Logical>, v: Physical<'_>) -> Result<Normalized, Nor
 /// An integer of any width: a sign byte, then the big-endian 128-bit word.
 pub fn integer(value: Int) -> Protected<Vec<u8>> {
     let (negative, word) = value.sign_and_word();
-    let word = Protected::new(word.to_be_bytes());
-    let mut bytes = Protected::new(Vec::with_capacity(17));
-    bytes.risky_inner_mut().push(u8::from(!negative));
-    bytes.risky_inner_mut().extend_from_slice(word.risky_ref());
-    bytes
+    fixed::<17>(|b| {
+        b[0] = u8::from(!negative);
+        b[1..].copy_from_slice(&word.to_be_bytes());
+    })
 }
 
 /// A float of either width, as the orderable bytes of its `f64` value with
@@ -168,7 +167,7 @@ pub fn float(value: Float) -> Protected<Vec<u8>> {
         Float::F32(f) => widen_f32(f),
         Float::F64(f) => f,
     };
-    Protected::new(orderable_f64(canonical_f64(value)).to_vec())
+    orderable_f64(canonical_f64(value))
 }
 
 /// A date's day count since 1970-01-01, as the orderable bytes of its
@@ -180,9 +179,9 @@ pub fn date(days: Int) -> Option<Protected<Vec<u8>>> {
         return None;
     }
     let from_ce = days.checked_add(EPOCH_DAYS_FROM_CE)?;
-    Some(Protected::new(
-        ((from_ce as u32) ^ (1u32 << 31)).to_be_bytes().to_vec(),
-    ))
+    Some(fixed(|b| {
+        *b = ((from_ce as u32) ^ (1u32 << 31)).to_be_bytes()
+    }))
 }
 
 /// A count of `unit`s since the Unix epoch, as orderable seconds then
@@ -193,14 +192,10 @@ pub fn timestamp(unit: TimeUnit, count: Int) -> Option<Protected<Vec<u8>>> {
     let nanos = timestamp_nanos(unit, count)?;
     let seconds = i64::try_from(nanos.div_euclid(NANOS_PER_SECOND)).ok()?;
     let sub = (nanos.rem_euclid(NANOS_PER_SECOND) as u32) / 1_000 * 1_000;
-    let mut bytes = Protected::new(Vec::with_capacity(12));
-    bytes
-        .risky_inner_mut()
-        .extend_from_slice(&((seconds as u64) ^ (1u64 << 63)).to_be_bytes());
-    bytes
-        .risky_inner_mut()
-        .extend_from_slice(&sub.to_be_bytes());
-    Some(bytes)
+    Some(fixed::<12>(|b| {
+        b[..8].copy_from_slice(&((seconds as u64) ^ (1u64 << 63)).to_be_bytes());
+        b[8..].copy_from_slice(&sub.to_be_bytes());
+    }))
 }
 
 /// A decimal's mantissa and scale, as the 14-byte orderable encoding of
@@ -240,17 +235,25 @@ pub fn timestamp(unit: TimeUnit, count: Int) -> Option<Protected<Vec<u8>>> {
 /// same significand and exponent, and `+0` and `-0` to the same zero, so
 /// equal values are equal bytes, as `rust_decimal` compares them.
 pub fn decimal(scale: u8, mantissa: Int) -> Option<Protected<Vec<u8>>> {
-    let bytes = Protected::new(crate::decimal::orderable(mantissa.to_i128()?, scale)?);
-    Some(Protected::new(bytes.risky_ref().to_vec()))
+    crate::decimal::orderable(mantissa.to_i128()?, scale)
 }
 
 /// NFC in the pinned Unicode version, without case or accent folding.
 ///
 /// The result is written into one protected buffer sized exactly up front,
-/// so it never reallocates and frees an unwiped partial copy. The
-/// `unicode-normalization` iterator keeps its own small buffers of pending
-/// code points (inline for four, spilling to the heap for longer combining
-/// sequences); those are not wiped and are out of this crate's control.
+/// so it never reallocates and frees an unwiped partial copy.
+///
+/// The `unicode-normalization` iterators keep pending code points in small
+/// buffers of their own, with room for four code points inside the
+/// iterator. Decomposition holds the combining marks that follow a
+/// character in the same buffer as the decomposed form of the next
+/// character, so the buffer moves to the heap as soon as those together
+/// pass four code points: four marks followed by any character is enough.
+/// Composition moves its buffer to the heap when five marks after one
+/// character do not combine with it. Once a buffer is on the heap it stays
+/// there for the rest of the string, so every later character passes
+/// through it, and it is freed without being wiped. That is out of this
+/// crate's control (see #488).
 pub fn text(text: &str) -> Result<Protected<Vec<u8>>, NormalizeError> {
     if text
         .chars()
@@ -281,6 +284,28 @@ pub fn uuid(value: &[u8]) -> Option<Protected<Vec<u8>>> {
     (value.len() == 16).then(|| Protected::new(value.to_vec()))
 }
 
+/// A fixed-width encoding, written by `write` straight into the protected
+/// vector that is returned.
+///
+/// The vector is allocated once at its final size, so it never
+/// reallocates, and `write` fills it in place. No separate array of the
+/// encoding is made and copied, so there is no extra copy to wipe. The
+/// compiler can still make short-lived temporaries while `write` runs, for
+/// example the array that `to_be_bytes` returns, and Rust cannot promise
+/// to wipe those.
+///
+/// `vitaminc-ore` has its own private copy of this function rather than
+/// sharing this one, so it stays out of this crate's public API.
+pub(crate) fn fixed<const N: usize>(mut write: impl FnMut(&mut [u8; N])) -> Protected<Vec<u8>> {
+    let mut bytes = Protected::new(vec![0u8; N]);
+    bytes.update(|bytes| {
+        let array = <&mut [u8; N]>::try_from(bytes.as_mut_slice())
+            .expect("the vector was made with exactly N bytes");
+        write(array);
+    });
+    bytes
+}
+
 /// Days from 0001-01-01 (day 1, chrono's "days from CE") to 1970-01-01.
 const EPOCH_DAYS_FROM_CE: i32 = 719_163;
 const NANOS_PER_SECOND: i128 = 1_000_000_000;
@@ -288,10 +313,13 @@ const NANOS_PER_SECOND: i128 = 1_000_000_000;
 /// The orderable bytes of an `f64`: negatives flip every bit, positives
 /// the sign bit, so the bytes sort as the numbers do. Expects a value
 /// [`canonical_f64`] has already folded.
-fn orderable_f64(value: f64) -> [u8; 8] {
+///
+/// The bytes are written straight into the protected vector that is
+/// returned (see [`fixed`]).
+fn orderable_f64(value: f64) -> Protected<Vec<u8>> {
     let bits = value.to_bits();
     let sign_extension = ((bits as i64) >> 63) as u64;
-    (bits ^ (sign_extension | (1u64 << 63))).to_be_bytes()
+    fixed(|b| *b = (bits ^ (sign_extension | (1u64 << 63))).to_be_bytes())
 }
 
 /// `f64::from(f32)` in integer operations only. A hardware conversion can
