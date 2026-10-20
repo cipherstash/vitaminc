@@ -148,7 +148,7 @@ func (e Encoder) physical(v any) bool {
 }
 
 func decodeScalar(r *reader, tag byte) (any, error) {
-	b, err := r.take(scalarWidth(tag))
+	b, err := r.take(fixedWidth(tag))
 	if err != nil {
 		return nil, err
 	}
@@ -196,20 +196,138 @@ func decodeScalar(r *reader, tag byte) (any, error) {
 	}
 }
 
-// scalarWidth is the fixed payload width of an extended scalar tag, or zero
-// for a tag decodeScalar does not handle.
-func scalarWidth(tag byte) int {
+// fixedWidth is the payload width of a fixed-width scalar tag, or zero for
+// a tag whose payload is not fixed (or that has none).
+func fixedWidth(tag byte) int {
 	switch tag {
 	case tagInt8, tagUint8:
 		return 1
 	case tagInt16, tagUint16:
 		return 2
-	case tagDate:
+	case tagInt32, tagUint32, tagFloat32, tagDate:
 		return 4
+	case tagInt64, tagUint64, tagFloat64:
+		return 8
 	case tagTimestamp:
 		return 12
 	case tagInt128, tagUint128, tagDecimal:
 		return 16
 	}
 	return 0
+}
+
+// numericTag reports whether tag is a plain int or float: what a typed null
+// in the envelope may ride on under a timestamp unit or an unknown id.
+func numericTag(tag byte, floats bool) bool {
+	switch tag {
+	case tagInt8, tagUint8, tagInt16, tagUint16, tagInt32, tagUint32, tagInt64, tagUint64,
+		tagInt128, tagUint128:
+		return true
+	case tagFloat32, tagFloat64:
+		return floats
+	}
+	return false
+}
+
+// fixedTags is the tag each FixedType is written with, all but the UUID,
+// which travels in the envelope.
+var fixedTags = map[vcvalue.FixedType]byte{
+	vcvalue.TypeInt8:      tagInt8,
+	vcvalue.TypeInt16:     tagInt16,
+	vcvalue.TypeInt32:     tagInt32,
+	vcvalue.TypeInt64:     tagInt64,
+	vcvalue.TypeInt128:    tagInt128,
+	vcvalue.TypeUint8:     tagUint8,
+	vcvalue.TypeUint16:    tagUint16,
+	vcvalue.TypeUint32:    tagUint32,
+	vcvalue.TypeUint64:    tagUint64,
+	vcvalue.TypeUint128:   tagUint128,
+	vcvalue.TypeFloat32:   tagFloat32,
+	vcvalue.TypeFloat64:   tagFloat64,
+	vcvalue.TypeDate:      tagDate,
+	vcvalue.TypeTimestamp: tagTimestamp,
+	vcvalue.TypeDecimal:   tagDecimal,
+}
+
+// TypedNull records an absent value of a fixed-width type: a null padded to
+// the length of a value of t, so the two seal to the same length. Encode
+// writes one for a nil pointer to a fixed-width type; this channel is for a
+// caller that knows the type some other way. An invalid t fails the
+// encode.
+func (e Encoder) TypedNull(t vcvalue.FixedType) {
+	if e.st.err != nil {
+		return
+	}
+	var header []byte
+	var payload int
+	if t == vcvalue.TypeUUID {
+		header, payload = []byte{tagEnvelope, logicalUUID, 0, tagBytes}, 16
+	} else if tag, ok := fixedTags[t]; ok {
+		header, payload = []byte{tag}, fixedWidth(tag)
+	} else {
+		e.st.fail(vcvalue.ErrInvalidFixedType)
+		return
+	}
+	e.push(tagTypedNull)
+	e.push(header...)
+	// One byte of the value's length went to tagTypedNull.
+	e.push(make([]byte, payload-1)...)
+	e.complete()
+}
+
+// decodeTypedNull reads a typed null after its tag, as strictly as the Rust
+// codec does, so every absence has one encoding: a header a value of some
+// fixed-width type starts with, then exactly the zero padding to that
+// value's length. It decodes as nil. A frame is never sealed, so the padding
+// means nothing once the value is out, and Rust's frame writer writes the
+// plain null for it too.
+func decodeTypedNull(r *reader) (any, error) {
+	tag, err := r.byteTag()
+	if err != nil {
+		return nil, err
+	}
+	var payload int
+	switch {
+	case tag == tagEnvelope:
+		h, err := r.take(3)
+		if err != nil {
+			return nil, err
+		}
+		id, param, physical := h[0], h[1], h[2]
+		switch id {
+		case logicalTimestamp:
+			// The nanosecond unit has the shorthand Timestamp tag.
+			if param > unitMicros || !numericTag(physical, false) {
+				return nil, ErrMalformed
+			}
+			payload = fixedWidth(physical)
+		case logicalUUID:
+			if param != 0 || physical != tagBytes {
+				return nil, ErrMalformed
+			}
+			payload = 16
+		case 0, logicalUndefined, logicalDate, logicalDecimal:
+			return nil, ErrMalformed
+		default:
+			// A logical id this build does not know, over an int or float.
+			if !numericTag(physical, true) {
+				return nil, ErrMalformed
+			}
+			payload = fixedWidth(physical)
+		}
+	case tag == tagDate || tag == tagTimestamp || tag == tagDecimal || numericTag(tag, true):
+		payload = fixedWidth(tag)
+	default:
+		return nil, ErrMalformed
+	}
+	padding, err := r.take(payload - 1)
+	if err != nil {
+		return nil, err
+	}
+	for _, b := range padding {
+		if b != 0 {
+			return nil, ErrMalformed
+		}
+	}
+	return nil, nil
 }

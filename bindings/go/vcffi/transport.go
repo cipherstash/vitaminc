@@ -35,6 +35,10 @@ const (
 	tagDate      = 0x12
 	tagTimestamp = 0x13
 	tagDecimal   = 0x14
+	// tagTypedNull is an absent value of a fixed-width type, padded to that
+	// type's leaf length: the tag, the header a value of the type starts
+	// with, then zeros (vitaminc#493).
+	tagTypedNull = 0x15
 	tagArray     = 0xF0
 	tagObject    = 0xF1
 	// tagPassthrough wraps one value node that travels in the clear

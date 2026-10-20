@@ -12,7 +12,9 @@
 //   - Sealed is one encrypted leaf (version || nonce || ciphertext || tag),
 //     the only frozen byte format in the model. SealedEmptySeq and
 //     SealedEmptyMap are its authenticated marker siblings for empty
-//     composites; an absent value is a sealed null leaf (ADR 0001). This
+//     composites; an absent value is a sealed null leaf (ADR 0001), padded
+//     to the length of a value when its type is fixed width (TypedNull,
+//     and a nil pointer to such a type; vitaminc#493). This
 //     sealed family is vitaminc-encrypt's materialization of the model: another binding (a stack-encrypt SDK,
 //     say) defines its own distinct sealed-leaf types and wires them to the
 //     codec via vcffi's LeafSet — a stack-encrypt leaf is never a Sealed.

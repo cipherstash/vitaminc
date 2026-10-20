@@ -452,7 +452,10 @@ func Marshal(v any) ([]byte, error) {
 //   - map[string]T               → Map, keys SORTED for determinism;
 //   - structs                    → Map by field name, honoring `vc:"name"`
 //     tags (`vc:"-"` skips a field), in declaration order;
-//   - pointers                   → dereferenced (nil pointer → Null).
+//   - pointers                   → dereferenced; a nil pointer → a typed
+//     null if its element type is fixed width (see [fixedTypeOf]), Null
+//     otherwise;
+//   - vcvalue.TypedNull          → a typed null of its type.
 //
 // Map keys are sorted because Go map iteration order is randomized;
 // sorting makes the encrypted structure deterministic. Struct fields keep
@@ -522,6 +525,9 @@ func interceptMarkers(enc Encoder, v any) bool {
 		return true
 	case vcvalue.Tagged:
 		enc.Tagged(x)
+		return true
+	case vcvalue.TypedNull:
+		enc.TypedNull(x.Type)
 		return true
 	case vcvalue.Plain:
 		encodeAny(enc.Passthrough(), x.V)
@@ -628,7 +634,14 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 		encodeStruct(enc, rv)
 	case reflect.Pointer, reflect.Interface:
 		if rv.IsNil() {
-			enc.Null()
+			// A nil pointer still has its element type, so an absent
+			// fixed-width value is padded like Rust's Option<T>. A nil
+			// interface has no type to go by.
+			if t, ok := fixedTypeOf(rv.Type()); ok && rv.Kind() == reflect.Pointer {
+				enc.TypedNull(t)
+			} else {
+				enc.Null()
+			}
 			return
 		}
 		// Charge the dereference against the shared depth budget: it writes
@@ -702,6 +715,57 @@ func encodeStruct(enc Encoder, rv reflect.Value) {
 		return
 	}
 	_ = m.End()
+}
+
+var (
+	encryptableType = reflect.TypeOf((*Encryptable)(nil)).Elem()
+	timeType        = reflect.TypeOf(time.Time{})
+	fixedNamed      = map[reflect.Type]vcvalue.FixedType{
+		reflect.TypeOf(vcvalue.Int128{}):    vcvalue.TypeInt128,
+		reflect.TypeOf(vcvalue.Uint128{}):   vcvalue.TypeUint128,
+		reflect.TypeOf(vcvalue.Date{}):      vcvalue.TypeDate,
+		reflect.TypeOf(vcvalue.Timestamp{}): vcvalue.TypeTimestamp,
+		reflect.TypeOf(vcvalue.Decimal{}):   vcvalue.TypeDecimal,
+		reflect.TypeOf(vcvalue.UUID{}):      vcvalue.TypeUUID,
+		timeType:                            vcvalue.TypeTimestamp,
+	}
+	fixedKinds = map[reflect.Kind]vcvalue.FixedType{
+		reflect.Int8:    vcvalue.TypeInt8,
+		reflect.Int16:   vcvalue.TypeInt16,
+		reflect.Int32:   vcvalue.TypeInt32,
+		reflect.Int:     vcvalue.TypeInt64,
+		reflect.Int64:   vcvalue.TypeInt64,
+		reflect.Uint8:   vcvalue.TypeUint8,
+		reflect.Uint16:  vcvalue.TypeUint16,
+		reflect.Uint32:  vcvalue.TypeUint32,
+		reflect.Uint:    vcvalue.TypeUint64,
+		reflect.Uint64:  vcvalue.TypeUint64,
+		reflect.Uintptr: vcvalue.TypeUint64,
+		reflect.Float32: vcvalue.TypeFloat32,
+		reflect.Float64: vcvalue.TypeFloat64,
+	}
+)
+
+// fixedTypeOf is the fixed-width type a pointer of type t points at, through
+// any number of pointers, when encodeReflect would write every value of it
+// with one fixed-width tag: the codec's int, uint and float kinds, and the
+// fixed-width vcvalue and time types. A type that implements Encryptable
+// chooses its own encoding, which may not be fixed width, so it has none.
+func fixedTypeOf(t reflect.Type) (vcvalue.FixedType, bool) {
+	for t.Kind() == reflect.Pointer {
+		if t.Implements(encryptableType) {
+			return 0, false
+		}
+		t = t.Elem()
+	}
+	if t.Implements(encryptableType) {
+		return 0, false
+	}
+	if ft, ok := fixedNamed[t]; ok {
+		return ft, true
+	}
+	ft, ok := fixedKinds[t.Kind()]
+	return ft, ok
 }
 
 // interfaceOf is rv.Interface(), or nil where reflection forbids it

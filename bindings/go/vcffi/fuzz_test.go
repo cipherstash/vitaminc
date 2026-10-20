@@ -54,9 +54,10 @@ func addCorpusSeeds(f *testing.F, wrap func([]byte) []byte) {
 	}
 }
 
-// canonicalForm is what an accepted value encoding re-encodes as. Three
+// canonicalForm is what an accepted value encoding re-encodes as. Four
 // things may legitimately change, and nothing else: an Undefined tag (0x01)
-// comes back as Null (0x00), Go's documented projection; a decimal negative
+// comes back as Null (0x00), Go's documented projection; a typed null comes
+// back as Null too, as Rust's frame writer writes it; a decimal negative
 // zero comes back as zero with its scale kept (ADR 0001); and a timestamp in
 // the 0xF3 envelope (seconds, milliseconds or microseconds) comes back in
 // the shorthand nanosecond form, because Go reads it as a time.Time. The
@@ -132,9 +133,25 @@ func canonicalValue(r *reader, out *[]byte) {
 	case tagPassthrough:
 		*out = append(*out, tag)
 		canonicalValue(r, out)
+	case tagTypedNull:
+		// The header names the type, which fixes the padding; it all comes
+		// back as the plain null.
+		header, _ := r.byteTag()
+		width := fixedWidth(header)
+		if header == tagEnvelope {
+			b, _ := r.take(3)
+			if len(b) == 3 {
+				width = fixedWidth(b[2])
+				if b[2] == tagBytes {
+					width = 16
+				}
+			}
+		}
+		_, _ = r.take(width - 1)
+		*out = append(*out, tagNull)
 	default:
 		// Null, booleans and the fixed-width extended scalars.
-		b, _ := r.take(scalarWidth(tag))
+		b, _ := r.take(fixedWidth(tag))
 		*out = append(append(*out, tag), b...)
 	}
 }
@@ -147,13 +164,13 @@ func shorthandTimestamp(r *reader, unit byte) ([]byte, bool) {
 	var count *big.Int
 	switch tag {
 	case tagInt8, tagInt16, tagInt32, tagInt64, tagInt128:
-		b, _ := r.take(scalarWidth(tag) + map[byte]int{tagInt32: 4, tagInt64: 8}[tag])
+		b, _ := r.take(fixedWidth(tag))
 		if len(b) == 0 {
 			return nil, false
 		}
 		count = signedLittle(b)
 	case tagUint8, tagUint16, tagUint32, tagUint64, tagUint128:
-		b, _ := r.take(scalarWidth(tag) + map[byte]int{tagUint32: 4, tagUint64: 8}[tag])
+		b, _ := r.take(fixedWidth(tag))
 		if len(b) == 0 {
 			return nil, false
 		}

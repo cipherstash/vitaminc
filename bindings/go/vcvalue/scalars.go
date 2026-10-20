@@ -15,6 +15,7 @@ var (
 	ErrNonFiniteDecimal = errors.New("vcvalue: decimal must be finite")
 	ErrInvalidUUID      = errors.New("vcvalue: invalid UUID")
 	ErrInvalidTagged    = errors.New("vcvalue: a tagged value must hold a physical scalar under an unknown logical id")
+	ErrInvalidFixedType = errors.New("vcvalue: not a fixed-width type")
 )
 
 // Int128 is a signed two's-complement integer in little-endian byte order.

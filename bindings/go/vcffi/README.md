@@ -167,6 +167,33 @@ so that Rust and Node read it as a UUID.
 Matching explicit Encoder channels are available for custom `Encryptable`
 implementations.
 
+### Absent values
+
+AES-GCM keeps the plaintext's length, so a one-byte null sealed in place of a
+date would show which rows have no date. A nil pointer to a fixed-width type
+(`*int32`, `*float64`, `*time.Time`, `*vcvalue.Date`, `*vcvalue.Decimal`,
+`*vcvalue.UUID`, and so on, a named type over one included) is therefore
+written as a **typed null**, padded to the length of a value of that type, as
+Rust writes an `Option<T>`'s `None` (vitaminc#493):
+
+```go
+type Person struct {
+	Name string
+	Born *vcvalue.Date // nil seals as long as a date
+}
+```
+
+A nil with no fixed-width type to go by is the plain null: a nil interface, a
+nil `*bool` (a bool is already as short as a null), a nil `*string` or
+`*[]byte` (variable width), and a nil pointer to an `Encryptable`, whose
+encoding is its own. Where the Go type cannot say what is missing (a nil in a
+`map[string]any`), write `vcvalue.TypedNull{Type: vcvalue.TypeDate}`, or call
+`Encoder.TypedNull` from an `Encryptable`.
+
+A typed null decodes as `nil`, like every null. Out of the seal the padding
+means nothing, and Rust's frame writer writes it back as the plain null, so
+Go does too.
+
 The codec reads `testdata/value-conformance.json` from the repo root directly,
 as do Rust and Node. Invalid scalar widths, date ranges, nanoseconds, decimal
 flags and scales return `ErrMalformed`. Value construction errors retain the
