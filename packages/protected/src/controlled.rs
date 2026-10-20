@@ -1,9 +1,48 @@
 pub use crate::Protected;
 use crate::{private::ControlledPrivate, AsProtectedRef, ProtectedRef, ReplaceT};
+use crate::{with_owned, Owned};
 use zeroize::Zeroize;
 
+/// The operations every controlled wrapper (`Protected`, `Equatable`,
+/// `Exportable`) provides.
+///
+/// # How the combinators hand over the inner value
+///
+/// `map`, `map_ok`, `zip`, `zip_ref` and `update_with` consume a controlled
+/// value and give its inner value to a closure. The closure receives it as an
+/// [`Owned`], not bare, so whatever the closure does not move out is wiped
+/// when the `Owned` drops, including when the closure panics. The slot the
+/// value came from is wiped too. A closure that reads the value can use it
+/// through `Deref`:
+///
+/// ```
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{Controlled, Protected};
+/// let len = Protected::new(vec![1u8, 2, 3]).map(|v| v.len());
+/// assert_eq!(len.risky_unwrap(), 3);
+/// ```
+///
+/// A closure that keeps the value, for example to convert it, takes it out
+/// with [`Owned::into_inner`]. That moves the value, so a heap buffer is
+/// reused rather than copied, and the slot it leaves is wiped:
+///
+/// ```
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{Controlled, Protected};
+/// let text = Protected::new(vec![104u8, 105])
+///     .map_ok(|v| String::from_utf8(v.into_inner()))
+///     .expect("valid UTF-8");
+/// assert_eq!(text.risky_unwrap(), "hi");
+/// ```
+///
+/// Once a value is taken out it is bare again, and the closure owns the wipe
+/// of whatever it builds from it until that goes back into a controlled
+/// wrapper. In the example above the `String` is bare only until `map_ok`
+/// wraps it. If the conversion fails, the error from `String::from_utf8`
+/// carries the bytes, and nothing wipes them: wrap or map such errors before
+/// they leave the closure when the input is sensitive.
 pub trait Controlled: ControlledPrivate + Zeroize {
-    type Inner;
+    type Inner: Zeroize;
 
     fn init_from_inner(x: Self::Inner) -> Self;
     fn inner_mut(&mut self) -> &mut Self::Inner;
@@ -68,8 +107,11 @@ pub trait Controlled: ControlledPrivate + Zeroize {
         f().map(Self::init_from_inner)
     }
 
-    /// Map the inner value of this [Controlled] type`.
+    /// Map the inner value of this [Controlled] type.
     /// Conceptually similar to `Option::map`.
+    ///
+    /// The closure receives the inner value as a [`Owned`]; see the trait
+    /// docs for how to read it or take it out.
     ///
     /// # Example
     ///
@@ -79,21 +121,26 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
     /// use vitaminc::protected::{Controlled, Protected};
     /// let x = Protected::new(100u8);
-    /// let y = x.map(|x| x + 10);
+    /// let y = x.map(|x| *x + 10);
     /// assert_eq!(y.risky_unwrap(), 110);
     /// ```
     fn map<B, F>(self, f: F) -> <Self as ReplaceT<B>>::Output
     where
         Self: Sized + ReplaceT<B>,
-        F: FnOnce(<Self as Controlled>::Inner) -> B,
+        F: FnOnce(Owned<'_, <Self as Controlled>::Inner>) -> B,
         <Self as ReplaceT<B>>::Output: Controlled<Inner = B>,
         B: Zeroize,
     {
-        <Self as ReplaceT<B>>::Output::init_from_inner(f(self.risky_unwrap()))
+        <Self as ReplaceT<B>>::Output::init_from_inner(with_owned(self, f))
     }
 
     /// Similar to `map` but the closure returns a `Result` with the new inner value.
     /// The result is a `Result` with the new [Controlled] type.
+    ///
+    /// The closure receives the inner value as a [`Owned`]; see the trait
+    /// docs for how to read it or take it out. An error the closure returns is
+    /// passed through as is, so an error that carries the input bytes (such as
+    /// `FromUtf8Error`) carries them out unwiped.
     ///
     /// # Example
     ///
@@ -103,18 +150,18 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
     /// use vitaminc::protected::{Controlled, Protected};
     /// let x = Protected::new(vec![240, 159, 146, 150]);
-    /// let y = x.map_ok(String::from_utf8);
+    /// let y = x.map_ok(|v| String::from_utf8(v.into_inner()));
     /// assert!(matches!(y, Ok(_)));
     /// assert_eq!(y.unwrap().risky_unwrap(), "💖");
     /// ```
     fn map_ok<B, F, E>(self, f: F) -> Result<<Self as ReplaceT<B>>::Output, E>
     where
         Self: Sized + ReplaceT<B>,
-        F: FnOnce(<Self as Controlled>::Inner) -> Result<B, E>,
+        F: FnOnce(Owned<'_, <Self as Controlled>::Inner>) -> Result<B, E>,
         <Self as ReplaceT<B>>::Output: Controlled<Inner = B>,
         B: Zeroize,
     {
-        f(self.risky_unwrap()).map(<Self as ReplaceT<B>>::Output::init_from_inner)
+        with_owned(self, f).map(<Self as ReplaceT<B>>::Output::init_from_inner)
     }
 
     /// Zip two [Controlled] values of the same type together with a function that combines them.
@@ -128,9 +175,11 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// use vitaminc::protected::{Controlled, Protected};
     /// let x = Protected::new(1);
     /// let y = Protected::new(2);
-    /// let z = x.zip(y, |x, y| x + y);
+    /// let z = x.zip(y, |x, y| *x + *y);
     /// assert_eq!(z.risky_unwrap(), 3);
     /// ```
+    ///
+    /// Both inner values arrive as [`Owned`]; see the trait docs.
     ///
     /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
     /// e.g. `other` must have the same, or broader scope as `self`
@@ -139,13 +188,15 @@ pub trait Controlled: ControlledPrivate + Zeroize {
         Self: Sized,
         Other: Controlled,
         Out: Zeroize,
-        F: FnOnce(Self::Inner, Other::Inner) -> Out,
+        F: FnOnce(Owned<'_, Self::Inner>, Owned<'_, Other::Inner>) -> Out,
     {
         // TODO: Use Replace private trait
-        Protected::init_from_inner(f(self.risky_unwrap(), b.risky_unwrap()))
+        Protected::init_from_inner(with_owned(self, |a| with_owned(b, |b| f(a, b))))
     }
 
     /// Like `zip` but the second argument is a reference.
+    ///
+    /// The first inner value arrives as a [`Owned`]; see the trait docs.
     ///
     /// # Example
     ///
@@ -154,7 +205,11 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// use vitaminc::protected::{Controlled, Protected};
     /// let x = Protected::new(String::from("hello "));
     /// let y = Protected::new(String::from("world"));
-    /// let z = x.zip_ref(&y, |x, y| x + y);
+    /// let z = x.zip_ref(&y, |x, y| {
+    ///     let mut x = x.into_inner();
+    ///     x.push_str(y);
+    ///     x
+    /// });
     /// assert_eq!(z.risky_unwrap(), "hello world");
     /// ```
     ///
@@ -169,10 +224,12 @@ pub trait Controlled: ControlledPrivate + Zeroize {
         <Self as ReplaceT<Out>>::Output: Controlled<Inner = Out>,
         Other: AsProtectedRef<'a, A>,
         Out: Zeroize,
-        F: FnOnce(Self::Inner, &A) -> Out,
+        F: FnOnce(Owned<'_, Self::Inner>, &A) -> Out,
     {
         let arg: ProtectedRef<'a, A> = other.as_protected_ref();
-        <Self as ReplaceT<Out>>::Output::init_from_inner(f(self.risky_unwrap(), arg.inner_ref()))
+        <Self as ReplaceT<Out>>::Output::init_from_inner(with_owned(self, |a| {
+            f(a, arg.inner_ref())
+        }))
     }
 
     /// Similar to `map` but using references to that the inner value is updated in place.
@@ -199,7 +256,8 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     }
 
     /// Update the inner value with another [Controlled] value.
-    /// The inner value of the second argument is passed to the closure.
+    /// The inner value of the second argument is passed to the closure as a
+    /// [`Owned`]; see the trait docs.
     ///
     /// # Example
     ///
@@ -209,7 +267,7 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// let mut x = Protected::new([0u8; 32]);
     /// let y = Protected::new([1u8; 32]);
     /// x.update_with(y, |x, y| {
-    ///    x.copy_from_slice(&y);
+    ///    x.copy_from_slice(&*y);
     /// });
     /// assert_eq!(x.risky_unwrap(), [1u8; 32]);
     /// ```
@@ -218,14 +276,10 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// e.g. `other` must have the same, or broader scope as `self`
     fn update_with<Other, F>(&mut self, other: Other, mut f: F)
     where
-        F: FnMut(&mut Self::Inner, Other::Inner),
+        F: FnMut(&mut Self::Inner, Owned<'_, Other::Inner>),
         Other: Controlled,
     {
-        // FIXME: There's a chance here that other will be dropped and not zeroized correctly
-        // But not all Zeroize types are ZeroizeOnDrop - we may need to yield a wrapper type that Derefs to the inner value
-        // Ditto for the zip method
-        // Either that or just make sure the caller uses zeroize() on the other value :/
-        f(self.inner_mut(), other.risky_unwrap());
+        with_owned(other, |o| f(self.inner_mut(), o));
     }
 
     /// Like `update_with` but the second argument is a reference.
@@ -321,14 +375,14 @@ mod tests {
     #[test]
     fn test_map_homogenous_inner() {
         let x = Protected::new(100u8);
-        let y = x.map(|x| x + 10);
+        let y = x.map(|x| *x + 10);
         assert_eq!(y.risky_unwrap(), 110u8);
     }
 
     #[test]
     fn test_map_different_inner() {
         let x = Protected::new(100u8);
-        let y: Protected<u16> = x.map(u16::from);
+        let y: Protected<u16> = x.map(|x| u16::from(*x));
         assert_eq!(y.risky_unwrap(), 100u16);
     }
 
@@ -336,25 +390,25 @@ mod tests {
     fn test_map_adapter_homogenous_inner() {
         assert_eq!(
             Exportable::<Protected<u8>>::new(100)
-                .map(|x| x + 10)
+                .map(|x| *x + 10)
                 .risky_unwrap(),
             110u8
         );
         assert_eq!(
             Equatable::<Protected<u8>>::new(100)
-                .map(|x| x + 10)
+                .map(|x| *x + 10)
                 .risky_unwrap(),
             110u8
         );
         assert_eq!(
             Exportable::<Equatable<Protected<u8>>>::new(100)
-                .map(|x| x + 10)
+                .map(|x| *x + 10)
                 .risky_unwrap(),
             110u8
         );
         assert_eq!(
             Equatable::<Exportable<Protected<u8>>>::new(100)
-                .map(|x| x + 10)
+                .map(|x| *x + 10)
                 .risky_unwrap(),
             110u8
         );
@@ -364,25 +418,25 @@ mod tests {
     fn test_map_adapter_different_inner() {
         assert_eq!(
             Exportable::<Protected<u8>>::new(100)
-                .map(u16::from)
+                .map(|x| u16::from(*x))
                 .risky_unwrap(),
             100u16
         );
         assert_eq!(
             Equatable::<Protected<u8>>::new(100)
-                .map(u16::from)
+                .map(|x| u16::from(*x))
                 .risky_unwrap(),
             100u16
         );
         assert_eq!(
             Exportable::<Equatable<Protected<u8>>>::new(100)
-                .map(u16::from)
+                .map(|x| u16::from(*x))
                 .risky_unwrap(),
             100u16
         );
         assert_eq!(
             Equatable::<Exportable<Protected<u8>>>::new(100)
-                .map(u16::from)
+                .map(|x| u16::from(*x))
                 .risky_unwrap(),
             100u16
         );

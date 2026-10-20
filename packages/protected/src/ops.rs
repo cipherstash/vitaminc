@@ -11,6 +11,6 @@ where
     type Output = Protected<T::Output>;
 
     fn bitxor(self, rhs: Self) -> Self::Output {
-        self.zip(rhs, |x, y| x ^ y)
+        self.zip(rhs, |x, y| x.into_inner() ^ y.into_inner())
     }
 }

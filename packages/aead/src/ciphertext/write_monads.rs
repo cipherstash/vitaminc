@@ -60,7 +60,7 @@ impl<const N: usize> PlaintextWritten<N> {
         self,
         f: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, E>,
     ) -> EncryptedWithTag<N, E> {
-        EncryptedWithTag::new(self.0, self.1.map_ok(f))
+        EncryptedWithTag::new(self.0, self.1.map_ok(|plaintext| f(plaintext.into_inner())))
     }
 }
 

@@ -89,11 +89,10 @@ impl CiphertextAndTagReader {
         self,
         f: impl FnOnce(&mut [u8]) -> Result<usize, E>,
     ) -> Plaintext<E> {
-        Plaintext(self.0.map_ok(|raw| {
-            let mut raw = zeroize::Zeroizing::new(raw);
+        Plaintext(self.0.map_ok(|mut raw| {
             let len = f(&mut raw)?;
             raw.truncate(len);
-            Ok(core::mem::take(&mut *raw))
+            Ok(raw.into_inner())
         }))
     }
 }

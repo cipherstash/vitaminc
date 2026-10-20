@@ -540,7 +540,7 @@ mod oracle {
 fn fills_exactly(bytes: &Protected<Vec<u8>>, len: usize) -> bool {
     Protected::new(len)
         .zip_ref(bytes, |len, bytes: &Vec<u8>| {
-            bytes.len() == len && bytes.capacity() == len
+            bytes.len() == *len && bytes.capacity() == *len
         })
         .risky_unwrap()
 }

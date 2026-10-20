@@ -675,7 +675,7 @@ pub(super) unsafe fn wipe_raw(ptr: *mut u8, len: usize) {
 ///
 /// `slot` must point to `size_of::<T>()` writable bytes that will never be
 /// read as a `T` again.
-unsafe fn wipe_bytes<T>(slot: *mut T) {
+pub(crate) unsafe fn wipe_bytes<T>(slot: *mut T) {
     wipe_raw(slot.cast::<u8>(), mem::size_of::<T>());
 }
 

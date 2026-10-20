@@ -39,8 +39,9 @@ inner type is: unlike a move, a `Copy` value has no single owner whose drop can
 wipe it. Duplicating the wrapper is an explicit `clone()`, and each clone is
 wiped when it drops. See the `Protected` type docs for the full rationale.
 `risky_unwrap` is the escape hatch: it hands back the plain inner value along
-with the obligation to wipe it. Combinators such as `map` show the plain value
-only to their closure and return the result re-wrapped.
+with the obligation to wipe it. Combinators such as `map` hand the value to
+their closure as an `Owned`, which is wiped when the closure is done with it
+unless the closure takes it with `into_inner`, and return the result re-wrapped.
 It also provides an "opaque" implementation of the `Debug` trait so you can debug protected values
 without accidentally leaking their innards.
 
@@ -113,7 +114,7 @@ use vitaminc_protected::{Controlled, Protected};
 
 let x: Protected<u8> = Protected::new(1);
 let y: Protected<u8> = Protected::new(2);
-let z: Protected<u8> = x.zip(y, |a, b| a + b);
+let z: Protected<u8> = x.zip(y, |a, b| *a + *b);
 ```
 
 If the inner type is an `Option` you can call `transpose` to swap the `Protected` and the `Option`.

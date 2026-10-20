@@ -47,7 +47,7 @@ fn untagged_bytes(leaf: Protected<Vec<u8>>) -> Result<Protected<Vec<u8>>, Unspec
         // on drop as well; this keeps nothing secret there to begin with.
         bytes.rotate_left(1);
         bytes.pop();
-        bytes
+        bytes.into_inner()
     }))
 }
 

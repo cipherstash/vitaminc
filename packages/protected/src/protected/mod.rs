@@ -43,12 +43,12 @@ impl<T: Zeroize> Protected<T> {
     }
 }
 
-// SAFETY: `inner_ptr` returns a pointer to `self`'s live, owned inner field, and
+// SAFETY: `inner_ptr_mut` returns a pointer to `self`'s live, owned inner field, and
 // `Protected`'s derived `Drop` only zeroizes — satisfying `MoveInner`'s contract.
 unsafe impl<T: Zeroize> crate::MoveInner for Protected<T> {
     type Inner = T;
-    fn inner_ptr(&self) -> *const T {
-        &self.0
+    fn inner_ptr_mut(&mut self) -> *mut T {
+        &mut self.0
     }
 }
 
