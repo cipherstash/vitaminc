@@ -86,4 +86,14 @@ func TestANilBoolOrStringSealsThePlainNull(t *testing.T) {
 	if got, want := len(ct.(map[string]any)["On"].(vcvalue.Sealed)), len(present.(map[string]any)["On"].(vcvalue.Sealed)); got != want {
 		t.Fatalf("bool: absent %d, present %d", got, want)
 	}
+	// A nil *string seals the plain null: as long as an empty string, and
+	// shorter than any other.
+	empty := ""
+	withName, err := cipher.Encrypt(t.Context(), rec{Name: &empty}, aad)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	if got, want := len(ct.(map[string]any)["Name"].(vcvalue.Sealed)), len(withName.(map[string]any)["Name"].(vcvalue.Sealed)); got != want {
+		t.Fatalf("string: absent %d, empty %d", got, want)
+	}
 }

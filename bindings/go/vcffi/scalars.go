@@ -78,9 +78,13 @@ func (e Encoder) UUID(u vcvalue.UUID) {
 	if e.st.err != nil {
 		return
 	}
-	e.push(tagEnvelope, logicalUUID, 0)
+	e.push(uuidEnvelope[:]...)
 	e.Bytes(u[:])
 }
+
+// uuidEnvelope is the envelope header a UUID starts with, and the header of
+// a UUID's typed null: the Uuid logical type, no parameter, over bytes.
+var uuidEnvelope = [3]byte{tagEnvelope, logicalUUID, 0}
 
 // Tagged records a physical scalar under a logical id this build does not
 // know, in the 0xF3 envelope: what Unmarshal produced for such a value, so
@@ -230,7 +234,7 @@ func numericTag(tag byte, floats bool) bool {
 }
 
 // fixedTags is the tag each FixedType is written with, all but the UUID,
-// which travels in the envelope.
+// whose header is uuidEnvelope over tagBytes.
 var fixedTags = map[vcvalue.FixedType]byte{
 	vcvalue.TypeInt8:      tagInt8,
 	vcvalue.TypeInt16:     tagInt16,
@@ -258,15 +262,17 @@ func (e Encoder) TypedNull(t vcvalue.FixedType) {
 	if e.st.err != nil {
 		return
 	}
+	if !t.Valid() {
+		e.st.fail(vcvalue.ErrInvalidFixedType)
+		return
+	}
 	var header []byte
 	var payload int
 	if t == vcvalue.TypeUUID {
-		header, payload = []byte{tagEnvelope, logicalUUID, 0, tagBytes}, 16
-	} else if tag, ok := fixedTags[t]; ok {
-		header, payload = []byte{tag}, fixedWidth(tag)
+		header, payload = append(uuidEnvelope[:], tagBytes), len(vcvalue.UUID{})
 	} else {
-		e.st.fail(vcvalue.ErrInvalidFixedType)
-		return
+		tag := fixedTags[t]
+		header, payload = []byte{tag}, fixedWidth(tag)
 	}
 	e.push(tagTypedNull)
 	e.push(header...)

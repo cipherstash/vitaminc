@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -228,4 +229,60 @@ func TestATypedNullIsReadStrictly(t *testing.T) {
 			t.Fatalf("%s: %v", h, err)
 		}
 	}
+}
+
+// Every fixed-width marker and kind writes its values with the header its
+// typed null carries, so the one table cannot pad a type as something it is
+// not. A marker added without a sample here fails the test.
+func TestEveryFixedTypeIsWrittenWithItsTypedNullsHeader(t *testing.T) {
+	samples := map[reflect.Type]any{
+		reflect.TypeOf(vcvalue.Int128{}):    vcvalue.Int128{1},
+		reflect.TypeOf(vcvalue.Uint128{}):   vcvalue.Uint128{1},
+		reflect.TypeOf(vcvalue.Date{}):      vcvalue.Date{Year: 2000, Month: 1, Day: 1},
+		reflect.TypeOf(time.Time{}):         time.Unix(7, 0),
+		reflect.TypeOf(vcvalue.Timestamp{}): vcvalue.Timestamp{Seconds: 7},
+		reflect.TypeOf(vcvalue.Decimal{}):   vcvalue.Decimal{Scale: 1},
+		reflect.TypeOf(vcvalue.UUID{}):      vcvalue.UUID{1},
+	}
+	check := func(name string, ft vcvalue.FixedType, sample any) {
+		null, err := Marshal(vcvalue.TypedNull{Type: ft})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		value, err := Marshal(sample)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		// The typed null's header (after its tag) begins the value's.
+		header := null[1:]
+		for len(header) > 0 && header[len(header)-1] == 0 {
+			header = header[:len(header)-1]
+		}
+		if !bytes.HasPrefix(value, header) {
+			t.Fatalf("%s: value %x does not start with its typed null's header %x", name, value, header)
+		}
+	}
+	for typ, m := range markers {
+		if m.fixed == 0 {
+			continue
+		}
+		sample, ok := samples[typ]
+		if !ok {
+			t.Fatalf("no sample for the fixed-width marker %v", typ)
+		}
+		check(typ.String(), m.fixed, sample)
+	}
+	for kind, n := range numericKinds {
+		check(kind.String(), n.fixed, reflect.Zero(kindTypes[kind]).Interface())
+	}
+}
+
+var kindTypes = map[reflect.Kind]reflect.Type{
+	reflect.Int8: reflect.TypeOf(int8(0)), reflect.Int16: reflect.TypeOf(int16(0)),
+	reflect.Int32: reflect.TypeOf(int32(0)), reflect.Int: reflect.TypeOf(0),
+	reflect.Int64: reflect.TypeOf(int64(0)), reflect.Uint8: reflect.TypeOf(uint8(0)),
+	reflect.Uint16: reflect.TypeOf(uint16(0)), reflect.Uint32: reflect.TypeOf(uint32(0)),
+	reflect.Uint: reflect.TypeOf(uint(0)), reflect.Uint64: reflect.TypeOf(uint64(0)),
+	reflect.Uintptr: reflect.TypeOf(uintptr(0)), reflect.Float32: reflect.TypeOf(float32(0)),
+	reflect.Float64: reflect.TypeOf(float64(0)),
 }

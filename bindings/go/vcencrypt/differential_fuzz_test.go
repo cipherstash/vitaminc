@@ -129,6 +129,21 @@ func corpusCiphertexts(f *testing.F) [][]byte {
 	return out
 }
 
+// intWidths is the payload width of each int tag, which a timestamp in the
+// envelope rides on.
+var intWidths = map[byte]int{0x0C: 1, 0x0D: 1, 0x0E: 2, 0x0F: 2, 0x04: 4, 0x06: 4, 0x05: 8, 0x07: 8, 0x10: 16, 0x11: 16}
+
+// typedNullWidths is the payload width of each header a typed null may
+// carry: an int, a float, a date, a timestamp, a decimal, and bytes, which
+// only a UUID's typed null carries, sixteen wide.
+var typedNullWidths = func() map[byte]int {
+	m := map[byte]int{0x08: 4, 0x12: 4, 0x09: 8, 0x13: 12, 0x14: 16, 0x0B: 16}
+	for tag, width := range intWidths {
+		m[tag] = width
+	}
+	return m
+}()
+
 // requireGoMatchesRust fails unless goOut is rustOut with exactly Go's
 // documented projections applied: an Undefined value-node tag (0x01) turned
 // into Null (0x00), and a timestamp in the 0xF3 envelope (seconds,
@@ -229,8 +244,6 @@ func rewrite(data []byte, goProjection bool) []byte {
 			out = append(out, tag)
 			walk()
 		case 0x15: // a typed null: both sides write it back as the plain null
-			widths := map[byte]int{0x0C: 1, 0x0D: 1, 0x0E: 2, 0x0F: 2, 0x04: 4, 0x06: 4, 0x08: 4,
-				0x12: 4, 0x05: 8, 0x07: 8, 0x09: 8, 0x13: 12, 0x10: 16, 0x11: 16, 0x14: 16, 0x0B: 16}
 			header := take(1)
 			if len(header) == 1 && header[0] == 0xF3 {
 				// id and parameter, then the physical tag the width follows.
@@ -239,7 +252,7 @@ func rewrite(data []byte, goProjection bool) []byte {
 				}
 			}
 			if len(header) == 1 {
-				take(widths[header[0]] - 1)
+				take(typedNullWidths[header[0]] - 1)
 			}
 			out = append(out, 0x00)
 		case 0xF3: // the envelope: id, parameter, then a physical scalar
@@ -269,8 +282,7 @@ func shorthandTimestamp(data []byte, pos *int, unit byte) ([]byte, bool) {
 		return nil, false
 	}
 	tag := data[*pos]
-	widths := map[byte]int{0x0C: 1, 0x0D: 1, 0x0E: 2, 0x0F: 2, 0x04: 4, 0x06: 4, 0x05: 8, 0x07: 8, 0x10: 16, 0x11: 16}
-	width, ok := widths[tag]
+	width, ok := intWidths[tag]
 	if !ok || *pos+1+width > len(data) {
 		return nil, false
 	}

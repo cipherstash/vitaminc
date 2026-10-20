@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -501,39 +502,8 @@ func encodeAny(enc Encoder, v any) {
 //     pointer, which still satisfies the assertion but would dereference nil
 //     in typical implementations; it encodes as Null like every other nil.
 func interceptMarkers(enc Encoder, v any) bool {
-	switch x := v.(type) {
-	case vcvalue.Int128:
-		enc.Int128(x)
-		return true
-	case vcvalue.Uint128:
-		enc.UInt128(x)
-		return true
-	case vcvalue.Date:
-		enc.Date(x)
-		return true
-	case time.Time:
-		enc.Timestamp(x)
-		return true
-	case vcvalue.Timestamp:
-		enc.TimestampParts(x)
-		return true
-	case vcvalue.Decimal:
-		enc.Decimal(x)
-		return true
-	case vcvalue.UUID:
-		enc.UUID(x)
-		return true
-	case vcvalue.Tagged:
-		enc.Tagged(x)
-		return true
-	case vcvalue.TypedNull:
-		enc.TypedNull(x.Type)
-		return true
-	case vcvalue.Plain:
-		encodeAny(enc.Passthrough(), x.V)
-		return true
-	case vcvalue.Object:
-		encodeObject(enc, x)
+	if m, ok := markers[reflect.TypeOf(v)]; ok {
+		m.encode(enc, v)
 		return true
 	}
 	if e, ok := v.(Encryptable); ok {
@@ -574,40 +544,13 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 		return
 	}
 
+	if k, ok := numericKinds[rv.Kind()]; ok {
+		k.encode(enc, rv)
+		return
+	}
 	switch rv.Kind() {
 	case reflect.Bool:
 		enc.Bool(rv.Bool())
-	case reflect.Int8:
-		enc.Int8(int8(rv.Int()))
-	case reflect.Int16:
-		enc.Int16(int16(rv.Int()))
-	case reflect.Int32:
-		enc.Int32(int32(rv.Int()))
-	case reflect.Int, reflect.Int64:
-		enc.Int64(rv.Int())
-	case reflect.Uint8:
-		enc.UInt8(uint8(rv.Uint()))
-	case reflect.Uint16:
-		enc.UInt16(uint16(rv.Uint()))
-	case reflect.Uint32:
-		enc.UInt32(uint32(rv.Uint()))
-	case reflect.Uint, reflect.Uint64, reflect.Uintptr:
-		// Every unsigned word-or-wider kind keeps its unsigned identity as
-		// UInt64 (no fit-check: a bare uint always maps to UINT64 now).
-		enc.UInt64(rv.Uint())
-	case reflect.Float32:
-		// rv.Float() widens to float64, and the hardware widening sets the
-		// quiet bit of a signaling NaN. Converting to the built-in float32
-		// instead copies the bits (reflect special-cases float32 to float32,
-		// Go issue 36400), so a named float32 type keeps them too. Only a
-		// value that cannot be read as an interface falls back to widening.
-		if f, ok := interfaceOf(rv.Convert(float32Type)).(float32); ok {
-			enc.Float32(f)
-		} else {
-			enc.Float32(float32(rv.Float()))
-		}
-	case reflect.Float64:
-		enc.Float64(rv.Float())
 	case reflect.String:
 		enc.String(rv.String())
 	case reflect.Slice:
@@ -637,7 +580,9 @@ func encodeReflect(enc Encoder, rv reflect.Value) {
 			// A nil pointer still has its element type, so an absent
 			// fixed-width value is padded like Rust's Option<T>. A nil
 			// interface has no type to go by.
-			if t, ok := fixedTypeOf(rv.Type()); ok && rv.Kind() == reflect.Pointer {
+			if rv.Kind() != reflect.Pointer {
+				enc.Null()
+			} else if t, ok := fixedTypeOf(rv.Type()); ok {
 				enc.TypedNull(t)
 			} else {
 				enc.Null()
@@ -717,61 +662,136 @@ func encodeStruct(enc Encoder, rv reflect.Value) {
 	_ = m.End()
 }
 
+// marker is how interceptMarkers writes a type it handles by exact type,
+// and the fixed-width type of its typed null, if it has one (zero if not).
+// One table for both, so a new marker type cannot be written one way and
+// padded, or not, another.
+type marker struct {
+	fixed  vcvalue.FixedType
+	encode func(Encoder, any)
+}
+
+// numeric is how encodeReflect writes an int, uint or float kind, and the
+// fixed-width type of its typed null: the same one-table rule as marker.
+type numeric struct {
+	fixed  vcvalue.FixedType
+	encode func(Encoder, reflect.Value)
+}
+
 var (
 	encryptableType = reflect.TypeOf((*Encryptable)(nil)).Elem()
-	timeType        = reflect.TypeOf(time.Time{})
-	fixedNamed      = map[reflect.Type]vcvalue.FixedType{
-		reflect.TypeOf(vcvalue.Int128{}):    vcvalue.TypeInt128,
-		reflect.TypeOf(vcvalue.Uint128{}):   vcvalue.TypeUint128,
-		reflect.TypeOf(vcvalue.Date{}):      vcvalue.TypeDate,
-		reflect.TypeOf(vcvalue.Timestamp{}): vcvalue.TypeTimestamp,
-		reflect.TypeOf(vcvalue.Decimal{}):   vcvalue.TypeDecimal,
-		reflect.TypeOf(vcvalue.UUID{}):      vcvalue.TypeUUID,
-		timeType:                            vcvalue.TypeTimestamp,
+	float32Type     = reflect.TypeOf(float32(0))
+
+	// markers is filled in init: Plain and Object encode by calling back
+	// into encodeAny, which reads the table.
+	markers map[reflect.Type]marker
+
+	numericKinds = map[reflect.Kind]numeric{
+		reflect.Int8:  {vcvalue.TypeInt8, func(e Encoder, rv reflect.Value) { e.Int8(int8(rv.Int())) }},
+		reflect.Int16: {vcvalue.TypeInt16, func(e Encoder, rv reflect.Value) { e.Int16(int16(rv.Int())) }},
+		reflect.Int32: {vcvalue.TypeInt32, func(e Encoder, rv reflect.Value) { e.Int32(int32(rv.Int())) }},
+		reflect.Int:   {vcvalue.TypeInt64, func(e Encoder, rv reflect.Value) { e.Int64(rv.Int()) }},
+		reflect.Int64: {vcvalue.TypeInt64, func(e Encoder, rv reflect.Value) { e.Int64(rv.Int()) }},
+		reflect.Uint8: {vcvalue.TypeUint8, func(e Encoder, rv reflect.Value) { e.UInt8(uint8(rv.Uint())) }},
+		reflect.Uint16: {vcvalue.TypeUint16, func(e Encoder, rv reflect.Value) {
+			e.UInt16(uint16(rv.Uint()))
+		}},
+		reflect.Uint32: {vcvalue.TypeUint32, func(e Encoder, rv reflect.Value) {
+			e.UInt32(uint32(rv.Uint()))
+		}},
+		// Every unsigned word-or-wider kind keeps its unsigned identity as
+		// UInt64 (no fit-check: a bare uint always maps to UINT64).
+		reflect.Uint:    {vcvalue.TypeUint64, func(e Encoder, rv reflect.Value) { e.UInt64(rv.Uint()) }},
+		reflect.Uint64:  {vcvalue.TypeUint64, func(e Encoder, rv reflect.Value) { e.UInt64(rv.Uint()) }},
+		reflect.Uintptr: {vcvalue.TypeUint64, func(e Encoder, rv reflect.Value) { e.UInt64(rv.Uint()) }},
+		reflect.Float32: {vcvalue.TypeFloat32, func(e Encoder, rv reflect.Value) {
+			// rv.Float() widens to float64, and the hardware widening sets
+			// the quiet bit of a signaling NaN. Converting to the built-in
+			// float32 instead copies the bits (reflect special-cases float32
+			// to float32, Go issue 36400), so a named float32 type keeps
+			// them too. Only a value that cannot be read as an interface
+			// falls back to widening.
+			if f, ok := interfaceOf(rv.Convert(float32Type)).(float32); ok {
+				e.Float32(f)
+			} else {
+				e.Float32(float32(rv.Float()))
+			}
+		}},
+		reflect.Float64: {vcvalue.TypeFloat64, func(e Encoder, rv reflect.Value) { e.Float64(rv.Float()) }},
 	}
-	fixedKinds = map[reflect.Kind]vcvalue.FixedType{
-		reflect.Int8:    vcvalue.TypeInt8,
-		reflect.Int16:   vcvalue.TypeInt16,
-		reflect.Int32:   vcvalue.TypeInt32,
-		reflect.Int:     vcvalue.TypeInt64,
-		reflect.Int64:   vcvalue.TypeInt64,
-		reflect.Uint8:   vcvalue.TypeUint8,
-		reflect.Uint16:  vcvalue.TypeUint16,
-		reflect.Uint32:  vcvalue.TypeUint32,
-		reflect.Uint:    vcvalue.TypeUint64,
-		reflect.Uint64:  vcvalue.TypeUint64,
-		reflect.Uintptr: vcvalue.TypeUint64,
-		reflect.Float32: vcvalue.TypeFloat32,
-		reflect.Float64: vcvalue.TypeFloat64,
-	}
+
+	// fixedTypes caches fixedTypeOf by pointer type: every nil pointer of a
+	// record type would otherwise pay its reflection again.
+	fixedTypes sync.Map
 )
 
+func init() {
+	markers = map[reflect.Type]marker{
+		reflect.TypeOf(vcvalue.Int128{}): {vcvalue.TypeInt128, func(e Encoder, v any) {
+			e.Int128(v.(vcvalue.Int128))
+		}},
+		reflect.TypeOf(vcvalue.Uint128{}): {vcvalue.TypeUint128, func(e Encoder, v any) {
+			e.UInt128(v.(vcvalue.Uint128))
+		}},
+		reflect.TypeOf(vcvalue.Date{}): {vcvalue.TypeDate, func(e Encoder, v any) {
+			e.Date(v.(vcvalue.Date))
+		}},
+		reflect.TypeOf(time.Time{}): {vcvalue.TypeTimestamp, func(e Encoder, v any) {
+			e.Timestamp(v.(time.Time))
+		}},
+		reflect.TypeOf(vcvalue.Timestamp{}): {vcvalue.TypeTimestamp, func(e Encoder, v any) {
+			e.TimestampParts(v.(vcvalue.Timestamp))
+		}},
+		reflect.TypeOf(vcvalue.Decimal{}): {vcvalue.TypeDecimal, func(e Encoder, v any) {
+			e.Decimal(v.(vcvalue.Decimal))
+		}},
+		reflect.TypeOf(vcvalue.UUID{}): {vcvalue.TypeUUID, func(e Encoder, v any) {
+			e.UUID(v.(vcvalue.UUID))
+		}},
+		// A tagged value's physical type is in the value, not the type.
+		reflect.TypeOf(vcvalue.Tagged{}): {0, func(e Encoder, v any) { e.Tagged(v.(vcvalue.Tagged)) }},
+		reflect.TypeOf(vcvalue.TypedNull{}): {0, func(e Encoder, v any) {
+			e.TypedNull(v.(vcvalue.TypedNull).Type)
+		}},
+		reflect.TypeOf(vcvalue.Plain{}): {0, func(e Encoder, v any) {
+			encodeAny(e.Passthrough(), v.(vcvalue.Plain).V)
+		}},
+		reflect.TypeOf(vcvalue.Object{}): {0, func(e Encoder, v any) {
+			encodeObject(e, v.(vcvalue.Object))
+		}},
+	}
+}
+
 // fixedTypeOf is the fixed-width type a pointer of type t points at, through
-// any number of pointers, when encodeReflect would write every value of it
-// with one fixed-width tag: the codec's int, uint and float kinds, and the
-// fixed-width vcvalue and time types. A type that implements Encryptable
-// chooses its own encoding, which may not be fixed width, so it has none.
+// any number of pointers, when encodeReflect writes every value of it with
+// one fixed-width tag: the int, uint and float kinds (a named type over one
+// included) and the fixed-width marker types, exactly (a named type over a
+// marker is a struct to reflection, written field by field). A type that
+// implements Encryptable chooses its own encoding, which may not be fixed
+// width, so it has none.
 func fixedTypeOf(t reflect.Type) (vcvalue.FixedType, bool) {
-	for t.Kind() == reflect.Pointer {
-		if t.Implements(encryptableType) {
-			return 0, false
+	if cached, ok := fixedTypes.Load(t); ok {
+		ft := cached.(vcvalue.FixedType)
+		return ft, ft != 0
+	}
+	var ft vcvalue.FixedType
+	elem := t
+	for elem.Kind() == reflect.Pointer && !elem.Implements(encryptableType) {
+		elem = elem.Elem()
+	}
+	if !elem.Implements(encryptableType) {
+		if m, ok := markers[elem]; ok {
+			ft = m.fixed
+		} else {
+			ft = numericKinds[elem.Kind()].fixed
 		}
-		t = t.Elem()
 	}
-	if t.Implements(encryptableType) {
-		return 0, false
-	}
-	if ft, ok := fixedNamed[t]; ok {
-		return ft, true
-	}
-	ft, ok := fixedKinds[t.Kind()]
-	return ft, ok
+	fixedTypes.Store(t, ft)
+	return ft, ft != 0
 }
 
 // interfaceOf is rv.Interface(), or nil where reflection forbids it
 // (values reached through unexported fields).
-var float32Type = reflect.TypeOf(float32(0))
-
 func interfaceOf(rv reflect.Value) any {
 	if !rv.CanInterface() {
 		return nil
