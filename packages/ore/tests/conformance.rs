@@ -759,6 +759,56 @@ fn the_conformance_checks_catch_a_term_that_ignores_the_salt() {
     );
 }
 
+/// A scheme whose term for an empty text is empty fails the check by
+/// name.
+#[test]
+#[should_panic(
+    expected = "vitaminc/ore/value/text-folded/unicode-16/v1: a term is empty, so it depends on nothing"
+)]
+fn the_conformance_checks_catch_an_empty_term() {
+    test_support::conformance(
+        &common::Empty(Mock::new(key())),
+        &common::Empty(Mock::new(Protected::new([8; 32]))),
+    );
+}
+
+/// A scheme that binds the salt but not the key passes the checks under
+/// another context and fails the first one under another key.
+#[test]
+#[should_panic(expected = "a term compares equal to one under another key")]
+fn the_conformance_checks_catch_a_term_that_ignores_the_key() {
+    test_support::conformance(
+        &common::Unkeyed(Mock::new(key())),
+        &common::Unkeyed(Mock::new(Protected::new([8; 32]))),
+    );
+}
+
+/// A scheme whose comparison tells spaces apart, but whose stored terms
+/// leave out the salt and the key, fails the byte check under another
+/// context.
+#[test]
+#[should_panic(expected = "a term is the same under another context")]
+fn the_conformance_checks_catch_a_stored_term_without_its_salt() {
+    let forgetful = |key| common::Forgetful {
+        mock: Mock::new(key),
+        keeps_salt: false,
+    };
+    test_support::conformance(&forgetful(key()), &forgetful(Protected::new([8; 32])));
+}
+
+/// The same, with the salt stored and only the key left out: the byte
+/// check under another context passes and the one under another key
+/// fails.
+#[test]
+#[should_panic(expected = "a term is the same under another key")]
+fn the_conformance_checks_catch_a_stored_term_without_its_key() {
+    let forgetful = |key| common::Forgetful {
+        mock: Mock::new(key),
+        keeps_salt: true,
+    };
+    test_support::conformance(&forgetful(key()), &forgetful(Protected::new([8; 32])));
+}
+
 /// A marker impl the runtime answer does not back fails the check by
 /// name.
 #[test]

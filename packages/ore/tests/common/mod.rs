@@ -197,6 +197,113 @@ impl OrderScheme for Unsalted {
 
 vitaminc_ore::supports_every_target!(Unsalted);
 
+/// A scheme whose term for a text shorter than two bytes is empty: the
+/// stored form of a term with no blocks, for the check that no term is
+/// empty to catch.
+pub struct Empty(pub Mock);
+
+impl OrderScheme for Empty {
+    const NAME: &'static str = "empty";
+    type Term = MockTerm;
+    type Error = Infallible;
+
+    fn encrypt_plaintext(
+        &self,
+        plaintext: &OrderPlaintext,
+        salt: &Context<'_>,
+    ) -> Result<MockTerm, Infallible> {
+        if plaintext.target() == OrderTarget::Text && plaintext.bytes().risky_ref().len() < 2 {
+            return Ok(MockTerm::new(Vec::new(), &[]));
+        }
+        self.0.encrypt_plaintext(plaintext, salt)
+    }
+
+    fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
+        compare(a, b)
+    }
+}
+
+vitaminc_ore::supports_every_target!(Empty);
+
+/// A scheme that binds the salt but not the key, for the conformance
+/// checks to catch a term that does not depend on the key.
+pub struct Unkeyed(pub Mock);
+
+impl OrderScheme for Unkeyed {
+    const NAME: &'static str = "unkeyed";
+    type Term = MockTerm;
+    type Error = Infallible;
+
+    fn encrypt_plaintext(
+        &self,
+        plaintext: &OrderPlaintext,
+        salt: &Context<'_>,
+    ) -> Result<MockTerm, Infallible> {
+        Ok(MockTerm::new(
+            salt.as_bytes().to_vec(),
+            plaintext.bytes().risky_ref(),
+        ))
+    }
+
+    fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
+        compare(a, b)
+    }
+}
+
+vitaminc_ore::supports_every_target!(Unkeyed);
+
+/// A term whose comparison knows the salt and key it was bound under,
+/// but whose stored bytes leave out the key, and the salt too unless
+/// `keeps_salt`: the shape of a scheme that keys its terms in memory and
+/// drops what it keyed them with when it stores them.
+pub struct ForgetfulTerm {
+    bound: Vec<u8>,
+    stored: Vec<u8>,
+}
+
+impl AsRef<[u8]> for ForgetfulTerm {
+    fn as_ref(&self) -> &[u8] {
+        &self.stored
+    }
+}
+
+/// A scheme whose stored terms forget the key, and the salt too unless
+/// `keeps_salt`, for the conformance checks on a term's bytes to catch.
+/// Its comparison still tells the spaces apart, so the checks that go
+/// through `compare` pass and only the byte checks see the bug.
+pub struct Forgetful {
+    pub mock: Mock,
+    pub keeps_salt: bool,
+}
+
+impl OrderScheme for Forgetful {
+    const NAME: &'static str = "forgetful";
+    type Term = ForgetfulTerm;
+    type Error = Infallible;
+
+    fn encrypt_plaintext(
+        &self,
+        plaintext: &OrderPlaintext,
+        salt: &Context<'_>,
+    ) -> Result<ForgetfulTerm, Infallible> {
+        let mut bound = salt.as_bytes().to_vec();
+        bound.extend_from_slice(self.mock.key.risky_ref());
+        let mut stored = if self.keeps_salt {
+            salt.as_bytes().to_vec()
+        } else {
+            Vec::new()
+        };
+        stored.extend_from_slice(plaintext.bytes().risky_ref());
+        Ok(ForgetfulTerm { bound, stored })
+    }
+
+    fn compare(a: &ForgetfulTerm, b: &ForgetfulTerm) -> Option<Ordering> {
+        (a.bound == b.bound).then(|| a.stored.cmp(&b.stored))
+    }
+}
+
+vitaminc_ore::supports_every_target!(Forgetful);
+
 /// A scheme whose backend fails.
 pub struct Down;
 

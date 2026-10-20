@@ -132,7 +132,9 @@ fn rows() -> Vec<Row> {
 }
 
 /// Check a scheme against its contract, for every target it takes.
-/// `a` and `b` are the scheme under two keys that differ.
+/// `a` and `b` are the scheme under two keys that differ. From outside
+/// the scheme, one key passed twice looks the same as a scheme that
+/// ignores its key, so the checks under another key name both causes.
 ///
 /// For every target [`Supports::supports`] admits, with the inventory of
 /// values this crate keeps, including an empty string and an empty byte
@@ -222,7 +224,7 @@ pub fn conformance<S: Supports<OrderTarget>>(a: &S, b: &S) {
             assert_ne!(
                 S::compare(own.raw(), under_other_key.raw()),
                 Some(Ordering::Equal),
-                "{name}: a term compares equal to one under another key, so it does not depend on the key"
+                "{name}: a term compares equal to one under another key, so it does not depend on the key, or `a` and `b` hold one key"
             );
             assert_ne!(
                 own.as_bytes(),
@@ -232,7 +234,7 @@ pub fn conformance<S: Supports<OrderTarget>>(a: &S, b: &S) {
             assert_ne!(
                 own.as_bytes(),
                 under_other_key.as_bytes(),
-                "{name}: a term is the same under another key, so it does not depend on the key"
+                "{name}: a term is the same under another key, so it does not depend on the key, or `a` and `b` hold one key"
             );
         }
     }
