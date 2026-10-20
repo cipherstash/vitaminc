@@ -70,15 +70,17 @@ jobs:
         # differ, or one entry's runner can be taken by another.
         # The default root volume leaves ~10 GiB free, which the feature
         # builds below fill; rust-lld then dies with SIGBUS (signal 7).
+        # `s3-cache` serves actions/cache from the stack's S3 bucket instead
+        # of GitHub's cache, so RunsOn entries do not share GitHub's entries.
         include:
           - name: github
             label: ubuntu-latest
           - name: runs-on 2cpu
-            label: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/volume=80gb
+            label: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/volume=80gb/extras=s3-cache
           - name: runs-on 4cpu
-            label: runs-on=${{ github.run_id }}/runner=4cpu-linux-x64/volume=80gb
+            label: runs-on=${{ github.run_id }}/runner=4cpu-linux-x64/volume=80gb/extras=s3-cache
           - name: runs-on 8cpu
-            label: runs-on=${{ github.run_id }}/runner=8cpu-linux-x64/volume=80gb
+            label: runs-on=${{ github.run_id }}/runner=8cpu-linux-x64/volume=80gb/extras=s3-cache
 
     steps:
       - uses: actions/checkout@v7
