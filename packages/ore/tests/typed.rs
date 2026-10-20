@@ -427,6 +427,33 @@ fn a_space_opens_the_scheme_once_for_all_its_terms() {
     assert_eq!(mock.opens(), 4);
 }
 
+/// A value the space refuses never reaches the scheme, so it opens
+/// nothing: the refusal is the value's, never the scheme's.
+#[test]
+fn a_refused_value_does_not_open_the_scheme() {
+    let mock = Mock::new(key());
+    let space = mock.target(T::I32).context("c");
+    assert!(matches!(
+        space.encrypt_checked(i64::MAX),
+        Err(OrderError::Term(NormalizeError::OutOfRange))
+    ));
+    let other = order(T::I64, None, Physical::Int(Int::I8(1))).expect("term");
+    assert!(matches!(
+        space.encrypt_term(&other),
+        Err(OrderError::Term(NormalizeError::Mismatch))
+    ));
+    assert_eq!(mock.opens(), 0, "a refused value opens nothing");
+    space.encrypt_checked(1i64).expect("mock");
+    assert_eq!(mock.opens(), 1);
+
+    let fixed = Fixed::<4>(Mock::new(key()));
+    assert!(matches!(
+        fixed.target(T::I64).encrypt_checked(1i64),
+        Err(OrderError::Unsupported { .. })
+    ));
+    assert_eq!(fixed.0.opens(), 0, "a refused target opens nothing");
+}
+
 /// A scheme that fails to open reports it from the value, through both
 /// methods, and is asked again on the next.
 #[test]
