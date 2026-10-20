@@ -1,0 +1,22 @@
+error[E0277]: `Forgetful` has no order term for `OrderTarget`
+  --> tests/ui/negative_space/a_scheme_must_answer_for_runtime_targets.rs:12:30
+   |
+12 |     let _ = clear::Forgetful.target(I32);
+   |                              ^^^^^^ does not implement `Supports<OrderTarget>`
+   |
+   = note: a scheme lists the targets it takes with `vitaminc_ore::supports_targets!(Scheme; I32, Date)`, which answers for each marker and for `OrderTarget`; pick one it lists, or an `OrderTarget` chosen while the program runs
+help: the trait `Supports<OrderTarget>` is not implemented for `Forgetful`
+      but trait `Supports<vitaminc_ore::target::I32>` is implemented for it
+  --> tests/ui/negative_space/../clear.rs
+   |
+   | impl vitaminc_ore::Supports<vitaminc_ore::target::I32> for Forgetful {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `vitaminc_ore::target::I32`, found `OrderTarget`
+note: required by a bound in `target`
+  --> src/scheme.rs
+   |
+   |     fn target<T: Target>(&self, target: T) -> OrderSpace<'_, Self, T>
+   |        ------ required by a bound in this associated function
+   |     where
+   |         Self: Supports<T> + Supports<OrderTarget>,
+   |                             ^^^^^^^^^^^^^^^^^^^^^ required by this bound in `OrderEncrypt::target`

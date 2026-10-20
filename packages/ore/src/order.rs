@@ -6,17 +6,18 @@
 //! encrypts, encoded as that target: bytes whose lexicographic order is
 //! the value's order, and the frozen domain label of the target. The
 //! target, not the value, decides the domain and the width, so values
-//! from every host compare in one column. A JavaScript `BigInt` arrives as
+//! from every host compare in one space. A JavaScript `BigInt` arrives as
 //! the narrowest integer that holds it, and a Rust field at its own type;
 //! both widen to the target, and a value outside it is refused.
 //!
 //! Where an equality term folds every integer width into one encoding, an
 //! order term keeps the declared width, so block ORE over an `i32` column
 //! costs four blocks, not seventeen. A float, a date, a timestamp, a
-//! decimal, bytes and a uuid order by the same bytes they are matched by,
-//! so those come from `vitaminc_normalize` unchanged. Text alone folds
-//! further: an order term drops accents and case, which equality must
-//! not. See the crate docs for the table.
+//! decimal and a uuid order by the same bytes they are matched by, so
+//! those come from `vitaminc_normalize` unchanged. Bytes are the equality
+//! encoding behind [`VARIABLE_WIDTH_MARKER`], and text folds further: an
+//! order term drops accents and case, which equality must not. See the
+//! crate docs for the table.
 
 use vitaminc_aead::{Encrypt, Int, Logical, Physical};
 use vitaminc_normalize::{terms_by, Normalize, NormalizeError, Term, TermsError};
@@ -24,13 +25,28 @@ use vitaminc_protected::{Controlled, Protected};
 
 use crate::{fold, OrderPlaintext};
 
+/// The byte every text and bytes order encoding starts with, so that no
+/// order plaintext is ever empty.
+///
+/// An empty string and an empty byte string are values with an order,
+/// and without the marker they encoded to nothing. Both scheme crates
+/// then encrypted them into a term that never touched the key or the
+/// salt: the same term under every key and context, which anyone could
+/// write into any index. A constant leading byte keeps the order of the
+/// encodings, and a fixed-width encoding is never empty, so it goes in
+/// unchanged. The scheme crates added this byte themselves before it
+/// moved here; see the README's Encodings section for why the domain
+/// labels did not change with it.
+pub const VARIABLE_WIDTH_MARKER: u8 = 0x01;
+
 /// Frozen domain labels for order terms, one per [`OrderTarget`].
 pub mod domain {
-    /// An `i8`, one byte.
-    pub const INT8: &str = "vitaminc/ore/value/int8/v1";
-    /// A `u8`, one byte.
-    pub const UINT8: &str = "vitaminc/ore/value/uint8/v1";
-    /// An `i16`, two bytes.
+    // Retired in 0.7, never to be reused with another meaning:
+    // `vitaminc/ore/value/int8/v1` and `vitaminc/ore/value/uint8/v1`, the
+    // one-byte targets 0.6 published. See `OrderTarget` for why.
+
+    /// An `i16`, two bytes. The narrowest integer target: see
+    /// [`OrderTarget`](super::OrderTarget) for why there is no 8-bit one.
     pub const INT16: &str = "vitaminc/ore/value/int16/v1";
     /// A `u16`, two bytes.
     pub const UINT16: &str = "vitaminc/ore/value/uint16/v1";
@@ -54,17 +70,19 @@ pub mod domain {
     pub const TIMESTAMP: &str = "vitaminc/ore/value/timestamp-micros/v1";
     /// A decimal, fourteen bytes, scale and signed zero normalized.
     pub const DECIMAL: &str = "vitaminc/ore/value/decimal/v1";
-    /// Text, as Unicode 16 NFC with accents and case folded.
+    /// Text: [`VARIABLE_WIDTH_MARKER`](super::VARIABLE_WIDTH_MARKER), then
+    /// Unicode 16 NFC with accents and case folded.
     pub const TEXT: &str = "vitaminc/ore/value/text-folded/unicode-16/v1";
-    /// Bytes.
+    /// Bytes: [`VARIABLE_WIDTH_MARKER`](super::VARIABLE_WIDTH_MARKER), then
+    /// the bytes as they are.
     pub const BYTES: &str = "vitaminc/ore/value/bytes/v1";
     /// A uuid, over its sixteen raw bytes.
     pub const UUID: &str = "vitaminc/ore/value/uuid/v1";
     /// Every domain, for a test or an index layer that enumerates them. A
     /// slice, so a domain added later does not change its type.
     pub const ALL: &[&str] = &[
-        INT8, UINT8, INT16, UINT16, INT32, UINT32, INT64, UINT64, INT128, UINT128, FLOAT64, DATE,
-        TIMESTAMP, DECIMAL, TEXT, BYTES, UUID,
+        INT16, UINT16, INT32, UINT32, INT64, UINT64, INT128, UINT128, FLOAT64, DATE, TIMESTAMP,
+        DECIMAL, TEXT, BYTES, UUID,
     ];
 }
 
@@ -79,14 +97,32 @@ pub mod domain {
 /// its own kind; anything else is [`NormalizeError::Mismatch`]. An
 /// integer is not a float, a date or a decimal, so none of those take
 /// one.
+///
+/// # What has no target
+///
+/// An order term reveals the order of the values it encrypts. That is
+/// the point of the scheme, and it is safe only when the set of possible
+/// values is large enough that knowing the order of the rows does not
+/// give the values away. A boolean has two values, so an order term over
+/// a boolean column says which rows are `true`: [`order`] refuses one
+/// with [`NormalizeError::NoDomain`]. An 8-bit integer has 256, so an
+/// order index over such a column is a frequency table of the column with
+/// the order on top, and anyone who knows a handful of rows' values, or
+/// the rough distribution of the data (ages, quantities, ratings), reads
+/// the rest off. So the narrowest integer target is sixteen bits. An
+/// `i8` or `u8` **value** still goes into any wider target it fits; what
+/// there is not is a one-byte space.
+///
+/// The floor removes only the case where the *type* guarantees few
+/// values. An `I16` or `I32` column that holds ages or ratings leaks the
+/// same frequency table, since the leak is a property of how many
+/// distinct values the column holds, not of the width. Whether a column
+/// should have an order index at all is a question about its data; a
+/// column of few distinct values wants an equality index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum OrderTarget {
-    /// An `i8`.
-    I8,
-    /// A `u8`.
-    U8,
-    /// An `i16`.
+    /// An `i16`. The narrowest integer target; see above for why.
     I16,
     /// A `u16`.
     U16,
@@ -121,8 +157,6 @@ pub enum OrderTarget {
 impl OrderTarget {
     /// Every target, for a test or an index layer that enumerates them.
     pub const ALL: &[OrderTarget] = &[
-        Self::I8,
-        Self::U8,
         Self::I16,
         Self::U16,
         Self::I32,
@@ -143,8 +177,6 @@ impl OrderTarget {
     /// The frozen domain label of every term of this target.
     pub fn domain(self) -> &'static str {
         match self {
-            Self::I8 => domain::INT8,
-            Self::U8 => domain::UINT8,
             Self::I16 => domain::INT16,
             Self::U16 => domain::UINT16,
             Self::I32 => domain::INT32,
@@ -164,10 +196,10 @@ impl OrderTarget {
     }
 
     /// The width of every term of this target, or `None` for text and
-    /// bytes, whose terms vary in length.
+    /// bytes, whose terms vary in length. Never one byte: see the type's
+    /// docs.
     pub fn width(self) -> Option<usize> {
         match self {
-            Self::I8 | Self::U8 => Some(1),
             Self::I16 | Self::U16 => Some(2),
             Self::I32 | Self::U32 | Self::Date => Some(4),
             Self::I64 | Self::U64 | Self::F64 => Some(8),
@@ -184,23 +216,25 @@ impl OrderTarget {
 ///
 /// An integer is converted to the target's width, then encoded
 /// big-endian, with the sign bit flipped when signed, so the bytes sort
-/// as the numbers do. A float, a date, a timestamp, a decimal, bytes and
-/// a uuid encode exactly as [`vitaminc_normalize::normalize`] encodes
-/// them for equality. Text is Unicode 16 NFC with accents and case
-/// folded, so `É` and `e` tie.
+/// as the numbers do. A float, a date, a timestamp, a decimal and a uuid
+/// encode exactly as [`vitaminc_normalize::normalize`] encodes them for
+/// equality. Bytes are the equality encoding behind
+/// [`VARIABLE_WIDTH_MARKER`], and text is the marker, then Unicode 16 NFC
+/// with accents and case folded, so `É` and `e` tie. The marker keeps a
+/// variable-width encoding from ever being empty.
 ///
 /// # Examples
 ///
 /// ```
 /// use vitaminc_ore::{domain, order, Int, NormalizeError, OrderTarget, Physical};
 ///
-/// // Every integer width widens to the column's type.
+/// // Every integer width widens to the target.
 /// let small = order(OrderTarget::I32, None, Physical::Int(Int::I8(100)))?;
 /// let large = order(OrderTarget::I32, None, Physical::Int(Int::U64(300)))?;
 /// assert_eq!(small.domain(), domain::INT32);
 /// assert_eq!(large.domain(), domain::INT32);
 ///
-/// // A value the column cannot hold is refused, not truncated.
+/// // A value the target cannot hold is refused, not truncated.
 /// let big = Physical::Int(Int::I64(1 << 40));
 /// assert_eq!(order(OrderTarget::I32, None, big).err(), Some(NormalizeError::OutOfRange));
 /// assert_eq!(
@@ -212,8 +246,8 @@ impl OrderTarget {
 ///
 /// # Errors
 ///
-/// [`NormalizeError::NoDomain`] for a null, a boolean, an `undefined` or a
-/// logical type this build does not know; [`NormalizeError::Invalid`] for
+/// [`NormalizeError::NoDomain`] for a null, a boolean (see [`OrderTarget`]
+/// for why), an `undefined` or a logical type this build does not know; [`NormalizeError::Invalid`] for
 /// a value that does not fit its own logical type;
 /// [`NormalizeError::Mismatch`] for a value of another kind than
 /// `target`; [`NormalizeError::OutOfRange`] for an integer outside
@@ -232,7 +266,7 @@ pub fn order(
     }
     let bytes = match (target, ty, v) {
         // A null, a boolean or an `undefined` has no order, whatever the
-        // column, and a walk skips it.
+        // target, and a walk skips it.
         (_, None, Physical::Null | Physical::Bool(_)) | (_, Some(Logical::Undefined), _) => {
             return Err(NormalizeError::NoDomain)
         }
@@ -242,7 +276,7 @@ pub fn order(
         }
         (T::F64, None, Physical::Float(f)) => vitaminc_normalize::float(f),
         (T::Text, None, Physical::Text(s)) => text(s)?,
-        (T::Bytes, None, Physical::Bytes(b)) => vitaminc_normalize::bytes(b),
+        (T::Bytes, None, Physical::Bytes(b)) => variable_width(b),
         (T::Date, Some(Logical::Date), Physical::Int(days)) => {
             vitaminc_normalize::date(days).ok_or(NormalizeError::Invalid)?
         }
@@ -255,7 +289,7 @@ pub fn order(
         (T::Uuid, Some(Logical::Uuid), Physical::Bytes(b)) => {
             vitaminc_normalize::uuid(b).ok_or(NormalizeError::Invalid)?
         }
-        // Another kind than the column's, including a logical type added
+        // Another kind than the target's, including a logical type added
         // to the data model later: it has no term here until it is given
         // a target.
         _ => return Err(NormalizeError::Mismatch),
@@ -268,9 +302,7 @@ impl OrderTarget {
     fn is_int(self) -> bool {
         matches!(
             self,
-            Self::I8
-                | Self::U8
-                | Self::I16
+            Self::I16
                 | Self::U16
                 | Self::I32
                 | Self::U32
@@ -293,8 +325,6 @@ fn convert(target: OrderTarget, value: Int) -> Option<Int> {
         };
     };
     match target {
-        OrderTarget::I8 => i8::try_from(v).ok().map(Int::I8),
-        OrderTarget::U8 => u8::try_from(v).ok().map(Int::U8),
         OrderTarget::I16 => i16::try_from(v).ok().map(Int::I16),
         OrderTarget::U16 => u16::try_from(v).ok().map(Int::U16),
         OrderTarget::I32 => i32::try_from(v).ok().map(Int::I32),
@@ -312,8 +342,9 @@ fn convert(target: OrderTarget, value: Int) -> Option<Int> {
 /// bytes `orderable-bytes` produces, checked against it in the tests.
 fn int(value: Int) -> Protected<Vec<u8>> {
     match value {
-        Int::I8(v) => fixed(((v as u8) ^ (1 << 7)).to_be_bytes()),
-        Int::U8(v) => fixed(v.to_be_bytes()),
+        // `convert` widens every 8-bit value to its target, so no
+        // one-byte encoding is ever made: there is no 8-bit target.
+        Int::I8(_) | Int::U8(_) => unreachable!("convert widens every 8-bit value to its target"),
         Int::I16(v) => fixed(((v as u16) ^ (1 << 15)).to_be_bytes()),
         Int::U16(v) => fixed(v.to_be_bytes()),
         Int::I32(v) => fixed(((v as u32) ^ (1 << 31)).to_be_bytes()),
@@ -325,15 +356,28 @@ fn int(value: Int) -> Protected<Vec<u8>> {
     }
 }
 
-/// Text as Unicode 16 NFC with accents and case folded. See the crate
-/// docs for the exact steps.
+/// The text order encoding: [`VARIABLE_WIDTH_MARKER`], then `text` as
+/// Unicode 16 NFC with accents and case folded. See the crate docs for
+/// the exact steps.
 ///
 /// # Errors
 ///
 /// [`NormalizeError::UnassignedCodePoint`] if `text` holds a code point
 /// Unicode 16 does not assign: its folding is not known.
 pub fn text(text: &str) -> Result<Protected<Vec<u8>>, NormalizeError> {
-    fold::folded(text)
+    let folded = fold::folded(text)?;
+    Ok(variable_width(folded.risky_ref()))
+    // `folded` drops here and is wiped.
+}
+
+/// A variable-width encoding: the marker, then `bytes`, in one protected
+/// buffer sized up front so it never reallocates and frees an unwiped
+/// partial copy. Never empty.
+fn variable_width(bytes: &[u8]) -> Protected<Vec<u8>> {
+    let mut out = Protected::new(Vec::with_capacity(bytes.len() + 1));
+    out.risky_inner_mut().push(VARIABLE_WIDTH_MARKER);
+    out.risky_inner_mut().extend_from_slice(bytes);
+    out
 }
 
 /// A fixed-width encoding as a protected vector, with the array wrapped

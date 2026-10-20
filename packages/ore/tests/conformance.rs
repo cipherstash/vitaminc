@@ -13,9 +13,10 @@ use quickcheck_macros::quickcheck;
 use vitaminc_aead::plaintext::kinds::id::LAST_KNOWN;
 use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
 use vitaminc_normalize::{domain as equality, normalize};
+use vitaminc_ore::target::{Date, I32};
 use vitaminc_ore::{
-    domain, order, Context, IntoContext, NormalizeError, OrderEncrypt, OrderError, OrderKeyInit,
-    OrderScheme, OrderTarget, Raw,
+    domain, order, test_support, Context, IntoContext, NormalizeError, OrderEncrypt, OrderError,
+    OrderKeyInit, OrderScheme, OrderTarget, Raw, VARIABLE_WIDTH_MARKER,
 };
 use vitaminc_protected::{Controlled, Protected};
 
@@ -51,18 +52,11 @@ fn inventory() -> Vec<Orderable<'static>> {
         width,
     };
     vec![
-        plain(T::I8, I(Int::I8(-1)), I(Int::U8(1)), domain::INT8, Some(1)),
-        plain(
-            T::U8,
-            I(Int::I8(0)),
-            I(Int::U8(255)),
-            domain::UINT8,
-            Some(1),
-        ),
+        // 8-bit values go in; the narrowest target is sixteen bits.
         plain(
             T::I16,
-            I(Int::I16(i16::MIN)),
-            I(Int::I16(i16::MAX)),
+            I(Int::I8(i8::MIN)),
+            I(Int::U8(u8::MAX)),
             domain::INT16,
             Some(2),
         ),
@@ -174,7 +168,7 @@ fn every_kind_has_an_order_target_or_is_a_named_exception() {
     for target in OrderTarget::ALL {
         assert!(targets.contains(target), "{target:?} has no row");
     }
-    assert_eq!(domain::ALL.len(), 17);
+    assert_eq!(domain::ALL.len(), 15);
     let scheme = Mock::new(key());
     for kind in &kinds {
         let (below, above) = (
@@ -183,16 +177,21 @@ fn every_kind_has_an_order_target_or_is_a_named_exception() {
         );
         assert_eq!(below.domain(), kind.domain);
         assert_eq!(below.width(), kind.width, "{}", kind.domain);
+        assert!(
+            !below.bytes().risky_ref().is_empty(),
+            "{}: an order plaintext is never empty",
+            kind.domain
+        );
         if let Some(width) = kind.width {
             assert_eq!(below.bytes().risky_ref().len(), width, "{}", kind.domain);
         }
-        let column = scheme.column(kind.target, ());
+        let space = scheme.target(kind.target);
         let (x, y) = (
-            column.encrypt_term(&below).expect("mock"),
-            column.encrypt_term(&above).expect("mock"),
+            space.encrypt_term(&below).expect("mock"),
+            space.encrypt_term(&above).expect("mock"),
         );
         assert_eq!(
-            column.compare(&x, &y),
+            space.compare(&x, &y),
             Some(Ordering::Less),
             "{}",
             kind.domain
@@ -328,7 +327,8 @@ fn equality_and_order_agree_on_what_is_equal() {
         order(T::Text, None, Physical::Text("É")).expect("ord"),
     );
     assert_eq!(e.bytes().risky_ref(), big.bytes().risky_ref());
-    // Shared kinds share their bytes with the equality index exactly.
+    // Shared fixed-width kinds share their bytes with the equality index
+    // exactly.
     for (target, ty, v) in [
         (
             T::Date,
@@ -341,7 +341,6 @@ fn equality_and_order_agree_on_what_is_equal() {
             Physical::Int(Int::I64(-12_345)),
         ),
         (T::Uuid, Some(Logical::Uuid), Physical::Bytes(&[9; 16])),
-        (T::Bytes, None, Physical::Bytes(b"raw")),
         (T::F64, None, Physical::Float(Float::F64(2.5))),
     ] {
         assert_eq!(
@@ -349,6 +348,15 @@ fn equality_and_order_agree_on_what_is_equal() {
             order(target, ty, v).expect("ord").bytes().risky_ref()
         );
     }
+    // Bytes share them behind the marker, so an order term is never empty.
+    let (eq, ord) = (
+        normalize(None, Physical::Bytes(b"raw")).expect("eq"),
+        order(T::Bytes, None, Physical::Bytes(b"raw")).expect("ord"),
+    );
+    assert_eq!(
+        ord.bytes().risky_ref(),
+        &[&[VARIABLE_WIDTH_MARKER][..], eq.bytes.risky_ref()].concat()
+    );
     // And no order domain is an equality domain.
     for d in domain::ALL {
         assert!(!equality::ALL.contains(d), "{d}");
@@ -359,10 +367,10 @@ fn equality_and_order_agree_on_what_is_equal() {
 fn a_scheme_refuses_a_target_by_name_not_by_counting_bytes() {
     let fixed = Fixed::<4>(Mock::new(key()));
     let day = Raw(Some(Logical::Date), Physical::Int(Int::I32(1)));
-    assert!(fixed.column(T::Date, ()).encrypt(day).is_ok());
-    assert!(fixed.column(T::I32, ()).encrypt(1i8).is_ok());
+    assert!(fixed.target(T::Date).encrypt_checked(day).is_ok());
+    assert!(fixed.target(T::I32).encrypt_checked(1i8).is_ok());
     for (target, value, domain) in [
-        (T::I8, Raw(None, Physical::Int(Int::I8(1))), domain::INT8),
+        (T::I16, Raw(None, Physical::Int(Int::I8(1))), domain::INT16),
         (T::Text, Raw(None, Physical::Text("abcd")), domain::TEXT),
         (
             T::Bytes,
@@ -377,7 +385,7 @@ fn a_scheme_refuses_a_target_by_name_not_by_counting_bytes() {
     ] {
         assert!(
             matches!(
-                fixed.column(target, ()).encrypt(value),
+                fixed.target(target).encrypt_checked(value),
                 Err(OrderError::Unsupported { scheme: "fixed", domain: d }) if d == domain
             ),
             "{domain}"
@@ -389,86 +397,98 @@ fn a_scheme_refuses_a_target_by_name_not_by_counting_bytes() {
 fn terms_compare_only_within_one_scheme_key_target_and_context() {
     let tenant = |n: u64| ("tenant", n);
     let mock = Mock::new(key());
-    let under_one = mock.column(T::I8, tenant(1)).encrypt(0i8).expect("mock");
+    let under_one = mock
+        .target(T::I16)
+        .context(tenant(1))
+        .encrypt_checked(0i8)
+        .expect("mock");
     assert_ne!(
         under_one,
-        mock.column(T::I8, tenant(2)).encrypt(0i8).expect("mock")
-    );
-    assert_ne!(
-        under_one,
-        Mock::new(Protected::new([8; 32]))
-            .column(T::I8, tenant(1))
-            .encrypt(0i8)
+        mock.target(T::I16)
+            .context(tenant(2))
+            .encrypt_checked(0i8)
             .expect("mock")
     );
     assert_ne!(
         under_one,
-        Fixed::<1>(Mock::new(key()))
-            .column(T::I8, tenant(1))
-            .encrypt(0i8)
+        Mock::new(Protected::new([8; 32]))
+            .target(T::I16)
+            .context(tenant(1))
+            .encrypt_checked(0i8)
+            .expect("mock")
+    );
+    assert_ne!(
+        under_one,
+        Fixed::<2>(Mock::new(key()))
+            .target(T::I16)
+            .context(tenant(1))
+            .encrypt_checked(0i8)
             .expect("fixed")
     );
     // The same bytes under another target are another term.
-    let as_i8 = mock.column(T::I8, ()).encrypt(0i8).expect("mock");
-    let as_u8 = mock.column(T::U8, ()).encrypt(0x80u16).expect("mock");
-    assert_eq!(as_i8.bytes, as_u8.bytes);
-    assert_ne!(as_i8, as_u8);
+    let as_i16 = mock.target(T::I16).encrypt_checked(0i8).expect("mock");
+    let as_u16 = mock
+        .target(T::U16)
+        .encrypt_checked(0x8000u16)
+        .expect("mock");
+    assert_eq!(as_i16.raw().bytes(), as_u16.raw().bytes());
+    assert_ne!(as_i16, as_u16);
 }
 
-/// The column derives the salt from the scheme's own name, so two schemes
+/// The space derives the salt from the scheme's own name, so two schemes
 /// under one key and context never bind the same salt.
 #[test]
-fn a_columns_salt_binds_its_schemes_own_name() {
+fn a_spaces_salt_binds_its_schemes_own_name() {
     let context = ("tenant", 1u64).into_context().encode();
     let expected = |scheme: &str| {
         Context::pae(&[
             b"vitaminc/ore/v1",
             scheme.as_bytes(),
-            domain::INT8.as_bytes(),
+            domain::INT16.as_bytes(),
             context.as_bytes(),
         ])
     };
-    let (mock, fixed) = (Mock::new(key()), Fixed::<1>(Mock::new(key())));
+    let (mock, fixed) = (Mock::new(key()), Fixed::<2>(Mock::new(key())));
     let (m, f) = (
-        mock.column(T::I8, ("tenant", 1u64)),
-        fixed.column(T::I8, ("tenant", 1u64)),
+        mock.target(T::I16).context(("tenant", 1u64)),
+        fixed.target(T::I16).context(("tenant", 1u64)),
     );
     assert_eq!(m.salt(), &expected("mock"));
     assert_eq!(f.salt(), &expected("fixed"));
     assert_ne!(m.salt(), f.salt());
     // And the scheme binds the salt it is handed: the mocks' terms carry it.
-    let term = m.encrypt(1i8).expect("mock");
-    assert!(term.salt.starts_with(expected("mock").as_bytes()));
+    let term = m.encrypt_checked(1i8).expect("mock");
+    assert!(term.raw().salt().starts_with(expected("mock").as_bytes()));
 }
 
 #[test]
-fn the_column_refuses_before_the_scheme_and_passes_the_schemes_failure_through() {
+fn the_space_refuses_before_the_scheme_and_passes_the_schemes_failure_through() {
     let mock = Mock::new(key());
-    let column = mock.column(T::Text, ());
+    let space = mock.target(T::Text);
     for v in [Physical::Null, Physical::Bool(true)] {
         assert!(matches!(
-            column.encrypt(Raw(None, v)),
+            space.encrypt_checked(Raw(None, v)),
             Err(OrderError::Term(NormalizeError::NoDomain))
         ));
     }
     assert!(matches!(
-        column.encrypt("\u{378}"),
+        space.encrypt_checked("\u{378}"),
         Err(OrderError::Term(NormalizeError::UnassignedCodePoint))
     ));
     assert!(matches!(
-        column.encrypt(7u32),
+        space.encrypt_checked(7u32),
         Err(OrderError::Term(NormalizeError::Mismatch))
     ));
     assert!(matches!(
-        mock.column(T::U8, ()).encrypt(300u16),
+        mock.target(T::U16).encrypt_checked(70_000u32),
         Err(OrderError::Term(NormalizeError::OutOfRange))
     ));
     assert!(matches!(
-        mock.column(T::Uuid, ())
-            .encrypt(Raw(Some(Logical::Uuid), Physical::Bytes(&[0; 3]))),
+        mock.target(T::Uuid)
+            .encrypt_checked(Raw(Some(Logical::Uuid), Physical::Bytes(&[0; 3]))),
         Err(OrderError::Term(NormalizeError::Invalid))
     ));
-    let failed = Down.column(T::I8, ()).encrypt(1i8).expect_err("down");
+    let failed = Down.target(T::I16).encrypt_checked(1i8).expect_err("down");
     assert!(matches!(failed, OrderError::Backend(_)));
     assert_eq!(
         failed.to_string(),
@@ -500,17 +520,20 @@ fn a_container_or_a_failing_source_has_no_single_term() {
     }
 
     let mock = Mock::new(key());
-    let column = mock.column(T::U16, ());
+    let space = mock.target(T::U16);
     assert!(matches!(
-        column.encrypt(vec![1u16, 2]),
+        space.encrypt_checked(vec![1u16, 2]),
         Err(OrderError::NotScalar)
     ));
     assert!(matches!(
-        column.encrypt(std::collections::BTreeMap::from([("k", 1u16)])),
+        space.encrypt_checked(std::collections::BTreeMap::from([("k", 1u16)])),
         Err(OrderError::NotScalar)
     ));
-    assert!(matches!(column.encrypt(Passed), Err(OrderError::NotScalar)));
-    let failed = column.encrypt(Throws).expect_err("source failed");
+    assert!(matches!(
+        space.encrypt_checked(Passed),
+        Err(OrderError::NotScalar)
+    ));
+    let failed = space.encrypt_checked(Throws).expect_err("source failed");
     assert!(matches!(failed, OrderError::Source(_)));
     assert_eq!(
         failed.to_string(),
@@ -518,32 +541,36 @@ fn a_container_or_a_failing_source_has_no_single_term() {
     );
 }
 
-/// A plaintext from a walk goes into the column of its own target only.
+/// A plaintext from a walk goes into the space of its own target only.
 #[test]
-fn a_column_takes_a_collected_term_of_its_own_target_only() {
+fn a_space_takes_a_collected_term_of_its_own_target_only() {
     let mock = Mock::new(key());
     let p = order(T::I32, None, Physical::Int(Int::I8(3))).expect("term");
     assert_eq!(
-        mock.column(T::I32, "c")
+        mock.target(T::I32)
+            .context("c")
             .encrypt_term(&p)
             .expect("same target"),
-        mock.column(T::I32, "c").encrypt(3i8).expect("mock")
+        mock.target(T::I32)
+            .context("c")
+            .encrypt_checked(3i8)
+            .expect("mock")
     );
     assert!(matches!(
-        mock.column(T::I64, "c").encrypt_term(&p),
+        mock.target(T::I64).context("c").encrypt_term(&p),
         Err(OrderError::Term(NormalizeError::Mismatch))
     ));
 }
 
-/// A column shows its target and masks the scheme, which holds the key,
+/// A space shows its target and masks the scheme, which holds the key,
 /// and the salt.
 #[test]
-fn a_column_debugs_as_its_target_with_the_rest_masked() {
+fn a_space_debugs_as_its_target_with_the_rest_masked() {
     let mock = Mock::new(key());
-    let column = mock.column(T::I32, ("orders", "total"));
-    let shown = format!("{column:?}");
+    let space = mock.target(T::I32).context(("orders", "total"));
+    let shown = format!("{space:?}");
     assert!(
-        shown.ends_with(r#"OrderColumn<'_, conformance::common::Mock> { scheme: "***", target: I32, salt: "***" }"#),
+        shown.ends_with(r#"OrderSpace<'_, conformance::common::Mock> { scheme: "***", target: I32, salt: "***", opened: "***" }"#),
         "{shown}"
     );
 }
@@ -551,7 +578,7 @@ fn a_column_debugs_as_its_target_with_the_rest_masked() {
 #[test]
 fn a_scheme_is_keyed_like_a_prf() {
     let from_bytes = Mock::try_from_bytes(Protected::new(vec![7; 32])).expect("32 bytes");
-    let term = |scheme: &Mock| scheme.column(T::I8, ()).encrypt(1i8).expect("mock");
+    let term = |scheme: &Mock| scheme.target(T::I16).encrypt_checked(1i8).expect("mock");
     assert_eq!(term(&from_bytes), term(&Mock::new(key())));
     let short = Mock::try_from_bytes(Protected::new(vec![7; 16]))
         .err()
@@ -560,28 +587,30 @@ fn a_scheme_is_keyed_like_a_prf() {
 }
 
 /// Callers hold chrono, rust_decimal and uuid values, not `Raw`; each
-/// encrypts into the column of its type as the typed scalar it stands for.
+/// encrypts into the space of its type as the typed scalar it stands for.
 #[test]
-fn typed_values_encrypt_into_the_column_of_their_type() {
+fn typed_values_encrypt_into_the_space_of_their_type() {
     use chrono::{NaiveDate, TimeZone, Utc};
     use rust_decimal::Decimal;
     let mock = Mock::new(key());
     let typed = |target, ty: Logical, v: Physical<'_>| {
-        mock.column(target, ())
-            .encrypt(Raw(Some(ty), v))
+        mock.target(target)
+            .encrypt_checked(Raw(Some(ty), v))
             .expect("typed")
     };
     // 2022-01-08 is day 19_000 after 1970-01-01.
-    let dates = mock.column(T::Date, ());
+    let dates = mock.target(T::Date);
     let day = NaiveDate::from_ymd_opt(2022, 1, 8).expect("date");
-    let date = dates.encrypt(day).expect("date");
+    let date = dates.encrypt_checked(day).expect("date");
     assert_eq!(
         date,
         typed(T::Date, Logical::Date, Physical::Int(Int::I32(19_000)))
     );
     assert_eq!(
         dates.compare(
-            &dates.encrypt(day.pred_opt().expect("date")).expect("date"),
+            &dates
+                .encrypt_checked(day.pred_opt().expect("date"))
+                .expect("date"),
             &date
         ),
         Some(Ordering::Less)
@@ -591,8 +620,8 @@ fn typed_values_encrypt_into_the_column_of_their_type() {
         .single()
         .expect("instant");
     assert_eq!(
-        mock.column(T::Timestamp, ())
-            .encrypt(at)
+        mock.target(T::Timestamp)
+            .encrypt_checked(at)
             .expect("timestamp"),
         typed(
             T::Timestamp,
@@ -600,37 +629,41 @@ fn typed_values_encrypt_into_the_column_of_their_type() {
             Physical::Int(Int::I64(1_700_000_000_123_456))
         )
     );
-    let decimals = mock.column(T::Decimal, ());
+    let decimals = mock.target(T::Decimal);
     assert_eq!(
-        decimals.encrypt(Decimal::new(150, 2)).expect("decimal"),
-        decimals.encrypt(Decimal::new(15, 1)).expect("decimal")
+        decimals
+            .encrypt_checked(Decimal::new(150, 2))
+            .expect("decimal"),
+        decimals
+            .encrypt_checked(Decimal::new(15, 1))
+            .expect("decimal")
     );
     let id = uuid::Uuid::from_bytes([9; 16]);
     assert_eq!(
-        mock.column(T::Uuid, ()).encrypt(id).expect("uuid"),
+        mock.target(T::Uuid).encrypt_checked(id).expect("uuid"),
         typed(T::Uuid, Logical::Uuid, Physical::Bytes(&[9; 16]))
     );
     // A date is not the integer it is stored as.
     assert!(matches!(
-        mock.column(T::I32, ()).encrypt(day),
+        mock.target(T::I32).encrypt_checked(day),
         Err(OrderError::Term(NormalizeError::Mismatch))
     ));
 }
 
 #[quickcheck]
-fn order_through_a_column_is_value_order(a: i32, b: i16, text_a: String, text_b: String) -> bool {
+fn order_through_a_space_is_value_order(a: i32, b: i16, text_a: String, text_b: String) -> bool {
     let mock = Mock::new(key());
-    let ints = mock.column(T::I64, "col");
+    let ints = mock.target(T::I64).context("col");
     let int_order = ints.compare(
-        &ints.encrypt(a).expect("mock"),
-        &ints.encrypt(b).expect("mock"),
+        &ints.encrypt_checked(a).expect("mock"),
+        &ints.encrypt_checked(b).expect("mock"),
     ) == Some(i64::from(a).cmp(&i64::from(b)));
     // Bytes compare as bytes; text ties where it folds together, so only
     // bytes are checked for order here.
-    let bytes = mock.column(T::Bytes, "col");
+    let bytes = mock.target(T::Bytes).context("col");
     let under = |s: &str| {
         bytes
-            .encrypt(Raw(None, Physical::Bytes(s.as_bytes())))
+            .encrypt_checked(Raw(None, Physical::Bytes(s.as_bytes())))
             .expect("mock")
     };
     let byte_order = bytes.compare(&under(&text_a), &under(&text_b))
@@ -639,47 +672,179 @@ fn order_through_a_column_is_value_order(a: i32, b: i16, text_a: String, text_b:
 }
 
 #[test]
-fn a_column_sorts_its_own_terms_and_refuses_another_columns() {
+fn a_space_sorts_its_own_terms_and_refuses_another_spaces() {
     let mock = Mock::new(key());
-    let column = mock.column(T::I32, "col");
+    let space = mock.target(T::I32).context("col");
     let mut terms: Vec<_> = [5i32, -3, 9, 0]
         .into_iter()
-        .map(|v| column.encrypt(v).expect("mock"))
+        .map(|v| space.encrypt_checked(v).expect("mock"))
         .collect();
-    // The column's comparison is total over its terms, so they sort by it.
-    terms.sort_by(|a, b| column.compare(a, b).expect("one column"));
+    // The space's comparison is total over its terms, so they sort by it.
+    terms.sort_by(|a, b| space.compare(a, b).expect("one space"));
     assert_eq!(
-        terms.iter().map(|t| t.bytes.clone()).collect::<Vec<_>>(),
+        terms
+            .iter()
+            .map(|t| t.raw().bytes().to_vec())
+            .collect::<Vec<_>>(),
         [-3i32, 0, 5, 9]
             .into_iter()
             .map(|v| (v as u32 ^ 0x8000_0000).to_be_bytes().to_vec())
             .collect::<Vec<_>>()
     );
-    // Another column's term, under another context, another key or another
+    // Another space's term, under another context, another key or another
     // scheme, has no order against them: the mock can tell, a real scheme
     // often cannot, so a caller never mixes them.
     let own = &terms[0];
-    let other_context = mock.column(T::I32, "other").encrypt(1i32).expect("mock");
+    let other_context = mock
+        .target(T::I32)
+        .context("other")
+        .encrypt_checked(1i32)
+        .expect("mock");
     let other_key = Mock::new(Protected::new([8; 32]))
-        .column(T::I32, "col")
-        .encrypt(1i32)
+        .target(T::I32)
+        .context("col")
+        .encrypt_checked(1i32)
         .expect("mock");
     let other_scheme = Fixed::<4>(Mock::new(key()))
-        .column(T::I32, "col")
-        .encrypt(1i32)
+        .target(T::I32)
+        .context("col")
+        .encrypt_checked(1i32)
         .expect("mock");
     for foreign in [other_context, other_key, other_scheme] {
-        assert_eq!(column.compare(own, &foreign), None);
-        assert_eq!(Mock::compare(own, &foreign), None);
+        assert_eq!(space.compare(own, &foreign), None);
+        assert_eq!(Mock::compare(own.raw(), foreign.raw()), None);
     }
 }
 
+/// A mock term keeps the plaintext bytes after its salt and key, so the
+/// tests above are about the plaintext layer, not the mock.
 #[test]
-fn a_mock_term_is_the_plaintext_bytes() {
-    // So the tests above are about the plaintext layer, not the mock.
+fn a_mock_term_keeps_the_plaintext_bytes_after_its_salt_and_key() {
     let term: MockTerm = Mock::new(key())
-        .column(T::U8, ())
-        .encrypt(9u16)
-        .expect("mock");
-    assert_eq!(term.as_ref(), &[9]);
+        .target(T::U16)
+        .encrypt_checked(9u16)
+        .expect("mock")
+        .into_raw();
+    assert_eq!(term.bytes(), &[0, 9]);
+}
+
+/// The checks a scheme crate runs against its real scheme pass for the
+/// mocks, which keep the contract, and catch a scheme that does not.
+#[test]
+fn the_conformance_checks_pass_for_a_scheme_that_keeps_the_contract() {
+    test_support::conformance(&Mock::new(key()), &Mock::new(Protected::new([8; 32])));
+    test_support::conformance(
+        &Fixed::<4>(Mock::new(key())),
+        &Fixed::<4>(Mock::new(Protected::new([8; 32]))),
+    );
+    test_support::query_conformance(&Mock::new(key()), &Mock::new(Protected::new([8; 32])));
+    test_support::query_conformance(
+        &Fixed::<4>(Mock::new(key())),
+        &Fixed::<4>(Mock::new(Protected::new([8; 32]))),
+    );
+    test_support::static_target::<Mock, I32>();
+    test_support::static_target::<Fixed<4>, I32>();
+    test_support::static_target::<Fixed<4>, Date>();
+}
+
+/// A scheme whose empty term ignores the key and the salt, as the scheme
+/// crates' once did, fails the check by name.
+#[test]
+#[should_panic(
+    expected = "vitaminc/ore/value/text-folded/unicode-16/v1: a term compares equal to one under another context"
+)]
+fn the_conformance_checks_catch_a_term_that_ignores_the_salt() {
+    test_support::conformance(
+        &common::Unsalted(Mock::new(key())),
+        &common::Unsalted(Mock::new(Protected::new([8; 32]))),
+    );
+}
+
+/// A scheme whose term for an empty text is empty fails the check by
+/// name.
+#[test]
+#[should_panic(
+    expected = "vitaminc/ore/value/text-folded/unicode-16/v1: a term is empty, so it depends on nothing"
+)]
+fn the_conformance_checks_catch_an_empty_term() {
+    test_support::conformance(
+        &common::Empty(Mock::new(key())),
+        &common::Empty(Mock::new(Protected::new([8; 32]))),
+    );
+}
+
+/// A scheme that binds the salt but not the key passes the checks under
+/// another context and fails the first one under another key.
+#[test]
+#[should_panic(expected = "a term compares equal to one under another key")]
+fn the_conformance_checks_catch_a_term_that_ignores_the_key() {
+    test_support::conformance(&common::Unkeyed, &common::Unkeyed);
+}
+
+/// A scheme whose comparison tells spaces apart, but whose stored terms
+/// leave out the salt and the key, fails the byte check under another
+/// context.
+#[test]
+#[should_panic(expected = "a term is the same under another context")]
+fn the_conformance_checks_catch_a_stored_term_without_its_salt() {
+    let forgetful = |key| common::Forgetful {
+        mock: Mock::new(key),
+        keeps_salt: false,
+    };
+    test_support::conformance(&forgetful(key()), &forgetful(Protected::new([8; 32])));
+}
+
+/// The same, with the salt stored and only the key left out: the byte
+/// check under another context passes and the one under another key
+/// fails.
+#[test]
+#[should_panic(expected = "a term is the same under another key")]
+fn the_conformance_checks_catch_a_stored_term_without_its_key() {
+    let forgetful = |key| common::Forgetful {
+        mock: Mock::new(key),
+        keeps_salt: true,
+    };
+    test_support::conformance(&forgetful(key()), &forgetful(Protected::new([8; 32])));
+}
+
+/// A scheme whose empty query ignores the key and the salt fails the
+/// query check by name.
+#[test]
+#[should_panic(
+    expected = "vitaminc/ore/value/text-folded/unicode-16/v1: a query under another context compares equal to the term, so it does not depend on the salt"
+)]
+fn the_conformance_checks_catch_a_query_that_ignores_the_salt() {
+    test_support::query_conformance(
+        &common::Unsalted(Mock::new(key())),
+        &common::Unsalted(Mock::new(Protected::new([8; 32]))),
+    );
+}
+
+/// A scheme whose queries order correctly but are empty bytes fails the
+/// query check by name.
+#[test]
+#[should_panic(expected = "a query is empty, so it depends on nothing")]
+fn the_conformance_checks_catch_an_empty_query() {
+    test_support::query_conformance(
+        &common::Blank(Mock::new(key())),
+        &common::Blank(Mock::new(Protected::new([8; 32]))),
+    );
+}
+
+/// A marker impl the runtime answer does not back fails the check by
+/// name.
+#[test]
+#[should_panic(expected = "lying implements Supports<I64> but refuses it at runtime")]
+fn the_conformance_checks_catch_a_marker_the_scheme_refuses_at_runtime() {
+    test_support::static_target::<common::Lying, vitaminc_ore::target::I64>();
+}
+
+/// Opening a space under a marker the runtime list refuses trips the
+/// space's debug assertion, so a scheme crate's own tests catch the
+/// disagreement even without `static_target`.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "lying implements Supports<I64> but refuses it at runtime")]
+fn a_space_under_a_marker_the_scheme_refuses_at_runtime_panics_in_debug() {
+    let _ = common::Lying(Fixed::<4>(Mock::new(key()))).target(vitaminc_ore::target::I64);
 }

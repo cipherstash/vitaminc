@@ -1,0 +1,29 @@
+error[E0277]: `i8` has no order target of its own
+  --> tests/ui/negative_space/an_i8_has_no_target_of_its_own.rs:10:34
+   |
+10 |     let _ = clear::Clear.encrypt(42i8);
+   |                          ------- ^^^^ has no order target of its own
+   |                          |
+   |                          required by a bound introduced by this call
+   |
+   = help: the trait `OwnTarget` is not implemented for `i8`
+   = note: name the target: `scheme.target(I64).encrypt_checked(value)`
+   = note: there is no 8-bit target: an order term over 256 values reveals them, so an `i8` goes into `I16` or wider by name (`scheme.target(I16).encrypt(value)`), or into an equality index
+   = help: the following other types implement trait `OwnTarget`:
+             &f32
+             &f64
+             &i128
+             &i16
+             &i32
+             &i64
+             &u128
+             &u16
+           and $N others
+note: required by a bound in `encrypt`
+  --> src/scheme.rs
+   |
+   |     fn encrypt<V>(&self, value: V) -> Result<OrderTerm<Self::Term, V::Target>, Self::Error>
+   |        ------- required by a bound in this associated function
+   |     where
+   |         V: OwnTarget + FitsIn<V::Target>,
+   |            ^^^^^^^^^ required by this bound in `OrderEncrypt::encrypt`

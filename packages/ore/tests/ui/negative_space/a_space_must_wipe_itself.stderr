@@ -1,0 +1,22 @@
+error[E0277]: the trait bound `u8: zeroize::ZeroizeOnDrop` is not satisfied
+  --> tests/ui/negative_space/a_space_must_wipe_itself.rs:14:18
+   |
+14 |     type Space = Vec<u8>;
+   |                  ^^^^^^^ the trait `zeroize::ZeroizeOnDrop` is not implemented for `u8`
+   |
+   = help: the following other types implement trait `zeroize::ZeroizeOnDrop`:
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+             (A, B, C, D, E, F, G, H)
+           and $N others
+   = note: required for `Vec<u8>` to implement `zeroize::ZeroizeOnDrop`
+note: required by a bound in `vitaminc_ore::OrderScheme::Space`
+  --> src/scheme.rs
+   |
+   |     type Space: zeroize::ZeroizeOnDrop;
+   |                 ^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `OrderScheme::Space`
