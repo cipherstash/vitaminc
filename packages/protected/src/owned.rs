@@ -164,6 +164,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{with_owned, Protected};
+    use core::cell::Cell;
     use zeroize::Zeroize;
 
     #[test]
@@ -183,10 +184,90 @@ mod tests {
         });
     }
 
-    #[test]
-    fn a_forgotten_owned_is_still_dropped() {
-        // Nothing observable without an allocator scan; this checks the
-        // path runs without a double free or a leak check failure.
-        with_owned(Protected::new(vec![7u8; 4]), |o| core::mem::forget(o));
+    /// Records when it is wiped and when it is dropped, so a test can tell
+    /// which of the two drops (`Owned`'s or `with_owned`'s backstop) did the
+    /// work, and when.
+    struct Spy<'a> {
+        wiped: &'a Cell<u32>,
+        dropped: &'a Cell<u32>,
+    }
+
+    impl Zeroize for Spy<'_> {
+        fn zeroize(&mut self) {
+            self.wiped.set(self.wiped.get() + 1);
+        }
+    }
+
+    impl Drop for Spy<'_> {
+        fn drop(&mut self) {
+            self.dropped.set(self.dropped.get() + 1);
+        }
+    }
+
+    fn spy<'a>(wiped: &'a Cell<u32>, dropped: &'a Cell<u32>) -> Protected<Spy<'a>> {
+        Protected::new(Spy { wiped, dropped })
+    }
+
+    mod given_the_closure_drops_the_owned {
+        use super::*;
+
+        #[test]
+        fn the_value_is_wiped_and_dropped_right_then() {
+            let (wiped, dropped) = (Cell::new(0), Cell::new(0));
+            with_owned(spy(&wiped, &dropped), |o| {
+                drop(o);
+                assert_eq!(wiped.get(), 1, "dropping the Owned should wipe the value");
+                assert_eq!(dropped.get(), 1, "dropping the Owned should drop the value");
+            });
+            assert_eq!(wiped.get(), 1, "the backstop should not wipe it again");
+            assert_eq!(dropped.get(), 1, "the backstop should not drop it again");
+        }
+    }
+
+    mod given_the_closure_forgets_the_owned {
+        use super::*;
+
+        #[test]
+        fn the_value_is_wiped_and_dropped_when_with_owned_returns() {
+            let (wiped, dropped) = (Cell::new(0), Cell::new(0));
+            with_owned(spy(&wiped, &dropped), |o| {
+                core::mem::forget(o);
+                assert_eq!(wiped.get(), 0, "nothing should have run yet");
+            });
+            assert_eq!(wiped.get(), 1, "the backstop should wipe the value");
+            assert_eq!(dropped.get(), 1, "the backstop should drop the value");
+        }
+    }
+
+    mod given_the_closure_takes_the_value_out {
+        use super::*;
+
+        #[test]
+        fn nothing_wipes_or_drops_it_until_the_caller_does() {
+            let (wiped, dropped) = (Cell::new(0), Cell::new(0));
+            let bare = with_owned(spy(&wiped, &dropped), |o| o.into_inner());
+            assert_eq!(wiped.get(), 0, "a taken value is the caller's to wipe");
+            assert_eq!(dropped.get(), 0, "a taken value is the caller's to drop");
+            drop(bare);
+            assert_eq!(dropped.get(), 1, "the caller's drop should be the only one");
+        }
+    }
+
+    mod given_the_closure_panics {
+        use super::*;
+
+        #[test]
+        fn the_value_is_wiped_and_dropped_once() {
+            let (wiped, dropped) = (Cell::new(0), Cell::new(0));
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                with_owned(spy(&wiped, &dropped), |o| {
+                    let _hold = o;
+                    panic!("closure failed with the value in hand")
+                })
+            }));
+            assert!(outcome.is_err(), "the closure should have panicked");
+            assert_eq!(wiped.get(), 1, "unwinding should wipe the value once");
+            assert_eq!(dropped.get(), 1, "unwinding should drop the value once");
+        }
     }
 }
