@@ -153,3 +153,49 @@ mod given_protected_bytes {
         assert_eq!(got.risky_unwrap(), vec![0xDE, 0xAD, 0xBE, 0xEF]);
     }
 }
+
+mod given_an_absent_fixed_width_value {
+    use super::*;
+
+    /// The ciphertext length of the one leaf `value` seals as.
+    fn sealed_len<P: Encrypt>(value: P) -> usize {
+        match encrypt(value, &cipher(), "ctx").expect("encrypt") {
+            CipherText::Single(leaf) => leaf.as_ref().len(),
+            other => panic!("not one leaf: {other:?}"),
+        }
+    }
+
+    fn same_length<T: Encrypt>(value: T) {
+        assert_eq!(
+            sealed_len(None::<T>),
+            sealed_len(Some(value)),
+            "{}",
+            core::any::type_name::<T>()
+        );
+    }
+
+    #[test]
+    fn seals_to_the_length_of_a_present_one() {
+        same_length(-1i8);
+        same_length(-1i16);
+        same_length(-1i32);
+        same_length(-1i64);
+        same_length(-1i128);
+        same_length(1u16);
+        same_length(1u32);
+        same_length(1u64);
+        same_length(1u128);
+        same_length(1.5f32);
+        same_length(1.5f64);
+        // A bool's plain null is already as long as a bool.
+        same_length(true);
+    }
+
+    #[test]
+    fn round_trips_through_aes_as_none() {
+        let cipher = cipher();
+        let node = encrypt(None::<u64>, &cipher, "ctx").expect("encrypt");
+        let got: Option<u64> = decrypt(&cipher, node, "ctx").expect("decrypt");
+        assert_eq!(got, None);
+    }
+}

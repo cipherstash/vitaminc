@@ -500,8 +500,10 @@ mod test {
         let absent = (&cipher).encrypt_none(aad).unwrap();
         let plaintext = open_local(&cipher, absent.into_local(), aad).unwrap();
         assert_eq!(plaintext.risky_ref(), &NULL_LEAF);
-        // And what the sink-based path seals for `None` verifies as absent.
-        let node = vitaminc_aead::encrypt(None::<u32>, &cipher, aad).unwrap();
+        // And what the sink-based path seals for the `None` of the bytes an
+        // `Encrypted` holds verifies as absent. (A fixed-width `None` seals
+        // as a typed null instead, which is not an `Absent`.)
+        let node = vitaminc_aead::encrypt(None::<Vec<u8>>, &cipher, aad).unwrap();
         let vitaminc_aead::CipherText::Single(leaf) = node else {
             panic!("a None is one leaf");
         };

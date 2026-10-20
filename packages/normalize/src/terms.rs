@@ -20,8 +20,8 @@ use vitaminc_aead::plaintext::{Error, Path, Step};
 use vitaminc_aead::seal::{seal_all, seal_all_async, AsyncCipher, Cipher};
 use vitaminc_aead::shape::{self, Locate, MapRules, SeqRules, Settle};
 use vitaminc_aead::{
-    Encrypt, EncryptError, EncryptSink, IntoAad, Logical, MapSink, Node, Pending, Physical,
-    Refusal, SeqSink, Sink, SourceError, Tee,
+    Encrypt, EncryptError, EncryptSink, FixedType, IntoAad, Logical, MapSink, Node, Pending,
+    Physical, Refusal, SeqSink, Sink, SourceError, Tee,
 };
 
 use vitaminc_protected::OpaqueDebug;
@@ -442,6 +442,13 @@ impl<'t, E: Error, N: Normalize> Sink for Terms<'t, E, N> {
             rules.sealed();
         }
         Ok(())
+    }
+
+    /// Indexed as a plain null, which has no term: whether, and how, an
+    /// absent value gets one is still to be decided
+    /// (cipherstash/vitaminc#493).
+    fn typed_null(self, _: FixedType) -> Result<(), E> {
+        self.scalar(None, Physical::Null)
     }
 
     fn seq(self, _: Option<usize>) -> Result<Self::Seq, E> {

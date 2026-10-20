@@ -15,7 +15,7 @@ use core::fmt;
 use std::sync::OnceLock;
 
 use vitaminc_aead::plaintext::{self, SourceError};
-use vitaminc_aead::{Encrypt, Logical, MapSink, Physical, SeqSink, Sink};
+use vitaminc_aead::{Encrypt, FixedType, Logical, MapSink, Physical, SeqSink, Sink};
 use vitaminc_context::{Context, IntoContext};
 use vitaminc_normalize::NormalizeError;
 use vitaminc_protected::{Controlled, OpaqueDebug, Protected};
@@ -788,6 +788,12 @@ impl Sink for Scalar {
         value: Physical<'_>,
     ) -> Result<OrderPlaintext, ScalarError> {
         order(self.0, ty, value).map_err(ScalarError::Term)
+    }
+
+    /// The same as a plain null for now: whether, and how, an absent value
+    /// gets an order term is still to be decided (cipherstash/vitaminc#493).
+    fn typed_null(self, _: FixedType) -> Result<OrderPlaintext, ScalarError> {
+        self.scalar(None, Physical::Null)
     }
 
     fn seq(self, _: Option<usize>) -> Result<Never, ScalarError> {

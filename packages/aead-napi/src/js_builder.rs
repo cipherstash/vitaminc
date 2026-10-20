@@ -15,7 +15,9 @@
 
 use napi::bindgen_prelude::{BigInt, Buffer, JsValue, Null, Object, ToNapiValue, Unknown};
 use napi::{Env, Error, Status};
-use vitaminc_aead::{Encrypt, Float, Frame, Int, Logical, MapSink, Physical, SeqSink, Sink};
+use vitaminc_aead::{
+    Encrypt, FixedType, Float, Frame, Int, Logical, MapSink, Physical, SeqSink, Sink,
+};
 
 use crate::error::JsFault;
 use crate::js::{
@@ -122,6 +124,11 @@ impl<'e, O: Out<'e>> Sink for JsBuilder<'e, O> {
         self.check_depth()?;
         let built = scalar_to_js(self.env, ty, value)?;
         Ok(self.out.put(built))
+    }
+
+    /// An absent value is JavaScript's `null`, whatever its type.
+    fn typed_null(self, _: FixedType) -> Result<O::Ok, JsFault> {
+        self.scalar(None, Physical::Null)
     }
 
     fn seq(self, len: Option<usize>) -> Result<JsSeq<'e, O>, JsFault> {
