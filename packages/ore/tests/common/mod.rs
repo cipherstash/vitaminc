@@ -315,6 +315,62 @@ impl OrderQuery for Unsalted {
 
 vitaminc_ore::supports_every_target!(Unsalted);
 
+/// A query from [`Blank`]: it orders as the mock's query does, but its
+/// bytes are empty, the shape of a query with no blocks.
+#[derive(Debug, Clone)]
+pub struct BlankQuery(MockTerm);
+
+impl AsRef<[u8]> for BlankQuery {
+    fn as_ref(&self) -> &[u8] {
+        &[]
+    }
+}
+
+/// A scheme whose terms keep the contract and whose queries are empty
+/// bytes, for the check that no query is empty to catch.
+pub struct Blank(pub Mock);
+
+impl OrderScheme for Blank {
+    const NAME: &'static str = "blank";
+    type Term = MockTerm;
+    type Error = Infallible;
+    type Space = MockSpace;
+
+    fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        self.0.open(target, salt)
+    }
+
+    fn encrypt_plaintext(
+        &self,
+        space: &MockSpace,
+        plaintext: &OrderPlaintext,
+    ) -> Result<MockTerm, Infallible> {
+        self.0.encrypt_plaintext(space, plaintext)
+    }
+
+    fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
+        compare(a, b)
+    }
+}
+
+impl OrderQuery for Blank {
+    type Query = BlankQuery;
+
+    fn encrypt_query(
+        &self,
+        space: &MockSpace,
+        plaintext: &OrderPlaintext,
+    ) -> Result<BlankQuery, Infallible> {
+        self.0.encrypt_plaintext(space, plaintext).map(BlankQuery)
+    }
+
+    fn compare_query(query: &BlankQuery, term: &MockTerm) -> Option<Ordering> {
+        compare(&query.0, term)
+    }
+}
+
+vitaminc_ore::supports_every_target!(Blank);
+
 /// A scheme whose term for a text shorter than two bytes is empty: the
 /// stored form of a term with no blocks, for the check that no term is
 /// empty to catch.

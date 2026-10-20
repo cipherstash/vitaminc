@@ -18,6 +18,7 @@ use core::cmp::Ordering;
 
 use vitaminc_aead::Encrypt;
 use vitaminc_normalize::NormalizeError;
+use vitaminc_protected::OpaqueDebug;
 
 use crate::scheme::{OrderError, OrderPlaintext, OrderScheme, OrderSpace, OrderTerm, Scalar};
 use crate::target::{FitsIn, StaticTarget, Supports, Target};
@@ -94,10 +95,12 @@ pub trait OrderQuery: OrderScheme {
 /// `==` compares the bytes. Whether that is equality of the values
 /// searched for depends on the scheme: under block ORE, whose queries are
 /// deterministic, it is. A query is for the comparison at hand and should
-/// not be persisted or logged, as [`OrderQuery`] explains.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// not be persisted or logged, as [`OrderQuery`] explains, so `Debug`
+/// shows the target and masks the query.
+#[derive(OpaqueDebug, Clone, PartialEq, Eq)]
 pub struct QueryTerm<R, T: Target> {
     raw: R,
+    #[non_sensitive]
     target: T,
 }
 

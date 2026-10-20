@@ -820,6 +820,17 @@ fn the_conformance_checks_catch_a_query_that_ignores_the_salt() {
     );
 }
 
+/// A scheme whose queries order correctly but are empty bytes fails the
+/// query check by name.
+#[test]
+#[should_panic(expected = "a query is empty, so it depends on nothing")]
+fn the_conformance_checks_catch_an_empty_query() {
+    test_support::query_conformance(
+        &common::Blank(Mock::new(key())),
+        &common::Blank(Mock::new(Protected::new([8; 32]))),
+    );
+}
+
 /// A marker impl the runtime answer does not back fails the check by
 /// name.
 #[test]

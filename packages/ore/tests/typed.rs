@@ -566,6 +566,10 @@ fn a_query_compares_against_the_space_s_terms() {
         quantity.encrypt_query_checked(1i64 << 40),
         Err(OrderError::Term(NormalizeError::OutOfRange))
     ));
+    assert!(matches!(
+        quantity.encrypt_query_checked("42"),
+        Err(OrderError::Term(NormalizeError::Mismatch))
+    ));
     let p = order(T::I32, None, Physical::Int(Int::I8(1))).expect("term");
     assert_eq!(quantity.encrypt_query_term(&p).expect("mock"), one);
     let other = order(T::I64, None, Physical::Int(Int::I8(1))).expect("term");
@@ -631,17 +635,29 @@ fn a_query_fails_as_a_term_fails() {
             ..
         })
     ));
+    let p = order(T::I64, None, Physical::Int(Int::I8(1))).expect("term");
+    assert!(matches!(
+        fixed.target(T::I64).encrypt_query_term(&p),
+        Err(OrderError::Unsupported {
+            scheme: "fixed",
+            ..
+        })
+    ));
     assert!(fixed.target(target::I32).encrypt_query(1i32).is_ok());
 }
 
-/// Queries are `Debug`, `Clone`, `Eq` and `AsRef<[u8]>`, as terms are.
+/// Queries are `Clone`, `Eq` and `AsRef<[u8]>`, as terms are. Their
+/// `Debug` masks the query, which is not to be logged.
 #[test]
 fn a_query_term_carries_what_a_term_carries() {
     let mock = Mock::new(key());
     let space = mock.target(target::I32);
     let query = space.encrypt_query(7i32).expect("mock");
     let shown = format!("{query:?}");
-    assert!(shown.starts_with("QueryTerm {"), "{shown}");
+    assert!(
+        shown.ends_with(r#"QueryTerm<typed::common::MockQuery, vitaminc_ore::target::I32> { raw: "***", target: I32 }"#),
+        "{shown}"
+    );
     assert_eq!(query.clone(), query);
     let bytes: &[u8] = query.as_ref();
     assert_eq!(bytes, query.as_bytes());
