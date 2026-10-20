@@ -430,9 +430,16 @@ fn f64_canonicalisation_is_idempotent(bits: u64) -> bool {
 /// Whether `bytes` holds exactly `expected`, compared inside the
 /// protected value with `zip_ref` so the encoding never leaves its
 /// wrapper. Only the answer, which is not secret, is taken out.
+///
+/// `zip_ref` hands the closure the expected copy as a plain `Vec`, which
+/// would be freed without being wiped when the closure ends. So the
+/// closure moves it into a `Zeroizing`, which wipes it when it is dropped.
 fn holds(bytes: &Protected<Vec<u8>>, expected: &[u8]) -> bool {
     Protected::new(expected.to_vec())
-        .zip_ref(bytes, |expected, bytes: &Vec<u8>| *bytes == expected)
+        .zip_ref(bytes, |expected, bytes: &Vec<u8>| {
+            let expected = zeroize::Zeroizing::new(expected);
+            *bytes == *expected
+        })
         .risky_unwrap()
 }
 
