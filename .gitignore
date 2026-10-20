@@ -14,3 +14,6 @@
 
 # Bytecode from `mise run pr:gate:has_rust_changes:test`.
 __pycache__/
+
+# Per-developer Claude Code settings.
+.claude/settings.local.json
