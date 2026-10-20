@@ -1,4 +1,14 @@
 
+## [0.7.0] - 2026-10-20
+
+### Documentation
+
+- say exactly when the normalization buffers move to the heap and what they leave behind
+
+### Fixes
+
+- have each encoder own the wiped buffer it writes, so no caller can pass one that is not
+
 ## [0.6.1] - 2026-10-18
 
 ## [0.6.0] - 2026-10-17

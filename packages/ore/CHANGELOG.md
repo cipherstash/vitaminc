@@ -1,4 +1,30 @@
 
+## [0.7.0] - 2026-10-20
+
+### Breaking
+
+- **Breaking:** typed targets and a chained API, with OrderColumn renamed to OrderSpace
+- **Breaking:** start the text and bytes order encodings with a marker byte, so no order plaintext is empty
+- **Breaking:** let a scheme derive its keys once per space, not once per term
+- **Breaking:** open takes the space's target as well as its salt
+- **Breaking:** require an order space to wipe itself on drop
+- **Breaking:** remove the one-byte order targets, I8 and U8
+
+### Documentation
+
+- say what a query's type prevents and why not to keep one
+- say a query is guarded against being kept, not wiped from memory
+- say exactly when the normalization buffers move to the heap and what they leave behind
+
+### Features
+
+- OrderQuery, the query side of an order scheme
+
+### Fixes
+
+- mask a query's bytes in Debug, and test the query checks that had none
+- write an integer's order encoding straight into the wiped buffer that is returned, so no plain copy is made
+
 ## [0.6.1] - 2026-10-18
 
 ## [0.6.0] - 2026-10-17

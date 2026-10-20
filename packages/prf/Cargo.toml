@@ -20,12 +20,12 @@ default = []
 normalize = ["dep:vitaminc-normalize", "dep:vitaminc-aead"]
 
 [dependencies]
-vitaminc-normalize = { version = "0.6.1", path = "../normalize", optional = true }
-vitaminc-aead = { version = "0.6.1", path = "../aead", optional = true }
+vitaminc-normalize = { version = "0.7.0", path = "../normalize", optional = true }
+vitaminc-aead = { version = "0.7.0", path = "../aead", optional = true }
 mutants = "0.0.4"
 thiserror = { workspace = true }
-vitaminc-context = { version = "0.6.1", path = "../context" }
-vitaminc-protected = { version = "0.6.1", path = "../protected" }
+vitaminc-context = { version = "0.7.0", path = "../context" }
+vitaminc-protected = { version = "0.7.0", path = "../protected" }
 
 [dev-dependencies]
 quickcheck = "1.1.0"
