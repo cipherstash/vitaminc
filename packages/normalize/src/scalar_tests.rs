@@ -593,3 +593,104 @@ fn decimal_refuses_a_mantissa_outside_96_bits_by_itself() {
     assert!(decimal(0, Int::I128(i128::MAX)).is_none());
     assert!(decimal(0, Int::I128(i128::MIN)).is_none());
 }
+
+/// `raw` cut down to every integer width of the data model.
+fn at_every_width(raw: u128) -> [Int; 10] {
+    [
+        Int::I8(raw as i8),
+        Int::U8(raw as u8),
+        Int::I16(raw as i16),
+        Int::U16(raw as u16),
+        Int::I32(raw as i32),
+        Int::U32(raw as u32),
+        Int::I64(raw as i64),
+        Int::U64(raw as u64),
+        Int::I128(raw as i128),
+        Int::U128(raw),
+    ]
+}
+
+/// `integer` works out the sign and word itself rather than calling
+/// `Int::sign_and_word`, so that they are never returned through a stack
+/// slot. These tests check that the two always agree.
+mod given_any_integer {
+    use super::*;
+
+    fn agrees_with_sign_and_word(value: Int) -> bool {
+        let (negative, word) = value.sign_and_word();
+        holds(&integer(value), &integer_bytes(u8::from(!negative), word))
+    }
+
+    #[test]
+    fn returns_the_sign_and_word_that_sign_and_word_gives_at_the_edges() {
+        for raw in [0, 1, u128::MAX, 1 << 127, (1 << 127) - 1, 0x80, 0x7f] {
+            for value in at_every_width(raw) {
+                assert!(
+                    agrees_with_sign_and_word(value),
+                    "integer and sign_and_word disagree on {value:?}"
+                );
+            }
+        }
+    }
+
+    #[quickcheck]
+    fn returns_the_sign_and_word_that_sign_and_word_gives(raw: u128) -> bool {
+        at_every_width(raw)
+            .into_iter()
+            .all(agrees_with_sign_and_word)
+    }
+}
+
+/// `timestamp` works out the nanosecond count itself rather than calling
+/// `timestamp_nanos`, so that the count is never returned through a stack
+/// slot. These tests check that the two accept the same counts.
+mod given_any_timestamp_count {
+    use super::*;
+    use vitaminc_aead::plaintext::kinds::timestamp_nanos;
+
+    const UNITS: [TimeUnit; 4] = [
+        TimeUnit::Seconds,
+        TimeUnit::Millis,
+        TimeUnit::Micros,
+        TimeUnit::Nanos,
+    ];
+
+    fn agrees_with_timestamp_nanos(unit: TimeUnit, count: Int) -> bool {
+        timestamp(unit, count).is_some() == timestamp_nanos(unit, count).is_some()
+    }
+
+    #[test]
+    fn returns_a_term_for_the_same_counts_as_timestamp_nanos_at_the_edges() {
+        for unit in UNITS {
+            let per = unit.nanos();
+            for nanos in [MIN_TIMESTAMP_NANOS, MAX_TIMESTAMP_NANOS] {
+                for count in [nanos / per - 1, nanos / per, nanos / per + 1] {
+                    let count = Int::I128(count);
+                    assert!(
+                        agrees_with_timestamp_nanos(unit, count),
+                        "timestamp and timestamp_nanos disagree on {count:?} {unit:?}"
+                    );
+                }
+            }
+            for count in [
+                Int::U128(u128::MAX),
+                Int::I128(i128::MIN),
+                Int::I128(i128::MAX),
+            ] {
+                assert!(
+                    agrees_with_timestamp_nanos(unit, count),
+                    "timestamp and timestamp_nanos disagree on {count:?} {unit:?}"
+                );
+            }
+        }
+    }
+
+    #[quickcheck]
+    fn returns_a_term_for_the_same_counts_as_timestamp_nanos(raw: u128) -> bool {
+        UNITS.into_iter().all(|unit| {
+            at_every_width(raw)
+                .into_iter()
+                .all(|count| agrees_with_timestamp_nanos(unit, count))
+        })
+    }
+}
