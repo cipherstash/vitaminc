@@ -62,6 +62,14 @@ p384 = { version = "0.14", default-features = false, features = ["alloc", "ecdsa
 # the PSS and PKCS#1 behaviour. Move to 0.10.0 when it is released.
 rsa = { version = "=0.10.0-rc.19", optional = true }
 sha2 = { version = "0.11.0", optional = true }
+# Verifies the Ed25519 signatures of `gcp::GcpEd25519Key` locally, for the
+# same reason. `ed25519-dalek` 3 is the line that speaks this workspace's
+# traits (`signature` 3, `pkcs8` 0.11/`spki` 0.8, `sha2` 0.11); 2.x would
+# pull a second, older copy of each. The `ed25519` crate alone holds only
+# the signature type, with no verifier. Default features are off: they add
+# precomputed tables and secret-key zeroization, and the adapter holds only
+# a public key.
+ed25519-dalek = { version = "3", default-features = false, features = ["pkcs8"], optional = true }
 
 # --- `vault` feature ---------------------------------------------------------
 # `vaultrs` covers every single-item Transit call but no batch endpoint; the
@@ -112,6 +120,9 @@ httpmock = "0.8"
 # verifier that takes only the digest-length salt.
 rsa = "=0.10.0-rc.19"
 sha2 = "0.11.0"
+# Signs test vectors for the GCP Ed25519 unit tests, and checks the Vault
+# dev server's Ed25519 signatures against the public key it exports.
+ed25519-dalek = { version = "3", default-features = false, features = ["pkcs8", "alloc"] }
 
 [features]
 default = ["aws", "caching"]
@@ -135,6 +146,7 @@ gcp = [
     "dep:rsa",
     "dep:sha2",
     "dep:spki",
+    "dep:ed25519-dalek",
 ]
 vault = ["dep:vaultrs", "dep:rustify", "dep:rustify_derive", "dep:serde", "dep:serde_json", "dep:base64", "canonical-encoding"]
 # Internal: the DER/PEM helpers behind ADR 0001. Not meant to be enabled

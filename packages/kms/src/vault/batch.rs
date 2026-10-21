@@ -11,6 +11,8 @@
 //!
 //! `sign` and `verify` are here too, because the `vaultrs` 0.8 requests
 //! have no `salt_length` field, and RSA-PSS needs it (see [`SignRequest`]).
+//! Their `ed25519` forms are here for the same reason of shape: they send
+//! a message, and no hash fields (see [`SignMessageRequest`]).
 //!
 //! Every request struct mirrors `vaultrs`'s own shape: `mount` and `name`
 //! build the path and are `#[endpoint(skip)]`ped out of the body, and
@@ -167,4 +169,51 @@ pub(super) struct VerifyRequest {
     pub marshaling_algorithm: MarshalingAlgorithm,
     pub signature_algorithm: Option<SignatureAlgorithm>,
     pub salt_length: Option<&'static str>,
+}
+
+/// `POST {mount}/sign/{name}` for an `ed25519` key, which signs the whole
+/// message. Vault ignores `hash_algorithm`, `marshaling_algorithm`,
+/// `signature_algorithm` and `salt_length` for this key type, so the
+/// request does not send them, and a reader of a request log does not see
+/// a hash that is not used.
+///
+/// `prehashed` must be `false`: Vault answers `true` with `400 only Pure
+/// Ed25519 signatures supported, prehashed must be false`. The adapter
+/// sends it explicitly, so a change of Vault's default cannot change what
+/// is signed. Verified against `hashicorp/vault:2.1.0`.
+#[derive(Debug, Endpoint)]
+#[endpoint(
+    path = "{self.mount}/sign/{self.name}",
+    method = "POST",
+    response = "SignDataResponse"
+)]
+pub(super) struct SignMessageRequest {
+    #[endpoint(skip)]
+    pub mount: String,
+    #[endpoint(skip)]
+    pub name: String,
+    /// The base64 message.
+    pub input: String,
+    pub key_version: u64,
+    pub prehashed: bool,
+}
+
+/// `POST {mount}/verify/{name}` for an `ed25519` key. See
+/// [`SignMessageRequest`].
+#[derive(Debug, Endpoint)]
+#[endpoint(
+    path = "{self.mount}/verify/{self.name}",
+    method = "POST",
+    response = "VerifySignedDataResponse"
+)]
+pub(super) struct VerifyMessageRequest {
+    #[endpoint(skip)]
+    pub mount: String,
+    #[endpoint(skip)]
+    pub name: String,
+    /// The base64 message.
+    pub input: String,
+    /// `vault:v<N>:<base64>`.
+    pub signature: String,
+    pub prehashed: bool,
 }

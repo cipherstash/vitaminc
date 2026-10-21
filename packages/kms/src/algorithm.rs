@@ -3,9 +3,10 @@
 /// One crate-level enum rather than each vendor's own type, so a consumer
 /// that moves between backends keeps the same configuration value. Every
 /// member takes a pre-computed digest of the named hash, which is what the
-/// [`Sign`](crate::Sign) trait accepts; Ed25519 is absent because pure
-/// Ed25519 signs the message itself and has no pre-hashed mode on the
-/// vendors that offer it.
+/// [`Sign`](crate::Sign) trait accepts. Ed25519 is not a member, because
+/// pure Ed25519 signs the message itself and has no pre-hashed mode on the
+/// vendors that offer it. It has its own adapter types, behind
+/// [`SignMessage`](crate::SignMessage), and so it needs no member here.
 ///
 /// Each adapter maps a member to its vendor's identifier and rejects, at
 /// construction, any member the vendor or the bound key cannot serve.

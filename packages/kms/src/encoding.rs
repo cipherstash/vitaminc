@@ -3,7 +3,8 @@
 //! INTEGER s }` and public keys as DER `SubjectPublicKeyInfo`.
 //!
 //! Azure returns ECDSA signatures as raw `r || s` and public keys as JWK
-//! fields; Vault returns PEM. AWS and GCP already return the canonical
+//! fields; Vault returns PEM, except for `ed25519` keys, whose public key
+//! it returns as the raw 32 bytes in base64. AWS and GCP already return the canonical
 //! forms (GCP when asked for DER), so they do not use this module.
 
 use der::asn1::{BitStringRef, UintRef};
@@ -31,6 +32,8 @@ pub enum EncodingError {
     UnknownCurve,
     #[error("a public-key component is empty")]
     EmptyComponent,
+    #[error("an Ed25519 public key is {0} bytes, expected 32")]
+    Ed25519PublicKeyLength(usize),
 }
 
 /// The named curve of an EC public key, for [`ec_spki`].
@@ -141,6 +144,27 @@ pub fn ec_spki(curve: EcCurve, x: &[u8], y: &[u8]) -> Result<Vec<u8>, EncodingEr
             parameters: Some(curve.oid()),
         },
         subject_public_key: BitStringRef::from_bytes(&point)?,
+    };
+    Ok(spki.to_der()?)
+}
+
+/// The length in bytes of an Ed25519 public key (RFC 8032), which is also
+/// the length of the `subjectPublicKey` in its SPKI (RFC 8410).
+pub const ED25519_PUBLIC_KEY_LEN: usize = 32;
+
+/// DER `SubjectPublicKeyInfo` for an Ed25519 public key given its raw
+/// 32-byte encoding, as Vault's public-key export returns for `ed25519`
+/// keys. RFC 8410: the algorithm is `id-Ed25519` with no parameters.
+pub fn ed25519_spki(raw: &[u8]) -> Result<Vec<u8>, EncodingError> {
+    if raw.len() != ED25519_PUBLIC_KEY_LEN {
+        return Err(EncodingError::Ed25519PublicKeyLength(raw.len()));
+    }
+    let spki = SubjectPublicKeyInfo::<der::asn1::AnyRef<'_>, _> {
+        algorithm: AlgorithmIdentifier {
+            oid: const_oid::db::rfc8410::ID_ED_25519,
+            parameters: None,
+        },
+        subject_public_key: BitStringRef::from_bytes(raw)?,
     };
     Ok(spki.to_der()?)
 }
@@ -278,6 +302,37 @@ mod tests {
         assert_eq!(point.len(), 65);
         assert_eq!(point[32], 0x01);
         assert_eq!(point[64], 0x02);
+    }
+
+    #[test]
+    fn ed25519_spki_matches_the_rfc_8410_example() {
+        // RFC 8410 section 10.1: the example Ed25519 public key, as PEM
+        // `MCowBQYDK2VwAyEAGb9ECWmEzf6FQbrBZ9w7lshQhqowtrbLDFw4rXAxZuE=`.
+        let raw = [
+            0x19, 0xBF, 0x44, 0x09, 0x69, 0x84, 0xCD, 0xFE, 0x85, 0x41, 0xBA, 0xC1, 0x67, 0xDC,
+            0x3B, 0x96, 0xC8, 0x50, 0x86, 0xAA, 0x30, 0xB6, 0xB6, 0xCB, 0x0C, 0x5C, 0x38, 0xAD,
+            0x70, 0x31, 0x66, 0xE1,
+        ];
+        let mut expected = vec![
+            0x30, 0x2A, // SEQUENCE
+            0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, // id-Ed25519, no parameters
+            0x03, 0x21, 0x00, // BIT STRING, 0 unused bits
+        ];
+        expected.extend_from_slice(&raw);
+
+        assert_eq!(ed25519_spki(&raw).unwrap(), expected);
+    }
+
+    #[test]
+    fn ed25519_spki_rejects_a_key_of_the_wrong_length() {
+        assert!(matches!(
+            ed25519_spki(&[0u8; 31]),
+            Err(EncodingError::Ed25519PublicKeyLength(31))
+        ));
+        assert!(matches!(
+            ed25519_spki(&[]),
+            Err(EncodingError::Ed25519PublicKeyLength(0))
+        ));
     }
 
     #[test]

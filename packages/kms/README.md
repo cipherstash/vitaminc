@@ -18,7 +18,8 @@ variants [`BatchGenerateDataKey`]/[`BatchRetrieveDataKey`] and the
 backends without native batch support), deriving a deterministic per-keyset
 index key ([`load_index_key`]), encrypting/decrypting directly under a
 KMS-held key ([`EncryptWithKey`]/[`DecryptWithKey`]), and MAC/signing
-operations ([`GenerateMac`]/[`VerifyMac`], [`Sign`]/[`Verify`],
+operations ([`GenerateMac`]/[`VerifyMac`], [`Sign`]/[`Verify`] over a
+digest, [`SignMessage`]/[`VerifyMessage`] over a whole message, and
 [`GetPublicKey`]).
 
 These traits deliberately cover more than any single consumer (e.g.
@@ -71,8 +72,8 @@ SDK. `aws` is on by default.
 |---|---|---|---|---|---|---|
 | `aws` | AWS KMS | `AwsDataKeySource` | same type | `AwsMacKey` | `AwsSigningKey` | LocalStack |
 | `azure` | Azure Key Vault / Managed HSM | `AzureDataKeySource` | same type | `AzureMacKey` | `AzureSigningKey` | Lowkey Vault |
-| `gcp` | Google Cloud KMS | `GcpDataKeySource` | same type | `GcpMacKey` | `GcpSigningKey` | SDK stub only |
-| `vault` | HashiCorp Vault Transit | `VaultDataKeySource` | same type | `VaultMacKey` | `VaultSigningKey` | Vault dev server |
+| `gcp` | Google Cloud KMS | `GcpDataKeySource` | same type | `GcpMacKey` | `GcpSigningKey`, `GcpEd25519Key` | SDK stub only |
+| `vault` | HashiCorp Vault Transit | `VaultDataKeySource` | same type | `VaultMacKey` | `VaultSigningKey`, `VaultEd25519Key` | Vault dev server |
 
 There is one adapter type per key purpose, because a backend key is created
 for one purpose. A data key source also implements direct encryption under
@@ -99,9 +100,16 @@ Design notes that apply across vendors:
   answers that path with `403`, the source uses the fan-out until it is
   rebuilt.
 - **Signature algorithms** are named once, by [`SignatureAlgorithm`], and
-  mapped by each adapter. ECDSA signatures are DER, public keys are DER
-  `SubjectPublicKeyInfo`, whatever the vendor returns natively
-  (`docs/adr/0002`).
+  mapped by each adapter. ECDSA signatures are DER, Ed25519 signatures are
+  the raw 64 bytes, and public keys are DER `SubjectPublicKeyInfo`, whatever
+  the vendor returns natively (`docs/adr/0002`).
+- **Ed25519** signs the whole message, so it is not a [`SignatureAlgorithm`]
+  (those sign a digest). Google and Vault offer it with no pre-hashed mode,
+  and AWS and Azure do not offer it. `GcpEd25519Key` and `VaultEd25519Key`
+  implement [`SignMessage`]/[`VerifyMessage`] and not [`Sign`]/[`Verify`],
+  and the digest signing keys do the opposite. Thus a digest cannot go to an
+  Ed25519 key, and a message cannot go to a digest key: the call does not
+  compile.
 - **Key versions.** Azure `KeyId`s and ciphertexts carry the key version
   the vault used, so retrieval survives rotation. MAC and signing keys from
   Azure, Google and Vault bind to an explicit key version at construction,

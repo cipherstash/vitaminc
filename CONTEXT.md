@@ -36,8 +36,11 @@ one purpose.
 _Avoid_: Key usage, key type (which names the algorithm, not the purpose)
 
 **Signing key**:
-An adapter over a backend key whose purpose is signing. It signs a digest,
-verifies a signature, and returns the public key.
+An adapter over a backend key whose purpose is signing. It signs, verifies
+a signature, and returns the public key. A signing key takes a digest
+(`Sign`) or the whole message (`SignMessage`, for Ed25519), never both:
+the scheme sets which. The digest schemes share one adapter type per
+backend, and Ed25519 has its own.
 
 **MAC key**:
 An adapter over a backend key whose purpose is MAC. It generates and

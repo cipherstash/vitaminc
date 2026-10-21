@@ -34,7 +34,7 @@ pub use key_id::KeyId;
 pub use mac::{GenerateMac, VerifyMac};
 pub use pooled::PooledDataKeySource;
 pub use provider::{Binding, BindingSupport, IndexKeyProvider, KeyProvider};
-pub use sign::{GetPublicKey, Sign, Verify};
+pub use sign::{GetPublicKey, Sign, SignMessage, Verify, VerifyMessage};
 
 // The AWS names below predate the vendor modules and stay at the crate
 // root for compatibility. Every other adapter lives in its vendor module

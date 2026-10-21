@@ -128,10 +128,27 @@ impl CheckIntegrity for MacVerifyResponse {
 
 impl CheckIntegrity for AsymmetricSignResponse {
     fn check_integrity(&self) -> Result<(), Mismatch> {
-        // This adapter always signs a digest, never raw `data`, so
+        // The response to a request that sent a `digest`, never `data`, so
         // `verifiedDataCrc32c` is expected to be false and is not checked.
+        // A request that sends `data` is checked as `SignedData`.
         verified(self.verified_digest_crc32c, "verifiedDigestCrc32c")?;
         matches(self.signature_crc32c, &self.signature, "signatureCrc32c")
+    }
+}
+
+/// An [`AsymmetricSignResponse`] to a request that sent the message itself
+/// in `data`, as Ed25519 signing does. The server then sets
+/// `verifiedDataCrc32c`, not `verifiedDigestCrc32c`.
+pub(super) struct SignedData(pub(super) AsymmetricSignResponse);
+
+impl CheckIntegrity for SignedData {
+    fn check_integrity(&self) -> Result<(), Mismatch> {
+        verified(self.0.verified_data_crc32c, "verifiedDataCrc32c")?;
+        matches(
+            self.0.signature_crc32c,
+            &self.0.signature,
+            "signatureCrc32c",
+        )
     }
 }
 
@@ -339,6 +356,25 @@ mod tests {
         assert_eq!(
             response.set_verified_digest_crc32c(false).check_integrity(),
             Err(Mismatch("verifiedDigestCrc32c"))
+        );
+    }
+
+    #[test]
+    fn signed_data_checks_the_data_flag_not_the_digest_flag() {
+        let response = AsymmetricSignResponse::new()
+            .set_signature(PAYLOAD)
+            .set_signature_crc32c(crc32c(PAYLOAD))
+            .set_verified_data_crc32c(true)
+            .set_verified_digest_crc32c(false);
+        assert_eq!(SignedData(response.clone()).check_integrity(), Ok(()));
+
+        assert_eq!(
+            SignedData(response.clone().set_verified_data_crc32c(false)).check_integrity(),
+            Err(Mismatch("verifiedDataCrc32c"))
+        );
+        assert_eq!(
+            SignedData(response.set_signature_crc32c(0)).check_integrity(),
+            Err(Mismatch("signatureCrc32c"))
         );
     }
 

@@ -5,8 +5,10 @@
 //! - [`VaultDataKeySource`]: data keys via `datakey`/`datakeys` (native
 //!   batch) and `decrypt` with `batch_input`, plus direct `encrypt`/`decrypt`.
 //! - [`VaultMacKey`]: HMAC via `hmac` and `verify`.
-//! - [`VaultSigningKey`]: signatures via `sign` and `verify`, public key via
-//!   `export/public-key`.
+//! - [`VaultSigningKey`]: signatures over a digest via `sign` and `verify`,
+//!   public key via `export/public-key`.
+//! - [`VaultEd25519Key`]: pure Ed25519 signatures over the whole message,
+//!   with the same calls on an `ed25519` key.
 //!
 //! Every adapter takes a ready [`vaultrs::client::VaultClient`]; address,
 //! token, namespace and TLS are the caller's concern. Keys must not be
@@ -26,7 +28,7 @@
 //! the way out — and `verify` has to put it back on the way in, because
 //! Vault's `verify` will not accept a bare tag.
 //!
-//! [`VaultMacKey`] and [`VaultSigningKey`] therefore bind to one explicit
+//! [`VaultMacKey`], [`VaultSigningKey`] and [`VaultEd25519Key`] therefore bind to one explicit
 //! key version at construction, the same shape Google Cloud KMS forces by
 //! binding to a `CryptoKeyVersion`. They pass that version on generation
 //! and rebuild `vault:v<version>:` on verification. **Rotating the backend
@@ -39,10 +41,12 @@
 
 mod batch;
 mod data_key;
+mod ed25519;
 mod mac;
 mod sign;
 
 pub use data_key::{Error as VaultDataKeySourceError, VaultDataKeySource};
+pub use ed25519::{Error as VaultEd25519KeyError, VaultEd25519Key};
 pub use mac::{Error as VaultMacKeyError, VaultMacKey};
 pub use sign::{Error as VaultSigningKeyError, VaultSigningKey};
 

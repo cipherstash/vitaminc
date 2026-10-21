@@ -60,8 +60,8 @@ pub enum Error {
 /// after a rotation.
 ///
 /// The bound key must not be `derived`: [`Sign`] carries no derivation
-/// context. (Vault only honours one on `ed25519` keys, which this crate's
-/// [`SignatureAlgorithm`] has no member for.)
+/// context. (Vault only honours one on `ed25519` keys, which this type does
+/// not serve: see [`VaultEd25519Key`](super::VaultEd25519Key).)
 pub struct VaultSigningKey {
     client: VaultClient,
     mount: String,

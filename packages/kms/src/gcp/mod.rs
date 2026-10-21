@@ -5,8 +5,10 @@
 //! - [`GcpDataKeySource`]: bound to a `CryptoKey`; data keys via local
 //!   generation plus `encrypt`/`decrypt`, and direct `encrypt`/`decrypt`.
 //! - [`GcpMacKey`]: bound to a `CryptoKeyVersion`; `macSign`/`macVerify`.
-//! - [`GcpSigningKey`]: bound to a `CryptoKeyVersion`; `asymmetricSign`,
-//!   local verification against `getPublicKey`.
+//! - [`GcpSigningKey`]: bound to a `CryptoKeyVersion`; `asymmetricSign`
+//!   over a digest, local verification against `getPublicKey`.
+//! - [`GcpEd25519Key`]: bound to an `EC_SIGN_ED25519` `CryptoKeyVersion`;
+//!   `asymmetricSign` over the whole message, local verification.
 //!
 //! Every adapter takes a ready [`google_cloud_kms_v1::client::KeyManagementService`];
 //! credentials and endpoint are the caller's concern. Every call computes
@@ -34,6 +36,7 @@
 //!   algorithm is checked against the requested [`crate::SignatureAlgorithm`].
 
 mod data_key;
+mod ed25519;
 mod integrity;
 mod mac;
 mod sign;
@@ -48,5 +51,6 @@ pub use data_key::{Error as GcpDataKeySourceError, GcpDataKeySource};
 /// `PooledDataKeySource::new(GcpDataKeySource::new(...))`. See
 /// [`PooledDataKeySource`](crate::PooledDataKeySource) for the trade-off.
 pub type GcpPooledDataKeySource<const N: usize> = crate::PooledDataKeySource<GcpDataKeySource<N>>;
+pub use ed25519::{Error as GcpEd25519KeyError, GcpEd25519Key};
 pub use mac::{Error as GcpMacKeyError, GcpMacKey};
 pub use sign::{Error as GcpSigningKeyError, GcpSigningKey};

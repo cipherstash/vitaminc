@@ -232,9 +232,10 @@ impl Hash {
 
 /// The crate-level scheme a Google Cloud KMS key algorithm implements, for
 /// the algorithms this adapter supports. `None` covers both algorithms
-/// with no crate-level equivalent (Ed25519, secp256k1, the post-quantum
-/// families, the raw PKCS#1 variants that sign data rather than a digest)
-/// and every non-signing purpose.
+/// with no crate-level equivalent (secp256k1, the post-quantum families,
+/// the raw PKCS#1 variants that sign data rather than a digest), Ed25519
+/// (which [`GcpEd25519Key`](super::GcpEd25519Key) serves) and every
+/// non-signing purpose.
 fn scheme_of(algorithm: &CryptoKeyVersionAlgorithm) -> Option<SignatureAlgorithm> {
     match algorithm {
         CryptoKeyVersionAlgorithm::EcSignP256Sha256 => Some(SignatureAlgorithm::EcdsaP256Sha256),
