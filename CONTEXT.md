@@ -108,3 +108,5 @@ or needs material the client holds as well.
 **Index key**:
 A fixed, deterministic key, one per backend key, that a caller uses
 locally to derive search-index terms. Never used as a data key.
+The deployment mints it once under the empty binding and persists its key
+id, because it is always retrieved under the empty binding.

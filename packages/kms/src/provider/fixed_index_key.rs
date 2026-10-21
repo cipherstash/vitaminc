@@ -8,14 +8,47 @@ use vitaminc_protected::Protected;
 /// Vendor backends have no deterministic-derivation primitive, so the index
 /// key's determinism comes entirely from the caller presenting the same
 /// stored identifier every time (see [`load_index_key`](crate::load_index_key)).
-/// Provisioning that `KeyId` is a one-time, out-of-band step: call the
-/// backend's `generate_data_key()` once, persist the resulting `key_id`
-/// durably (configuration, a secrets store), and construct this wrapper
-/// with it on every subsequent run. Minting a fresh one at startup makes
-/// every previously written index term unfindable.
+/// Provisioning that `KeyId` is a one-time, out-of-band step: mint one key
+/// with [`Binding::EMPTY`] (`generate_keys(&[Binding::EMPTY])`, or
+/// `generate_data_key(Binding::EMPTY)` on a vendor source), persist the
+/// resulting `key_id` durably (configuration, a secrets store), and
+/// construct this wrapper with it on every subsequent run. Minting a fresh
+/// one at startup makes every previously written index term unfindable.
 ///
 /// The index key is retrieved with [`Binding::EMPTY`]: it belongs to the
-/// backend key, not to any value's context.
+/// backend key, not to any value's context. So it must also be minted with
+/// `Binding::EMPTY`. Every source binds, so a key minted under a different
+/// binding does not come back: a vendor source and `FakeKeyProvider`
+/// refuse the retrieval each time the service starts. `AuthorityKeySource`
+/// does not refuse it: it derives a key that is not the one it minted,
+/// with no error.
+///
+/// ```
+/// # #[cfg(feature = "test-support")]
+/// # futures::executor::block_on(async {
+/// use vitaminc_kms::provider::{
+///     Binding, FakeKeyProvider, FixedIndexKeySource, IndexKeyProvider, KeyProvider,
+/// };
+///
+/// // Once, when the deployment is set up. Persist `index_key_id`.
+/// let backend = FakeKeyProvider::<32>::new();
+/// let minted = backend.generate_keys(&[Binding::EMPTY]).await?;
+/// let index_key_id = minted[0].key_id.clone();
+///
+/// // Each time the service starts, with the persisted id.
+/// let source = FixedIndexKeySource::new(backend, index_key_id);
+/// let index_key = source.load_index_key().await?;
+/// # let _: vitaminc_kms::IndexKeyMaterial<32> = index_key;
+///
+/// // A key minted under any other binding does not load.
+/// let backend = FakeKeyProvider::<32>::new();
+/// let minted = backend.generate_keys(&[Binding::from("users/email")]).await?;
+/// let wrong = FixedIndexKeySource::new(backend, minted[0].key_id.clone());
+/// assert!(wrong.load_index_key().await.is_err());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// # })
+/// # .unwrap();
+/// ```
 ///
 /// Implements both provider traits, delegating [`KeyProvider`] to the inner
 /// source, so one value satisfies a consumer that needs both.

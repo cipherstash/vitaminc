@@ -75,6 +75,16 @@ pub(crate) fn tagged_binding(binding: Binding<'_>) -> Vec<u8> {
 /// different key, which opens nothing, and the consumer's AEAD reports
 /// that.
 ///
+/// **A binding is not secret.** It goes to the backend with each request,
+/// and the backend can record it. AWS KMS writes the `EncryptionContext`
+/// to CloudTrail in readable form. Vault audit devices record request data:
+/// by default each string is an HMAC, but a mount can turn this off for
+/// named fields, and an HMAC does not hide a value that is easy to guess.
+/// Google Cloud KMS and Azure Managed HSM receive the bytes as additional
+/// authenticated data in the request. ZeroKMS logs the descriptor on each
+/// retrieval. Thus do not put secret data in a binding. Put only the
+/// context that identifies the value, such as a table and column name.
+///
 /// A newtype rather than a bare `&[u8]`, so a plaintext or a key id cannot
 /// be passed where a binding belongs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

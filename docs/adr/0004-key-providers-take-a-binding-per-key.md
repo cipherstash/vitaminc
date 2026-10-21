@@ -32,6 +32,9 @@ one backend among several.
   knowing it, so the constant was removed before it shipped (CIP-4981).
 - `Binding::EMPTY` is still a binding. A key minted under it comes back only
   under it.
+- A binding is not secret. Each backend receives it in the request, and some
+  record it (AWS writes the `EncryptionContext` to CloudTrail, and ZeroKMS
+  logs the descriptor). Callers must not put secret data in a binding.
 - A cache in front of a provider must key on the binding as well as the key
   id. An id alone is not the question the caller asked, and a hit on it could
   hand back a key the backend would have refused.

@@ -63,7 +63,10 @@ the same consumer runs on any of them. The pieces built on top:
 
 - [`FixedIndexKeySource<T>`](provider::FixedIndexKeySource) pairs any
   provider with the one `KeyId` a deployment provisioned for index-key
-  derivation, giving it an [`IndexKeyProvider`] as well.
+  derivation, giving it an [`IndexKeyProvider`] as well. Mint that key once
+  with `Binding::EMPTY`, because the index key is retrieved with
+  `Binding::EMPTY`. A vendor source refuses a key minted under another
+  binding, and `AuthorityKeySource` derives a different key from it.
 - [`CachingKeyProvider<T>`](provider::CachingKeyProvider) (feature
   `caching`, on by default) memoizes retrieved keys, keyed on the key id
   *and* the binding, so a hit is never a key the backend would have answered

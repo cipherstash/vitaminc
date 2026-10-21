@@ -15,9 +15,8 @@ type CacheKey = (KeyId, Vec<u8>);
 /// so a hit is pure memoization. The binding is part of the cache key
 /// because it is part of the question: a hit must never hand back a key
 /// that the backend would have refused, or checked differently, under the
-/// binding the caller actually presented (`docs/adr/0002` in
-/// cipherstash-suite). An id on its own is not the question the caller
-/// asked.
+/// binding the caller actually presented (`docs/adr/0004`). An id on its
+/// own is not the question the caller asked.
 ///
 /// Only retrieval is cached. `generate_keys` passes straight through and
 /// its keys never enter the cache: serving a fresh mint from a cache would
