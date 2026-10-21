@@ -3,12 +3,14 @@ use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
     GenerateDataKey, GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey,
+    DEFAULT_MAX_IN_FLIGHT,
 };
 use crate::key_id::KeyId;
 use azure_security_keyvault_keys::models::{
     EncryptionAlgorithm, KeyClientEncryptOptions, KeyOperationParameters,
 };
 use azure_security_keyvault_keys::{KeyClient, ResourceId};
+use std::num::NonZeroUsize;
 use std::str::FromStr;
 use thiserror::Error;
 use vitaminc_protected::{Controlled, Protected};
@@ -92,6 +94,7 @@ pub struct AzureDataKeySource<const N: usize> {
     client: KeyClient,
     key_name: String,
     key_version: Option<String>,
+    max_in_flight: NonZeroUsize,
 }
 
 impl<const N: usize> AzureDataKeySource<N> {
@@ -102,6 +105,7 @@ impl<const N: usize> AzureDataKeySource<N> {
             client,
             key_name: key_name.into(),
             key_version: None,
+            max_in_flight: DEFAULT_MAX_IN_FLIGHT,
         }
     }
 
@@ -112,6 +116,15 @@ impl<const N: usize> AzureDataKeySource<N> {
     #[must_use]
     pub fn with_key_version(mut self, key_version: impl Into<String>) -> Self {
         self.key_version = Some(key_version.into());
+        self
+    }
+
+    /// Sets how many requests a batch keeps in flight at one time. The
+    /// default is [`DEFAULT_MAX_IN_FLIGHT`]. Set a lower value when the
+    /// key's request quota or the client's connection pool is small.
+    #[must_use]
+    pub fn with_max_in_flight(mut self, max_in_flight: NonZeroUsize) -> Self {
+        self.max_in_flight = max_in_flight;
         self
     }
 
@@ -286,7 +299,7 @@ impl<const N: usize> BatchGenerateDataKey<N> for AzureDataKeySource<N> {
         &self,
         bindings: &[Binding<'_>],
     ) -> Result<Vec<GeneratedDataKey<N>>, Self::Error> {
-        fan_out_generate(self, bindings).await
+        fan_out_generate(self, bindings, self.max_in_flight).await
     }
 }
 
@@ -295,7 +308,7 @@ impl<const N: usize> BatchRetrieveDataKey<N> for AzureDataKeySource<N> {
         &self,
         keys: &[(KeyId, Binding<'_>)],
     ) -> Result<Vec<Protected<[u8; N]>>, Self::Error> {
-        dedup_retrieve(self, keys).await
+        dedup_retrieve(self, keys, self.max_in_flight).await
     }
 }
 

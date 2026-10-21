@@ -6,10 +6,11 @@ use super::{b64_decode, b64_encode};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding, GenerateDataKey,
-    GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey,
+    GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey, DEFAULT_MAX_IN_FLIGHT,
 };
 use crate::key_id::KeyId;
 use private::ValidDataKeySize;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use thiserror::Error;
 use vaultrs::api::transit::requests::{
@@ -147,6 +148,8 @@ pub struct VaultDataKeySource<const N: usize> {
     /// reset: build a new source to probe again, for example after a
     /// policy change.
     native_batch_unsupported: AtomicBool,
+    /// The fan-out's limit. See [`Self::with_max_in_flight`].
+    max_in_flight: NonZeroUsize,
 }
 
 impl<const N: usize> VaultDataKeySource<N>
@@ -191,7 +194,18 @@ where
             mount: mount.into(),
             name: name.into(),
             native_batch_unsupported: AtomicBool::new(false),
+            max_in_flight: DEFAULT_MAX_IN_FLIGHT,
         }
+    }
+
+    /// Sets how many requests a batch keeps in flight at one time when it
+    /// uses the fan-out. A native batch is one request, so this limit does
+    /// not apply to it. The default is [`DEFAULT_MAX_IN_FLIGHT`]. Set a lower value when the
+    /// key's request quota or the client's connection pool is small.
+    #[must_use]
+    pub fn with_max_in_flight(mut self, max_in_flight: NonZeroUsize) -> Self {
+        self.max_in_flight = max_in_flight;
+        self
     }
 
     /// The base64 derivation context for `binding`: [`DATA_KEY_CONTEXT_TAG`],
@@ -400,7 +414,7 @@ where
             }
         }
 
-        fan_out_generate(self, bindings).await
+        fan_out_generate(self, bindings, self.max_in_flight).await
     }
 }
 

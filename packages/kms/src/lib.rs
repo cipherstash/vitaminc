@@ -30,7 +30,7 @@ pub use algorithm::{DigestLengthError, SignatureAlgorithm};
 pub use crypt::{DecryptWithKey, EncryptWithKey};
 pub use data_key::{
     dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, GenerateDataKey,
-    GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey,
+    GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey, DEFAULT_MAX_IN_FLIGHT,
 };
 pub use index_key::{load_index_key, IndexKeyMaterial};
 pub use key_id::KeyId;

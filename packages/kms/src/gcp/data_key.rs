@@ -3,9 +3,11 @@ use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
     GenerateDataKey, GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey,
+    DEFAULT_MAX_IN_FLIGHT,
 };
 use crate::key_id::KeyId;
 use google_cloud_kms_v1::client::KeyManagementService;
+use std::num::NonZeroUsize;
 use thiserror::Error;
 use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::{Generatable, SafeRand};
@@ -69,6 +71,7 @@ fn into_sized<const N: usize>(bytes: Vec<u8>) -> Result<[u8; N], Error> {
 pub struct GcpDataKeySource<const N: usize> {
     client: KeyManagementService,
     crypto_key_name: String,
+    max_in_flight: NonZeroUsize,
 }
 
 impl<const N: usize> GcpDataKeySource<N> {
@@ -80,7 +83,17 @@ impl<const N: usize> GcpDataKeySource<N> {
         Self {
             client,
             crypto_key_name: crypto_key_name.into(),
+            max_in_flight: DEFAULT_MAX_IN_FLIGHT,
         }
+    }
+
+    /// Sets how many requests a batch keeps in flight at one time. The
+    /// default is [`DEFAULT_MAX_IN_FLIGHT`]. Set a lower value when the
+    /// key's request quota or the client's connection pool is small.
+    #[must_use]
+    pub fn with_max_in_flight(mut self, max_in_flight: NonZeroUsize) -> Self {
+        self.max_in_flight = max_in_flight;
+        self
     }
 
     /// One `cryptoKeys.encrypt` call, checksummed both ways.
@@ -213,7 +226,7 @@ impl<const N: usize> BatchGenerateDataKey<N> for GcpDataKeySource<N> {
         &self,
         bindings: &[Binding<'_>],
     ) -> Result<Vec<GeneratedDataKey<N>>, Self::Error> {
-        fan_out_generate(self, bindings).await
+        fan_out_generate(self, bindings, self.max_in_flight).await
     }
 }
 
@@ -222,7 +235,7 @@ impl<const N: usize> BatchRetrieveDataKey<N> for GcpDataKeySource<N> {
         &self,
         keys: &[(KeyId, Binding<'_>)],
     ) -> Result<Vec<Protected<[u8; N]>>, Self::Error> {
-        dedup_retrieve(self, keys).await
+        dedup_retrieve(self, keys, self.max_in_flight).await
     }
 }
 
