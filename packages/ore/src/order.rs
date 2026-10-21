@@ -217,8 +217,13 @@ pub mod domain {
 /// every value, as SQL's `NULLS FIRST` and `NULLS LAST`.
 ///
 /// A space takes a policy when it is made, like its target and context,
-/// and every term of it agrees: `scheme.target(I32).nulls(NullOrder::Last)`.
-/// Without one, a null has no order term, as before. With one, every null
+/// and every term of it agrees. This is the policy as a value, for a
+/// target chosen while the program runs:
+/// `scheme.target(OrderTarget::I32).nulls(NullOrder::Last)`. On a marker
+/// target the policy is a marker too, [`First`](crate::target::First) or
+/// [`Last`](crate::target::Last), each standing for one of these through
+/// [`NullPolicy`](crate::target::NullPolicy):
+/// `scheme.target(I32).nulls(Last)`. Without one, a null has no order term, as before. With one, every null
 /// in the space, typed or plain, encodes to the space's sentinel: the
 /// lowest code the target's width holds (all `0x00`) for
 /// [`First`](Self::First), the highest (all `0xFF`) for

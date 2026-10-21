@@ -190,12 +190,18 @@ and a walk skips it, so the term column holds a SQL `NULL` exactly where
 the value was absent. A space can instead place its nulls, as SQL's
 `NULLS FIRST` and `NULLS LAST` do, so that an absent value is indexed
 like any other and `ORDER BY ... NULLS FIRST` can be answered from the
-index alone. The policy is a [`NullOrder`], fixed when the space is
-made, like the target and the context:
+index alone. The policy is fixed when the space is made, like the
+target and the context, and it follows the target. On a marker target
+it is a marker too, `First` or `Last` from the `target` module, and it
+becomes part of the space's type, `Nulls<I32, Last>`, so the compiler
+keeps a nulls-first term out of a nulls-last space's comparison as it
+keeps an `I64` term out of an `I32` space's. On a target chosen while
+the program runs it is a [`NullOrder`], chosen then too, which every
+term carries, so a nulls-first and a nulls-last term compare as `None`:
 
 ```rust
 use std::cmp::Ordering;
-use vitaminc_ore::target::I32;
+use vitaminc_ore::target::{Last, I32};
 use vitaminc_ore::{NormalizeError, NullOrder, OrderEncrypt, OrderError, OrderTarget};
 # use vitaminc_ore::{Context, OrderPlaintext, OrderScheme};
 # struct Clear;
@@ -218,7 +224,7 @@ use vitaminc_ore::{NormalizeError, NullOrder, OrderEncrypt, OrderError, OrderTar
 # vitaminc_ore::supports_every_target!(Clear);
 # let scheme = Clear;
 
-let ages = scheme.context("users.age").target(I32).nulls(NullOrder::Last);
+let ages = scheme.context("users.age").target(I32).nulls(Last);
 let (age, absent) = (ages.encrypt_checked(36i32)?, ages.encrypt_checked(None::<i32>)?);
 assert_eq!(ages.compare(&age, &absent), Some(Ordering::Less));
 
@@ -228,8 +234,12 @@ assert!(matches!(
     Err(OrderError::Term(NormalizeError::Reserved))
 ));
 
-// A target chosen while the program runs: text and bytes take no policy.
-assert!(scheme.target(OrderTarget::I32).nulls(NullOrder::First).is_ok());
+// A target chosen while the program runs takes a policy chosen then, and
+// text and bytes take none.
+let column = scheme.target(OrderTarget::I32).context("users.age");
+let (first, last) = (column.nulls(NullOrder::First)?, column.nulls(NullOrder::Last)?);
+let (a, b) = (first.encrypt_checked(36i32)?, last.encrypt_checked(36i32)?);
+assert_eq!(last.compare(&a, &b), None);
 assert_eq!(
     scheme.target(OrderTarget::Text).nulls(NullOrder::First).err(),
     Some(NormalizeError::NoDomain)

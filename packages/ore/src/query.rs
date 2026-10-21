@@ -21,7 +21,9 @@ use vitaminc_normalize::NormalizeError;
 use vitaminc_protected::OpaqueDebug;
 
 use crate::scheme::{same, OrderError, OrderPlaintext, OrderScheme, OrderSpace, OrderTerm, Scalar};
-use crate::target::{FitsIn, FixedWidth, Nulls, StaticTarget, Supports, Target};
+use crate::target::{
+    FitsIn, FixedWidth, NullPolicy, Nulls, RuntimeNulls, StaticTarget, Supports, Target,
+};
 use crate::{NullOrder, OrderTarget};
 
 /// An order scheme that makes queries: what a caller makes from the
@@ -87,10 +89,11 @@ pub trait OrderQuery: OrderScheme {
 /// target it was made under, as an [`OrderTerm`] is.
 ///
 /// Under a marker from [`target`](crate::target) the label is a
-/// zero-sized type, so a query of one target cannot meet a term of
-/// another in [`OrderSpace::compare_query`]: that does not compile.
-/// Under an [`OrderTarget`] the label is stored, and a query and a term
-/// of different targets compare as `None` instead of as noise.
+/// zero-sized type, so a query of one target, or of one null policy,
+/// cannot meet a term of another in [`OrderSpace::compare_query`]: that
+/// does not compile. Under an [`OrderTarget`] the label is stored, and a
+/// query and a term of different targets or policies compare as `None`
+/// instead of as noise.
 ///
 /// A query is not a term: it has its own type, so it cannot be compared
 /// where a term is expected, and the compiler refuses
@@ -211,8 +214,8 @@ impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> Or
     /// queried value sorts before the stored one.
     ///
     /// Both must be this space's, as [`compare`](Self::compare) asks of
-    /// its terms: a query and a term of different targets, or of another
-    /// target than this space's, are `None`.
+    /// its terms: a query and a term of different targets or null
+    /// policies, or of another than this space's, are `None`.
     pub fn compare_query(
         &self,
         query: &QueryTerm<S::Query, T>,
@@ -264,8 +267,11 @@ impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: StaticTarg
     }
 }
 
-impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: FixedWidth>
-    OrderSpace<'_, S, Nulls<T>>
+impl<
+        S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized,
+        T: FixedWidth,
+        P: NullPolicy,
+    > OrderSpace<'_, S, Nulls<T, P>>
 {
     /// The query of a null in this space: its sentinel, as a query. The
     /// same as [`encrypt_query_checked`](OrderSpace::encrypt_query_checked)
@@ -282,12 +288,13 @@ impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: FixedWidth
     ///
     /// The scheme's own failure, and nothing else: the scheme
     /// [`Supports`] the target.
-    pub fn null_query(&self) -> Result<QueryTerm<S::Query, Nulls<T>>, S::Error> {
+    #[allow(clippy::type_complexity)]
+    pub fn null_query(&self) -> Result<QueryTerm<S::Query, Nulls<T, P>>, S::Error> {
         self.query_opened(&self.sentinel())
     }
 }
 
-impl<S: OrderQuery + Supports<OrderTarget> + ?Sized> OrderSpace<'_, S, Nulls<OrderTarget>> {
+impl<S: OrderQuery + Supports<OrderTarget> + ?Sized> OrderSpace<'_, S, RuntimeNulls> {
     /// The query of a null in this space, for a target chosen while the
     /// program runs: its sentinel, as a query. As
     /// [`null_query`](OrderSpace::null_query) on a marker target, which
@@ -298,9 +305,7 @@ impl<S: OrderQuery + Supports<OrderTarget> + ?Sized> OrderSpace<'_, S, Nulls<Ord
     /// [`OrderError::Unsupported`] if the scheme does not take this
     /// target, [`OrderError::Backend`] if the scheme failed.
     #[allow(clippy::type_complexity)]
-    pub fn null_query(
-        &self,
-    ) -> Result<QueryTerm<S::Query, Nulls<OrderTarget>>, OrderError<S::Error>> {
+    pub fn null_query(&self) -> Result<QueryTerm<S::Query, RuntimeNulls>, OrderError<S::Error>> {
         self.supported()?;
         self.query_opened(&self.sentinel())
             .map_err(OrderError::Backend)

@@ -3,10 +3,10 @@
 #[path = "../clear.rs"]
 mod clear;
 
-use vitaminc_ore::target::I32;
-use vitaminc_ore::{NullOrder, OrderEncrypt};
+use vitaminc_ore::target::{Last, I32};
+use vitaminc_ore::OrderEncrypt;
 
 fn main() {
-    let ages = clear::Clear.target(I32).nulls(NullOrder::Last);
+    let ages = clear::Clear.target(I32).nulls(Last);
     let _ = ages.encrypt(1i32);
 }

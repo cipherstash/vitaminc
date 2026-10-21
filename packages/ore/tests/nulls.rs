@@ -9,7 +9,7 @@ use std::cmp::Ordering;
 
 use common::{key, Fixed, Mock};
 use vitaminc_aead::{Int, Logical, Physical};
-use vitaminc_ore::target::{self, I32};
+use vitaminc_ore::target::{self, First, Last, NullPolicy, I32};
 use vitaminc_ore::{
     domain, order, order_with_nulls, NormalizeError, NullOrder, OrderEncrypt, OrderError,
     OrderKeyInit, OrderTarget, Raw,
@@ -21,12 +21,10 @@ const NULL: Raw<'static> = Raw(None, Physical::Null);
 
 #[test]
 fn a_null_sorts_below_every_value_under_nulls_first_and_above_under_nulls_last() {
-    let mock = Mock::new(key());
-    for (nulls, end) in [
-        (NullOrder::First, Ordering::Less),
-        (NullOrder::Last, Ordering::Greater),
-    ] {
-        let ages = mock.context("users.age").target(I32).nulls(nulls);
+    fn check<P: NullPolicy>(policy: P, end: Ordering) {
+        let mock = Mock::new(key());
+        let nulls = P::ORDER;
+        let ages = mock.context("users.age").target(I32).nulls(policy);
         assert_eq!(ages.null_order(), Some(nulls), "the space keeps its policy");
         let null = ages.encrypt_null().expect("mock");
         for value in [i32::MIN, -1, 0, 1, i32::MAX - 1] {
@@ -50,13 +48,16 @@ fn a_null_sorts_below_every_value_under_nulls_first_and_above_under_nulls_last()
         }
         assert_eq!(typed.null_order(), Some(nulls), "a term carries its policy");
     }
+    check(First, Ordering::Less);
+    check(Last, Ordering::Greater);
 }
 
 #[test]
 fn a_space_that_places_nulls_refuses_the_targets_maximum() {
-    let mock = Mock::new(key());
-    for nulls in [NullOrder::First, NullOrder::Last] {
-        let ages = mock.target(I32).nulls(nulls);
+    fn check<P: NullPolicy>(policy: P) {
+        let mock = Mock::new(key());
+        let nulls = P::ORDER;
+        let ages = mock.target(I32).nulls(policy);
         assert!(
             matches!(
                 ages.encrypt_checked(i32::MAX),
@@ -71,7 +72,7 @@ fn a_space_that_places_nulls_refuses_the_targets_maximum() {
             ),
             "{nulls:?}: the maximum at a wider width is refused the same way"
         );
-        let ids = mock.target(target::Uuid).nulls(nulls);
+        let ids = mock.target(target::Uuid).nulls(policy);
         assert!(
             matches!(
                 ids.encrypt_checked(Raw(Some(Logical::Uuid), Physical::Bytes(&[0xFF; 16]))),
@@ -80,12 +81,14 @@ fn a_space_that_places_nulls_refuses_the_targets_maximum() {
             "{nulls:?}: the maximum uuid is the nulls' code"
         );
         // A float target gives nothing up.
-        let scores = mock.target(target::F64).nulls(nulls);
+        let scores = mock.target(target::F64).nulls(policy);
         assert!(scores.encrypt_checked(f64::INFINITY).is_ok());
         assert!(scores.encrypt_checked(f64::NAN).is_ok());
     }
+    check(First);
+    check(Last);
     // The plain space still takes the maximum.
-    assert!(mock.target(I32).encrypt(i32::MAX).is_ok());
+    assert!(Mock::new(key()).target(I32).encrypt(i32::MAX).is_ok());
 }
 
 #[test]
@@ -109,7 +112,7 @@ fn a_space_without_a_policy_gives_a_null_no_term_as_before() {
     // An undefined is not a null, whatever the policy.
     let undefined = Raw(Some(Logical::Undefined), Physical::Null);
     assert!(matches!(
-        ages.nulls(NullOrder::Last).encrypt_checked(undefined),
+        ages.nulls(Last).encrypt_checked(undefined),
         Err(OrderError::Term(NormalizeError::NoDomain))
     ));
 }
@@ -118,8 +121,8 @@ fn a_space_without_a_policy_gives_a_null_no_term_as_before() {
 fn a_space_that_places_nulls_is_its_own_space() {
     let mock = Mock::new(key());
     let plain = mock.target(I32).context("users.age");
-    let first = plain.nulls(NullOrder::First);
-    let last = plain.nulls(NullOrder::Last);
+    let first = plain.nulls(First);
+    let last = plain.nulls(Last);
     assert_eq!(plain.domain(), domain::INT32);
     assert_eq!(first.domain(), domain::INT32_NULLS_FIRST);
     assert_eq!(last.domain(), domain::INT32_NULLS_LAST);
@@ -144,10 +147,7 @@ fn a_space_that_places_nulls_is_its_own_space() {
     // The same space, made twice, is the same space.
     assert_eq!(
         last.salt(),
-        mock.context("users.age")
-            .target(I32)
-            .nulls(NullOrder::Last)
-            .salt()
+        mock.context("users.age").target(I32).nulls(Last).salt()
     );
 }
 
@@ -176,35 +176,26 @@ fn a_space_takes_a_collected_term_of_its_own_policy_only() {
     }
 }
 
-/// Both policies of a marker target are one Rust type, `Nulls<I32>`, so
-/// a term of one reaches the other's comparison; it carries its policy,
-/// and the two compare as `None`.
+/// The policy of a marker space is part of its type, so a term of one
+/// policy does not reach the other's comparison (the compile-fail cases
+/// show that); each space and its terms and queries name their own.
 #[test]
-fn a_marker_space_tells_its_two_policies_apart() {
+fn a_marker_space_carries_its_policy_in_its_type() {
     let mock = Mock::new(key());
     let plain = mock.context("users.age").target(I32);
-    let (first, last) = (plain.nulls(NullOrder::First), plain.nulls(NullOrder::Last));
+    let (first, last) = (plain.nulls(First), plain.nulls(Last));
     let (a, b) = (
         first.encrypt_checked(1i32).expect("mock"),
         last.encrypt_checked(1i32).expect("mock"),
     );
+    assert_eq!(first.null_order(), Some(NullOrder::First));
+    assert_eq!(last.null_order(), Some(NullOrder::Last));
     assert_eq!(a.null_order(), Some(NullOrder::First));
     assert_eq!(b.null_order(), Some(NullOrder::Last));
     assert_eq!(first.compare(&a, &a), Some(Ordering::Equal));
-    assert_eq!(first.compare(&a, &b), None, "two policies do not compare");
-    assert_eq!(last.compare(&a, &b), None, "two policies do not compare");
+    assert_eq!(last.compare(&b, &b), Some(Ordering::Equal));
     let query = last.null_query().expect("mock");
     assert_eq!(query.null_order(), Some(NullOrder::Last));
-    assert_eq!(
-        first.compare_query(&query, &a),
-        None,
-        "a query of one policy does not compare with a term of the other"
-    );
-    assert_eq!(
-        last.compare_query(&query, &a),
-        None,
-        "nor in the space the query came from"
-    );
     assert_eq!(
         last.compare_query(&query, &b),
         Some(Ordering::Greater),
@@ -238,9 +229,29 @@ fn a_runtime_space_places_nulls_on_a_fixed_width_target_only() {
     );
     // A runtime term carries its policy, so terms of the two policies
     // compare as `None`, not as noise.
+    assert_eq!(a.null_order(), Some(NullOrder::First));
+    assert_eq!(b.null_order(), Some(NullOrder::Last));
     assert_eq!(first.compare(&a, &a), Some(Ordering::Equal));
     assert_eq!(first.compare(&a, &b), None, "two policies do not compare");
+    assert_eq!(last.compare(&a, &b), None, "two policies do not compare");
     assert_eq!(last.compare(&b, &a), None, "two policies do not compare");
+    let query = last.null_query().expect("mock");
+    assert_eq!(query.null_order(), Some(NullOrder::Last));
+    assert_eq!(
+        first.compare_query(&query, &a),
+        None,
+        "a query of one policy does not compare with a term of the other"
+    );
+    assert_eq!(
+        last.compare_query(&query, &a),
+        None,
+        "nor in the space the query came from"
+    );
+    assert_eq!(
+        last.compare_query(&query, &b),
+        Some(Ordering::Greater),
+        "a nulls-last null sorts above a value of its own space"
+    );
 }
 
 #[test]
@@ -293,10 +304,7 @@ fn a_scheme_takes_a_policy_space_exactly_when_it_takes_the_target() {
 #[test]
 fn a_query_of_a_null_finds_the_nulls_and_bounds_a_range() {
     let mock = Mock::new(key());
-    let ages = mock
-        .context("users.age")
-        .target(I32)
-        .nulls(NullOrder::First);
+    let ages = mock.context("users.age").target(I32).nulls(First);
     let rows = [
         ages.encrypt_checked(None::<i32>).expect("mock"),
         ages.encrypt_checked(3i32).expect("mock"),

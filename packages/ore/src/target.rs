@@ -13,9 +13,19 @@
 //! The same method takes either: [`OrderEncrypt::target`] is generic over
 //! [`Target`], which every marker and [`OrderTarget`] implement.
 //!
+//! A space can also place nulls first or last, and the policy follows the
+//! target. On a fixed-width marker it is a marker too, [`First`] or
+//! [`Last`], and the space's target becomes [`Nulls<T, P>`](Nulls): the
+//! compiler keeps a nulls-first term out of a nulls-last space's
+//! comparison, as it keeps an `I64` term out of an `I32` space's. On an
+//! [`OrderTarget`] it is a [`NullOrder`] chosen while the program runs,
+//! and the target becomes a [`RuntimeNulls`], whose terms carry their
+//! policy and compare as `None` with a term of the other.
+//!
 //! [`OrderEncrypt::target`]: crate::OrderEncrypt::target
 
 use core::fmt;
+use core::marker::PhantomData;
 
 use vitaminc_aead::{Bytes as RawBytes, Encrypt};
 
@@ -37,7 +47,8 @@ pub trait Target: private::Sealed + Copy + fmt::Debug {
     fn runtime(self) -> OrderTarget;
 
     /// Where a space of this target places nulls: `None`, unless the
-    /// target is a [`Nulls`], which a space's `nulls` method makes.
+    /// target is a [`Nulls`] or a [`RuntimeNulls`], which a space's
+    /// `nulls` method makes.
     fn null_order(self) -> Option<NullOrder> {
         None
     }
@@ -53,8 +64,8 @@ pub trait StaticTarget: Target + Default {
 
 /// A marker target of fixed width: every marker but [`Text`] and
 /// [`Bytes`]. Only these take a null policy, so
-/// `scheme.target(I32).nulls(NullOrder::Last)` compiles and
-/// `scheme.target(Text).nulls(..)` does not.
+/// `scheme.target(I32).nulls(Last)` compiles and
+/// `scheme.target(Text).nulls(Last)` does not.
 ///
 /// Sealed: implemented for the thirteen fixed-width markers here.
 #[diagnostic::on_unimplemented(
@@ -64,27 +75,114 @@ pub trait StaticTarget: Target + Default {
 )]
 pub trait FixedWidth: StaticTarget {}
 
-/// A target in a space that places nulls first or last: the target and
-/// its [`NullOrder`]. Made only by a space's `nulls` method, from a
-/// fixed-width target, so every `Nulls` names a domain label.
+/// The null policy of a space whose target is named when the program is
+/// compiled: [`First`] or [`Last`], which a marker space's `nulls` method
+/// takes. The policy is then part of the space's type, as the target is.
+///
+/// Sealed: [`First`] and [`Last`] are the only policies.
+pub trait NullPolicy: private::Sealed + Copy + fmt::Debug + Default {
+    /// Where a space of this policy places nulls.
+    const ORDER: NullOrder;
+}
+
+/// Nulls sort below every value, as SQL's `NULLS FIRST`: the policy
+/// [`NullOrder::First`], named when the program is compiled.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct First;
+
+/// Nulls sort above every value, as SQL's `NULLS LAST`: the policy
+/// [`NullOrder::Last`], named when the program is compiled.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Last;
+
+impl private::Sealed for First {}
+impl private::Sealed for Last {}
+
+impl NullPolicy for First {
+    const ORDER: NullOrder = NullOrder::First;
+}
+
+impl NullPolicy for Last {
+    const ORDER: NullOrder = NullOrder::Last;
+}
+
+/// A marker target in a space that places nulls first or last: the
+/// target `T` and the policy `P`, both part of the type. Made only by a
+/// marker space's `nulls` method, from a fixed-width target, so every
+/// `Nulls` names a domain label.
 ///
 /// A space of a `Nulls` target is not a [`StaticTarget`] space, so it has
 /// no `encrypt`: the policy refuses the maximum of an integer or uuid
 /// target, so a value goes through `encrypt_checked`, which reports it.
-/// Terms of a `Nulls<I32>` space do not compile against an `I32` space's.
+/// Terms of a `Nulls<I32, Last>` space do not compile against an `I32`
+/// space's comparison, nor against a `Nulls<I32, First>` space's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Nulls<T> {
+pub struct Nulls<T, P: NullPolicy> {
     target: T,
-    order: NullOrder,
+    policy: PhantomData<P>,
 }
 
-impl<T: Target> Nulls<T> {
-    pub(crate) fn new(target: T, order: NullOrder) -> Self {
-        Self { target, order }
+impl<T: FixedWidth, P: NullPolicy> Nulls<T, P> {
+    pub(crate) fn new(target: T) -> Self {
+        Self {
+            target,
+            policy: PhantomData,
+        }
     }
 
     /// The target the policy is set on.
     pub fn target(self) -> T {
+        self.target
+    }
+
+    /// Where the space places nulls: `P`'s order.
+    pub fn null_order(self) -> NullOrder {
+        P::ORDER
+    }
+}
+
+impl<T: FixedWidth, P: NullPolicy> private::Sealed for Nulls<T, P> {}
+
+impl<T: FixedWidth, P: NullPolicy> Target for Nulls<T, P> {
+    fn runtime(self) -> OrderTarget {
+        self.target.runtime()
+    }
+
+    fn null_order(self) -> Option<NullOrder> {
+        Some(P::ORDER)
+    }
+}
+
+/// A scheme takes a target in a space that places nulls exactly when it
+/// takes the target: the policy changes no width.
+impl<S: Supports<T> + ?Sized, T: FixedWidth, P: NullPolicy> Supports<Nulls<T, P>> for S {
+    fn supports(target: Nulls<T, P>) -> bool {
+        <S as Supports<T>>::supports(target.target)
+    }
+}
+
+/// A target chosen while the program runs, in a space that places nulls
+/// first or last: the [`OrderTarget`] and its [`NullOrder`], both values.
+/// Made only by `nulls` on a space of an [`OrderTarget`], which refuses
+/// text and bytes, so every `RuntimeNulls` names a domain label.
+///
+/// This is for a layer that reads its column types and null policies from
+/// a schema while the program runs. Every term of such a space carries its
+/// policy, as it carries its target, so a nulls-first and a nulls-last
+/// term of one target compare as `None` rather than as noise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RuntimeNulls {
+    target: OrderTarget,
+    order: NullOrder,
+}
+
+impl RuntimeNulls {
+    pub(crate) fn new(target: OrderTarget, order: NullOrder) -> Self {
+        Self { target, order }
+    }
+
+    /// The target the policy is set on.
+    pub fn target(self) -> OrderTarget {
         self.target
     }
 
@@ -94,11 +192,11 @@ impl<T: Target> Nulls<T> {
     }
 }
 
-impl<T: Target> private::Sealed for Nulls<T> {}
+impl private::Sealed for RuntimeNulls {}
 
-impl<T: Target> Target for Nulls<T> {
+impl Target for RuntimeNulls {
     fn runtime(self) -> OrderTarget {
-        self.target.runtime()
+        self.target
     }
 
     fn null_order(self) -> Option<NullOrder> {
@@ -106,11 +204,11 @@ impl<T: Target> Target for Nulls<T> {
     }
 }
 
-/// A scheme takes a target in a space that places nulls exactly when it
-/// takes the target: the policy changes no width.
-impl<S: Supports<T> + ?Sized, T: Target> Supports<Nulls<T>> for S {
-    fn supports(target: Nulls<T>) -> bool {
-        <S as Supports<T>>::supports(target.target)
+/// A scheme takes a target chosen while the program runs, in a space that
+/// places nulls, exactly when it takes the target.
+impl<S: Supports<OrderTarget> + ?Sized> Supports<RuntimeNulls> for S {
+    fn supports(target: RuntimeNulls) -> bool {
+        <S as Supports<OrderTarget>>::supports(target.target)
     }
 }
 
@@ -198,9 +296,10 @@ pub trait OwnTarget: Encrypt + private::Sealed {
 /// debug build asserts that a marker's answer agrees.
 ///
 /// A scheme never answers for a target in a space that places nulls
-/// ([`Nulls`]): this crate answers for it, with the answer for the target
-/// the policy is set on, since the policy changes no width. That impl
-/// covers every scheme, so a scheme cannot implement `Supports` for every
+/// ([`Nulls`], [`RuntimeNulls`]): this crate answers for it, with the
+/// answer for the target
+/// the policy is set on, since the policy changes no width. Those impls
+/// cover every scheme, so a scheme cannot implement `Supports` for every
 /// `T: Target` at once; it lists its targets, as the macros do.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` has no order term for `{T}`",
@@ -615,30 +714,39 @@ mod tests {
 
     #[test]
     fn a_scheme_takes_a_target_with_a_null_policy_exactly_when_it_takes_the_target() {
-        for nulls in [NullOrder::First, NullOrder::Last] {
+        fn marker<P: NullPolicy>(order: NullOrder) {
             assert!(
-                <Four as Supports<Nulls<I32>>>::supports(Nulls::new(I32, nulls)),
-                "{nulls:?}: a marker the scheme takes"
+                <Four as Supports<Nulls<I32, P>>>::supports(Nulls::new(I32)),
+                "{order:?}: a marker the scheme takes"
             );
-            assert!(
-                <Four as Supports<Nulls<OrderTarget>>>::supports(Nulls::new(
-                    OrderTarget::Date,
-                    nulls
-                )),
-                "{nulls:?}: a runtime target the scheme takes"
-            );
-            assert!(
-                !<Four as Supports<Nulls<OrderTarget>>>::supports(Nulls::new(
-                    OrderTarget::I64,
-                    nulls
-                )),
-                "{nulls:?}: a runtime target the scheme does not take"
-            );
-            let placed = Nulls::new(Date, nulls);
+            let placed = Nulls::<Date, P>::new(Date);
             assert_eq!(placed.target(), Date);
-            assert_eq!(placed.null_order(), nulls);
+            assert_eq!(placed.null_order(), order);
             assert_eq!(placed.runtime(), OrderTarget::Date);
-            assert_eq!(Target::null_order(placed), Some(nulls));
+            assert_eq!(Target::null_order(placed), Some(order));
+        }
+        marker::<First>(NullOrder::First);
+        marker::<Last>(NullOrder::Last);
+        for order in [NullOrder::First, NullOrder::Last] {
+            assert!(
+                <Four as Supports<RuntimeNulls>>::supports(RuntimeNulls::new(
+                    OrderTarget::Date,
+                    order
+                )),
+                "{order:?}: a runtime target the scheme takes"
+            );
+            assert!(
+                !<Four as Supports<RuntimeNulls>>::supports(RuntimeNulls::new(
+                    OrderTarget::I64,
+                    order
+                )),
+                "{order:?}: a runtime target the scheme does not take"
+            );
+            let placed = RuntimeNulls::new(OrderTarget::Date, order);
+            assert_eq!(placed.target(), OrderTarget::Date);
+            assert_eq!(placed.null_order(), order);
+            assert_eq!(placed.runtime(), OrderTarget::Date);
+            assert_eq!(Target::null_order(placed), Some(order));
         }
         assert_eq!(I32.null_order(), None, "a marker places no nulls");
         assert_eq!(
@@ -646,5 +754,11 @@ mod tests {
             None,
             "nor does a runtime target"
         );
+    }
+
+    #[test]
+    fn each_policy_marker_stands_for_its_null_order() {
+        assert_eq!(First::ORDER, NullOrder::First);
+        assert_eq!(Last::ORDER, NullOrder::Last);
     }
 }

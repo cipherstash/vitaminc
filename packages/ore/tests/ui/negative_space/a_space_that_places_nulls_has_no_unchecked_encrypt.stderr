@@ -1,4 +1,4 @@
-error[E0599]: the method `encrypt` exists for struct `OrderSpace<'_, Clear, Nulls<vitaminc_ore::target::I32>>`, but its trait bounds were not satisfied
+error[E0599]: the method `encrypt` exists for struct `OrderSpace<'_, Clear, Nulls<vitaminc_ore::target::I32, vitaminc_ore::target::Last>>`, but its trait bounds were not satisfied
   --> tests/ui/negative_space/a_space_that_places_nulls_has_no_unchecked_encrypt.rs:11:18
    |
 11 |     let _ = ages.encrypt(1i32);
@@ -11,10 +11,10 @@ error[E0599]: the method `encrypt` exists for struct `OrderSpace<'_, Clear, Null
    |
   ::: src/target.rs
    |
-   | pub struct Nulls<T> {
-   | ------------------- doesn't satisfy `Nulls<vitaminc_ore::target::I32>: StaticTarget`
+   | pub struct Nulls<T, P: NullPolicy> {
+   | ---------------------------------- doesn't satisfy `_: StaticTarget`
    |
    = note: the following trait bounds were not satisfied:
-           `Nulls<vitaminc_ore::target::I32>: StaticTarget`
-           `OrderSpace<'_, Clear, Nulls<vitaminc_ore::target::I32>>: OrderScheme`
-           which is required by `OrderSpace<'_, Clear, Nulls<vitaminc_ore::target::I32>>: OrderEncrypt`
+           `Nulls<vitaminc_ore::target::I32, vitaminc_ore::target::Last>: StaticTarget`
+           `OrderSpace<'_, Clear, Nulls<vitaminc_ore::target::I32, vitaminc_ore::target::Last>>: OrderScheme`
+           which is required by `OrderSpace<'_, Clear, Nulls<vitaminc_ore::target::I32, vitaminc_ore::target::Last>>: OrderEncrypt`

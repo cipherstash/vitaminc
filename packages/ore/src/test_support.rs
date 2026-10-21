@@ -57,7 +57,7 @@ use core::cmp::Ordering;
 
 use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
 
-use crate::target::{Nulls, StaticTarget};
+use crate::target::{RuntimeNulls, StaticTarget};
 use crate::{
     order, order_with_nulls, NullOrder, OrderEncrypt, OrderQuery, OrderSpace, OrderTarget, Supports,
 };
@@ -266,7 +266,7 @@ pub fn conformance<S: Supports<OrderTarget>>(a: &S, b: &S) {
             .expect("a fixed-width row");
         let plain = a.target(row.target).context("conformance");
         let [space, other_context, other_key] = placed_spaces(a, b, row.target, nulls);
-        let null = |space: &OrderSpace<'_, S, Nulls<OrderTarget>>| {
+        let null = |space: &OrderSpace<'_, S, RuntimeNulls>| {
             space
                 .encrypt_null()
                 .unwrap_or_else(|e| panic!("{name}: the scheme refused a null's term: {e}"))
@@ -339,7 +339,7 @@ fn placed_spaces<'s, S: Supports<OrderTarget>>(
     b: &'s S,
     target: OrderTarget,
     nulls: NullOrder,
-) -> [OrderSpace<'s, S, Nulls<OrderTarget>>; 3] {
+) -> [OrderSpace<'s, S, RuntimeNulls>; 3] {
     let placed = |scheme: &'s S, context: &str| {
         scheme
             .target(target)
@@ -462,7 +462,7 @@ pub fn query_conformance<S: OrderQuery + Supports<OrderTarget>>(a: &S, b: &S) {
         let null = space
             .encrypt_null()
             .unwrap_or_else(|e| panic!("{name}: the scheme refused a null's term: {e}"));
-        let query = |space: &OrderSpace<'_, S, Nulls<OrderTarget>>| {
+        let query = |space: &OrderSpace<'_, S, RuntimeNulls>| {
             space
                 .null_query()
                 .unwrap_or_else(|e| panic!("{name}: the scheme refused a null's query: {e}"))

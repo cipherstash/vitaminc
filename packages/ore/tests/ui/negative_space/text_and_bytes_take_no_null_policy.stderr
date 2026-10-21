@@ -1,7 +1,7 @@
 error[E0599]: the method `nulls` exists for struct `OrderSpace<'_, Clear, vitaminc_ore::target::Text>`, but its trait bounds were not satisfied
   --> tests/ui/negative_space/text_and_bytes_take_no_null_policy.rs:10:39
    |
-10 |     let _ = clear::Clear.target(Text).nulls(NullOrder::Last);
+10 |     let _ = clear::Clear.target(Text).nulls(Last);
    |                                       ^^^^^ method cannot be called on `OrderSpace<'_, Clear, vitaminc_ore::target::Text>` due to unsatisfied trait bounds
    |
   ::: src/target.rs
@@ -15,7 +15,7 @@ error[E0599]: the method `nulls` exists for struct `OrderSpace<'_, Clear, vitami
 error[E0599]: the method `nulls` exists for struct `OrderSpace<'_, Clear, vitaminc_ore::target::Bytes>`, but its trait bounds were not satisfied
   --> tests/ui/negative_space/text_and_bytes_take_no_null_policy.rs:11:40
    |
-11 |     let _ = clear::Clear.target(Bytes).nulls(NullOrder::First);
+11 |     let _ = clear::Clear.target(Bytes).nulls(First);
    |                                        ^^^^^ method cannot be called on `OrderSpace<'_, Clear, vitaminc_ore::target::Bytes>` due to unsatisfied trait bounds
    |
   ::: src/target.rs

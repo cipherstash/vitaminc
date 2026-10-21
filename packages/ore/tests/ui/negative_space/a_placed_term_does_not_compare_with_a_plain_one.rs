@@ -3,12 +3,12 @@
 #[path = "../clear.rs"]
 mod clear;
 
-use vitaminc_ore::target::I32;
-use vitaminc_ore::{NullOrder, OrderEncrypt};
+use vitaminc_ore::target::{Last, I32};
+use vitaminc_ore::OrderEncrypt;
 
 fn main() {
     let plain = clear::Clear.target(I32);
-    let last = plain.nulls(NullOrder::Last);
+    let last = plain.nulls(Last);
     let (a, b) = (plain.encrypt(1i32).unwrap(), last.encrypt_checked(1i32).unwrap());
     let _ = plain.compare(&a, &b);
 }
