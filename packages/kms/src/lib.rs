@@ -30,7 +30,7 @@ pub use data_key::{
 pub use index_key::{load_index_key, IndexKeyMaterial};
 pub use key_id::KeyId;
 pub use mac::{GenerateMac, VerifyMac};
-pub use provider::{Binding, BindingSupport, IndexKeyProvider, KeyProvider};
+pub use provider::{Binding, IndexKeyProvider, KeyProvider};
 pub use sign::{GetPublicKey, Sign, SignMessage, Verify, VerifyMessage};
 
 // The AWS names below predate the vendor modules and stay at the crate

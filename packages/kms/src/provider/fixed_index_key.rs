@@ -1,4 +1,4 @@
-use super::{Binding, BindingSupport, DelegatedError, IndexKeyProvider, KeyProvider};
+use super::{Binding, DelegatedError, IndexKeyProvider, KeyProvider};
 use crate::{
     GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyIsolation, KeyReconstruction,
 };
@@ -69,7 +69,6 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for FixedIndexKeyS
     const RECONSTRUCTION: KeyReconstruction = T::RECONSTRUCTION;
     const CUSTODY: KeyCustody = T::CUSTODY;
     const ISOLATION: KeyIsolation = T::ISOLATION;
-    const BINDING: BindingSupport = T::BINDING;
 
     async fn generate_keys(
         &self,
@@ -100,7 +99,6 @@ mod tests {
         const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
         const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
         const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
-        const BINDING: BindingSupport = BindingSupport::Unbound;
 
         /// One key per binding, with the binding's length as the material,
         /// so a test can see that a call reached this provider.
@@ -138,7 +136,6 @@ mod tests {
         const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
         const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
         const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
-        const BINDING: BindingSupport = BindingSupport::Bound;
 
         async fn generate_keys(
             &self,
@@ -202,10 +199,6 @@ mod tests {
         assert_eq!(retrieved.len(), 2);
         assert_eq!(retrieved[0].clone().risky_unwrap(), [0u8; 4]);
         assert_eq!(retrieved[1].clone().risky_unwrap(), [1u8; 4]);
-        assert_eq!(
-            <FixedIndexKeySource<Misbehaving> as KeyProvider<4>>::BINDING,
-            BindingSupport::Unbound
-        );
     }
 
     #[tokio::test]

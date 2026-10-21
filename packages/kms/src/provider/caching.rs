@@ -1,4 +1,4 @@
-use super::{Binding, BindingSupport, DelegatedError, IndexKeyProvider, KeyProvider};
+use super::{Binding, DelegatedError, IndexKeyProvider, KeyProvider};
 use crate::{
     GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyIsolation, KeyReconstruction,
 };
@@ -40,9 +40,8 @@ type CacheKey = (KeyId, Vec<u8>);
 /// a hard bound calls [`purge_expired`](Self::purge_expired) on its own
 /// schedule.
 ///
-/// **Opt in deliberately; never a default.** Against a
-/// [`Bound`](BindingSupport::Bound) backend such as ZeroKMS, every
-/// retrieval is an authorization decision the backend logs: a hit skips
+/// **Opt in deliberately; never a default.** Against a backend that
+/// audits each retrieval, such as ZeroKMS, every retrieval is an authorization decision the backend logs: a hit skips
 /// that round trip, and with it the audit entry and the policy check for
 /// that access. A deployment that relies on per-retrieval auditing must
 /// not wrap its provider in this.
@@ -93,7 +92,6 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for CachingKeyProv
     const RECONSTRUCTION: KeyReconstruction = T::RECONSTRUCTION;
     const CUSTODY: KeyCustody = T::CUSTODY;
     const ISOLATION: KeyIsolation = T::ISOLATION;
-    const BINDING: BindingSupport = T::BINDING;
 
     /// Straight through to the inner provider. See the type's docs for why
     /// minting is never cached.
@@ -188,7 +186,7 @@ impl<const N: usize, T: IndexKeyProvider<N> + Sync> IndexKeyProvider<N>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::{Binding, BindingSupport, KeyProvider};
+    use crate::provider::{Binding, KeyProvider};
     use crate::{GeneratedDataKey, KeyId, KeyIsolation, KeyReconstruction};
     use std::convert::Infallible;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -240,7 +238,6 @@ mod tests {
         const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ClientAndServer;
         const CUSTODY: KeyCustody = KeyCustody::BackendHeld;
         const ISOLATION: KeyIsolation = KeyIsolation::Pooled;
-        const BINDING: BindingSupport = BindingSupport::Bound;
 
         async fn generate_keys(
             &self,
@@ -432,6 +429,5 @@ mod tests {
         );
         assert_eq!(<Cached as KeyProvider<4>>::CUSTODY, KeyCustody::BackendHeld);
         assert_eq!(<Cached as KeyProvider<4>>::ISOLATION, KeyIsolation::Pooled);
-        assert_eq!(<Cached as KeyProvider<4>>::BINDING, BindingSupport::Bound);
     }
 }

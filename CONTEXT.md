@@ -31,8 +31,9 @@ _Avoid_: Client, backend (for the Rust type), implementation, Group 2
 **Key purpose**:
 The class of operations a backend key can perform, fixed when the key is
 created: data-key (which includes direct encrypt and decrypt), MAC, or
-signing. Vault Transit is the one backend where a key can serve more than
-one purpose.
+signing. On Vault Transit, one key can serve both MAC and signing. A
+data-key purpose needs a `derived=true` Transit key, and MAC needs a key
+that is not derived, so no Transit key serves data keys and another purpose.
 _Avoid_: Key usage, key type (which names the algorithm, not the purpose)
 
 **Signing key**:
@@ -59,9 +60,10 @@ _Avoid_: Group 1 (design-ticket jargon), backend
 
 **Binding**:
 Bytes a caller attaches to a data key when it is minted and must present
-again to retrieve it. A backend either binds it into the key server-side
-(`Bound`) or ignores it (`Unbound`), and says which. Stack Encrypt's
-descriptor is a binding.
+again to retrieve it. Every data key source binds it into the key
+server-side, so a retrieval under a different binding fails. A backend key
+that cannot bind cannot back a data key source. Stack Encrypt's descriptor
+is a binding.
 _Avoid_: context (overloaded), AAD (one vendor's mechanism)
 
 **Data key**:

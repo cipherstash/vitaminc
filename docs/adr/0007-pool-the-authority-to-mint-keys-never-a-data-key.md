@@ -1,15 +1,15 @@
 # Pool the authority to mint keys, never a data key
 
-`vitaminc-kms` has two ways to fill a batch of data keys. `fan_out_generate`
+`vitaminc-kms` had two ways to fill a batch of data keys. `fan_out_generate`
 makes one backend call per value: full per-value isolation, N round trips.
-`pooled_key_generate` makes one call, mints one key and clones it N times: one
-round trip, and every value in the batch shares a key.
+`pooled_key_generate` made one call, minted one key and cloned it N times: one
+round trip, and every value in the batch shared a key.
 
-Pooling in that second form is also why `PooledDataKeySource` and the three
-vendor pooled sources are `BindingSupport::Unbound`. One key cannot carry a
-batch's several bindings, and binding it to the first would make every other
-item unretrievable. Once binding is mandatory (CIP-4981, which rewrites ADR
-0006) that form cannot exist at all, and the round-trip saving goes with it.
+Pooling in that second form could not bind. One key cannot carry a batch's
+several bindings, and binding it to the first would make every other item
+unretrievable. So `PooledDataKeySource` and the three vendor pooled sources
+ignored the binding. Binding is now mandatory (CIP-4981, ADR 0006), so that
+form was removed, and the round-trip saving went with it.
 
 The saving is worth keeping. This ADR is how to keep it.
 
@@ -66,7 +66,7 @@ across it. A source built this way reports `PerValue`, because that is what it
 delivers. What differs from `fan_out_generate` is not isolation but how many
 round trips it makes and what it keeps in memory.
 
-Today's constant bundles three properties that only move together because
+The constant bundles three properties that only move together because
 clone-one-key makes them:
 
 | | clone-one-key | authority key |
@@ -81,8 +81,8 @@ by implementing that trait, and cache policy — TTL, entry capacity, refresh
 behaviour under load — is configuration on it. Hanging strategies off
 `KeyIsolation` would re-bundle exactly what this design separates.
 
-Once nothing implements `Pooled`, the variant should go. A two-valued enum with
-one unreachable value is worse than no enum.
+Nothing implements `Pooled` now, so the variant should go (CIP-5062). A
+two-valued enum with one unreachable value is worse than no enum.
 
 ## The authority key is a new kind of key
 
@@ -139,8 +139,8 @@ normal path. Two consequences follow, and both are deliberate:
 ## Consequences
 
 * `pooled_key_generate`, `PooledDataKeySource`, `AwsPooledDataKeySource`,
-  `AzurePooledDataKeySource` and `GcpPooledDataKeySource` go. Nothing replaces
-  them one-for-one: callers that wanted fewer round trips get an authority-key
+  `AzurePooledDataKeySource` and `GcpPooledDataKeySource` are gone (CIP-4981).
+  Nothing replaces them one-for-one: callers that wanted fewer round trips get an authority-key
   source, and callers that wanted per-value isolation already had
   `fan_out_generate`.
 * `KeyIsolation` loses `Pooled`, and probably loses its reason to exist.

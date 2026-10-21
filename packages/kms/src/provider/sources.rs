@@ -9,14 +9,11 @@
 //! monomorphised future and verify it. No `where` bound on the impls either,
 //! for the same reason.
 //!
-//! Every constant is forwarded from the capability traits, including
-//! `BINDING` — which source honours its [`Binding`](super::Binding) is the
-//! source's own business, declared on its `RetrieveDataKey` impl, not a
-//! property of this adapter.
+//! Every constant is forwarded from the capability traits.
 
 #![cfg(any(feature = "aws", feature = "azure", feature = "gcp", feature = "vault"))]
 
-use super::{Binding, BindingSupport, KeyProvider};
+use super::{Binding, KeyProvider};
 use crate::{
     BatchGenerateDataKey, BatchRetrieveDataKey, GenerateDataKey, GeneratedDataKey, KeyCustody,
     KeyId, KeyIsolation, KeyReconstruction, RetrieveDataKey,
@@ -30,7 +27,6 @@ macro_rules! key_provider_body {
         const RECONSTRUCTION: KeyReconstruction = <Self as RetrieveDataKey<$n>>::RECONSTRUCTION;
         const CUSTODY: KeyCustody = <Self as RetrieveDataKey<$n>>::CUSTODY;
         const ISOLATION: KeyIsolation = <Self as BatchGenerateDataKey<$n>>::ISOLATION;
-        const BINDING: BindingSupport = <Self as RetrieveDataKey<$n>>::BINDING;
 
         async fn generate_keys(
             &self,
@@ -90,51 +86,4 @@ impl_key_provider_for_size! {
     crate::vault::VaultDataKeySource<32> => 32,
     #[cfg(feature = "vault")]
     crate::vault::VaultDataKeySource<64> => 64,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// `BINDING` is the one capability constant a caller acts on before it
-    /// trusts a backend with a context, so each source's value is pinned
-    /// here rather than left to whatever the forwarding happens to produce.
-    /// Two of the four cannot bind, for reasons recorded on their
-    /// `RetrieveDataKey` impls — that is a documented limit, not an
-    /// oversight, and this test is where it is visible side by side.
-    #[test]
-    fn every_source_declares_the_binding_support_it_actually_has() {
-        #[cfg(feature = "aws")]
-        {
-            // AWS KMS binds an `EncryptionContext`.
-            assert_eq!(
-                <crate::aws::AwsDataKeySource<32> as KeyProvider<32>>::BINDING,
-                BindingSupport::Bound
-            );
-        }
-        #[cfg(feature = "gcp")]
-        {
-            // Google Cloud KMS binds additional authenticated data.
-            assert_eq!(
-                <crate::gcp::GcpDataKeySource<32> as KeyProvider<32>>::BINDING,
-                BindingSupport::Bound
-            );
-        }
-        #[cfg(feature = "azure")]
-        {
-            // Azure binds the `aad` of `A256GCM`.
-            assert_eq!(
-                <crate::azure::AzureDataKeySource<32> as KeyProvider<32>>::BINDING,
-                BindingSupport::Bound
-            );
-        }
-        #[cfg(feature = "vault")]
-        {
-            // Vault binds the derivation context of a derived key.
-            assert_eq!(
-                <crate::vault::VaultDataKeySource<32> as KeyProvider<32>>::BINDING,
-                BindingSupport::Bound
-            );
-        }
-    }
 }

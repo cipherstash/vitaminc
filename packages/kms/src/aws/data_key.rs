@@ -1,7 +1,7 @@
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
-    BindingSupport, GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
+    GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
     RetrieveDataKey,
 };
 use crate::key_id::KeyId;
@@ -134,8 +134,6 @@ impl<const N: usize> RetrieveDataKey<N> for AwsDataKeySource<N> {
 
     /// AWS KMS binds the `EncryptionContext` into the data key and refuses a
     /// `Decrypt` that presents a different one.
-    const BINDING: BindingSupport = BindingSupport::Bound;
-
     async fn retrieve_data_key(
         &self,
         key_id: &KeyId,
@@ -409,7 +407,7 @@ mod tests {
             KeyId::new(b"blob-one".to_vec()),
         ];
         let keys = source
-            .retrieve_data_keys(&crate::data_key::unbound(&ids))
+            .retrieve_data_keys(&crate::data_key::with_empty_binding(&ids))
             .await
             .unwrap();
 
@@ -485,7 +483,7 @@ mod tests {
                 Binding::from("users/email"),
             ),
             (KeyId::new(b"blob-one".to_vec()), Binding::from("users/age")),
-            // A Bound source dedupes on the id and the binding together, so
+            // A source dedupes on the id and the binding together, so
             // the repeat names the same binding to be one call.
             (
                 KeyId::new(b"blob-two".to_vec()),
@@ -555,7 +553,7 @@ mod tests {
         }
     }
 
-    /// The binding has to reach AWS, or `BINDING = Bound` is a claim with
+    /// The binding has to reach AWS, or the claim that AWS binds has
     /// nothing behind it. Asserts the `EncryptionContext` on **both** calls,
     /// because a context sent on generate and dropped on decrypt would make
     /// every key unretrievable, and a test that only checked generate would

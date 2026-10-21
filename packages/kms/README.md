@@ -40,11 +40,23 @@ through a persisted identifier, while a service such as ZeroKMS supplies
 both.
 
 Every key in a batch carries a [`Binding`]: bytes the caller attaches when
-the key is minted and must present again to retrieve it. A backend either
-binds those bytes into the key server-side or ignores them, and says which
-through [`BindingSupport`], so a caller that needs binding can check
-before it depends on it. The AWS KMS and Google Cloud KMS sources are
-`Bound`. The Azure Key Vault and Vault Transit sources are `Unbound`.
+the key is minted and must present again to retrieve it. Every source binds
+those bytes into the key server-side, so a retrieval under a different
+binding fails. There is no source that ignores a binding, because a key
+that is not bound to its context is not committed to it
+(`docs/adr/0006`). Each backend binds in its own way:
+
+| Backend | The binding is |
+|---|---|
+| AWS KMS | an `EncryptionContext` entry |
+| Google Cloud KMS | additional authenticated data |
+| Azure Managed HSM | the `aad` of `A256GCM` over an `oct-HSM` key |
+| Vault Transit | the derivation context of a `derived=true` key |
+
+Two backends narrow because of this. The Azure source needs an `oct-HSM`
+key, which is production-ready on Managed HSM only. No emulator covers it,
+so only stub-transport tests do (CIP-4072). The Vault source needs a
+`derived=true` Transit key.
 
 Every vendor data key source in this crate implements [`KeyProvider`], so
 the same consumer runs on any of them. The pieces built on top:

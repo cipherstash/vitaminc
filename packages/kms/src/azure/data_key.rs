@@ -2,7 +2,7 @@ use super::envelope::{Envelope, EnvelopeError};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
-    BindingSupport, GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
+    GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
     RetrieveDataKey,
 };
 use crate::key_id::KeyId;
@@ -270,8 +270,6 @@ impl<const N: usize> RetrieveDataKey<N> for AzureDataKeySource<N> {
 
     /// The binding is the `aad` of the `A256GCM` encryption. The vault
     /// refuses the authentication tag under any other binding.
-    const BINDING: BindingSupport = BindingSupport::Bound;
-
     async fn retrieve_data_key(
         &self,
         key_id: &KeyId,
@@ -646,7 +644,7 @@ mod tests {
         let source = AzureDataKeySource::<32>::new(client, "my-key");
 
         let retrieved = source
-            .retrieve_data_keys(&crate::data_key::unbound(&[
+            .retrieve_data_keys(&crate::data_key::with_empty_binding(&[
                 key_id.clone(),
                 key_id.clone(),
                 key_id,

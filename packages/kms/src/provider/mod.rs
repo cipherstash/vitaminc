@@ -10,12 +10,12 @@
 //!
 //! Every vendor data key source in this crate implements [`KeyProvider`]
 //! (one concrete impl each, in `sources.rs`), so the same `StackCipher` runs on AWS KMS, Azure Key
-//! Vault, Google Cloud KMS, Vault Transit, or ZeroKMS. Two things differ in
-//! *meaning* between backends rather than in mechanism, and a provider
-//! declares both: [`BindingSupport`], whether it binds the caller's bytes
-//! into the key server-side or ignores them, and [`KeyCustody`], whether the
-//! key id it hands back is the data key in wrapped form or a reference the
-//! backend resolves.
+//! Vault, Google Cloud KMS, Vault Transit, or ZeroKMS. Every provider binds
+//! the caller's [`Binding`] into the key server-side, so a key comes back
+//! only under the binding it was minted with. What differs in *meaning*
+//! between backends, rather than in mechanism, is [`KeyCustody`]: whether
+//! the key id a provider hands back is the data key in wrapped form or a
+//! reference the backend resolves. A provider declares it.
 
 #[cfg(feature = "caching")]
 mod caching;
@@ -33,7 +33,7 @@ use crate::{
 };
 use vitaminc_protected::Protected;
 
-pub use crate::data_key::{Binding, BindingSupport};
+pub use crate::data_key::Binding;
 #[cfg(feature = "caching")]
 pub use caching::CachingKeyProvider;
 #[cfg(feature = "test-support")]
@@ -58,8 +58,6 @@ pub trait KeyProvider<const N: usize> {
     const CUSTODY: KeyCustody;
     /// See [`KeyIsolation`].
     const ISOLATION: KeyIsolation;
-    /// See [`BindingSupport`].
-    const BINDING: BindingSupport;
 
     fn generate_keys(
         &self,

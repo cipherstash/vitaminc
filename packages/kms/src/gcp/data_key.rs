@@ -2,7 +2,7 @@ use super::integrity::{self, CallError, Encrypted};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
-    BindingSupport, GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
+    GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
     RetrieveDataKey,
 };
 use crate::key_id::KeyId;
@@ -196,8 +196,6 @@ impl<const N: usize> RetrieveDataKey<N> for GcpDataKeySource<N> {
 
     /// Google Cloud KMS binds the additional authenticated data into the
     /// ciphertext and refuses a `decrypt` that presents different AAD.
-    const BINDING: BindingSupport = BindingSupport::Bound;
-
     async fn retrieve_data_key(
         &self,
         key_id: &KeyId,
@@ -483,7 +481,7 @@ mod tests {
             KeyId::new(vec![1u8; 8]),
         ];
         let keys = source
-            .retrieve_data_keys(&crate::data_key::unbound(&ids))
+            .retrieve_data_keys(&crate::data_key::with_empty_binding(&ids))
             .await
             .unwrap();
 
@@ -580,8 +578,8 @@ mod tests {
     }
 
     /// `dedup_retrieve` keys on the whole `(KeyId, Binding)` pair. The same
-    /// id under two bindings is two different questions to a `Bound`
-    /// backend — deduping on the id alone would ask once and hand the second
+    /// id under two bindings is two different questions to the backend —
+    /// deduping on the id alone would ask once and hand the second
     /// item an answer it never asked for.
     #[tokio::test]
     async fn one_key_id_under_two_bindings_is_two_retrievals() {

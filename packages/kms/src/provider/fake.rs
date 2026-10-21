@@ -1,4 +1,4 @@
-use super::{Binding, BindingSupport, IndexKeyProvider, KeyProvider};
+use super::{Binding, IndexKeyProvider, KeyProvider};
 use crate::{
     GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyIsolation, KeyReconstruction,
 };
@@ -19,9 +19,9 @@ type Keys<const N: usize> = HashMap<(KeyId, Vec<u8>), Protected<[u8; N]>>;
 /// per binding and remembers the key under `(key_id, binding)`.
 /// `retrieve_keys` looks each pair up: a known id under a different binding
 /// is [`FakeKeyProviderError::BindingMismatch`], an unknown id is
-/// [`FakeKeyProviderError::UnknownKey`]. That is the whole contract, and it
-/// is why the fake reports `BINDING = Bound`: a consumer's tests can prove
-/// they present the same binding on both sides.
+/// [`FakeKeyProviderError::UnknownKey`]. That is the whole contract. It
+/// binds as every real provider does, so a consumer's tests can prove they
+/// present the same binding on both sides.
 ///
 /// The index key is fixed at construction and identical across instances
 /// built with [`new`](Self::new), so terms derived by one cipher match terms
@@ -112,7 +112,6 @@ impl<const N: usize> KeyProvider<N> for FakeKeyProvider<N> {
     /// id is a reference rather than the key itself.
     const CUSTODY: KeyCustody = KeyCustody::BackendHeld;
     const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
-    const BINDING: BindingSupport = BindingSupport::Bound;
 
     async fn generate_keys(
         &self,

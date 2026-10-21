@@ -18,9 +18,15 @@ pub(crate) fn into_sized<const N: usize, E>(
 /// again to retrieve it. Stack Encrypt passes each leaf's rendered context
 /// (its descriptor).
 ///
+/// Every source binds. The backend binds the bytes into the data key, so a
+/// retrieval under a different binding fails. ZeroKMS binds its descriptor
+/// and logs it per retrieval. AWS KMS binds an `EncryptionContext`. Google
+/// Cloud KMS and Azure Managed HSM bind additional authenticated data.
+/// Vault Transit binds the derivation context of a derived key. A source
+/// that cannot bind cannot be a data key source (ADR 0006).
+///
 /// A newtype rather than a bare `&[u8]`, so a plaintext or a key id cannot
-/// be passed where a binding belongs. What a source does with it is declared
-/// by [`RetrieveDataKey::BINDING`].
+/// be passed where a binding belongs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Binding<'a>(&'a [u8]);
 
@@ -47,28 +53,6 @@ impl<'a> From<&'a str> for Binding<'a> {
     fn from(s: &'a str) -> Self {
         Self(s.as_bytes())
     }
-}
-
-/// Whether a source honours the [`Binding`] it is given.
-///
-/// `Bound`: the source has its backend bind the bytes into the data key, so
-/// retrieving with a different binding fails. ZeroKMS binds its descriptor
-/// and logs it per retrieval; AWS KMS binds an `EncryptionContext`; Google
-/// Cloud KMS binds additional authenticated data.
-///
-/// `Unbound`: the source ignores the bytes, and the caller's own
-/// authenticated data is the only thing tying a key to its context. Azure
-/// Key Vault's wrap algorithms take no additional authenticated data, a
-/// non-derived Vault Transit key has nothing to bind with, and a pooled
-/// source cannot bind — one key shared across a batch cannot carry the
-/// batch's several bindings.
-///
-/// An `Unbound` source never errors on a non-empty binding. A caller that
-/// requires binding checks this constant up front.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BindingSupport {
-    Bound,
-    Unbound,
 }
 
 pub struct GeneratedDataKey<const N: usize> {
@@ -162,11 +146,6 @@ pub trait RetrieveDataKey<const N: usize> {
     /// whether the caller is holding the key itself or a reference to one.
     const CUSTODY: KeyCustody;
 
-    /// See [`BindingSupport`]. Declared on retrieval because retrieval is
-    /// where a binding is enforced: a `Bound` source refuses a key id
-    /// presented under a binding it was not minted with.
-    const BINDING: BindingSupport;
-
     async fn retrieve_data_key(
         &self,
         key_id: &KeyId,
@@ -227,9 +206,9 @@ pub async fn fan_out_generate<const N: usize, T: GenerateDataKey<N> + Sync>(
 /// distinct, so this is N round trips; it saves a round trip only when a
 /// caller presents the same id more than once.
 /// Dedupes on the whole `(KeyId, Binding)` pair, not on the id alone: a
-/// `Bound` backend answers the same id differently under different
-/// bindings — one of them by refusing — so collapsing them would hand one
-/// item a key it never asked for.
+/// backend answers the same id differently under different bindings — one
+/// of them by refusing — so collapsing them would hand one item a key it
+/// never asked for.
 pub async fn dedup_retrieve<const N: usize, T: RetrieveDataKey<N> + Sync>(
     backend: &T,
     keys: &[(KeyId, Binding<'_>)],
@@ -256,9 +235,9 @@ pub async fn dedup_retrieve<const N: usize, T: RetrieveDataKey<N> + Sync>(
     Ok(keys.iter().map(|key| by_key[key].clone()).collect())
 }
 
-/// Pairs each id with [`Binding::EMPTY`], for tests whose backend is
-/// `Unbound` or whose assertion is about something other than binding.
+/// Pairs each id with [`Binding::EMPTY`], for tests whose assertion is
+/// about something other than binding.
 #[cfg(test)]
-pub(crate) fn unbound(ids: &[KeyId]) -> Vec<(KeyId, Binding<'static>)> {
+pub(crate) fn with_empty_binding(ids: &[KeyId]) -> Vec<(KeyId, Binding<'static>)> {
     ids.iter().map(|id| (id.clone(), Binding::EMPTY)).collect()
 }
