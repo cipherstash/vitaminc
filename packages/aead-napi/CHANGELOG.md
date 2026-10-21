@@ -1,4 +1,12 @@
 
+## [0.8.0] - 2026-10-21
+
+A ciphertext holding a typed null (`vitaminc-aead` 0.8.0) decrypts to JavaScript's `null`, whatever the type of the absent value.
+
+### Not guaranteed
+
+- JavaScript has no type for an absent value, so a `null` sealed from JavaScript is still the one-byte null, and the ciphertext's length still shows that the value is absent.
+
 ## [0.7.0] - 2026-10-20
 
 ## [0.6.1] - 2026-10-18

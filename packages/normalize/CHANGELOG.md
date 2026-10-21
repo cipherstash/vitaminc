@@ -1,4 +1,20 @@
 
+## [0.8.0] - 2026-10-21
+
+Existing equality terms do not change: every domain label and encoding of 0.7 stays as it is, and the null term is a new label beside them. An index built by 0.7 holds a SQL `NULL` where a value was absent; 0.8 writes a term there instead. Both read correctly, but the rows 0.7 wrote still show their absences until they are re-indexed.
+
+### Breaking
+
+- **Breaking:** Every null, typed or plain, now has an equality term, under the new frozen domain `vitaminc/prf/value/null/v1` with the one byte `0x00`. A sealed `None` is now as long as a `Some` (`vitaminc-aead` 0.8.0), but the term column still held a SQL `NULL` exactly where a value was absent. So `normalize(None, Physical::Null)` succeeds where it returned `NoDomain`, and a walk over a value with a null returns one more term, at the null's path. A layer that must keep a SQL `NULL` for some column drops the term whose domain is `domain::NULL`; producing it is the default because dropping a term should be an explicit act. A boolean and an `undefined` still have no term. `domain::ALL` now lists nine labels.
+
+### Features
+
+- `NormalizeError::Reserved`, which an order space that places nulls returns for the one value it keeps for them (`vitaminc-ore` 0.8.0). `NormalizeError` is `#[non_exhaustive]`, so a match on it still compiles.
+
+### Not guaranteed
+
+- In an equality index the nulls are one more group of equal terms, as any repeated value is. That is never more than the SQL `NULL` it replaces, which needed no inference to read.
+
 ## [0.7.0] - 2026-10-20
 
 ### Fixes
