@@ -9,7 +9,9 @@ use vitaminc_aead::{
     Encrypt, EncryptError, EncryptSink, Int, Logical, Physical, Raw, Tee, Unencryptable,
 };
 use vitaminc_normalize::{terms, Terms, TermsError};
-use vitaminc_ore::{domain, order, order_terms, NormalizeError, Order, OrderTarget, Term};
+use vitaminc_ore::{
+    domain, order, order_terms, NormalizeError, NullOrder, Order, OrderTarget, Term,
+};
 use vitaminc_protected::Controlled;
 
 fn paths<T>(terms: &[Term<T>]) -> Vec<String> {
@@ -102,6 +104,43 @@ fn order_and_equality_terms_come_from_one_walk() {
     assert!(ordered
         .iter()
         .all(|t| t.normalized.domain() == domain::INT64));
+}
+
+/// A normalizer that places nulls gives the null its term at its path, so
+/// the order terms land where the equality terms do.
+#[test]
+fn a_normalizer_that_places_nulls_gives_the_null_the_sentinel_where_equality_has_its_term() {
+    let (mut equality, mut ordered) = (Vec::new(), Vec::new());
+    let last = Order::new(OrderTarget::I64)
+        .nulls(NullOrder::Last)
+        .expect("fixed width");
+    Record
+        .visit(Tee(
+            Terms::<TermsError>::new(&mut equality),
+            Terms::by(last, &mut ordered),
+        ))
+        .expect("walk");
+    assert_eq!(
+        paths(&equality),
+        paths(&ordered),
+        "the null has an order term at its path"
+    );
+    assert_eq!(render(&ordered[2].path), ".gone");
+    assert_eq!(ordered[2].normalized.domain(), domain::INT64_NULLS_LAST);
+    assert_eq!(ordered[2].normalized.bytes().risky_ref(), &[0xFF; 8]);
+    assert!(ordered
+        .iter()
+        .all(|t| t.normalized.domain() == domain::INT64_NULLS_LAST));
+    // A value at the target's maximum stops the walk at its path.
+    let err = vitaminc_normalize::terms_by(last, BTreeMap::from([("top", i64::MAX)]))
+        .expect_err("refused");
+    let term = err.term().expect("refused by the normalizer");
+    assert_eq!(term.error(), NormalizeError::Reserved);
+    assert_eq!(render(term.path()), ".top");
+    assert_eq!(
+        err.to_string(),
+        "no order term: the value is reserved for nulls in the index it was given to"
+    );
 }
 
 #[test]
