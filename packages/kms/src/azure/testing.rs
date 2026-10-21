@@ -57,26 +57,50 @@ impl RecordedRequest {
     }
 }
 
-/// An [`HttpClient`] that answers from a queue of canned JSON bodies and
-/// records what it was asked to send, so a test can assert on the request
-/// without a network.
+/// An [`HttpClient`] that answers from a queue of canned JSON bodies, or
+/// from a function of each request, and records what it was asked to send,
+/// so a test can assert on the request without a network.
 ///
 /// Key Vault clients discover their auth scope by sending the first request
 /// unauthorized and reading the challenge off the 401 (see
 /// `azure_security_keyvault_keys`'s `KeyVaultAuthorizer`). This stub plays
 /// that back: a request with no `authorization` header gets the challenge
 /// and is not recorded, so `requests()` holds only the real calls.
-#[derive(Debug)]
 pub(super) struct StubTransport {
-    responses: Mutex<Vec<(StatusCode, String)>>,
+    responses: Responses,
     requests: Mutex<Vec<RecordedRequest>>,
+}
+
+/// A function that answers one request with a status and a JSON body.
+type Responder = Box<dyn Fn(&RecordedRequest) -> (StatusCode, String) + Send + Sync>;
+
+enum Responses {
+    /// Canned answers, popped from the back.
+    Queue(Mutex<Vec<(StatusCode, String)>>),
+    /// An answer computed from each request.
+    Computed(Responder),
+}
+
+impl std::fmt::Debug for StubTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StubTransport")
+            .field("requests", &self.requests)
+            .finish_non_exhaustive()
+    }
 }
 
 impl StubTransport {
     fn new(responses: Vec<(StatusCode, String)>) -> Self {
         Self {
             // Popped from the back, so reverse once up front.
-            responses: Mutex::new(responses.into_iter().rev().collect()),
+            responses: Responses::Queue(Mutex::new(responses.into_iter().rev().collect())),
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn computed(responder: Responder) -> Self {
+        Self {
+            responses: Responses::Computed(responder),
             requests: Mutex::new(Vec::new()),
         }
     }
@@ -110,17 +134,19 @@ impl HttpClient for StubTransport {
             Body::Bytes(bytes) => bytes.to_vec(),
             Body::SeekableStream(_) => panic!("the stub transport does not stream request bodies"),
         };
-        self.requests.lock().unwrap().push(RecordedRequest {
+        let recorded = RecordedRequest {
             url: request.url().clone(),
             body,
-        });
-
-        let (status, body) = self
-            .responses
-            .lock()
-            .unwrap()
-            .pop()
-            .expect("the stub transport ran out of canned responses");
+        };
+        let (status, body) = match &self.responses {
+            Responses::Queue(queue) => queue
+                .lock()
+                .unwrap()
+                .pop()
+                .expect("the stub transport ran out of canned responses"),
+            Responses::Computed(responder) => responder(&recorded),
+        };
+        self.requests.lock().unwrap().push(recorded);
 
         let mut headers = Headers::new();
         headers.insert(CONTENT_TYPE, "application/json; charset=utf-8");
@@ -131,12 +157,24 @@ impl HttpClient for StubTransport {
 /// A [`KeyClient`] whose transport answers with `responses` in order, each
 /// with a 200 status.
 pub(super) fn stub_client(responses: &[&str]) -> (KeyClient, Arc<StubTransport>) {
-    let transport = Arc::new(StubTransport::new(
+    client_over(StubTransport::new(
         responses
             .iter()
             .map(|body| (StatusCode::Ok, (*body).to_owned()))
             .collect(),
-    ));
+    ))
+}
+
+/// A [`KeyClient`] whose transport answers each request with `responder`,
+/// so a test can stand in for a check the vault itself makes.
+pub(super) fn responder_client(
+    responder: impl Fn(&RecordedRequest) -> (StatusCode, String) + Send + Sync + 'static,
+) -> (KeyClient, Arc<StubTransport>) {
+    client_over(StubTransport::computed(Box::new(responder)))
+}
+
+fn client_over(transport: StubTransport) -> (KeyClient, Arc<StubTransport>) {
+    let transport = Arc::new(transport);
     let client = KeyClient::new(
         "https://my-vault.vault.azure.net",
         Arc::new(StubCredential),

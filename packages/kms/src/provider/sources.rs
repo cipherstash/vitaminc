@@ -122,11 +122,10 @@ mod tests {
         }
         #[cfg(feature = "azure")]
         {
-            // `wrapKey`/`unwrapKey` take RSA-OAEP or AES-KW; neither has a
-            // place for additional authenticated data.
+            // Azure binds the `aad` of `A256GCM`.
             assert_eq!(
                 <crate::azure::AzureDataKeySource<32> as KeyProvider<32>>::BINDING,
-                BindingSupport::Unbound
+                BindingSupport::Bound
             );
         }
         #[cfg(feature = "vault")]

@@ -71,7 +71,7 @@ SDK. `aws` is on by default.
 | Feature | Backend | Data keys | Direct encrypt | MAC | Signing | Local tests |
 |---|---|---|---|---|---|---|
 | `aws` | AWS KMS | `AwsDataKeySource` | same type | `AwsMacKey` | `AwsSigningKey` | LocalStack |
-| `azure` | Azure Key Vault / Managed HSM | `AzureDataKeySource` | same type | `AzureMacKey` | `AzureSigningKey` | Lowkey Vault |
+| `azure` | Azure Key Vault / Managed HSM | `AzureDataKeySource` (Managed HSM `oct-HSM` only) | same type | `AzureMacKey` | `AzureSigningKey` | Lowkey Vault (MAC and signing only) |
 | `gcp` | Google Cloud KMS | `GcpDataKeySource` | same type | `GcpMacKey` | `GcpSigningKey`, `GcpEd25519Key` | SDK stub only |
 | `vault` | HashiCorp Vault Transit | `VaultDataKeySource` | same type | `VaultMacKey` | `VaultSigningKey`, `VaultEd25519Key` | Vault dev server |
 
