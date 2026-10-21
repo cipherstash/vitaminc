@@ -132,6 +132,11 @@ httpmock = "0.8"
 # verifier that takes only the digest-length salt.
 rsa = "=0.10.0-rc.19"
 sha2 = "0.11.0"
+# The AWS LocalStack tests check ECDSA signatures with an independent
+# verifier over the digest as given, as the RSA tests do with `rsa`. Both
+# crates are already in the lock as optional `gcp` dependencies.
+p256 = { version = "0.14", default-features = false, features = ["alloc", "ecdsa", "pkcs8"] }
+p384 = { version = "0.14", default-features = false, features = ["alloc", "ecdsa", "pkcs8"] }
 # Signs test vectors for the GCP Ed25519 unit tests, and checks the Vault
 # dev server's Ed25519 signatures against the public key it exports.
 ed25519-dalek = { version = "3", default-features = false, features = ["pkcs8", "alloc"] }

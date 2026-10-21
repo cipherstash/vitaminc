@@ -540,6 +540,139 @@ mod tests {
         assert_eq!(two.num_calls(), 1);
     }
 
+    /// AWS refuses a `CiphertextBlob` from a different KMS key only when the
+    /// `Decrypt` request names the expected key in `KeyId` (CIP-5029).
+    /// Without it, AWS opens the blob under the key the blob itself names,
+    /// and this source would accept a data key or a direct ciphertext that
+    /// another key sealed. The rules match only a request with the bound
+    /// key id, so a call count of one each is the assertion.
+    #[tokio::test]
+    async fn every_decrypt_names_the_bound_key() {
+        let retrieve_rule = mock!(Client::decrypt)
+            .match_requests(|input| {
+                input.key_id() == Some(TEST_KEY_ID)
+                    && input.ciphertext_blob().unwrap().as_ref() == b"data-key-blob".as_slice()
+            })
+            .then_output(|| {
+                DecryptOutput::builder()
+                    .plaintext(Blob::new(fixed_plaintext().to_vec()))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+        let direct_rule = mock!(Client::decrypt)
+            .match_requests(|input| {
+                input.key_id() == Some(TEST_KEY_ID)
+                    && input.ciphertext_blob().unwrap().as_ref() == b"direct-blob".as_slice()
+            })
+            .then_output(|| {
+                DecryptOutput::builder()
+                    .plaintext(Blob::new(b"a short secret".to_vec()))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+        let client = mock_client!(
+            aws_sdk_kms,
+            RuleMode::MatchAny,
+            &[&retrieve_rule, &direct_rule]
+        );
+        let source = AwsDataKeySource::<32>::new(client, TEST_KEY_ID);
+
+        let _ = source
+            .retrieve_data_key(&KeyId::new(b"data-key-blob".to_vec()), Binding::EMPTY)
+            .await
+            .unwrap();
+        let _ = source.decrypt(b"direct-blob").await.unwrap();
+
+        assert_eq!(retrieve_rule.num_calls(), 1);
+        assert_eq!(direct_rule.num_calls(), 1);
+    }
+
+    /// A generate rule and a decrypt rule for one binding. Each matches only
+    /// its own exact `EncryptionContext`, and the decrypt rule also matches
+    /// only its own `blob`. The rules return `material` as the key, so the
+    /// caller can see which rule served each slot.
+    fn rules_for_binding(
+        binding: &'static [u8],
+        blob: &'static [u8],
+        material: u8,
+    ) -> (aws_smithy_mocks::Rule, aws_smithy_mocks::Rule) {
+        use base64::Engine as _;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(binding);
+        let expected = context_of(&[("vitaminc:use", "data-key"), ("vitaminc:binding", &encoded)]);
+        let sent = expected.clone();
+        let generate_rule = mock!(Client::generate_data_key)
+            .match_requests(move |req| req.encryption_context() == Some(&sent))
+            .then_output(move || {
+                GenerateDataKeyOutput::builder()
+                    .plaintext(Blob::new(vec![material; 32]))
+                    .ciphertext_blob(Blob::new(blob.to_vec()))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+        let decrypt_rule = mock!(Client::decrypt)
+            .match_requests(move |req| {
+                req.encryption_context() == Some(&expected)
+                    && req.ciphertext_blob().unwrap().as_ref() == blob
+            })
+            .then_output(move || {
+                DecryptOutput::builder()
+                    .plaintext(Blob::new(vec![material; 32]))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+        (generate_rule, decrypt_rule)
+    }
+
+    /// Each binding given to [`KeyProvider`](crate::provider::KeyProvider)
+    /// reaches its own request, in order (CIP-5039). The `KeyProvider` impl
+    /// comes from a macro that forwards to the batch traits. The other tests
+    /// with a non-empty binding call the batch traits directly, so they do
+    /// not see a macro that drops, reorders or swaps the bindings. Two
+    /// different bindings make a swap visible: on generate, slot 0 holds the
+    /// key of the second rule; on retrieve, an id arrives with the other
+    /// binding and no rule matches.
+    #[tokio::test]
+    async fn key_provider_sends_each_binding_with_its_own_request() {
+        use crate::provider::KeyProvider;
+
+        let (generate_email, decrypt_email) = rules_for_binding(b"users/email", b"blob-email", 1);
+        let (generate_age, decrypt_age) = rules_for_binding(b"users/age", b"blob-age", 2);
+        let client = mock_client!(
+            aws_sdk_kms,
+            RuleMode::MatchAny,
+            &[&generate_email, &decrypt_email, &generate_age, &decrypt_age]
+        );
+        let source = AwsDataKeySource::<32>::new(client, TEST_KEY_ID);
+        let email = Binding::from("users/email");
+        let age = Binding::from("users/age");
+
+        let generated = KeyProvider::generate_keys(&source, &[email, age])
+            .await
+            .unwrap();
+
+        assert_eq!(generated.len(), 2);
+        assert_eq!(generated[0].key_id.as_bytes(), b"blob-email");
+        assert_eq!(generated[0].plaintext.clone().risky_unwrap(), [1u8; 32]);
+        assert_eq!(generated[1].key_id.as_bytes(), b"blob-age");
+        assert_eq!(generated[1].plaintext.clone().risky_unwrap(), [2u8; 32]);
+        assert_eq!(generate_email.num_calls(), 1);
+        assert_eq!(generate_age.num_calls(), 1);
+
+        let requests = [
+            (generated[0].key_id.clone(), email),
+            (generated[1].key_id.clone(), age),
+        ];
+        let retrieved = KeyProvider::retrieve_keys(&source, &requests)
+            .await
+            .unwrap();
+
+        assert_eq!(retrieved.len(), 2);
+        assert_eq!(retrieved[0].clone().risky_unwrap(), [1u8; 32]);
+        assert_eq!(retrieved[1].clone().risky_unwrap(), [2u8; 32]);
+        assert_eq!(decrypt_email.num_calls(), 1);
+        assert_eq!(decrypt_age.num_calls(), 1);
+    }
+
     /// Against LocalStack on `localhost:4566` — see the crate README for
     /// how to bring it up.
     mod localstack {
@@ -626,6 +759,34 @@ mod tests {
                     matches!(
                         error,
                         Error::AwsSdk(aws_sdk_kms::Error::InvalidCiphertextException(_))
+                    ),
+                    "{error:?}"
+                );
+            }
+        }
+
+        /// A data key that key A minted does not open through a source bound
+        /// to key B (CIP-5029). The blob names key A, and AWS opens it under
+        /// that key unless the `Decrypt` request names a `KeyId`. This
+        /// source sends its own key id, so AWS refuses the blob.
+        #[tokio::test]
+        async fn a_data_key_from_another_key_does_not_open() {
+            let client = localstack_client();
+            let key_a = encrypt_decrypt_key(&client).await;
+            let key_b = encrypt_decrypt_key(&client).await;
+            let source_a = AwsDataKeySource::<32>::new(client.clone(), key_a);
+            let source_b = AwsDataKeySource::<32>::new(client, key_b);
+
+            for binding in [Binding::EMPTY, Binding::from("users/email")] {
+                let generated = source_a.generate_data_key(binding).await.unwrap();
+                let error = source_b
+                    .retrieve_data_key(&generated.key_id, binding)
+                    .await
+                    .unwrap_err();
+                assert!(
+                    matches!(
+                        error,
+                        Error::AwsSdk(aws_sdk_kms::Error::IncorrectKeyException(_))
                     ),
                     "{error:?}"
                 );

@@ -406,6 +406,66 @@ mod tests {
         }
     }
 
+    /// Every algorithm, as the AWS adapter maps it.
+    const ALL_ALGORITHMS: [SignatureAlgorithm; 9] = [
+        SignatureAlgorithm::EcdsaP256Sha256,
+        SignatureAlgorithm::EcdsaP384Sha384,
+        SignatureAlgorithm::EcdsaP521Sha512,
+        SignatureAlgorithm::RsaPssSha256,
+        SignatureAlgorithm::RsaPssSha384,
+        SignatureAlgorithm::RsaPssSha512,
+        SignatureAlgorithm::RsaPkcs1Sha256,
+        SignatureAlgorithm::RsaPkcs1Sha384,
+        SignatureAlgorithm::RsaPkcs1Sha512,
+    ];
+
+    /// `sign` and `verify` both send `MessageType::Digest`, the bound key
+    /// id, the AWS spec of the configured algorithm, and the digest as
+    /// given (CIP-5030). With `MessageType::Raw`, AWS hashes the digest
+    /// again, and no outside verifier accepts the signature; the round trip
+    /// through AWS still verifies, so only the request shows the fault. The
+    /// rules match only the exact request, so a call count of one each is
+    /// the assertion.
+    #[tokio::test]
+    async fn sign_and_verify_send_a_digest_under_the_configured_algorithm() {
+        for algorithm in ALL_ALGORITHMS {
+            let spec = signing_algorithm_spec(algorithm);
+            let message = vec![1u8; algorithm.digest_len()];
+            let sign_spec = spec.clone();
+            let sign_message = message.clone();
+            let sign_rule = mock!(Client::sign)
+                .match_requests(move |input| {
+                    input.key_id() == Some(TEST_KEY_ID)
+                        && input.message_type() == Some(&MessageType::Digest)
+                        && input.signing_algorithm() == Some(&sign_spec)
+                        && input.message().map(|m| m.as_ref()) == Some(sign_message.as_slice())
+                })
+                .then_output(|| {
+                    SignOutput::builder()
+                        .signature(Blob::new(vec![0x30, 0x06]))
+                        .build()
+                });
+            let verify_rule = mock!(Client::verify)
+                .match_requests(move |input| {
+                    input.key_id() == Some(TEST_KEY_ID)
+                        && input.message_type() == Some(&MessageType::Digest)
+                        && input.signing_algorithm() == Some(&spec)
+                        && input.message().map(|m| m.as_ref()) == Some(message.as_slice())
+                        && input.signature().map(|s| s.as_ref()) == Some([0x30, 0x06].as_slice())
+                })
+                .then_output(|| VerifyOutput::builder().signature_valid(true).build());
+            let client = mock_client!(aws_sdk_kms, RuleMode::MatchAny, &[&sign_rule, &verify_rule]);
+            let key = AwsSigningKey::new(client, TEST_KEY_ID, algorithm);
+            let digest = Protected::new(vec![1u8; algorithm.digest_len()]);
+
+            let signature = key.sign(&digest).await.unwrap();
+            assert!(key.verify(&digest, &signature).await.unwrap());
+
+            assert_eq!(sign_rule.num_calls(), 1, "{algorithm:?}");
+            assert_eq!(verify_rule.num_calls(), 1, "{algorithm:?}");
+        }
+    }
+
     /// Against LocalStack on `localhost:4566` — see the crate README for
     /// how to bring it up.
     mod localstack {
@@ -415,22 +475,10 @@ mod tests {
 
         /// A P-256 sign/verify key, to match
         /// [`SignatureAlgorithm::EcdsaP256Sha256`].
-        async fn p256_signing_key(client: &Client) -> String {
-            let key = client
-                .create_key()
-                .key_usage(KeyUsageType::SignVerify)
-                .key_spec(KeySpec::EccNistP256)
-                .send()
-                .await
-                .expect("LocalStack CreateKey");
-
-            key.key_metadata().unwrap().key_id().to_owned()
-        }
-
         #[tokio::test]
         async fn sign_then_verify_round_trip() {
             let client = localstack_client();
-            let key_id = p256_signing_key(&client).await;
+            let key_id = create_signing_key(&client, KeySpec::EccNistP256).await;
             let key = signing_key_bound_to(client, key_id);
 
             let signature = key.sign(&digest()).await.unwrap();
@@ -441,7 +489,7 @@ mod tests {
         #[tokio::test]
         async fn a_signature_over_a_different_digest_verifies_as_false() {
             let client = localstack_client();
-            let key_id = p256_signing_key(&client).await;
+            let key_id = create_signing_key(&client, KeySpec::EccNistP256).await;
             let key = signing_key_bound_to(client, key_id);
 
             let signature = key.sign(&digest()).await.unwrap();
@@ -456,12 +504,136 @@ mod tests {
         #[tokio::test]
         async fn get_public_key_returns_der_subject_public_key_info() {
             let client = localstack_client();
-            let key_id = p256_signing_key(&client).await;
+            let key_id = create_signing_key(&client, KeySpec::EccNistP256).await;
             let key = signing_key_bound_to(client, key_id);
 
             let public_key = key.get_public_key().await.unwrap();
 
             assert_eq!(public_key.first(), Some(&0x30));
+        }
+
+        /// A sign/verify key of `spec`.
+        async fn create_signing_key(client: &Client, spec: KeySpec) -> String {
+            let key = client
+                .create_key()
+                .key_usage(KeyUsageType::SignVerify)
+                .key_spec(spec)
+                .send()
+                .await
+                .expect("LocalStack CreateKey");
+
+            key.key_metadata().unwrap().key_id().to_owned()
+        }
+
+        /// `message` hashed with the hash of `algorithm`.
+        fn digest_of(algorithm: SignatureAlgorithm, message: &[u8]) -> Vec<u8> {
+            use sha2::Digest as _;
+            match algorithm.digest_len() {
+                32 => sha2::Sha256::digest(message).to_vec(),
+                48 => sha2::Sha384::digest(message).to_vec(),
+                _ => sha2::Sha512::digest(message).to_vec(),
+            }
+        }
+
+        /// Checks `signature` over `digest` as given, with a verifier
+        /// outside AWS and the DER `SubjectPublicKeyInfo` from AWS.
+        fn verifies_locally(
+            algorithm: SignatureAlgorithm,
+            public_key: &[u8],
+            digest: &[u8],
+            signature: &[u8],
+        ) -> bool {
+            use p256::pkcs8::DecodePublicKey as _;
+            use rsa::signature::hazmat::PrehashVerifier;
+
+            fn check<S, K>(key: &K, digest: &[u8], signature: &[u8]) -> bool
+            where
+                S: for<'a> TryFrom<&'a [u8]>,
+                K: PrehashVerifier<S>,
+            {
+                S::try_from(signature).is_ok_and(|s| key.verify_prehash(digest, &s).is_ok())
+            }
+            let rsa_key = || rsa::RsaPublicKey::from_public_key_der(public_key).unwrap();
+
+            match algorithm {
+                SignatureAlgorithm::EcdsaP256Sha256 => check::<p256::ecdsa::DerSignature, _>(
+                    &p256::ecdsa::VerifyingKey::from_public_key_der(public_key).unwrap(),
+                    digest,
+                    signature,
+                ),
+                SignatureAlgorithm::EcdsaP384Sha384 => check::<p384::ecdsa::DerSignature, _>(
+                    &p384::ecdsa::VerifyingKey::from_public_key_der(public_key).unwrap(),
+                    digest,
+                    signature,
+                ),
+                SignatureAlgorithm::EcdsaP521Sha512 => {
+                    unreachable!("no dev-dependency verifies P-521")
+                }
+                SignatureAlgorithm::RsaPssSha256 => check::<rsa::pss::Signature, _>(
+                    &rsa::pss::VerifyingKey::<sha2::Sha256>::new(rsa_key()),
+                    digest,
+                    signature,
+                ),
+                SignatureAlgorithm::RsaPssSha384 => check::<rsa::pss::Signature, _>(
+                    &rsa::pss::VerifyingKey::<sha2::Sha384>::new(rsa_key()),
+                    digest,
+                    signature,
+                ),
+                SignatureAlgorithm::RsaPssSha512 => check::<rsa::pss::Signature, _>(
+                    &rsa::pss::VerifyingKey::<sha2::Sha512>::new(rsa_key()),
+                    digest,
+                    signature,
+                ),
+                SignatureAlgorithm::RsaPkcs1Sha256 => check::<rsa::pkcs1v15::Signature, _>(
+                    &rsa::pkcs1v15::VerifyingKey::<sha2::Sha256>::new(rsa_key()),
+                    digest,
+                    signature,
+                ),
+                SignatureAlgorithm::RsaPkcs1Sha384 => check::<rsa::pkcs1v15::Signature, _>(
+                    &rsa::pkcs1v15::VerifyingKey::<sha2::Sha384>::new(rsa_key()),
+                    digest,
+                    signature,
+                ),
+                SignatureAlgorithm::RsaPkcs1Sha512 => check::<rsa::pkcs1v15::Signature, _>(
+                    &rsa::pkcs1v15::VerifyingKey::<sha2::Sha512>::new(rsa_key()),
+                    digest,
+                    signature,
+                ),
+            }
+        }
+
+        /// A signature from AWS verifies outside AWS, over the digest as
+        /// given (CIP-5030). `MessageType::Digest` gives this property: with
+        /// `Raw`, AWS signs a hash of the digest, the `Verify` of AWS still
+        /// accepts the signature, and every outside verifier refuses it.
+        /// The test checks each algorithm that has a local verifier.
+        #[tokio::test]
+        async fn an_aws_signature_verifies_outside_aws() {
+            let cases = [
+                (SignatureAlgorithm::EcdsaP256Sha256, KeySpec::EccNistP256),
+                (SignatureAlgorithm::EcdsaP384Sha384, KeySpec::EccNistP384),
+                (SignatureAlgorithm::RsaPssSha256, KeySpec::Rsa2048),
+                (SignatureAlgorithm::RsaPssSha384, KeySpec::Rsa2048),
+                (SignatureAlgorithm::RsaPssSha512, KeySpec::Rsa2048),
+                (SignatureAlgorithm::RsaPkcs1Sha256, KeySpec::Rsa2048),
+                (SignatureAlgorithm::RsaPkcs1Sha384, KeySpec::Rsa2048),
+                (SignatureAlgorithm::RsaPkcs1Sha512, KeySpec::Rsa2048),
+            ];
+
+            let client = localstack_client();
+            for (algorithm, spec) in cases {
+                let key_id = create_signing_key(&client, spec).await;
+                let key = AwsSigningKey::new(client.clone(), key_id, algorithm);
+                let digest = digest_of(algorithm, b"a message signed in AWS");
+
+                let signature = key.sign(&Protected::new(digest.clone())).await.unwrap();
+                let public_key = key.get_public_key().await.unwrap();
+
+                assert!(
+                    verifies_locally(algorithm, &public_key, &digest, &signature),
+                    "{algorithm:?}"
+                );
+            }
         }
 
         fn signing_key_bound_to(client: Client, key_id: String) -> AwsSigningKey {
