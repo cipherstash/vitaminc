@@ -1,0 +1,20 @@
+[package]
+name = "skill-doctests"
+description = "Test-only crate, never published: compiles and runs every Rust block in the agent skills under .claude/skills against the workspace crates."
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# The skill files are Markdown, so nothing else compiles their examples. Each is
+# included as rustdoc in src/lib.rs, which makes every Rust block a doctest.
+# Doctests link dev-dependencies, so the crates the examples use live here.
+[dev-dependencies]
+futures = "0.3.31"
+vitaminc-aead = { path = "../aead" }
+vitaminc-encrypt = { path = "../encrypt" }
+vitaminc-hmac = { path = "../hmac" }
+vitaminc-prf = { path = "../prf" }
+vitaminc-protected = { path = "../protected" }
+vitaminc-random = { path = "../random" }

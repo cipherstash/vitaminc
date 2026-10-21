@@ -2200,6 +2200,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "skill-doctests"
+version = "0.0.0"
+dependencies = [
+ "futures",
+ "vitaminc-aead",
+ "vitaminc-encrypt",
+ "vitaminc-hmac",
+ "vitaminc-prf",
+ "vitaminc-protected",
+ "vitaminc-random",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"

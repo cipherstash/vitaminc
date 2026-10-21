@@ -115,3 +115,10 @@ publish = false
 name = "derive-tests-umbrella-only"
 release = false
 publish = false
+
+# Test-only workspace member: doctests every Rust block in .claude/skills. Never
+# released, for the same reasons as the derive-tests crates above.
+[[package]]
+name = "skill-doctests"
+release = false
+publish = false
