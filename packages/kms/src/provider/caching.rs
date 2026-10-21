@@ -426,6 +426,189 @@ mod tests {
         assert_eq!(cache.cache.entry_count(), 0);
     }
 
+    /// How a [`Miscounting`] provider gets the length of its answer wrong.
+    #[derive(Clone, Copy)]
+    enum Miscount {
+        OneTooMany,
+        OneTooFew,
+    }
+
+    /// A provider that breaks the one-key-per-request contract of
+    /// `retrieve_keys`. It records each batch in a [`CountingProvider`] and
+    /// answers correctly until a test arms it. After that, it adds one key
+    /// to each answer or removes the last key from it.
+    struct Miscounting {
+        inner: CountingProvider,
+        miscount: Mutex<Option<Miscount>>,
+    }
+
+    impl Miscounting {
+        fn arm(&self, miscount: Miscount) {
+            *self.miscount.lock().unwrap() = Some(miscount);
+        }
+    }
+
+    impl KeyProvider<4> for Miscounting {
+        type Error = Infallible;
+
+        const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ClientAndServer;
+        const CUSTODY: KeyCustody = KeyCustody::BackendHeld;
+
+        async fn generate_keys(
+            &self,
+            bindings: &[Binding<'_>],
+        ) -> Result<Vec<GeneratedDataKey<4>>, Self::Error> {
+            self.inner.generate_keys(bindings).await
+        }
+
+        async fn retrieve_keys(
+            &self,
+            requests: &[(KeyId, Binding<'_>)],
+        ) -> Result<Vec<Protected<[u8; 4]>>, Self::Error> {
+            let mut keys = self.inner.retrieve_keys(requests).await?;
+            match *self.miscount.lock().unwrap() {
+                Some(Miscount::OneTooMany) => keys.push(Protected::new([0xff; 4])),
+                Some(Miscount::OneTooFew) => {
+                    keys.pop();
+                }
+                None => {}
+            }
+            Ok(keys)
+        }
+    }
+
+    fn miscounting(miscount: Miscount) -> CachingKeyProvider<Miscounting, 4> {
+        let provider = Miscounting {
+            inner: CountingProvider::default(),
+            miscount: Mutex::new(None),
+        };
+        provider.arm(miscount);
+        CachingKeyProvider::new(provider, 100, minute())
+    }
+
+    /// A batch in the form that `CountingProvider` records it.
+    fn pairs(batch: &[(KeyId, Binding<'_>)]) -> RetrieveBatch {
+        batch
+            .iter()
+            .map(|(id, binding)| (id.clone(), binding.as_bytes().to_vec()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn one_key_too_many_is_a_batch_length_error_and_caches_nothing() {
+        let cache = miscounting(Miscount::OneTooMany);
+        let request = [(KeyId::new(vec![1]), Binding::from("users/email"))];
+
+        let result = cache.retrieve_keys(&request).await;
+        assert!(matches!(
+            result,
+            Err(DelegatedError::BatchLength {
+                expected: 1,
+                received: 2
+            })
+        ));
+
+        // The cache stored nothing, so the same request is a miss again.
+        let result = cache.retrieve_keys(&request).await;
+        assert!(matches!(
+            result,
+            Err(DelegatedError::BatchLength {
+                expected: 1,
+                received: 2
+            })
+        ));
+        assert_eq!(cache.inner().inner.retrieve_calls(), 2);
+        assert_eq!(cache.inner().inner.last_retrieve_batch(), pairs(&request));
+    }
+
+    /// Two misses, not one: with one miss and no key in the answer, the
+    /// reassembly step also fails, so that test cannot show that the length
+    /// check itself rejects the answer. With two misses and one key, a cache
+    /// without the length check stores the first key under the first id.
+    #[tokio::test]
+    async fn one_key_too_few_is_a_batch_length_error_and_caches_nothing() {
+        let cache = miscounting(Miscount::OneTooFew);
+        let binding = Binding::from("users/email");
+        let request = [
+            (KeyId::new(vec![1]), binding),
+            (KeyId::new(vec![2]), binding),
+        ];
+
+        let result = cache.retrieve_keys(&request).await;
+        assert!(matches!(
+            result,
+            Err(DelegatedError::BatchLength {
+                expected: 2,
+                received: 1
+            })
+        ));
+
+        // The cache stored nothing, so both pairs are misses again.
+        let result = cache.retrieve_keys(&request).await;
+        assert!(matches!(
+            result,
+            Err(DelegatedError::BatchLength {
+                expected: 2,
+                received: 1
+            })
+        ));
+        assert_eq!(cache.inner().inner.retrieve_calls(), 2);
+        assert_eq!(cache.inner().inner.last_retrieve_batch(), pairs(&request));
+    }
+
+    #[tokio::test]
+    async fn a_batch_length_error_counts_only_the_misses() {
+        let cache = CachingKeyProvider::new(
+            Miscounting {
+                inner: CountingProvider::default(),
+                miscount: Mutex::new(None),
+            },
+            100,
+            minute(),
+        );
+        let binding = Binding::from("users/email");
+        let (a, b, c) = (
+            KeyId::new(vec![1]),
+            KeyId::new(vec![2]),
+            KeyId::new(vec![3]),
+        );
+
+        // Cache `a` while the provider still answers correctly.
+        cache.retrieve_keys(&[(a.clone(), binding)]).await.unwrap();
+        cache.inner().arm(Miscount::OneTooMany);
+
+        // Three requests, one hit: the inner provider is asked for two keys
+        // and returns three.
+        let request = [
+            (a.clone(), binding),
+            (b.clone(), binding),
+            (c.clone(), binding),
+        ];
+        let result = cache.retrieve_keys(&request).await;
+        assert!(matches!(
+            result,
+            Err(DelegatedError::BatchLength {
+                expected: 2,
+                received: 3
+            })
+        ));
+        let misses = [(b.clone(), binding), (c.clone(), binding)];
+        assert_eq!(cache.inner().inner.last_retrieve_batch(), pairs(&misses));
+
+        // The cache stored neither miss, so the inner provider is asked for
+        // both again.
+        let result = cache.retrieve_keys(&request).await;
+        assert!(matches!(
+            result,
+            Err(DelegatedError::BatchLength {
+                expected: 2,
+                received: 3
+            })
+        ));
+        assert_eq!(cache.inner().inner.retrieve_calls(), 3);
+        assert_eq!(cache.inner().inner.last_retrieve_batch(), pairs(&misses));
+    }
+
     #[test]
     fn the_inner_provider_constants_are_forwarded() {
         type Cached = CachingKeyProvider<CountingProvider, 4>;
