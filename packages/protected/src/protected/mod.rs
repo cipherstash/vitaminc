@@ -88,7 +88,9 @@ impl<T: Zeroize> Protected<Option<T>> {
     }
 }
 
-impl<T: Zeroize> ControlledPrivate for Protected<T> {}
+// SAFETY: `Protected` owns its one field, `inner_mut` points at it, and its
+// only `Drop` is the zeroize from `ZeroizeOnDrop`.
+unsafe impl<T: Zeroize> ControlledPrivate for Protected<T> {}
 
 impl<T> Controlled for Protected<T>
 where

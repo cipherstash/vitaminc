@@ -47,7 +47,10 @@ impl<T: Zeroize, Scope> Zeroize for Usage<T, Scope> {
 // callers to strip the scope wrapper first.
 impl<T: ZeroizeOnDrop, Scope> ZeroizeOnDrop for Usage<T, Scope> {}
 
-impl<T: ControlledPrivate, Scope> ControlledPrivate for Usage<T, Scope> {}
+// SAFETY: `Usage` owns its one field (beside a `PhantomData`), `inner_mut`
+// delegates to that field's own sound impl, and it has no `Drop` of its own:
+// dropping it runs only the field's, which that field's impl covers.
+unsafe impl<T: ControlledPrivate, Scope> ControlledPrivate for Usage<T, Scope> {}
 
 impl<T, Scope> Controlled for Usage<T, Scope>
 where

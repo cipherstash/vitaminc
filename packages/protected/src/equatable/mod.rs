@@ -143,7 +143,10 @@ where
 }
 
 // TODO: Canwe make a blanket impl for all Paranoid types?
-impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Equatable<T> {}
+// SAFETY: `Equatable` owns its one field, `inner_mut` delegates to that
+// field's own sound impl, and its only `Drop` is the zeroize from
+// `ZeroizeOnDrop`.
+unsafe impl<T: ControlledPrivate + Zeroize> ControlledPrivate for Equatable<T> {}
 
 impl<T> Controlled for Equatable<T>
 where

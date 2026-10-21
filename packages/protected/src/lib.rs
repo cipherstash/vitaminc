@@ -195,9 +195,24 @@ mod private {
     impl<T: Zeroize> Sealed for Exportable<T> {}
     impl<T, S> Sealed for Usage<T, S> {}
 
-    /// Private trait that is used to hide the inner value of a Controlled type
-    /// as well as preventing consumers from implementing Controlled themselves.
-    /// Marker trait used to seal the `Controlled` trait, preventing external implementations.
-    /// This trait is only implemented within this crate.
-    pub trait ControlledPrivate {}
+    /// Marker trait that seals [`Controlled`](crate::Controlled), so that it
+    /// is only implemented within this crate.
+    ///
+    /// # Safety
+    ///
+    /// The combinators (through `with_owned`) drop the innermost value in
+    /// place and then wipe the wrapper's bytes, without running the
+    /// wrapper's own `Drop`. That is sound only if, for the implementing
+    /// wrapper and every wrapper layer inside it:
+    ///
+    /// 1. its `Drop`, if any, does nothing but zeroize, so skipping it skips
+    ///    only a wipe, never a resource release such as freeing or
+    ///    unlocking memory; and
+    /// 2. `Controlled::inner_mut` points at a value the wrapper owns
+    ///    outright, inline within its own bytes, so dropping that value and
+    ///    wiping `size_of::<Self>()` bytes leaves nothing behind.
+    ///
+    /// A wrapper that owns a resource, such as one backed by `Locked`, must
+    /// not implement this trait.
+    pub unsafe trait ControlledPrivate {}
 }
