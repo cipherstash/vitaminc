@@ -968,4 +968,24 @@ mod tests {
             Err(ScalarError::Term(NormalizeError::NoDomain))
         ));
     }
+
+    /// A fixed-width `None` reaches the sink as a typed null, which gets
+    /// no order term, the same as a plain null (cipherstash/vitaminc#493).
+    #[test]
+    fn the_scalar_sink_gives_a_typed_null_no_term_like_a_plain_null() {
+        assert!(
+            matches!(
+                None::<u32>.visit(Scalar(OrderTarget::U32)),
+                Err(ScalarError::Term(NormalizeError::NoDomain))
+            ),
+            "a typed null must have no order term"
+        );
+        assert!(
+            matches!(
+                None::<u32>.visit(Scalar(OrderTarget::Text)),
+                Err(ScalarError::Term(NormalizeError::NoDomain))
+            ),
+            "the target does not give a typed null a term either"
+        );
+    }
 }

@@ -96,3 +96,22 @@ fn two_normalizers_share_one_walk() {
         [".a"]
     );
 }
+
+/// A fixed-width `None` reaches the sink as a typed null. It is indexed
+/// as a plain null, which has no term, so an absent field gains no term
+/// and does not stop the walk (cipherstash/vitaminc#493).
+#[test]
+fn a_fixed_width_none_has_no_term_and_does_not_stop_the_walk() {
+    let mut doc = BTreeMap::new();
+    doc.insert("gone", None::<i32>);
+    doc.insert("here", Some(5i32));
+    let found = terms(doc).expect("a typed null does not stop the walk");
+    assert_eq!(
+        found.iter().map(|t| render(&t.path)).collect::<Vec<_>>(),
+        [".here"],
+        "only the present field has a term"
+    );
+    let by_name = terms_by(LowByte, BTreeMap::from([("gone", None::<i32>)]))
+        .expect("a typed null does not stop a normalizer of the caller's own");
+    assert!(by_name.is_empty(), "a typed null has no term under LowByte");
+}
