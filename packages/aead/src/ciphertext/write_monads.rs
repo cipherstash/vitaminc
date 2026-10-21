@@ -55,12 +55,19 @@ impl<const N: usize> PlaintextWritten<N> {
         Self(nonce, plaintext)
     }
 
-    /// Provides a closure that takes the plaintext and to which the ciphertext and tag must be written.
+    /// Hands the closure the plaintext buffer, which it must overwrite in
+    /// place with the ciphertext and then extend with the tag.
+    ///
+    /// The closure borrows the buffer, so it stays inside the `Protected`
+    /// throughout. A backend that fails part way through may leave
+    /// plaintext in it, and the buffer is wiped on that path too.
     pub fn accepts_ciphertext_and_tag_ok<E>(
         self,
-        f: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, E>,
+        f: impl FnOnce(&mut Vec<u8>) -> Result<(), E>,
     ) -> EncryptedWithTag<N, E> {
-        EncryptedWithTag::new(self.0, self.1.map_ok(|plaintext| f(plaintext.into_inner())))
+        let Self(nonce, mut buf) = self;
+        // On an error `buf` is dropped, and so wiped, with the closure.
+        EncryptedWithTag::new(nonce, buf.risky_try_update(f).map(|()| buf))
     }
 }
 

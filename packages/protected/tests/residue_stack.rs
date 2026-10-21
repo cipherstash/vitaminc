@@ -2,9 +2,9 @@
 //!
 //! Moving a value whose bytes live inline (`Protected<[u8; N]>`) copies them,
 //! and the slot a move leaves behind holds the secret until something else
-//! overwrites it. The combinators move the inner value out of its wrapper to
-//! hand it to the closure, and `move_inner_out` wipes the slot it leaves. These
-//! tests check that: each case plants a marker inside a `Protected<[u8; 32]>`,
+//! overwrites it. The combinators lend the inner value to the closure where it
+//! sits, and the wrapper they consume wipes it when it drops. These tests
+//! check that: each case plants a marker inside a `Protected<[u8; 32]>`,
 //! runs one combinator on a fresh thread, then searches the dead stack below
 //! the caller for the marker.
 //!
@@ -13,7 +13,7 @@
 //! volatile reads (so the copy itself calls nothing that would overwrite it)
 //! and search it.
 //!
-//! The slot wipe reaches the slot the combinator is given. At `opt-level = 0`
+//! The wipe reaches the wrapper the combinator is given. At `opt-level = 0`
 //! the compiler makes an argument copy of its own for a by-value call, which
 //! is outside it, so the zero-copy cases are ignored there and the guarantee
 //! is stated for optimised builds. Run with `--release` to exercise them.
@@ -98,7 +98,7 @@ fn copies(dead: &[u8], needle: &[u8]) -> usize {
 #[inline(never)]
 fn planted() -> Protected<Array> {
     let mut p = Protected::new([0u8; 32]);
-    p.update(|a| a.copy_from_slice(black_box(MARKER)));
+    p.risky_update(|a| a.copy_from_slice(black_box(MARKER)));
     p
 }
 
@@ -108,51 +108,34 @@ fn planted() -> Protected<Array> {
 
 #[inline(never)]
 fn by_map(p: Protected<Array>) -> usize {
-    p.map(|a| black_box(&*a)[0] as usize).risky_unwrap()
+    p.map(|a| black_box(a)[0] as usize).risky_unwrap()
 }
 
 #[inline(never)]
 fn by_map_ok(p: Protected<Array>) -> usize {
-    p.map_ok(|a| Ok::<_, ()>(black_box(&*a)[0] as usize))
+    p.map_ok(|a| Ok::<_, ()>(black_box(a)[0] as usize))
         .unwrap()
         .risky_unwrap()
 }
 
 #[inline(never)]
 fn by_zip(p: Protected<Array>) -> usize {
-    p.zip(Protected::new(0usize), |a, n| {
-        black_box(&*a)[0] as usize + *n
-    })
-    .risky_unwrap()
+    p.zip(Protected::new(0usize), |a, n| black_box(a)[0] as usize + *n)
+        .risky_unwrap()
 }
 
 #[inline(never)]
 fn by_zip_ref(p: Protected<Array>) -> usize {
     let other = Protected::new(0usize);
-    p.zip_ref(&other, |a, n: &usize| black_box(&*a)[0] as usize + *n)
+    p.zip_ref(&other, |a, n: &usize| black_box(a)[0] as usize + *n)
         .risky_unwrap()
 }
 
 #[inline(never)]
-fn by_update_with(p: Protected<Array>) -> usize {
+fn by_risky_update_with(p: Protected<Array>) -> usize {
     let mut sink = Protected::new(0usize);
-    sink.update_with(p, |s, a| *s = black_box(&*a)[0] as usize);
+    sink.risky_update_with(p, |s, a| *s = black_box(a)[0] as usize);
     sink.risky_unwrap()
-}
-
-/// Not a zero-copy case: `into_inner` on an inline array makes a bare copy
-/// in the closure, and every move of that copy makes another. It is in the
-/// report so the cost can be seen, and the docs steer inline values to be
-/// read through the `Owned` instead.
-#[inline(never)]
-fn by_into_inner(p: Protected<Array>) -> usize {
-    p.map(|a| {
-        let bare = a.into_inner();
-        let first = black_box(&bare)[0] as usize;
-        drop(Protected::new(bare));
-        first
-    })
-    .risky_unwrap()
 }
 
 /// Positive control: `risky_unwrap` hands the bare array to the caller,
@@ -189,7 +172,7 @@ mod given_an_inline_array_moved_into_a_combinator {
     #[test]
     #[cfg_attr(
         vitaminc_unoptimized,
-        ignore = "the slot wipe reaches the compiler's own argument copy only at opt-level 1 and above"
+        ignore = "the wipe reaches the compiler's own argument copy only at opt-level 1 and above"
     )]
     fn map_leaves_no_copy() {
         assert_eq!(residue(by_map), 0, "map should leave no copy of the array");
@@ -198,7 +181,7 @@ mod given_an_inline_array_moved_into_a_combinator {
     #[test]
     #[cfg_attr(
         vitaminc_unoptimized,
-        ignore = "the slot wipe reaches the compiler's own argument copy only at opt-level 1 and above"
+        ignore = "the wipe reaches the compiler's own argument copy only at opt-level 1 and above"
     )]
     fn map_ok_leaves_no_copy() {
         assert_eq!(
@@ -211,7 +194,7 @@ mod given_an_inline_array_moved_into_a_combinator {
     #[test]
     #[cfg_attr(
         vitaminc_unoptimized,
-        ignore = "the slot wipe reaches the compiler's own argument copy only at opt-level 1 and above"
+        ignore = "the wipe reaches the compiler's own argument copy only at opt-level 1 and above"
     )]
     fn zip_leaves_no_copy() {
         assert_eq!(residue(by_zip), 0, "zip should leave no copy of the array");
@@ -220,7 +203,7 @@ mod given_an_inline_array_moved_into_a_combinator {
     #[test]
     #[cfg_attr(
         vitaminc_unoptimized,
-        ignore = "the slot wipe reaches the compiler's own argument copy only at opt-level 1 and above"
+        ignore = "the wipe reaches the compiler's own argument copy only at opt-level 1 and above"
     )]
     fn zip_ref_leaves_no_copy() {
         assert_eq!(
@@ -233,13 +216,13 @@ mod given_an_inline_array_moved_into_a_combinator {
     #[test]
     #[cfg_attr(
         vitaminc_unoptimized,
-        ignore = "the slot wipe reaches the compiler's own argument copy only at opt-level 1 and above"
+        ignore = "the wipe reaches the compiler's own argument copy only at opt-level 1 and above"
     )]
-    fn update_with_leaves_no_copy() {
+    fn risky_update_with_leaves_no_copy() {
         assert_eq!(
-            residue(by_update_with),
+            residue(by_risky_update_with),
             0,
-            "update_with should leave no copy of the array"
+            "risky_update_with should leave no copy of the array"
         );
     }
 }
@@ -250,14 +233,13 @@ mod given_an_inline_array_moved_into_a_combinator {
 #[test]
 #[ignore = "diagnostic: prints where each case leaves its residue"]
 fn report() {
-    let cases: [(&str, Case); 7] = [
+    let cases: [(&str, Case); 6] = [
         ("risky_unwrap (control)", by_risky_unwrap),
         ("map", by_map),
         ("map_ok", by_map_ok),
         ("zip", by_zip),
         ("zip_ref", by_zip_ref),
-        ("update_with", by_update_with),
-        ("into_inner, rewrap", by_into_inner),
+        ("risky_update_with", by_risky_update_with),
     ];
     for (name, case) in cases {
         let dead = after(move || {

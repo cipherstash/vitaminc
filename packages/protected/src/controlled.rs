@@ -1,6 +1,5 @@
 pub use crate::Protected;
 use crate::{private::ControlledPrivate, AsProtectedRef, ProtectedRef, ReplaceT};
-use crate::{with_owned, Owned};
 use zeroize::Zeroize;
 
 /// The operations every controlled wrapper (`Protected`, `Equatable`,
@@ -8,12 +7,12 @@ use zeroize::Zeroize;
 ///
 /// # How the combinators hand over the inner value
 ///
-/// `map`, `map_ok`, `zip`, `zip_ref` and `update_with` consume a controlled
-/// value and give its inner value to a closure. The closure receives it as an
-/// [`Owned`], not bare, so whatever the closure does not move out is wiped
-/// when the `Owned` drops, including when the closure panics. The slot the
-/// value came from is wiped too. A closure that reads the value can use it
-/// through `Deref`:
+/// `map`, `map_ok`, `zip` and `zip_ref` consume a controlled value and lend
+/// its inner value to a closure as a shared reference. The closure reads the
+/// value and builds a new one from it, which the combinator wraps. It never
+/// owns the value, so it cannot move it anywhere: the consumed wrapper keeps
+/// it, and wipes it when the combinator returns, including when the closure
+/// panics.
 ///
 /// ```
 /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
@@ -22,25 +21,33 @@ use zeroize::Zeroize;
 /// assert_eq!(len.risky_unwrap(), 3);
 /// ```
 ///
-/// A closure that keeps the value, for example to convert it, takes it out
-/// with [`Owned::into_inner`]. That moves the value, so a heap buffer is
-/// reused rather than copied, and the slot it leaves is wiped:
+/// A conversion that would take the value by ownership builds its result
+/// from the borrow instead. For bytes to text that is one copy, made straight
+/// into the value the combinator wraps, and the error carries no bytes:
 ///
 /// ```
 /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
 /// use vitaminc::protected::{Controlled, Protected};
 /// let text = Protected::new(vec![104u8, 105])
-///     .map_ok(|v| String::from_utf8(v.into_inner()))
+///     .map_ok(|v| std::str::from_utf8(v).map(str::to_owned))
 ///     .expect("valid UTF-8");
 /// assert_eq!(text.risky_unwrap(), "hi");
 /// ```
 ///
-/// Once a value is taken out it is bare again, and the closure owns the wipe
-/// of whatever it builds from it until that goes back into a controlled
-/// wrapper. In the example above the `String` is bare only until `map_ok`
-/// wraps it. If the conversion fails, the error from `String::from_utf8`
-/// carries the bytes, and nothing wipes them: wrap or map such errors before
-/// they leave the closure when the input is sensitive.
+/// A borrow does not stop a closure from copying or logging what it reads.
+/// What it guarantees is that the wrapper keeps ownership, so the original is
+/// always wiped, and anything the closure returns is wrapped again. An error
+/// returned from `map_ok` is passed through as is, so do not build one that
+/// carries the value.
+///
+/// # Changing the value in place
+///
+/// The `risky_update` family lends the inner value mutably, to change it in
+/// place, for example to decrypt a buffer. A mutable borrow can still move
+/// the value out (`core::mem::take`, `core::mem::replace`), which hands the
+/// closure a bare value nothing wipes. That is why these methods carry the
+/// `risky_` prefix, like `risky_unwrap`: review what each closure does with
+/// the value.
 pub trait Controlled: ControlledPrivate + Zeroize {
     type Inner: Zeroize;
 
@@ -110,8 +117,7 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// Map the inner value of this [Controlled] type.
     /// Conceptually similar to `Option::map`.
     ///
-    /// The closure receives the inner value as a [`Owned`]; see the trait
-    /// docs for how to read it or take it out.
+    /// The closure borrows the inner value; see the trait docs.
     ///
     /// # Example
     ///
@@ -127,20 +133,20 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     fn map<B, F>(self, f: F) -> <Self as ReplaceT<B>>::Output
     where
         Self: Sized + ReplaceT<B>,
-        F: FnOnce(Owned<'_, <Self as Controlled>::Inner>) -> B,
+        F: FnOnce(&<Self as Controlled>::Inner) -> B,
         <Self as ReplaceT<B>>::Output: Controlled<Inner = B>,
         B: Zeroize,
     {
-        <Self as ReplaceT<B>>::Output::init_from_inner(with_owned(self, f))
+        // `self` is dropped, and so wiped, when this returns or unwinds.
+        <Self as ReplaceT<B>>::Output::init_from_inner(f(self.risky_ref()))
     }
 
     /// Similar to `map` but the closure returns a `Result` with the new inner value.
     /// The result is a `Result` with the new [Controlled] type.
     ///
-    /// The closure receives the inner value as a [`Owned`]; see the trait
-    /// docs for how to read it or take it out. An error the closure returns is
-    /// passed through as is, so an error that carries the input bytes (such as
-    /// `FromUtf8Error`) carries them out unwiped.
+    /// The closure borrows the inner value; see the trait docs. An error the
+    /// closure returns is passed through as is, so it must not carry the
+    /// value.
     ///
     /// # Example
     ///
@@ -150,21 +156,24 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
     /// use vitaminc::protected::{Controlled, Protected};
     /// let x = Protected::new(vec![240, 159, 146, 150]);
-    /// let y = x.map_ok(|v| String::from_utf8(v.into_inner()));
+    /// let y = x.map_ok(|v| std::str::from_utf8(v).map(str::to_owned));
     /// assert!(matches!(y, Ok(_)));
     /// assert_eq!(y.unwrap().risky_unwrap(), "💖");
     /// ```
     fn map_ok<B, F, E>(self, f: F) -> Result<<Self as ReplaceT<B>>::Output, E>
     where
         Self: Sized + ReplaceT<B>,
-        F: FnOnce(Owned<'_, <Self as Controlled>::Inner>) -> Result<B, E>,
+        F: FnOnce(&<Self as Controlled>::Inner) -> Result<B, E>,
         <Self as ReplaceT<B>>::Output: Controlled<Inner = B>,
         B: Zeroize,
     {
-        with_owned(self, f).map(<Self as ReplaceT<B>>::Output::init_from_inner)
+        // `self` is dropped, and so wiped, when this returns or unwinds.
+        f(self.risky_ref()).map(<Self as ReplaceT<B>>::Output::init_from_inner)
     }
 
     /// Zip two [Controlled] values of the same type together with a function that combines them.
+    ///
+    /// The closure borrows both inner values; see the trait docs.
     ///
     /// # Example
     ///
@@ -179,8 +188,6 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// assert_eq!(z.risky_unwrap(), 3);
     /// ```
     ///
-    /// Both inner values arrive as [`Owned`]; see the trait docs.
-    ///
     /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
     /// e.g. `other` must have the same, or broader scope as `self`
     fn zip<Other, Out, F>(self, b: Other, f: F) -> Protected<Out>
@@ -188,15 +195,17 @@ pub trait Controlled: ControlledPrivate + Zeroize {
         Self: Sized,
         Other: Controlled,
         Out: Zeroize,
-        F: FnOnce(Owned<'_, Self::Inner>, Owned<'_, Other::Inner>) -> Out,
+        F: FnOnce(&Self::Inner, &Other::Inner) -> Out,
     {
         // TODO: Use Replace private trait
-        Protected::init_from_inner(with_owned(self, |a| with_owned(b, |b| f(a, b))))
+        // `self` and `b` are dropped, and so wiped, when this returns or
+        // unwinds.
+        Protected::init_from_inner(f(self.risky_ref(), b.risky_ref()))
     }
 
     /// Like `zip` but the second argument is a reference.
     ///
-    /// The first inner value arrives as a [`Owned`]; see the trait docs.
+    /// The closure borrows both inner values; see the trait docs.
     ///
     /// # Example
     ///
@@ -205,11 +214,7 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// use vitaminc::protected::{Controlled, Protected};
     /// let x = Protected::new(String::from("hello "));
     /// let y = Protected::new(String::from("world"));
-    /// let z = x.zip_ref(&y, |x, y| {
-    ///     let mut x = x.into_inner();
-    ///     x.push_str(y);
-    ///     x
-    /// });
+    /// let z = x.zip_ref(&y, |x, y| format!("{x}{y}"));
     /// assert_eq!(z.risky_unwrap(), "hello world");
     /// ```
     ///
@@ -224,15 +229,18 @@ pub trait Controlled: ControlledPrivate + Zeroize {
         <Self as ReplaceT<Out>>::Output: Controlled<Inner = Out>,
         Other: AsProtectedRef<'a, A>,
         Out: Zeroize,
-        F: FnOnce(Owned<'_, Self::Inner>, &A) -> Out,
+        F: FnOnce(&Self::Inner, &A) -> Out,
     {
         let arg: ProtectedRef<'a, A> = other.as_protected_ref();
-        <Self as ReplaceT<Out>>::Output::init_from_inner(with_owned(self, |a| {
-            f(a, arg.inner_ref())
-        }))
+        // `self` is dropped, and so wiped, when this returns or unwinds.
+        <Self as ReplaceT<Out>>::Output::init_from_inner(f(self.risky_ref(), arg.inner_ref()))
     }
 
-    /// Similar to `map` but using references to that the inner value is updated in place.
+    /// Change the inner value in place, through a mutable borrow.
+    ///
+    /// This is risky because the closure can move the value out of the
+    /// borrow (`core::mem::take`, `core::mem::replace`), and a value moved out
+    /// is bare. See the trait docs.
     ///
     /// # Example
     ///
@@ -240,7 +248,7 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
     /// # use vitaminc::protected::{Controlled, Protected};
     /// let mut x = Protected::new([0u8; 4]);
-    /// x.update(|x| {
+    /// x.risky_update(|x| {
     ///   x.iter_mut().for_each(|x| {
     ///    *x += 1;
     ///  });
@@ -248,16 +256,45 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// assert_eq!(x.risky_unwrap(), [1, 1, 1, 1]);
     /// ```
     ///
-    fn update<F>(&mut self, mut f: F)
+    fn risky_update<F>(&mut self, mut f: F)
     where
         F: FnMut(&mut Self::Inner),
     {
         f(self.inner_mut());
     }
 
-    /// Update the inner value with another [Controlled] value.
-    /// The inner value of the second argument is passed to the closure as a
-    /// [`Owned`]; see the trait docs.
+    /// Like `risky_update`, but the closure can fail.
+    ///
+    /// The error is returned as is. The value stays in the wrapper, possibly
+    /// part changed, and is wiped when the wrapper drops, so a caller that
+    /// gives up on an error can just drop it. The error must not carry the
+    /// value.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// # use vitaminc::protected::{Controlled, Protected};
+    /// let mut x = Protected::new(vec![1u8, 2, 3]);
+    /// x.risky_try_update(|v| {
+    ///     v.pop().ok_or("empty")?;
+    ///     Ok::<_, &str>(())
+    /// })
+    /// .expect("not empty");
+    /// assert_eq!(x.risky_unwrap(), [1, 2]);
+    /// ```
+    fn risky_try_update<F, E>(&mut self, f: F) -> Result<(), E>
+    where
+        F: FnOnce(&mut Self::Inner) -> Result<(), E>,
+    {
+        f(self.inner_mut())
+    }
+
+    /// Change the inner value in place, using the value of another
+    /// [Controlled] value, which the closure borrows and which is wiped when
+    /// this returns.
+    ///
+    /// This is risky for the same reason as `risky_update`.
     ///
     /// # Example
     ///
@@ -266,23 +303,24 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// use vitaminc::protected::{Controlled, Protected};
     /// let mut x = Protected::new([0u8; 32]);
     /// let y = Protected::new([1u8; 32]);
-    /// x.update_with(y, |x, y| {
-    ///    x.copy_from_slice(&*y);
+    /// x.risky_update_with(y, |x, y| {
+    ///    x.copy_from_slice(y);
     /// });
     /// assert_eq!(x.risky_unwrap(), [1u8; 32]);
     /// ```
     ///
     /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
     /// e.g. `other` must have the same, or broader scope as `self`
-    fn update_with<Other, F>(&mut self, other: Other, mut f: F)
+    fn risky_update_with<Other, F>(&mut self, other: Other, mut f: F)
     where
-        F: FnMut(&mut Self::Inner, Owned<'_, Other::Inner>),
+        F: FnMut(&mut Self::Inner, &Other::Inner),
         Other: Controlled,
     {
-        with_owned(other, |o| f(self.inner_mut(), o));
+        // `other` is dropped, and so wiped, when this returns or unwinds.
+        f(self.inner_mut(), other.risky_ref());
     }
 
-    /// Like `update_with` but the second argument is a reference.
+    /// Like `risky_update_with` but the second argument is a reference.
     ///
     /// # Example
     ///
@@ -293,13 +331,13 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     ///
     /// let mut x = Protected::new([0u8; 32]);
     /// let y = Protected::new([1u8; 32]);
-    /// x.update_with_ref(y.as_protected_ref(), |x, y| {
+    /// x.risky_update_with_ref(y.as_protected_ref(), |x, y| {
     ///   x.copy_from_slice(y);
     /// });
     /// assert_eq!(x.risky_unwrap(), [1u8; 32]);
     /// ```
     ///
-    fn update_with_ref<'a, A, F>(&mut self, other: ProtectedRef<'a, A>, mut f: F)
+    fn risky_update_with_ref<'a, A, F>(&mut self, other: ProtectedRef<'a, A>, mut f: F)
     where
         A: ?Sized + 'a,
         F: FnMut(&mut Self::Inner, &A),

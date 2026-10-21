@@ -3,14 +3,15 @@ use zeroize::Zeroize;
 
 use crate::{Controlled, Protected};
 
-impl<T> BitXor for Protected<T>
+impl<T, O> BitXor for Protected<T>
 where
-    T: BitXor + Zeroize,
-    <T as BitXor>::Output: Zeroize,
+    T: Zeroize,
+    for<'a> &'a T: BitXor<&'a T, Output = O>,
+    O: Zeroize,
 {
-    type Output = Protected<T::Output>;
+    type Output = Protected<O>;
 
     fn bitxor(self, rhs: Self) -> Self::Output {
-        self.zip(rhs, |x, y| x.into_inner() ^ y.into_inner())
+        self.zip(rhs, |x, y| x ^ y)
     }
 }

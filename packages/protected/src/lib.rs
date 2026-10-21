@@ -16,7 +16,6 @@ mod exportable;
 mod locked;
 mod non_empty;
 mod ops;
-mod owned;
 mod protected;
 #[cfg(test)]
 mod test_util;
@@ -49,8 +48,6 @@ pub use locked::{LockError, LockPolicy, LockPolicyError, Locked};
 #[deprecated(note = "renamed to `MaybeEmpty`; the trait is unchanged")]
 pub use non_empty::MaybeEmpty as IsEmpty;
 pub use non_empty::{EmptyError, MaybeEmpty, NonEmpty};
-pub(crate) use owned::with_owned;
-pub use owned::Owned;
 pub use protected::{flatten_array, Protected};
 pub use usage::{Acceptable, DefaultScope, Scope, Usage};
 
@@ -83,7 +80,7 @@ pub(crate) unsafe trait MoveInner {
 /// field are then overwritten with zeroes, and the wrapper is forgotten so its
 /// `Drop` never runs against the now-moved-out field (no double-free, no
 /// use-after-zeroize). This is the shared primitive behind
-/// `risky_unwrap` / `flatten` / `transpose` and the `Controlled` combinators.
+/// `risky_unwrap` / `flatten` / `transpose`.
 ///
 /// This is a *safe* function: the only soundness obligation — that
 /// `inner_ptr_mut` names the wrapper's live, owned field — is discharged by the
@@ -197,22 +194,5 @@ mod private {
 
     /// Marker trait that seals [`Controlled`](crate::Controlled), so that it
     /// is only implemented within this crate.
-    ///
-    /// # Safety
-    ///
-    /// The combinators (through `with_owned`) drop the innermost value in
-    /// place and then wipe the wrapper's bytes, without running the
-    /// wrapper's own `Drop`. That is sound only if, for the implementing
-    /// wrapper and every wrapper layer inside it:
-    ///
-    /// 1. its `Drop`, if any, does nothing but zeroize, so skipping it skips
-    ///    only a wipe, never a resource release such as freeing or
-    ///    unlocking memory; and
-    /// 2. `Controlled::inner_mut` points at a value the wrapper owns
-    ///    outright, inline within its own bytes, so dropping that value and
-    ///    wiping `size_of::<Self>()` bytes leaves nothing behind.
-    ///
-    /// A wrapper that owns a resource, such as one backed by `Locked`, must
-    /// not implement this trait.
-    pub unsafe trait ControlledPrivate {}
+    pub trait ControlledPrivate {}
 }

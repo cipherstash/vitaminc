@@ -96,12 +96,7 @@ where
     CipherTextBuilder::new()
         .append_nonce(nonce)
         .append_target_plaintext(data)
-        .accepts_ciphertext_and_tag_ok(|mut buf| {
-            cipher
-                .key
-                .seal(&nonce_bytes, aad.as_bytes(), &mut buf)
-                .map(|()| buf)
-        })
+        .accepts_ciphertext_and_tag_ok(|buf| cipher.key.seal(&nonce_bytes, aad.as_bytes(), buf))
         .build()
 }
 

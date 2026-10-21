@@ -39,9 +39,10 @@ inner type is: unlike a move, a `Copy` value has no single owner whose drop can
 wipe it. Duplicating the wrapper is an explicit `clone()`, and each clone is
 wiped when it drops. See the `Protected` type docs for the full rationale.
 `risky_unwrap` is the escape hatch: it hands back the plain inner value along
-with the obligation to wipe it. Combinators such as `map` hand the value to
-their closure as an `Owned`, which is wiped when the closure is done with it
-unless the closure takes it with `into_inner`, and return the result re-wrapped.
+with the obligation to wipe it. Combinators such as `map` lend the value to
+their closure by reference, wipe it when the closure returns, and return the
+result re-wrapped. The `risky_update` family lends it mutably, to change it in
+place; a mutable borrow can move the value out, hence the `risky_` prefix.
 It also provides an "opaque" implementation of the `Debug` trait so you can debug protected values
 without accidentally leaking their innards.
 

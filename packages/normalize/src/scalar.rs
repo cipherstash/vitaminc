@@ -298,7 +298,7 @@ pub fn uuid(value: &[u8]) -> Option<Protected<Vec<u8>>> {
 /// sharing this one, so it stays out of this crate's public API.
 pub(crate) fn fixed<const N: usize>(mut write: impl FnMut(&mut [u8; N])) -> Protected<Vec<u8>> {
     let mut bytes = Protected::new(vec![0u8; N]);
-    bytes.update(|bytes| {
+    bytes.risky_update(|bytes| {
         let array = <&mut [u8; N]>::try_from(bytes.as_mut_slice())
             .expect("the vector was made with exactly N bytes");
         write(array);

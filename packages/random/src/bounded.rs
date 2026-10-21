@@ -116,7 +116,7 @@ impl BoundedRng<Protected<u32>> for SafeRand {
         // Check the bound here rather than inside the closure, so the
         // panic names this method's contract. Either way the value is
         // wiped on unwind: here `n` is still wrapped, and inside the closure
-        // `Controlled::map` hands it over as an `Owned`, which wipes on drop.
+        // `Controlled::map` only lends it, and `n` is wiped when it drops.
         assert!(*n.risky_ref() != 0, "range must be non-zero");
         n.map(|n| below_u32(self, *n))
     }

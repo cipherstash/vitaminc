@@ -1097,7 +1097,7 @@ impl<T: DecryptProtected> Sink for ProtectedOptional<T> {
 
 /// Move a protected value into a protected `Some`.
 fn some<T: Zeroize>(value: Protected<T>) -> Protected<Option<T>> {
-    value.map(|value| Some(value.into_inner()))
+    value.into_some()
 }
 
 /// Any sink, with its result moved into `Protected` when it is done: the

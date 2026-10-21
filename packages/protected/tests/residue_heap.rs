@@ -1,9 +1,9 @@
 //! What the `Controlled` combinators leave on the heap.
 //!
-//! The combinators hand the closure the inner value as an `Owned`, which
-//! wipes it on drop. For a heap-backed value such as `Vec<u8>` that means the
-//! buffer is zeroed before it is freed, however the closure ends: by reading
-//! the value, by taking it out with `into_inner` and wrapping it again, or by
+//! The combinators lend the closure the inner value, and the wrapper they
+//! consume wipes it when it drops. For a heap-backed value such as `Vec<u8>`
+//! that means the buffer is zeroed before it is freed, however the closure
+//! ends: by reading the value, by building a converted copy from it, or by
 //! panicking.
 //!
 //! The check is an allocator that, while armed, scans every block being freed
@@ -149,31 +149,35 @@ mod given_a_heap_inner_the_closure_only_reads {
     }
 
     #[test]
-    fn update_with_wipes_the_other_before_the_free() {
+    fn risky_update_with_wipes_the_other_before_the_free() {
         let (mut a, b) = (secret(), secret());
         let n = leaked_blocks(|| {
-            a.update_with(b, |a, b| a.truncate(b.len() / 2));
+            a.risky_update_with(b, |a, b| a.truncate(b.len() / 2));
             drop(a);
         });
-        assert_eq!(n, 0, "update_with should wipe the Vec the closure dropped");
+        assert_eq!(
+            n, 0,
+            "risky_update_with should wipe the Vec the closure dropped"
+        );
     }
 }
 
-mod given_a_heap_inner_the_closure_takes_out {
+mod given_a_heap_inner_the_closure_converts {
     use super::*;
 
     #[test]
-    fn into_inner_moves_the_same_buffer() {
+    fn the_source_and_the_converted_copy_are_both_wiped() {
         let p = secret();
-        let before = p.risky_ref().as_ptr();
         let n = leaked_blocks(|| {
             let out: Protected<String> = p
-                .map_ok(|v| String::from_utf8(v.into_inner()))
+                .map_ok(|v| core::str::from_utf8(v).map(str::to_owned))
                 .expect("the marker is ASCII");
-            assert_eq!(out.risky_ref().as_ptr(), before, "no copy should be made");
             drop(out);
         });
-        assert_eq!(n, 0, "the converted String should be wiped by its wrapper");
+        assert_eq!(
+            n, 0,
+            "the source Vec and the converted String should both be wiped"
+        );
     }
 }
 
@@ -186,7 +190,7 @@ mod given_the_closure_panics {
         let n = leaked_blocks(|| {
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let _: Protected<usize> = p.map(|v| {
-                    black_box(&*v);
+                    black_box(v);
                     panic!("closure failed with the secret in hand")
                 });
             }));

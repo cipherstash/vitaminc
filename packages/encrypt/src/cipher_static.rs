@@ -6,7 +6,6 @@ use crate::Aes256Cipher;
 use vitaminc_aead::hlist::{Absent, Encrypted, Entry, StaticCipher};
 use vitaminc_aead::{tags, IntoAad, Unspecified};
 use vitaminc_protected::{Controlled, Protected};
-use zeroize::Zeroizing;
 
 /// What an [`Absent`] seals: the null leaf, as `None` is everywhere else
 /// (ADR 0001). No separate absence derivation is needed, because the leaf
@@ -21,15 +20,13 @@ const NULL_LEAF: [u8; 1] = [tags::NULL];
 /// could open as a present value.
 fn tagged_bytes(data: Protected<Vec<u8>>) -> Protected<Vec<u8>> {
     data.map(|bytes| {
-        // `map` hands the closure the plain vector and with it the duty to
-        // wipe it. The leaf is a fresh allocation one byte longer, so the
-        // caller's vector is copied rather than grown in place (a growth
-        // would leave the old allocation behind unwiped); wrapping it wipes
-        // it when the closure returns.
-        let bytes = Zeroizing::new(bytes);
+        // The leaf is a fresh allocation one byte longer, so the caller's
+        // vector is copied rather than grown in place (a growth would leave
+        // the old allocation behind unwiped). `map` only lends the vector,
+        // and wipes it when the closure returns.
         let mut leaf = Vec::with_capacity(bytes.len() + 1);
         leaf.push(tags::BYTES);
-        leaf.extend_from_slice(&bytes);
+        leaf.extend_from_slice(bytes);
         leaf
     })
 }
@@ -40,15 +37,16 @@ fn untagged_bytes(leaf: Protected<Vec<u8>>) -> Result<Protected<Vec<u8>>, Unspec
     if leaf.risky_ref().first() != Some(&tags::BYTES) {
         return Err(Unspecified);
     }
-    Ok(leaf.map(|mut bytes| {
+    let mut leaf = leaf;
+    leaf.risky_update(|bytes| {
         // Rotate the tag to the end and pop it, so the one byte the shorter
         // vector leaves in its spare capacity is the public tag and not the
         // last byte of the plaintext. `Protected` wipes the spare capacity
         // on drop as well; this keeps nothing secret there to begin with.
         bytes.rotate_left(1);
         bytes.pop();
-        bytes.into_inner()
-    }))
+    });
+    Ok(leaf)
 }
 
 impl StaticCipher for &Aes256Cipher {

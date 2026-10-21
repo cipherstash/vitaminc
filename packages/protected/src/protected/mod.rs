@@ -71,6 +71,22 @@ impl<T: Zeroize> Protected<Protected<T>> {
     }
 }
 
+impl<T: Zeroize> Protected<T> {
+    /// Move the value into a protected `Some`, without it leaving
+    /// protection. The inverse of [`transpose`](Protected::transpose) for a
+    /// value that is present.
+    ///
+    /// ```
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{Controlled, Protected};
+    /// let x = Protected::new([1u8; 32]).into_some();
+    /// assert_eq!(x.risky_unwrap(), Some([1u8; 32]));
+    /// ```
+    pub fn into_some(self) -> Protected<Option<T>> {
+        Protected::new(Some(self.into_inner_unchecked()))
+    }
+}
+
 impl<T: Zeroize> Protected<Option<T>> {
     #[inline]
     /// Transpose a [Protected] of `Option` into an `Option` of [Protected].
@@ -88,9 +104,7 @@ impl<T: Zeroize> Protected<Option<T>> {
     }
 }
 
-// SAFETY: `Protected` owns its one field, `inner_mut` points at it, and its
-// only `Drop` is the zeroize from `ZeroizeOnDrop`.
-unsafe impl<T: Zeroize> ControlledPrivate for Protected<T> {}
+impl<T: Zeroize> ControlledPrivate for Protected<T> {}
 
 impl<T> Controlled for Protected<T>
 where
