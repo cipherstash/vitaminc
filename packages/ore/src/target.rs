@@ -574,4 +574,67 @@ mod tests {
             assert_eq!(target.runtime(), *target);
         }
     }
+
+    /// A four-byte scheme, the shape of block ORE at one width.
+    struct Four;
+
+    impl OrderScheme for Four {
+        const NAME: &'static str = "four";
+        type Term = Vec<u8>;
+        type Error = core::convert::Infallible;
+        type Space = ();
+
+        fn open(
+            &self,
+            _: OrderTarget,
+            _: &vitaminc_context::Context<'_>,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn encrypt_plaintext(
+            &self,
+            _: &(),
+            _: &crate::OrderPlaintext,
+        ) -> Result<Vec<u8>, Self::Error> {
+            Ok(vec![0])
+        }
+
+        fn compare(a: &Vec<u8>, b: &Vec<u8>) -> Option<core::cmp::Ordering> {
+            Some(a.cmp(b))
+        }
+    }
+
+    crate::supports_targets!(Four; I32, U32, Date);
+
+    #[test]
+    fn a_scheme_takes_a_target_with_a_null_policy_exactly_when_it_takes_the_target() {
+        for nulls in [NullOrder::First, NullOrder::Last] {
+            assert!(
+                <Four as Supports<Nulls<I32>>>::supports(Nulls::new(I32, nulls)),
+                "{nulls:?}: a marker the scheme takes"
+            );
+            assert!(
+                <Four as Supports<Nulls<OrderTarget>>>::supports(Nulls::new(
+                    OrderTarget::Date,
+                    nulls
+                )),
+                "{nulls:?}: a runtime target the scheme takes"
+            );
+            assert!(
+                !<Four as Supports<Nulls<OrderTarget>>>::supports(Nulls::new(
+                    OrderTarget::I64,
+                    nulls
+                )),
+                "{nulls:?}: a runtime target the scheme does not take"
+            );
+            let placed = Nulls::new(Date, nulls);
+            assert_eq!(placed.target(), Date);
+            assert_eq!(placed.order(), nulls);
+            assert_eq!(placed.runtime(), OrderTarget::Date);
+            assert_eq!(placed.nulls(), Some(nulls));
+        }
+        assert_eq!(I32.nulls(), None, "a marker places no nulls");
+        assert_eq!(OrderTarget::I32.nulls(), None, "nor does a runtime target");
+    }
 }

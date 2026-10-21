@@ -381,6 +381,55 @@ fn every_domain_is_distinct_and_listed_once() {
     }
     assert_eq!(T::Text.domain_with_nulls(NullOrder::First), None);
     assert_eq!(T::Bytes.domain_with_nulls(NullOrder::Last), None);
+    // The labels are protocol data, so they are written out here too: the
+    // rule above would follow a renamed plain label without a word.
+    assert_eq!(
+        domain::ALL,
+        [
+            "vitaminc/ore/value/int16/v1",
+            "vitaminc/ore/value/uint16/v1",
+            "vitaminc/ore/value/int32/v1",
+            "vitaminc/ore/value/uint32/v1",
+            "vitaminc/ore/value/int64/v1",
+            "vitaminc/ore/value/uint64/v1",
+            "vitaminc/ore/value/int128/v1",
+            "vitaminc/ore/value/uint128/v1",
+            "vitaminc/ore/value/float64/v1",
+            "vitaminc/ore/value/date/v1",
+            "vitaminc/ore/value/timestamp-micros/v1",
+            "vitaminc/ore/value/decimal/v1",
+            "vitaminc/ore/value/text-folded/unicode-16/v1",
+            "vitaminc/ore/value/bytes/v1",
+            "vitaminc/ore/value/uuid/v1",
+            "vitaminc/ore/value/int16/nulls-first/v1",
+            "vitaminc/ore/value/uint16/nulls-first/v1",
+            "vitaminc/ore/value/int32/nulls-first/v1",
+            "vitaminc/ore/value/uint32/nulls-first/v1",
+            "vitaminc/ore/value/int64/nulls-first/v1",
+            "vitaminc/ore/value/uint64/nulls-first/v1",
+            "vitaminc/ore/value/int128/nulls-first/v1",
+            "vitaminc/ore/value/uint128/nulls-first/v1",
+            "vitaminc/ore/value/float64/nulls-first/v1",
+            "vitaminc/ore/value/date/nulls-first/v1",
+            "vitaminc/ore/value/timestamp-micros/nulls-first/v1",
+            "vitaminc/ore/value/decimal/nulls-first/v1",
+            "vitaminc/ore/value/uuid/nulls-first/v1",
+            "vitaminc/ore/value/int16/nulls-last/v1",
+            "vitaminc/ore/value/uint16/nulls-last/v1",
+            "vitaminc/ore/value/int32/nulls-last/v1",
+            "vitaminc/ore/value/uint32/nulls-last/v1",
+            "vitaminc/ore/value/int64/nulls-last/v1",
+            "vitaminc/ore/value/uint64/nulls-last/v1",
+            "vitaminc/ore/value/int128/nulls-last/v1",
+            "vitaminc/ore/value/uint128/nulls-last/v1",
+            "vitaminc/ore/value/float64/nulls-last/v1",
+            "vitaminc/ore/value/date/nulls-last/v1",
+            "vitaminc/ore/value/timestamp-micros/nulls-last/v1",
+            "vitaminc/ore/value/decimal/nulls-last/v1",
+            "vitaminc/ore/value/uuid/nulls-last/v1",
+        ],
+        "every label, in the order `domain::ALL` promises"
+    );
     // No order domain is an equality domain.
     for d in domain::ALL {
         assert!(!vitaminc_normalize::domain::ALL.contains(d), "{d}");
@@ -636,29 +685,53 @@ const FIXED_TARGETS: [OrderTarget; 13] = [
     T::Uuid,
 ];
 
+/// Every sentinel, written out byte for byte, so neither the width table
+/// nor the fill can drift without a test naming the target.
 #[test]
 fn every_null_is_the_extreme_code_of_its_targets_width() {
-    for target in FIXED_TARGETS {
-        let width = target.width().expect("fixed width");
-        for (nulls, fill) in [(NullOrder::First, "00"), (NullOrder::Last, "ff")] {
-            let sentinel = fill.repeat(width);
-            assert_eq!(
-                placed(target, nulls, None, Physical::Null),
-                sentinel,
-                "{target:?} {nulls:?}: a null is the sentinel"
-            );
-        }
+    let first = |target| placed(target, NullOrder::First, None, Physical::Null);
+    let last = |target| placed(target, NullOrder::Last, None, Physical::Null);
+    let pinned: [(OrderTarget, &str, &str); 13] = [
+        (T::I16, "0000", "ffff"),
+        (T::U16, "0000", "ffff"),
+        (T::I32, "00000000", "ffffffff"),
+        (T::U32, "00000000", "ffffffff"),
+        (T::I64, "0000000000000000", "ffffffffffffffff"),
+        (T::U64, "0000000000000000", "ffffffffffffffff"),
+        (
+            T::I128,
+            "00000000000000000000000000000000",
+            "ffffffffffffffffffffffffffffffff",
+        ),
+        (
+            T::U128,
+            "00000000000000000000000000000000",
+            "ffffffffffffffffffffffffffffffff",
+        ),
+        (T::F64, "0000000000000000", "ffffffffffffffff"),
+        (T::Date, "00000000", "ffffffff"),
+        (
+            T::Timestamp,
+            "000000000000000000000000",
+            "ffffffffffffffffffffffff",
+        ),
+        (
+            T::Decimal,
+            "0000000000000000000000000000",
+            "ffffffffffffffffffffffffffff",
+        ),
+        (
+            T::Uuid,
+            "00000000000000000000000000000000",
+            "ffffffffffffffffffffffffffffffff",
+        ),
+    ];
+    for (target, below, above) in pinned {
+        assert_eq!(first(target), below, "{target:?}: the nulls-first sentinel");
+        assert_eq!(last(target), above, "{target:?}: the nulls-last sentinel");
     }
-    // Pinned in full for two widths, so the rule above is not the only
-    // witness.
-    assert_eq!(
-        placed(T::U16, NullOrder::First, None, Physical::Null),
-        "0000"
-    );
-    assert_eq!(
-        placed(T::Timestamp, NullOrder::Last, None, Physical::Null),
-        "ffffffffffffffffffffffff"
-    );
+    let listed: Vec<_> = pinned.iter().map(|(target, ..)| *target).collect();
+    assert_eq!(listed, FIXED_TARGETS, "every fixed-width target is pinned");
 }
 
 /// Under nulls-first every integer's code is one higher than in the plain
@@ -753,8 +826,33 @@ fn nulls_first_moves_every_integer_code_up_by_one() {
             "{target:?}: the value below the maximum"
         );
     }
-    // The shift carries across bytes.
+    // The shift carries across bytes, as far as it has to.
     assert_eq!(first(T::U16, U16(0x00FF)), "0100", "the shift carries");
+    assert_eq!(
+        first(T::U32, U32(0x00FF_FFFF)),
+        "01000000",
+        "the shift carries across three bytes"
+    );
+    assert_eq!(
+        first(T::I32, I32(-1)),
+        "80000000",
+        "minus one carries across every byte to zero's plain code"
+    );
+    assert_eq!(
+        first(T::I64, I64(-1)),
+        "8000000000000000",
+        "minus one carries across every byte to zero's plain code"
+    );
+    assert_eq!(
+        first(T::U128, U64(u64::MAX)),
+        "00000000000000010000000000000000",
+        "the shift carries across eight bytes of sixteen"
+    );
+    assert_eq!(
+        first(T::I128, I128(-1)),
+        "80000000000000000000000000000000",
+        "minus one carries across all sixteen bytes"
+    );
 }
 
 /// Under nulls-last every integer keeps its plain code: the sentinel is the
@@ -841,6 +939,13 @@ fn the_nil_uuid_moves_up_by_one_under_nulls_first_and_stays_under_nulls_last() {
         "ffffffffffffffffffffffffffffffff",
         "the uuid below the maximum takes the highest code"
     );
+    let mut carries = [0x00; 16];
+    carries[8..].fill(0xFF);
+    assert_eq!(
+        uuid(NullOrder::First, &carries),
+        "00000000000000010000000000000000",
+        "a uuid's shift carries across bytes"
+    );
     assert_eq!(
         uuid(NullOrder::Last, &[0; 16]),
         "00000000000000000000000000000000",
@@ -874,7 +979,13 @@ fn float_date_timestamp_and_decimal_codes_never_reach_a_sentinel() {
                 Physical::Float(Float::F64(f64::INFINITY)),
                 Physical::Float(Float::F64(f64::NAN)),
                 Physical::Float(Float::F64(-f64::NAN)),
+                // The two NaNs whose orderable bytes, were they not folded
+                // to one quiet NaN, would be all `0x00` and all `0xFF`.
                 Physical::Float(Float::F64(f64::from_bits(u64::MAX))),
+                Physical::Float(Float::F64(f64::from_bits(0x7FFF_FFFF_FFFF_FFFF))),
+                // The same at `f32`, which widens before it is folded.
+                Physical::Float(Float::F32(f32::from_bits(u32::MAX))),
+                Physical::Float(Float::F32(f32::from_bits(0x7FFF_FFFF))),
             ],
         ),
         (
@@ -936,6 +1047,16 @@ fn no_float_reaches_a_sentinel(bits: u64) -> bool {
         None,
         Physical::Float(Float::F64(f64::from_bits(bits))),
     );
+    code != [0x00; 8] && code != [0xFF; 8]
+}
+
+/// Only a NaN could reach an extreme, and a uniform bit pattern is a NaN
+/// about once in two thousand draws. This draws only infinities and NaNs,
+/// of either sign and any payload.
+#[quickcheck]
+fn no_nan_reaches_a_sentinel(bits: u64) -> bool {
+    let nan_or_infinite = f64::from_bits(bits | 0x7FF0_0000_0000_0000);
+    let code = bytes(T::F64, None, Physical::Float(Float::F64(nan_or_infinite)));
     code != [0x00; 8] && code != [0xFF; 8]
 }
 

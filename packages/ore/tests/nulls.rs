@@ -176,6 +176,42 @@ fn a_space_takes_a_collected_term_of_its_own_policy_only() {
     }
 }
 
+/// Both policies of a marker target are one Rust type, `Nulls<I32>`, so
+/// a term of one reaches the other's comparison; it carries its policy,
+/// and the two compare as `None`.
+#[test]
+fn a_marker_space_tells_its_two_policies_apart() {
+    let mock = Mock::new(key());
+    let plain = mock.context("users.age").target(I32);
+    let (first, last) = (plain.nulls(NullOrder::First), plain.nulls(NullOrder::Last));
+    let (a, b) = (
+        first.encrypt_checked(1i32).expect("mock"),
+        last.encrypt_checked(1i32).expect("mock"),
+    );
+    assert_eq!(a.nulls(), Some(NullOrder::First));
+    assert_eq!(b.nulls(), Some(NullOrder::Last));
+    assert_eq!(first.compare(&a, &a), Some(Ordering::Equal));
+    assert_eq!(first.compare(&a, &b), None, "two policies do not compare");
+    assert_eq!(last.compare(&a, &b), None, "two policies do not compare");
+    let query = last.null_query().expect("mock");
+    assert_eq!(query.nulls(), Some(NullOrder::Last));
+    assert_eq!(
+        first.compare_query(&query, &a),
+        None,
+        "a query of one policy does not compare with a term of the other"
+    );
+    assert_eq!(
+        last.compare_query(&query, &a),
+        None,
+        "nor in the space the query came from"
+    );
+    assert_eq!(
+        last.compare_query(&query, &b),
+        Some(Ordering::Greater),
+        "a nulls-last null sorts above a value of its own space"
+    );
+}
+
 #[test]
 fn a_runtime_space_places_nulls_on_a_fixed_width_target_only() {
     let mock = Mock::new(key());
@@ -272,6 +308,12 @@ fn a_query_of_a_null_finds_the_nulls_and_bounds_a_range() {
     let plain = ages.encrypt_query_checked(NULL).expect("mock");
     assert_eq!(is_null, typed, "a typed null's query is the null's query");
     assert_eq!(is_null, plain, "a plain null's query is the null's query");
+    assert_eq!(
+        is_null.nulls(),
+        Some(NullOrder::First),
+        "a query carries its space's policy"
+    );
+    assert_eq!(is_null.target(), T::I32);
     let nulls: Vec<_> = rows
         .iter()
         .map(|row| ages.compare_query(&is_null, row) == Some(Ordering::Equal))

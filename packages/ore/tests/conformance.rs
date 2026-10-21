@@ -784,6 +784,20 @@ fn the_conformance_checks_catch_a_term_that_ignores_the_salt() {
     );
 }
 
+/// A scheme that mishandles only an extreme plaintext at a width no plain
+/// row reaches, the all-ones timestamp, passes every plain check and fails
+/// the checks over a space that places nulls, by the policy's label.
+#[test]
+#[should_panic(
+    expected = "vitaminc/ore/value/timestamp-micros/nulls-last/v1: a null does not sort at its end of the space"
+)]
+fn the_conformance_checks_catch_a_scheme_that_mishandles_a_sentinel() {
+    test_support::conformance(
+        &common::Extreme(Mock::new(key())),
+        &common::Extreme(Mock::new(Protected::new([8; 32]))),
+    );
+}
+
 /// A scheme whose term for an empty text is empty fails the check by
 /// name.
 #[test]
