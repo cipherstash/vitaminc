@@ -756,6 +756,63 @@ mod tests {
         );
     }
 
+    /// Four bytes again, with a hand-written marker answer that refuses
+    /// `U32`, so the policy impls can be seen to ask the target's answer
+    /// rather than assume one.
+    struct Refusing;
+
+    impl OrderScheme for Refusing {
+        const NAME: &'static str = "refusing";
+        type Term = Vec<u8>;
+        type Error = core::convert::Infallible;
+        type Space = ();
+
+        fn open(
+            &self,
+            _: OrderTarget,
+            _: &vitaminc_context::Context<'_>,
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn encrypt_plaintext(
+            &self,
+            _: &(),
+            _: &crate::OrderPlaintext,
+        ) -> Result<Vec<u8>, Self::Error> {
+            Ok(vec![0])
+        }
+
+        fn compare(a: &Vec<u8>, b: &Vec<u8>) -> Option<core::cmp::Ordering> {
+            Some(a.cmp(b))
+        }
+    }
+
+    impl Supports<OrderTarget> for Refusing {
+        fn supports(_: OrderTarget) -> bool {
+            false
+        }
+    }
+
+    impl Supports<U32> for Refusing {
+        fn supports(_: U32) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn a_policy_target_takes_the_answer_of_the_target_it_is_set_on() {
+        fn marker<P: NullPolicy>() {
+            assert!(
+                !<Refusing as Supports<Nulls<U32, P>>>::supports(Nulls::new(U32)),
+                "{:?}: a marker the scheme refuses stays refused under a policy",
+                P::ORDER
+            );
+        }
+        marker::<First>();
+        marker::<Last>();
+    }
+
     #[test]
     fn each_policy_marker_stands_for_its_null_order() {
         assert_eq!(First::ORDER, NullOrder::First);

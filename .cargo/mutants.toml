@@ -73,6 +73,12 @@ exclude_re = [
     # (`vec![]`, `vec![1]`) stay gated, and the byte is pinned by the
     # known-answer tests and the HMAC vector for the null domain.
     "packages/normalize/src/scalar.rs:.*replace null -> Protected<Vec<u8>> with Protected::(new|from)\\(vec!\\[0\\]\\)",
+    # Equivalent mutant: `Nulls::target` (vitaminc-ore target.rs) returns
+    # the marker the policy is set on, and every marker it can hold is a
+    # fixed-width marker, a zero-sized type with one value, which is also
+    # what `Default::default()` returns. No input can tell them apart. Its
+    # sibling `RuntimeNulls::target` holds an `OrderTarget` and stays gated.
+    "packages/ore/src/target.rs:.*replace Nulls<T, P>::target -> T with Default::default\\(\\)",
 ]
 
 # Property tests (quickcheck) and AEAD round-trips run slower under mutation than
