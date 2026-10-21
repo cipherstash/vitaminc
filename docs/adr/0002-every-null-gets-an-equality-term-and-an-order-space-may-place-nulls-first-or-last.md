@@ -171,8 +171,8 @@ let found = terms_by(Order::new(OrderTarget::I32).nulls(NullOrder::Last)?, &valu
 The policy is fixed when the space is made, like the target and the
 context, and every term of the space agrees with it. `OrderSpace::nulls`
 and `Order::nulls` are the only way to set one. `OrderPlaintext` learns
-`nulls() -> Option<NullOrder>`, and `order` takes the policy beside the
-target.
+`nulls() -> Option<NullOrder>`, and `order_with_nulls` takes the policy
+beside the target, leaving `order` as the plain space's encoder.
 
 Only a fixed-width target takes a policy. Text and bytes do not, for the
 same reason the typed null itself stops at fixed widths: a sealed `None`
@@ -259,9 +259,9 @@ vitaminc/ore/value/<kind>/nulls-last/v1
 
 with `<kind>` as in the existing labels (`int32`, `float64`, `uuid`, and
 so on) for the thirteen fixed-width targets, twenty-six new labels in
-all. `OrderTarget::domain` gains a policy argument and the `domain`
-module gains the new constants and a `domain::ALL` that lists all
-forty-one. The salt binds the label as
+all. `OrderTarget::domain_with_nulls` gives a policy's label beside
+`OrderTarget::domain`, and the `domain` module gains the new constants
+and a `domain::ALL` that lists all forty-one. The salt binds the label as
 before, so a term from a nulls-last space never compares with a term from
 a plain space of the same target, and turning a policy on for a column is
 a re-index, visibly, rather than a mixed column whose stored maximums
@@ -269,9 +269,10 @@ silently became nulls.
 
 ### 5. Queries for `IS NULL`, `IS NOT NULL` and ranges
 
-`encrypt_query` on a space with a policy accepts a null and gives the
-sentinel's query term. A layer answers `IS NULL` with an equality
-comparison against it and `IS NOT NULL` with the negation. A range query in
+`encrypt_query_checked` on a space with a policy accepts a null and
+gives the sentinel's query term, which `null_query` also gives. A layer
+answers `IS NULL` with an equality comparison against it and
+`IS NOT NULL` with the negation. A range query in
 a space with a policy must exclude the sentinel itself, because SQL
 comparisons never match a null: `age < 10` under nulls-first is "above the
 sentinel and below 10". The space offers the sentinel's query term for

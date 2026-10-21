@@ -196,6 +196,12 @@ pub trait OwnTarget: Encrypt + private::Sealed {
 /// [`supports_every_target!`](crate::supports_every_target). A space
 /// asks the runtime answer for every target it is opened with, and in a
 /// debug build asserts that a marker's answer agrees.
+///
+/// A scheme never answers for a target in a space that places nulls
+/// ([`Nulls`]): this crate answers for it, with the answer for the target
+/// the policy is set on, since the policy changes no width. That impl
+/// covers every scheme, so a scheme cannot implement `Supports` for every
+/// `T: Target` at once; it lists its targets, as the macros do.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` has no order term for `{T}`",
     label = "does not implement `Supports<{T}>`",

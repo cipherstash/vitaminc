@@ -313,8 +313,8 @@ A boolean or an `undefined` has no order term and does not stop the
 walk, and nor does a null, unless the normalizer places nulls:
 `Order::new(target).nulls(NullOrder::Last)` gives every null of the walk
 the space's sentinel, at its path, where the equality walk puts the
-null's equality term. Anything else without a term stops it: a term silently missing
-from an index is worse than an error. A collected term goes into its
+null's equality term. Anything else without a term stops it: a term
+silently missing from an index is worse than an error. A collected term goes into its
 space with `OrderSpace::encrypt_term`, which refuses a term of another
 target.
 

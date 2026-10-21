@@ -607,9 +607,10 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
     ///
     /// [`OrderError::Unsupported`] if the scheme does not take this
     /// target, [`OrderError::Term`] if the scalar has no term as the
-    /// space's target (with [`NormalizeError::Reserved`] for the maximum of
-    /// an integer or uuid target in a space that places nulls), [`OrderError::NotScalar`] if the value is a
-    /// container, [`OrderError::Source`] if the value could not be read,
+    /// space's target (with [`NormalizeError::Reserved`] for the maximum
+    /// of an integer or uuid target in a space that places nulls),
+    /// [`OrderError::NotScalar`] if the value is a container,
+    /// [`OrderError::Source`] if the value could not be read,
     /// [`OrderError::Backend`] if the scheme failed.
     pub fn encrypt_checked<V: Encrypt>(
         &self,
@@ -657,12 +658,12 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
     ///
     /// Both terms must be this space's. A term of a target named when the
     /// program is compiled cannot be another target's; a term of one
-    /// chosen while it ran carries its target and null policy, and two of
-    /// different targets or policies, or of another than this space's,
-    /// are `None`. The
-    /// scheme cannot always tell two spaces' terms apart otherwise, and
-    /// may order them as noise. `None` where it can tell: a term not of
-    /// this scheme, or two terms not made to compare.
+    /// chosen while it ran carries its target, and every term carries its
+    /// null policy, so two of different targets or policies, or of
+    /// another than this space's, are `None`. The scheme cannot always
+    /// tell two spaces' terms apart otherwise, and may order them as
+    /// noise. `None` where it can tell: a term not of this scheme, or two
+    /// terms not made to compare.
     pub fn compare(
         &self,
         a: &OrderTerm<S::Term, T>,
@@ -858,11 +859,14 @@ impl<S: Supports<OrderTarget> + ?Sized> OrderSpace<'_, S, Nulls<OrderTarget>> {
 ///
 /// Under a marker from [`target`](crate::target) the label is a zero-sized
 /// type, so two terms of different targets cannot meet in
-/// [`OrderSpace::compare`]: that does not compile. Under an
+/// [`OrderSpace::compare`]: that does not compile, and nor does a term of a
+/// space that places nulls in a plain space's comparison. Under an
 /// [`OrderTarget`] the label is stored, and two of different targets
-/// compare as `None` instead of as noise. Storage reads the scheme's bytes
-/// through `AsRef<[u8]>`, and [`raw`](Self::raw) is the scheme's term
-/// itself.
+/// compare as `None` instead of as noise. A [`Nulls`] label stores its
+/// policy, because both policies of a target are one type, so a
+/// nulls-first and a nulls-last term compare as `None` too. Storage reads
+/// the scheme's bytes through `AsRef<[u8]>`, and [`raw`](Self::raw) is the
+/// scheme's term itself.
 ///
 /// `==` compares the stored term, byte for byte, not the value: the order
 /// of two values is [`OrderSpace::compare`], and a randomised scheme

@@ -485,8 +485,9 @@ impl OrderTarget {
 /// # Errors
 ///
 /// [`NormalizeError::NoDomain`] for a null, a boolean (see [`OrderTarget`]
-/// for why), an `undefined` or a logical type this build does not know; [`NormalizeError::Invalid`] for
-/// a value that does not fit its own logical type;
+/// for why), an `undefined` or a logical type this build does not know;
+/// [`NormalizeError::Invalid`] for a value that does not fit its own
+/// logical type;
 /// [`NormalizeError::Mismatch`] for a value of another kind than
 /// `target`; [`NormalizeError::OutOfRange`] for an integer outside
 /// `target`'s width; [`NormalizeError::UnassignedCodePoint`] for text
@@ -893,10 +894,11 @@ impl Normalize for Order {
 /// normalizer.
 ///
 /// A null, a boolean or an `undefined` produces no term and does not stop
-/// the walk (for nulls placed first or last, walk with
-/// [`Order::nulls`] through [`vitaminc_normalize::terms_by`]); a scalar of another kind than `target`, or one outside it,
-/// stops it, and so does a value encryption would refuse, for the same
-/// reason at the same path. [`vitaminc_normalize::Terms`] has the rules.
+/// the walk (for nulls placed first or last, walk with [`Order::nulls`]
+/// through [`vitaminc_normalize::terms_by`]); a scalar of another kind
+/// than `target`, or one outside it, stops it, and so does a value
+/// encryption would refuse, for the same reason at the same path.
+/// [`vitaminc_normalize::Terms`] has the rules.
 ///
 /// # Examples
 ///

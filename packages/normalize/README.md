@@ -122,9 +122,10 @@ refusal with `TermsError::refusal`; encryption reports the same one as
 
 A null, typed or plain, has its term at its own path. A scalar whose kind
 has no domain (a boolean, an `undefined`) produces no term and does not
-stop the walk; passthrough subtrees get none either. A scalar whose *logical type* has no domain, one from a newer
-client, stops the walk: encrypting it with no term and no error would leave
-an index silently incomplete. That refusal and an unassigned code point
+stop the walk; passthrough subtrees get none either. A scalar whose
+*logical type* has no domain, one from a newer client, stops the walk:
+encrypting it with no term and no error would leave an index silently
+incomplete. That refusal and an unassigned code point
 arrive as `EncryptError::Source` carrying a `TermError` (from `terms`, as
 `TermsError::term`), which holds the `NormalizeError` and the path to the
 refused field. Downcast to `TermError`; the `NormalizeError` is also its
