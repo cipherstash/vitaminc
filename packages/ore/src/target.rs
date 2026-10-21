@@ -19,7 +19,7 @@ use core::fmt;
 
 use vitaminc_aead::{Bytes as RawBytes, Encrypt};
 
-use crate::{OrderScheme, OrderTarget};
+use crate::{NullOrder, OrderScheme, OrderTarget};
 
 mod private {
     /// Seals [`Target`](super::Target), [`FitsIn`](super::FitsIn) and
@@ -35,6 +35,12 @@ mod private {
 pub trait Target: private::Sealed + Copy + fmt::Debug {
     /// The target as the value every encoding is keyed by.
     fn runtime(self) -> OrderTarget;
+
+    /// Where a space of this target places nulls: `None`, unless the
+    /// target is a [`Nulls`], which a space's `nulls` method makes.
+    fn nulls(self) -> Option<NullOrder> {
+        None
+    }
 }
 
 /// A target known when the program is compiled: one of the markers in this
@@ -43,6 +49,69 @@ pub trait Target: private::Sealed + Copy + fmt::Debug {
 pub trait StaticTarget: Target + Default {
     /// The target this marker stands for.
     const TARGET: OrderTarget;
+}
+
+/// A marker target of fixed width: every marker but [`Text`] and
+/// [`Bytes`]. Only these take a null policy, so
+/// `scheme.target(I32).nulls(NullOrder::Last)` compiles and
+/// `scheme.target(Text).nulls(..)` does not.
+///
+/// Sealed: implemented for the thirteen fixed-width markers here.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` takes no null policy",
+    label = "not a fixed-width target",
+    note = "only a fixed-width target places nulls first or last: a text or bytes null already shows by its length, so placing it would hide nothing"
+)]
+pub trait FixedWidth: StaticTarget {}
+
+/// A target in a space that places nulls first or last: the target and
+/// its [`NullOrder`]. Made only by a space's `nulls` method, from a
+/// fixed-width target, so every `Nulls` names a domain label.
+///
+/// A space of a `Nulls` target is not a [`StaticTarget`] space, so it has
+/// no `encrypt`: the policy refuses the maximum of an integer or uuid
+/// target, so a value goes through `encrypt_checked`, which reports it.
+/// Terms of a `Nulls<I32>` space do not compile against an `I32` space's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Nulls<T> {
+    target: T,
+    order: NullOrder,
+}
+
+impl<T: Target> Nulls<T> {
+    pub(crate) fn new(target: T, order: NullOrder) -> Self {
+        Self { target, order }
+    }
+
+    /// The target the policy is set on.
+    pub fn target(self) -> T {
+        self.target
+    }
+
+    /// Where the space places nulls.
+    pub fn order(self) -> NullOrder {
+        self.order
+    }
+}
+
+impl<T: Target> private::Sealed for Nulls<T> {}
+
+impl<T: Target> Target for Nulls<T> {
+    fn runtime(self) -> OrderTarget {
+        self.target.runtime()
+    }
+
+    fn nulls(self) -> Option<NullOrder> {
+        Some(self.order)
+    }
+}
+
+/// A scheme takes a target in a space that places nulls exactly when it
+/// takes the target: the policy changes no width.
+impl<S: Supports<T> + ?Sized, T: Target> Supports<Nulls<T>> for S {
+    fn supports(target: Nulls<T>) -> bool {
+        <S as Supports<T>>::supports(target.target)
+    }
 }
 
 impl private::Sealed for OrderTarget {}
@@ -238,6 +307,15 @@ macro_rules! markers {
         )*
     };
 }
+
+/// The fixed-width markers: every one but `Text` and `Bytes`.
+macro_rules! fixed_width {
+    ($($marker:ident),* $(,)?) => {
+        $(impl FixedWidth for $marker {})*
+    };
+}
+
+fixed_width!(I16, U16, I32, U32, I64, U64, I128, U128, F64, Date, Timestamp, Decimal, Uuid);
 
 markers! {
     /// [`OrderTarget::I16`]. The narrowest integer target: an 8-bit one

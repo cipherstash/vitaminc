@@ -78,12 +78,202 @@ pub mod domain {
     pub const BYTES: &str = "vitaminc/ore/value/bytes/v1";
     /// A uuid, over its sixteen raw bytes.
     pub const UUID: &str = "vitaminc/ore/value/uuid/v1";
-    /// Every domain, for a test or an index layer that enumerates them. A
-    /// slice, so a domain added later does not change its type.
+
+    // A space that places nulls is a space of its own, with a label of its
+    // own: it admits other values than the plain space and gives a meaning
+    // to a code the plain space leaves unused. One pair per fixed-width
+    // target; text and bytes take no null policy.
+
+    /// An `i16` in a space that places nulls first: see
+    /// [`NullOrder::First`](super::NullOrder::First).
+    pub const INT16_NULLS_FIRST: &str = "vitaminc/ore/value/int16/nulls-first/v1";
+    /// An `i16` in a space that places nulls last: see
+    /// [`NullOrder::Last`](super::NullOrder::Last).
+    pub const INT16_NULLS_LAST: &str = "vitaminc/ore/value/int16/nulls-last/v1";
+    /// A `u16` in a space that places nulls first: see
+    /// [`NullOrder::First`](super::NullOrder::First).
+    pub const UINT16_NULLS_FIRST: &str = "vitaminc/ore/value/uint16/nulls-first/v1";
+    /// A `u16` in a space that places nulls last: see
+    /// [`NullOrder::Last`](super::NullOrder::Last).
+    pub const UINT16_NULLS_LAST: &str = "vitaminc/ore/value/uint16/nulls-last/v1";
+    /// An `i32` in a space that places nulls first: see
+    /// [`NullOrder::First`](super::NullOrder::First).
+    pub const INT32_NULLS_FIRST: &str = "vitaminc/ore/value/int32/nulls-first/v1";
+    /// An `i32` in a space that places nulls last: see
+    /// [`NullOrder::Last`](super::NullOrder::Last).
+    pub const INT32_NULLS_LAST: &str = "vitaminc/ore/value/int32/nulls-last/v1";
+    /// A `u32` in a space that places nulls first: see
+    /// [`NullOrder::First`](super::NullOrder::First).
+    pub const UINT32_NULLS_FIRST: &str = "vitaminc/ore/value/uint32/nulls-first/v1";
+    /// A `u32` in a space that places nulls last: see
+    /// [`NullOrder::Last`](super::NullOrder::Last).
+    pub const UINT32_NULLS_LAST: &str = "vitaminc/ore/value/uint32/nulls-last/v1";
+    /// An `i64` in a space that places nulls first: see
+    /// [`NullOrder::First`](super::NullOrder::First).
+    pub const INT64_NULLS_FIRST: &str = "vitaminc/ore/value/int64/nulls-first/v1";
+    /// An `i64` in a space that places nulls last: see
+    /// [`NullOrder::Last`](super::NullOrder::Last).
+    pub const INT64_NULLS_LAST: &str = "vitaminc/ore/value/int64/nulls-last/v1";
+    /// A `u64` in a space that places nulls first: see
+    /// [`NullOrder::First`](super::NullOrder::First).
+    pub const UINT64_NULLS_FIRST: &str = "vitaminc/ore/value/uint64/nulls-first/v1";
+    /// A `u64` in a space that places nulls last: see
+    /// [`NullOrder::Last`](super::NullOrder::Last).
+    pub const UINT64_NULLS_LAST: &str = "vitaminc/ore/value/uint64/nulls-last/v1";
+    /// An `i128` in a space that places nulls first: see
+    /// [`NullOrder::First`](super::NullOrder::First).
+    pub const INT128_NULLS_FIRST: &str = "vitaminc/ore/value/int128/nulls-first/v1";
+    /// An `i128` in a space that places nulls last: see
+    /// [`NullOrder::Last`](super::NullOrder::Last).
+    pub const INT128_NULLS_LAST: &str = "vitaminc/ore/value/int128/nulls-last/v1";
+    /// A `u128` in a space that places nulls first: see
+    /// [`NullOrder::First`](super::NullOrder::First).
+    pub const UINT128_NULLS_FIRST: &str = "vitaminc/ore/value/uint128/nulls-first/v1";
+    /// A `u128` in a space that places nulls last: see
+    /// [`NullOrder::Last`](super::NullOrder::Last).
+    pub const UINT128_NULLS_LAST: &str = "vitaminc/ore/value/uint128/nulls-last/v1";
+    /// An `f64` in a space that places nulls first: see
+    /// [`NullOrder::First`](super::NullOrder::First).
+    pub const FLOAT64_NULLS_FIRST: &str = "vitaminc/ore/value/float64/nulls-first/v1";
+    /// An `f64` in a space that places nulls last: see
+    /// [`NullOrder::Last`](super::NullOrder::Last).
+    pub const FLOAT64_NULLS_LAST: &str = "vitaminc/ore/value/float64/nulls-last/v1";
+    /// A date in a space that places nulls first: see
+    /// [`NullOrder::First`](super::NullOrder::First).
+    pub const DATE_NULLS_FIRST: &str = "vitaminc/ore/value/date/nulls-first/v1";
+    /// A date in a space that places nulls last: see
+    /// [`NullOrder::Last`](super::NullOrder::Last).
+    pub const DATE_NULLS_LAST: &str = "vitaminc/ore/value/date/nulls-last/v1";
+    /// A timestamp in a space that places nulls first: see
+    /// [`NullOrder::First`](super::NullOrder::First).
+    pub const TIMESTAMP_NULLS_FIRST: &str = "vitaminc/ore/value/timestamp-micros/nulls-first/v1";
+    /// A timestamp in a space that places nulls last: see
+    /// [`NullOrder::Last`](super::NullOrder::Last).
+    pub const TIMESTAMP_NULLS_LAST: &str = "vitaminc/ore/value/timestamp-micros/nulls-last/v1";
+    /// A decimal in a space that places nulls first: see
+    /// [`NullOrder::First`](super::NullOrder::First).
+    pub const DECIMAL_NULLS_FIRST: &str = "vitaminc/ore/value/decimal/nulls-first/v1";
+    /// A decimal in a space that places nulls last: see
+    /// [`NullOrder::Last`](super::NullOrder::Last).
+    pub const DECIMAL_NULLS_LAST: &str = "vitaminc/ore/value/decimal/nulls-last/v1";
+    /// A uuid in a space that places nulls first: see
+    /// [`NullOrder::First`](super::NullOrder::First).
+    pub const UUID_NULLS_FIRST: &str = "vitaminc/ore/value/uuid/nulls-first/v1";
+    /// A uuid in a space that places nulls last: see
+    /// [`NullOrder::Last`](super::NullOrder::Last).
+    pub const UUID_NULLS_LAST: &str = "vitaminc/ore/value/uuid/nulls-last/v1";
+
+    /// Every domain, for a test or an index layer that enumerates them: the
+    /// fifteen plain labels in [`OrderTarget::ALL`](super::OrderTarget::ALL)
+    /// order, then the thirteen nulls-first labels and the thirteen
+    /// nulls-last labels, each in the same order. A slice, so a domain
+    /// added later does not change its type.
     pub const ALL: &[&str] = &[
-        INT16, UINT16, INT32, UINT32, INT64, UINT64, INT128, UINT128, FLOAT64, DATE, TIMESTAMP,
-        DECIMAL, TEXT, BYTES, UUID,
+        INT16,
+        UINT16,
+        INT32,
+        UINT32,
+        INT64,
+        UINT64,
+        INT128,
+        UINT128,
+        FLOAT64,
+        DATE,
+        TIMESTAMP,
+        DECIMAL,
+        TEXT,
+        BYTES,
+        UUID,
+        INT16_NULLS_FIRST,
+        UINT16_NULLS_FIRST,
+        INT32_NULLS_FIRST,
+        UINT32_NULLS_FIRST,
+        INT64_NULLS_FIRST,
+        UINT64_NULLS_FIRST,
+        INT128_NULLS_FIRST,
+        UINT128_NULLS_FIRST,
+        FLOAT64_NULLS_FIRST,
+        DATE_NULLS_FIRST,
+        TIMESTAMP_NULLS_FIRST,
+        DECIMAL_NULLS_FIRST,
+        UUID_NULLS_FIRST,
+        INT16_NULLS_LAST,
+        UINT16_NULLS_LAST,
+        INT32_NULLS_LAST,
+        UINT32_NULLS_LAST,
+        INT64_NULLS_LAST,
+        UINT64_NULLS_LAST,
+        INT128_NULLS_LAST,
+        UINT128_NULLS_LAST,
+        FLOAT64_NULLS_LAST,
+        DATE_NULLS_LAST,
+        TIMESTAMP_NULLS_LAST,
+        DECIMAL_NULLS_LAST,
+        UUID_NULLS_LAST,
     ];
+}
+
+/// Where the nulls of an order space sort: below every value or above
+/// every value, as SQL's `NULLS FIRST` and `NULLS LAST`.
+///
+/// A space takes a policy when it is made, like its target and context,
+/// and every term of it agrees: `scheme.target(I32).nulls(NullOrder::Last)`.
+/// Without one, a null has no order term, as before. With one, every null
+/// in the space, typed or plain, encodes to the space's sentinel: the
+/// lowest code the target's width holds (all `0x00`) for
+/// [`First`](Self::First), the highest (all `0xFF`) for
+/// [`Last`](Self::Last). Only a fixed-width target takes a policy.
+///
+/// For an integer or uuid target the policy costs one value: the target's
+/// maximum, whose code the nulls-last sentinel already is, is refused with
+/// [`NormalizeError::Reserved`]. Under nulls-first every code moves up by
+/// one, so zero, the minimum and the nil uuid stay encodable and the
+/// maximum is again the one refused. A column that places nulls cannot
+/// hold its type's maximum. Float, date, timestamp and decimal codes never
+/// reach either extreme, so those targets shift nothing and refuse
+/// nothing.
+///
+/// Each policy is its own set of domain labels, and the salt binds the
+/// label, so a term of a space that places nulls never compares with a
+/// term of a plain space of the same target.
+///
+/// # What a placed null reveals
+///
+/// In any order index whose stored terms compare with each other, the
+/// nulls are visible as the tied group at one end, and in a sparse domain
+/// as the group that differs from every value at the top of the encoding.
+/// That is never more than the SQL `NULL` it replaces, which needs no
+/// inference to read.
+///
+/// # Examples
+///
+/// ```
+/// use vitaminc_ore::{domain, order_with_nulls, Int, NormalizeError, NullOrder, OrderTarget, Physical};
+/// use vitaminc_protected::Controlled;
+///
+/// let null = order_with_nulls(OrderTarget::U16, NullOrder::First, None, Physical::Null)?;
+/// assert_eq!(null.domain(), domain::UINT16_NULLS_FIRST);
+/// assert_eq!(null.bytes().risky_ref(), &[0x00, 0x00]);
+///
+/// // Zero moves up by one, so it stays above the null.
+/// let zero = order_with_nulls(OrderTarget::U16, NullOrder::First, None, Physical::Int(Int::U16(0)))?;
+/// assert_eq!(zero.bytes().risky_ref(), &[0x00, 0x01]);
+///
+/// // The maximum is the one value refused.
+/// let max = Physical::Int(Int::U16(u16::MAX));
+/// assert_eq!(
+///     order_with_nulls(OrderTarget::U16, NullOrder::First, None, max).err(),
+///     Some(NormalizeError::Reserved)
+/// );
+/// # Ok::<(), NormalizeError>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum NullOrder {
+    /// Nulls sort below every value, as `NULLS FIRST`.
+    First,
+    /// Nulls sort above every value, as `NULLS LAST`.
+    Last,
 }
 
 /// The type an order index declares, which every value it holds is
@@ -195,6 +385,51 @@ impl OrderTarget {
         }
     }
 
+    /// The frozen domain label of every term of this target in a space
+    /// that places nulls as `nulls` says, or `None` for text and bytes,
+    /// which take no null policy.
+    ///
+    /// ```
+    /// use vitaminc_ore::{domain, NullOrder, OrderTarget};
+    ///
+    /// assert_eq!(
+    ///     OrderTarget::I32.domain_with_nulls(NullOrder::Last),
+    ///     Some(domain::INT32_NULLS_LAST)
+    /// );
+    /// assert_eq!(OrderTarget::Text.domain_with_nulls(NullOrder::Last), None);
+    /// ```
+    pub fn domain_with_nulls(self, nulls: NullOrder) -> Option<&'static str> {
+        Some(match (self, nulls) {
+            (Self::I16, NullOrder::First) => domain::INT16_NULLS_FIRST,
+            (Self::I16, NullOrder::Last) => domain::INT16_NULLS_LAST,
+            (Self::U16, NullOrder::First) => domain::UINT16_NULLS_FIRST,
+            (Self::U16, NullOrder::Last) => domain::UINT16_NULLS_LAST,
+            (Self::I32, NullOrder::First) => domain::INT32_NULLS_FIRST,
+            (Self::I32, NullOrder::Last) => domain::INT32_NULLS_LAST,
+            (Self::U32, NullOrder::First) => domain::UINT32_NULLS_FIRST,
+            (Self::U32, NullOrder::Last) => domain::UINT32_NULLS_LAST,
+            (Self::I64, NullOrder::First) => domain::INT64_NULLS_FIRST,
+            (Self::I64, NullOrder::Last) => domain::INT64_NULLS_LAST,
+            (Self::U64, NullOrder::First) => domain::UINT64_NULLS_FIRST,
+            (Self::U64, NullOrder::Last) => domain::UINT64_NULLS_LAST,
+            (Self::I128, NullOrder::First) => domain::INT128_NULLS_FIRST,
+            (Self::I128, NullOrder::Last) => domain::INT128_NULLS_LAST,
+            (Self::U128, NullOrder::First) => domain::UINT128_NULLS_FIRST,
+            (Self::U128, NullOrder::Last) => domain::UINT128_NULLS_LAST,
+            (Self::F64, NullOrder::First) => domain::FLOAT64_NULLS_FIRST,
+            (Self::F64, NullOrder::Last) => domain::FLOAT64_NULLS_LAST,
+            (Self::Date, NullOrder::First) => domain::DATE_NULLS_FIRST,
+            (Self::Date, NullOrder::Last) => domain::DATE_NULLS_LAST,
+            (Self::Timestamp, NullOrder::First) => domain::TIMESTAMP_NULLS_FIRST,
+            (Self::Timestamp, NullOrder::Last) => domain::TIMESTAMP_NULLS_LAST,
+            (Self::Decimal, NullOrder::First) => domain::DECIMAL_NULLS_FIRST,
+            (Self::Decimal, NullOrder::Last) => domain::DECIMAL_NULLS_LAST,
+            (Self::Uuid, NullOrder::First) => domain::UUID_NULLS_FIRST,
+            (Self::Uuid, NullOrder::Last) => domain::UUID_NULLS_LAST,
+            (Self::Text | Self::Bytes, _) => return None,
+        })
+    }
+
     /// The width of every term of this target, or `None` for text and
     /// bytes, whose terms vary in length. Never one byte: see the type's
     /// docs.
@@ -244,6 +479,9 @@ impl OrderTarget {
 /// # Ok::<(), NormalizeError>(())
 /// ```
 ///
+/// This is the plain space, which places no nulls: a null has no term
+/// here. [`order_with_nulls`] encodes for a space that places them.
+///
 /// # Errors
 ///
 /// [`NormalizeError::NoDomain`] for a null, a boolean (see [`OrderTarget`]
@@ -258,16 +496,110 @@ pub fn order(
     ty: Option<Logical>,
     v: Physical<'_>,
 ) -> Result<OrderPlaintext, NormalizeError> {
+    encode(target, None, ty, v)
+}
+
+/// Encode one scalar as `target` in a space that places nulls as `nulls`
+/// says, sealed with that space's domain: [`order`] for a space with a
+/// [`NullOrder`].
+///
+/// A null, typed or plain, is the space's sentinel: all `0x00` for
+/// [`NullOrder::First`], all `0xFF` for [`NullOrder::Last`], at the
+/// target's width. A value encodes as in [`order`], except that under
+/// nulls-first an integer's or a uuid's code is one higher, as a
+/// big-endian number over the target's width, so the lowest code is free
+/// for the sentinel. See [`NullOrder`] for the whole rule.
+///
+/// # Examples
+///
+/// ```
+/// use vitaminc_ore::{domain, order_with_nulls, Int, NormalizeError, NullOrder, OrderTarget, Physical};
+/// use vitaminc_protected::Controlled;
+///
+/// let null = order_with_nulls(OrderTarget::I16, NullOrder::Last, None, Physical::Null)?;
+/// assert_eq!(null.domain(), domain::INT16_NULLS_LAST);
+/// assert_eq!(null.bytes().risky_ref(), &[0xFF, 0xFF]);
+/// assert_eq!(
+///     order_with_nulls(OrderTarget::I16, NullOrder::Last, None, Physical::Int(Int::I16(i16::MAX))).err(),
+///     Some(NormalizeError::Reserved)
+/// );
+/// // Text takes no null policy.
+/// assert_eq!(
+///     order_with_nulls(OrderTarget::Text, NullOrder::Last, None, Physical::Text("a")).err(),
+///     Some(NormalizeError::NoDomain)
+/// );
+/// # Ok::<(), NormalizeError>(())
+/// ```
+///
+/// # Errors
+///
+/// As [`order`], except that a null is not refused, and:
+/// [`NormalizeError::NoDomain`] for every value when `target` is text or
+/// bytes, which take no null policy; [`NormalizeError::Reserved`] for the
+/// maximum of an integer or uuid target, whose code is the nulls-last
+/// sentinel or would overflow after the nulls-first shift. An `undefined`
+/// is still [`NormalizeError::NoDomain`]: it is not a value and not a
+/// null.
+pub fn order_with_nulls(
+    target: OrderTarget,
+    nulls: NullOrder,
+    ty: Option<Logical>,
+    v: Physical<'_>,
+) -> Result<OrderPlaintext, NormalizeError> {
+    encode(target, Some(nulls), ty, v)
+}
+
+/// The domain label of a space: the target's own, or the one its null
+/// policy names. `None` for a null policy on text or bytes.
+pub(crate) fn label(target: OrderTarget, nulls: Option<NullOrder>) -> Option<&'static str> {
+    match nulls {
+        None => Some(target.domain()),
+        Some(nulls) => target.domain_with_nulls(nulls),
+    }
+}
+
+/// The sealed sentinel of a space that places nulls: every null of it.
+/// `None` for text and bytes, which take no policy.
+pub(crate) fn null_plaintext(target: OrderTarget, nulls: NullOrder) -> Option<OrderPlaintext> {
+    let domain = target.domain_with_nulls(nulls)?;
+    let width = target.width()?;
+    Some(OrderPlaintext::new(
+        target,
+        Some(nulls),
+        domain,
+        sentinel(width, nulls),
+    ))
+}
+
+/// [`order`] and [`order_with_nulls`]: one scalar as `target`, in the plain
+/// space when `nulls` is `None`.
+pub(crate) fn encode(
+    target: OrderTarget,
+    nulls: Option<NullOrder>,
+    ty: Option<Logical>,
+    v: Physical<'_>,
+) -> Result<OrderPlaintext, NormalizeError> {
     use OrderTarget as T;
     // As `normalize`: a value that does not fit its logical type is refused
     // before the target is looked at.
     if ty.is_some_and(|ty| !ty.admits(&v)) {
         return Err(NormalizeError::Invalid);
     }
+    // A null policy on text or bytes has no label, so no value has a term
+    // there.
+    let domain = label(target, nulls).ok_or(NormalizeError::NoDomain)?;
     let bytes = match (target, ty, v) {
-        // A null, a boolean or an `undefined` has no order, whatever the
-        // target, and a walk skips it.
-        (_, None, Physical::Null | Physical::Bool(_)) | (_, Some(Logical::Undefined), _) => {
+        // A null is the sentinel of a space that places nulls, and has no
+        // order in one that does not, where a walk skips it.
+        (_, None, Physical::Null) => {
+            return match nulls.and_then(|nulls| null_plaintext(target, nulls)) {
+                Some(sentinel) => Ok(sentinel),
+                None => Err(NormalizeError::NoDomain),
+            }
+        }
+        // A boolean or an `undefined` has no order, whatever the target or
+        // the null policy, and a walk skips it.
+        (_, None, Physical::Bool(_)) | (_, Some(Logical::Undefined), _) => {
             return Err(NormalizeError::NoDomain)
         }
         (_, Some(Logical::Unknown(_)), _) => return Err(NormalizeError::NoDomain),
@@ -294,10 +626,78 @@ pub fn order(
         // a target.
         _ => return Err(NormalizeError::Mismatch),
     };
-    Ok(OrderPlaintext::new(target, bytes))
+    let bytes = match nulls {
+        None => bytes,
+        Some(nulls) => make_room(target, nulls, bytes)?,
+    };
+    Ok(OrderPlaintext::new(target, nulls, domain, bytes))
+}
+
+/// The sentinel of a space that places nulls: the extreme code of the
+/// target's width, all `0x00` for nulls-first and all `0xFF` for
+/// nulls-last, in one protected buffer allocated at its final size.
+fn sentinel(width: usize, nulls: NullOrder) -> Protected<Vec<u8>> {
+    let fill = match nulls {
+        NullOrder::First => 0x00,
+        NullOrder::Last => 0xFF,
+    };
+    Protected::new(vec![fill; width])
+}
+
+/// A value's code in a space that places nulls, so that no value is the
+/// sentinel.
+///
+/// An integer or a uuid owns every code of its width, so the maximum,
+/// whose code is all `0xFF`, is refused under both policies, and under
+/// nulls-first every other code moves up by one to free all `0x00`. A
+/// float, a date, a timestamp and a decimal never reach either extreme
+/// (the tests walk each encoder's range), so their codes stay as they
+/// are; a code that did reach the sentinel is refused rather than tied
+/// with the nulls.
+fn make_room(
+    target: OrderTarget,
+    nulls: NullOrder,
+    mut code: Protected<Vec<u8>>,
+) -> Result<Protected<Vec<u8>>, NormalizeError> {
+    let all = |code: &Protected<Vec<u8>>, byte: u8| code.risky_ref().iter().all(|b| *b == byte);
+    if target.owns_every_code() {
+        if all(&code, 0xFF) {
+            return Err(NormalizeError::Reserved);
+        }
+        if nulls == NullOrder::First {
+            code.update(|code| increment(code));
+        }
+        return Ok(code);
+    }
+    let reserved = match nulls {
+        NullOrder::First => 0x00,
+        NullOrder::Last => 0xFF,
+    };
+    if all(&code, reserved) {
+        return Err(NormalizeError::Reserved);
+    }
+    Ok(code)
+}
+
+/// Add one to `code` as a big-endian unsigned number, in place. The caller
+/// has refused all `0xFF`, so it never overflows.
+fn increment(code: &mut [u8]) {
+    let mut carry = 1u8;
+    for byte in code.iter_mut().rev() {
+        let (sum, over) = byte.overflowing_add(carry);
+        *byte = sum;
+        carry = u8::from(over);
+    }
 }
 
 impl OrderTarget {
+    /// Whether every code of the target's width is some value's: an
+    /// integer or a uuid. Such a target gives up its maximum to a null
+    /// policy.
+    fn owns_every_code(self) -> bool {
+        self.is_int() || self == Self::Uuid
+    }
+
     /// Whether this is an integer target.
     fn is_int(self) -> bool {
         matches!(
@@ -404,8 +804,67 @@ fn fixed<const N: usize>(mut write: impl FnMut(&mut [u8; N])) -> Protected<Vec<u
 /// of the walk is encoded as that target, so it suits a value of one kind
 /// throughout, such as an array column; a scalar of another kind stops
 /// the walk with [`NormalizeError::Mismatch`].
+///
+/// Made with [`Order::new`], which places no nulls, so a null has no term
+/// and the walk skips it. [`Order::nulls`] places them, as a space does:
+/// every null of the walk is then the space's sentinel, at its path.
+///
+/// ```
+/// use vitaminc_normalize::terms_by;
+/// use vitaminc_ore::{domain, NullOrder, Order, OrderTarget};
+///
+/// let ages = vec![Some(36i32), None];
+/// let plain = terms_by(Order::new(OrderTarget::I32), &ages)?;
+/// assert_eq!(plain.len(), 1);
+///
+/// let last = Order::new(OrderTarget::I32).nulls(NullOrder::Last).expect("fixed width");
+/// let placed = terms_by(last, &ages)?;
+/// assert_eq!(placed.len(), 2);
+/// assert_eq!(placed[1].normalized.domain(), domain::INT32_NULLS_LAST);
+/// # Ok::<(), vitaminc_ore::TermsError>(())
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Order(pub OrderTarget);
+pub struct Order {
+    target: OrderTarget,
+    nulls: Option<NullOrder>,
+}
+
+impl Order {
+    /// The normalizer for `target`, placing no nulls.
+    pub const fn new(target: OrderTarget) -> Self {
+        Self {
+            target,
+            nulls: None,
+        }
+    }
+
+    /// This normalizer, placing nulls as `nulls` says.
+    ///
+    /// # Errors
+    ///
+    /// [`NormalizeError::NoDomain`] for a text or bytes target, which takes
+    /// no null policy, rather than a normalizer that refuses every value.
+    pub fn nulls(self, nulls: NullOrder) -> Result<Self, NormalizeError> {
+        self.target
+            .domain_with_nulls(nulls)
+            .map(|_| Self {
+                nulls: Some(nulls),
+                ..self
+            })
+            .ok_or(NormalizeError::NoDomain)
+    }
+
+    /// The target every scalar is encoded as.
+    pub fn target(self) -> OrderTarget {
+        self.target
+    }
+
+    /// Where the normalizer places nulls, or `None` if it gives them no
+    /// term.
+    pub fn null_order(self) -> Option<NullOrder> {
+        self.nulls
+    }
+}
 
 impl Normalize for Order {
     type Term = OrderPlaintext;
@@ -417,7 +876,7 @@ impl Normalize for Order {
         ty: Option<Logical>,
         value: Physical<'_>,
     ) -> Result<OrderPlaintext, NormalizeError> {
-        order(self.0, ty, value)
+        encode(self.target, self.nulls, ty, value)
     }
 }
 
@@ -426,7 +885,8 @@ impl Normalize for Order {
 /// normalizer.
 ///
 /// A null, a boolean or an `undefined` produces no term and does not stop
-/// the walk; a scalar of another kind than `target`, or one outside it,
+/// the walk (for nulls placed first or last, walk with
+/// [`Order::nulls`] through [`vitaminc_normalize::terms_by`]); a scalar of another kind than `target`, or one outside it,
 /// stops it, and so does a value encryption would refuse, for the same
 /// reason at the same path. [`vitaminc_normalize::Terms`] has the rules.
 ///
@@ -451,7 +911,7 @@ pub fn order_terms<P: Encrypt>(
     target: OrderTarget,
     value: P,
 ) -> Result<Vec<Term<OrderPlaintext>>, TermsError> {
-    terms_by(Order(target), value)
+    terms_by(Order::new(target), value)
 }
 
 #[cfg(test)]

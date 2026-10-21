@@ -15,8 +15,8 @@ use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
 use vitaminc_normalize::{domain as equality, normalize};
 use vitaminc_ore::target::{Date, I32};
 use vitaminc_ore::{
-    domain, order, test_support, Context, IntoContext, NormalizeError, OrderEncrypt, OrderError,
-    OrderKeyInit, OrderScheme, OrderTarget, Raw, VARIABLE_WIDTH_MARKER,
+    domain, order, order_with_nulls, test_support, Context, IntoContext, NormalizeError, NullOrder,
+    OrderEncrypt, OrderError, OrderKeyInit, OrderScheme, OrderTarget, Raw, VARIABLE_WIDTH_MARKER,
 };
 use vitaminc_protected::{Controlled, Protected};
 
@@ -168,7 +168,11 @@ fn every_kind_has_an_order_target_or_is_a_named_exception() {
     for target in OrderTarget::ALL {
         assert!(targets.contains(target), "{target:?} has no row");
     }
-    assert_eq!(domain::ALL.len(), 15);
+    assert_eq!(
+        domain::ALL.len(),
+        41,
+        "fifteen plain labels and two policies' thirteen"
+    );
     let scheme = Mock::new(key());
     for kind in &kinds {
         let (below, above) = (
@@ -197,8 +201,28 @@ fn every_kind_has_an_order_target_or_is_a_named_exception() {
             kind.domain
         );
     }
-    // The exceptions: no order term under any target, and the walk skips
-    // them.
+    // Every fixed-width row has a sentinel under each policy, and text and
+    // bytes take none.
+    for kind in &kinds {
+        for nulls in [NullOrder::First, NullOrder::Last] {
+            let null = order_with_nulls(kind.target, nulls, None, Physical::Null);
+            match kind.width {
+                Some(width) => {
+                    let null = null.expect("a fixed-width target places nulls");
+                    assert_eq!(null.bytes().risky_ref().len(), width, "{}", kind.domain);
+                    assert_eq!(Some(null.domain()), kind.target.domain_with_nulls(nulls));
+                }
+                None => assert_eq!(
+                    null.err(),
+                    Some(NormalizeError::NoDomain),
+                    "{}: no null policy",
+                    kind.domain
+                ),
+            }
+        }
+    }
+    // The exceptions: no order term under any target in a space that
+    // places no nulls, and the walk skips them.
     for target in OrderTarget::ALL {
         for v in [Physical::Null, Physical::Bool(false), Physical::Bool(true)] {
             assert_eq!(
@@ -570,7 +594,7 @@ fn a_space_debugs_as_its_target_with_the_rest_masked() {
     let space = mock.target(T::I32).context(("orders", "total"));
     let shown = format!("{space:?}");
     assert!(
-        shown.ends_with(r#"OrderSpace<'_, conformance::common::Mock> { scheme: "***", target: I32, salt: "***", opened: "***" }"#),
+        shown.ends_with(r#"OrderSpace<'_, conformance::common::Mock> { scheme: "***", target: I32, domain: "vitaminc/ore/value/int32/v1", context: "***", salt: "***", opened: "***" }"#),
         "{shown}"
     );
 }

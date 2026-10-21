@@ -199,7 +199,7 @@ assert_eq!(terms[1].normalized.domain(), domain::INT32);
 let (mut equality, mut order) = (Vec::new(), Vec::new());
 scores.visit(Tee(
     Terms::<TermsError>::new(&mut equality),
-    Terms::by(Order(OrderTarget::I32), &mut order),
+    Terms::by(Order::new(OrderTarget::I32), &mut order),
 ))?;
 assert_eq!(equality.len(), order.len());
 # Ok::<(), vitaminc_normalize::TermsError>(())

@@ -81,7 +81,7 @@ fn order_and_equality_terms_come_from_one_walk() {
     Record
         .visit(Tee(
             Terms::<TermsError>::new(&mut equality),
-            Terms::by(Order(OrderTarget::I64), &mut ordered),
+            Terms::by(Order::new(OrderTarget::I64), &mut ordered),
         ))
         .expect("walk");
     // The null has an equality term, and no order term in a space that
@@ -111,7 +111,7 @@ fn order_terms_beside_encryption_see_the_same_walk() {
         .visit(Tee(
             EncryptSink::root("users/v1"),
             Terms::<EncryptError<core::convert::Infallible>, Order>::by(
-                Order(OrderTarget::I32),
+                Order::new(OrderTarget::I32),
                 &mut ordered,
             ),
         ))

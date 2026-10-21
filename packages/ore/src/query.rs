@@ -20,9 +20,9 @@ use vitaminc_aead::Encrypt;
 use vitaminc_normalize::NormalizeError;
 use vitaminc_protected::OpaqueDebug;
 
-use crate::scheme::{OrderError, OrderPlaintext, OrderScheme, OrderSpace, OrderTerm, Scalar};
-use crate::target::{FitsIn, StaticTarget, Supports, Target};
-use crate::OrderTarget;
+use crate::scheme::{same, OrderError, OrderPlaintext, OrderScheme, OrderSpace, OrderTerm, Scalar};
+use crate::target::{FitsIn, Nulls, StaticTarget, Supports, Target};
+use crate::{NullOrder, OrderTarget};
 
 /// An order scheme that makes queries: what a caller makes from the
 /// value it is searching for, to compare against the space's stored
@@ -120,6 +120,12 @@ impl<R, T: Target> QueryTerm<R, T> {
         self.target.runtime()
     }
 
+    /// Where the space the query was made in places nulls, or `None` for
+    /// a space that gives them no term.
+    pub fn nulls(&self) -> Option<NullOrder> {
+        self.target.nulls()
+    }
+
     /// The scheme's own query.
     pub fn raw(&self) -> &R {
         &self.raw
@@ -153,6 +159,11 @@ impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> Or
     /// terms it orders every one of them against the value, so it should
     /// not be persisted or logged (see [`OrderQuery`]).
     ///
+    /// In a space that places nulls, a null (`None::<i32>`, or a plain
+    /// null) is the sentinel's query, as [`null_query`](OrderSpace::null_query)
+    /// makes it; in one that does not, a null is refused with
+    /// [`NormalizeError::NoDomain`].
+    ///
     /// # Errors
     ///
     /// As [`encrypt_checked`](Self::encrypt_checked).
@@ -161,7 +172,7 @@ impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> Or
         value: V,
     ) -> Result<QueryTerm<S::Query, T>, OrderError<S::Error>> {
         self.supported()?;
-        let plaintext = value.visit(Scalar(self.target()))?;
+        let plaintext = value.visit(Scalar::of(self.target))?;
         self.query_opened(&plaintext).map_err(OrderError::Backend)
     }
 
@@ -171,13 +182,14 @@ impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> Or
     /// # Errors
     ///
     /// [`OrderError::Term`] with [`NormalizeError::Mismatch`] if it was
-    /// encoded as another target than this space's, else as
+    /// encoded for another space than this one (another target, or
+    /// another null policy), else as
     /// [`encrypt_query_checked`](Self::encrypt_query_checked).
     pub fn encrypt_query_term(
         &self,
         plaintext: &OrderPlaintext,
     ) -> Result<QueryTerm<S::Query, T>, OrderError<S::Error>> {
-        if plaintext.target() != self.target() {
+        if plaintext.domain() != self.domain() {
             return Err(OrderError::Term(NormalizeError::Mismatch));
         }
         self.supported()?;
@@ -206,8 +218,7 @@ impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> Or
         query: &QueryTerm<S::Query, T>,
         term: &OrderTerm<S::Term, T>,
     ) -> Option<Ordering> {
-        let target = self.target();
-        (query.target() == target && term.target() == target)
+        (same(query.target, self.target) && same(term.target, self.target))
             .then(|| S::compare_query(&query.raw, term.raw()))
             .flatten()
     }
@@ -242,7 +253,7 @@ impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: StaticTarg
         &self,
         value: V,
     ) -> Result<QueryTerm<S::Query, T>, S::Error> {
-        let plaintext = match value.visit(Scalar(T::TARGET)) {
+        let plaintext = match value.visit(Scalar::of(T::default())) {
             Ok(plaintext) => plaintext,
             // As in `encrypt`: `FitsIn` is a sealed table the encoding
             // never refuses, exercised at its extremes by this crate's
@@ -250,5 +261,27 @@ impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: StaticTarg
             Err(refused) => unreachable!("a `FitsIn` value was refused: {refused}"),
         };
         self.query_opened(&plaintext)
+    }
+}
+
+impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: Target>
+    OrderSpace<'_, S, Nulls<T>>
+{
+    /// The query of a null in this space: its sentinel, as a query. The
+    /// same as [`encrypt_query_checked`](OrderSpace::encrypt_query_checked)
+    /// of any null.
+    ///
+    /// A layer answers `IS NULL` with an equality comparison against it,
+    /// and `IS NOT NULL` with the negation. It is also the bound a range
+    /// needs, because SQL comparisons never match a null: under
+    /// nulls-first, `age < 10` is "above the sentinel and below 10", and
+    /// under nulls-last `age > 10` is "above 10 and below the sentinel".
+    /// Building the predicate is the layer's work.
+    ///
+    /// # Errors
+    ///
+    /// The scheme's own failure, and nothing else.
+    pub fn null_query(&self) -> Result<QueryTerm<S::Query, Nulls<T>>, S::Error> {
+        self.query_opened(&self.sentinel())
     }
 }

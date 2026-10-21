@@ -8,7 +8,10 @@
 //! tests, and the checks here fail on the mistakes a scheme can make:
 //! a term that does not depend on the key or the salt (the empty text
 //! and bytes terms once did not), an order the scheme does not keep, a
-//! target refused at runtime that a marker impl vouches for.
+//! target refused at runtime that a marker impl vouches for. Every
+//! fixed-width target is also checked in a nulls-first and a nulls-last
+//! space, so a scheme meets an all-zero and an all-ones plaintext, the
+//! two sentinels.
 //!
 //! ```
 //! # use vitaminc_ore::{Context, OrderPlaintext, OrderScheme};
@@ -54,11 +57,14 @@ use core::cmp::Ordering;
 
 use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
 
-use crate::target::StaticTarget;
-use crate::{order, OrderEncrypt, OrderQuery, OrderSpace, OrderTarget, Supports};
+use crate::target::{Nulls, StaticTarget};
+use crate::{
+    order, order_with_nulls, NullOrder, OrderEncrypt, OrderQuery, OrderSpace, OrderTarget, Supports,
+};
 
 /// A target and two values in order as it, with the empty value where
 /// the target has one.
+#[derive(Clone, Copy)]
 struct Row {
     target: OrderTarget,
     ty: Option<Logical>,
@@ -161,6 +167,18 @@ fn rows() -> Vec<Row> {
 ///   on the salt and the key; for a randomised scheme every term is
 ///   other bytes anyway, and only the comparison above tells.
 ///
+/// Then, for every fixed-width target, in a nulls-first and a nulls-last
+/// space:
+///
+/// - the null's term (the all-zero or the all-ones plaintext) sorts below
+///   or above a value's, and two of them compare equal;
+/// - the null's term depends on the key and the salt, by the same checks
+///   as above;
+/// - a value's term in the space never compares equal to its term in the
+///   plain space of the same target, so the salt binds the null policy.
+///   Under nulls-last a value's plaintext is the same bytes in both, so
+///   only the salt tells them apart.
+///
 /// What this cannot see is the structure of a term: a randomised scheme
 /// that keeps its nonce but drops its blocks for one plaintext still
 /// needs a test of its own that pins its stored format with literal
@@ -240,6 +258,107 @@ pub fn conformance<S: Supports<OrderTarget>>(a: &S, b: &S) {
                 "{name}: a term is the same under another key, so it does not depend on the key, or `a` and `b` hold one key"
             );
         }
+    }
+    for (row, nulls) in placed_rows::<S>() {
+        let name = row
+            .target
+            .domain_with_nulls(nulls)
+            .expect("a fixed-width row");
+        let plain = a.target(row.target).context("conformance");
+        let [space, other_context, other_key] = placed_spaces(a, b, row.target, nulls);
+        let null = |space: &OrderSpace<'_, S, Nulls<OrderTarget>>| {
+            space
+                .encrypt_null()
+                .unwrap_or_else(|e| panic!("{name}: the scheme refused a null's term: {e}"))
+        };
+        let value =
+            order_with_nulls(row.target, nulls, row.ty, row.below).expect("the inventory encodes");
+        let below = space
+            .encrypt_term(&value)
+            .unwrap_or_else(|e| panic!("{name}: the scheme refused a term of its target: {e}"));
+        let (own, again) = (null(&space), null(&space));
+        assert_eq!(
+            space.compare(&below, &own),
+            Some(end(nulls)),
+            "{name}: a null does not sort at its end of the space"
+        );
+        assert_eq!(
+            space.compare(&own, &again),
+            Some(Ordering::Equal),
+            "{name}: two nulls' terms do not compare equal"
+        );
+        assert!(
+            !own.as_bytes().is_empty(),
+            "{name}: a null's term is empty, so it depends on nothing"
+        );
+        let (under_other_context, under_other_key) = (null(&other_context), null(&other_key));
+        assert_ne!(
+            S::compare(own.raw(), under_other_context.raw()),
+            Some(Ordering::Equal),
+            "{name}: a null's term compares equal to one under another context, so it does not depend on the salt"
+        );
+        assert_ne!(
+            S::compare(own.raw(), under_other_key.raw()),
+            Some(Ordering::Equal),
+            "{name}: a null's term compares equal to one under another key, so it does not depend on the key, or `a` and `b` hold one key"
+        );
+        assert_ne!(
+            own.as_bytes(),
+            under_other_context.as_bytes(),
+            "{name}: a null's term is the same under another context, so it does not depend on the salt"
+        );
+        assert_ne!(
+            own.as_bytes(),
+            under_other_key.as_bytes(),
+            "{name}: a null's term is the same under another key, so it does not depend on the key, or `a` and `b` hold one key"
+        );
+        let in_plain = plain
+            .encrypt_term(&order(row.target, row.ty, row.below).expect("the inventory encodes"))
+            .unwrap_or_else(|e| panic!("{name}: the scheme refused a term of its target: {e}"));
+        assert_ne!(
+            S::compare(below.raw(), in_plain.raw()),
+            Some(Ordering::Equal),
+            "{name}: a term compares equal to the plain space's, so the salt does not bind the null policy"
+        );
+    }
+}
+
+/// Every fixed-width row the scheme takes, under each null policy.
+fn placed_rows<S: Supports<OrderTarget>>() -> Vec<(Row, NullOrder)> {
+    rows()
+        .into_iter()
+        .filter(|row| S::supports(row.target) && row.target.width().is_some())
+        .flat_map(|row| [NullOrder::First, NullOrder::Last].map(|nulls| (row, nulls)))
+        .collect()
+}
+
+/// The space that places nulls as `nulls` says, the same under another
+/// context, and the same under the other key.
+fn placed_spaces<'s, S: Supports<OrderTarget>>(
+    a: &'s S,
+    b: &'s S,
+    target: OrderTarget,
+    nulls: NullOrder,
+) -> [OrderSpace<'s, S, Nulls<OrderTarget>>; 3] {
+    let placed = |scheme: &'s S, context: &str| {
+        scheme
+            .target(target)
+            .context(context)
+            .nulls(nulls)
+            .expect("a fixed-width target places nulls")
+    };
+    [
+        placed(a, "conformance"),
+        placed(a, "other"),
+        placed(b, "conformance"),
+    ]
+}
+
+/// How a value's term compares with the null's under `nulls`.
+fn end(nulls: NullOrder) -> Ordering {
+    match nulls {
+        NullOrder::First => Ordering::Greater,
+        NullOrder::Last => Ordering::Less,
     }
 }
 
@@ -328,6 +447,51 @@ pub fn query_conformance<S: OrderQuery + Supports<OrderTarget>>(a: &S, b: &S) {
                 "{name}: a query compares equal to the term under another key, so it does not depend on the key"
             );
         }
+    }
+    for (row, nulls) in placed_rows::<S>() {
+        let name = row
+            .target
+            .domain_with_nulls(nulls)
+            .expect("a fixed-width row");
+        let [space, other_context, other_key] = placed_spaces(a, b, row.target, nulls);
+        let value =
+            order_with_nulls(row.target, nulls, row.ty, row.below).expect("the inventory encodes");
+        let below = space
+            .encrypt_term(&value)
+            .unwrap_or_else(|e| panic!("{name}: the scheme refused a term of its target: {e}"));
+        let null = space
+            .encrypt_null()
+            .unwrap_or_else(|e| panic!("{name}: the scheme refused a null's term: {e}"));
+        let query = |space: &OrderSpace<'_, S, Nulls<OrderTarget>>| {
+            space
+                .null_query()
+                .unwrap_or_else(|e| panic!("{name}: the scheme refused a null's query: {e}"))
+        };
+        let own = query(&space);
+        assert_eq!(
+            space.compare_query(&own, &null),
+            Some(Ordering::Equal),
+            "{name}: the null's query does not compare equal to a null's term"
+        );
+        assert_eq!(
+            space.compare_query(&own, &below),
+            Some(end(nulls).reverse()),
+            "{name}: the null's query does not sort at its end of the space"
+        );
+        assert!(
+            !own.as_bytes().is_empty(),
+            "{name}: a null's query is empty, so it depends on nothing"
+        );
+        assert_ne!(
+            S::compare_query(query(&other_context).raw(), null.raw()),
+            Some(Ordering::Equal),
+            "{name}: a null's query under another context compares equal to the term, so it does not depend on the salt"
+        );
+        assert_ne!(
+            S::compare_query(query(&other_key).raw(), null.raw()),
+            Some(Ordering::Equal),
+            "{name}: a null's query under another key compares equal to the term, so it does not depend on the key"
+        );
     }
 }
 
