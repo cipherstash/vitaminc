@@ -261,4 +261,28 @@ mod tests {
             .unwrap();
         assert_eq!(env.optional("VITAMINC_KMS_TEST_C", "default"), "c");
     }
+    /// The flag names are an interface: `docs/live-tests.md` and the
+    /// `kms-live.yml` workflow set them. The description is what the
+    /// `skipped:` line and the error messages show.
+    #[test]
+    fn each_backend_has_its_documented_flag_and_name() {
+        #[cfg(feature = "vault")]
+        {
+            let backend = Backend::VaultEnterprise;
+            assert_eq!(backend.flag(), "VITAMINC_KMS_LIVE_VAULT_ENTERPRISE");
+            assert_eq!(backend.description(), "Vault Enterprise");
+        }
+        #[cfg(feature = "azure")]
+        {
+            let backend = Backend::AzureManagedHsm;
+            assert_eq!(backend.flag(), "VITAMINC_KMS_LIVE_AZURE");
+            assert_eq!(backend.description(), "Azure Managed HSM");
+        }
+        #[cfg(feature = "gcp")]
+        {
+            let backend = Backend::GoogleCloudKms;
+            assert_eq!(backend.flag(), "VITAMINC_KMS_LIVE_GCP");
+            assert_eq!(backend.description(), "Google Cloud KMS");
+        }
+    }
 }

@@ -79,6 +79,12 @@ exclude_re = [
     # what `Default::default()` returns. No input can tell them apart. Its
     # sibling `RuntimeNulls::target` holds an `OrderTarget` and stays gated.
     "packages/ore/src/target.rs:.*replace Nulls<T, P>::target -> T with Default::default\\(\\)",
+    # Not testable without side effects: `enabled` and `configured`
+    # (vitaminc-kms live.rs, test-only) only pass the process environment to
+    # `resolve`, whose decision is tested on its own. With no live flag set,
+    # as in CI, both return `None` whatever their body is. A test that set a
+    # real flag would also turn on the live tests that run in parallel.
+    "packages/kms/src/live.rs:.*replace (enabled|configured) -> Option<LiveEnv> with None",
 ]
 
 # Property tests (quickcheck) and AEAD round-trips run slower under mutation than
