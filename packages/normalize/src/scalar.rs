@@ -109,7 +109,7 @@ pub enum NormalizeError {
     /// integer or uuid target in an order space that places nulls first
     /// or last. Not reported by the equality normalizer, which gives a
     /// null a domain of its own.
-    #[error("the value is reserved for nulls in the index it was given to")]
+    #[error("the value's code is the one this space keeps for the null")]
     Reserved,
 }
 

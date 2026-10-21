@@ -162,8 +162,10 @@ pub enum NullOrder {
 let space = scheme.context("users.age").target(I32);
 // A space that places nulls.
 let space = scheme.context("users.age").target(I32).nulls(NullOrder::Last);
-// The normalizer for a walk, the same way.
-let found = terms_by(Order::new(OrderTarget::I32).nulls(NullOrder::Last), &value)?;
+// The normalizer for a walk, the same way. On a target chosen while the
+// program runs, `nulls` can refuse (text and bytes take no policy), so it
+// returns a `Result`.
+let found = terms_by(Order::new(OrderTarget::I32).nulls(NullOrder::Last)?, &value)?;
 ```
 
 The policy is fixed when the space is made, like the target and the
@@ -177,8 +179,13 @@ same reason the typed null itself stops at fixed widths: a sealed `None`
 string is the plain null and already shows by its length, so placing it
 in an order would hide nothing, and a variable-width column is not where
 `ORDER BY` with nulls is asked for. On a marker target `nulls` compiles
-only for the fixed-width markers; on `OrderTarget` it returns an error
-for `Text` and `Bytes` rather than make a space every encryption refuses.
+only for the fixed-width markers; on `OrderTarget` it returns
+`NormalizeError::NoDomain` for `Text` and `Bytes` rather than make a
+space every encryption refuses. The policy is part of the space's type
+(`OrderSpace<S, Nulls<T>>`), so a term from a space that places nulls
+does not compile against a plain space's `compare`, and such a space has
+no unchecked `encrypt`: the maximum can be refused, so every value goes
+through `encrypt_checked`.
 
 Without a policy nothing changes: a null, typed or plain, is `NoDomain`,
 a walk skips it and `encrypt_checked` refuses it. With one, a null, typed

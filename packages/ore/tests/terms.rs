@@ -139,7 +139,7 @@ fn a_normalizer_that_places_nulls_gives_the_null_the_sentinel_where_equality_has
     assert_eq!(render(term.path()), ".top");
     assert_eq!(
         err.to_string(),
-        "no order term: the value is reserved for nulls in the index it was given to"
+        "no order term: the value's code is the one this space keeps for the null"
     );
 }
 
