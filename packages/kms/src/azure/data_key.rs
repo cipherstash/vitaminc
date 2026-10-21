@@ -133,9 +133,7 @@ pub enum Error {
 /// version instead.
 ///
 /// Neither `wrapKey` nor `encrypt` has a batch endpoint on Key Vault, so
-/// [`BatchGenerateDataKey`] is N round trips ([`fan_out_generate`]). Wrap
-/// this source in [`PooledDataKeySource`](crate::PooledDataKeySource) to
-/// trade per-value isolation for one round trip per batch.
+/// [`BatchGenerateDataKey`] is N round trips ([`fan_out_generate`]).
 pub struct AzureDataKeySource<const N: usize> {
     client: KeyClient,
     key_name: String,

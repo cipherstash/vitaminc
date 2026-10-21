@@ -14,7 +14,7 @@ This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) f
 The crate defines a family of small, capability-based traits: minting and
 retrieving data keys ([`GenerateDataKey`]/[`RetrieveDataKey`], with batch
 variants [`BatchGenerateDataKey`]/[`BatchRetrieveDataKey`] and the
-[`fan_out_generate`]/[`pooled_key_generate`]/[`dedup_retrieve`] shims for
+[`fan_out_generate`]/[`dedup_retrieve`] shims for
 backends without native batch support), deriving a deterministic per-keyset
 index key ([`load_index_key`]), encrypting/decrypting directly under a
 KMS-held key ([`EncryptWithKey`]/[`DecryptWithKey`]), and MAC/signing
@@ -56,8 +56,8 @@ the same consumer runs on any of them. The pieces built on top:
   `caching`, on by default) memoizes retrieved keys, keyed on the key id
   *and* the binding, so a hit is never a key the backend would have answered
   differently for. Minting is never cached: a cached mint would share one
-  key across values, which is the pooled trade-off by accident rather than
-  by choice. Opt in deliberately: against a backend that audits each
+  key across values, and one shared key cannot carry the binding of each
+  value. Opt in deliberately: against a backend that audits each
   retrieval, a hit skips that audit entry and policy check.
 - `FakeKeyProvider`, behind the `test-support` feature, is an in-memory
   provider whose generate/retrieve round-trips and whose bindings are
@@ -88,13 +88,13 @@ and [`AwsKmsHmac`], which predate the modules, are also at the crate root.
 
 Design notes that apply across vendors:
 
-- **Pooled batches.** AWS, Azure and Google have no batch primitive, so
-  their batch traits fan out one call per key. `PooledDataKeySource<T>`
-  wraps any of them to mint one key per batch instead, trading per-value
-  isolation for one round trip. Vault batches retrieval natively on every
-  edition and generation natively on Vault Enterprise (on Community the
-  adapter falls back to one call per key, see `docs/adr/0003`), always at
-  per-value isolation, so it needs no pooled variant. The token needs
+- **Batches.** AWS, Azure and Google have no batch primitive, so their
+  batch traits fan out one call per key. There is no pooled source that
+  mints one key per batch: one shared key cannot carry the bindings of
+  several values (`docs/adr/0007`). Vault batches retrieval natively on
+  every edition and generation natively on Vault Enterprise (on Community
+  the adapter falls back to one call per key, see `docs/adr/0003`), always
+  at per-value isolation. The token needs
   `update` on `<mount>/datakey/plaintext/<name>` and `<mount>/decrypt/<name>`;
   `update` on `<mount>/datakeys/plaintext/<name>` is optional. If Vault
   answers that path with `403`, the source uses the fan-out until it is

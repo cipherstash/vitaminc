@@ -19,7 +19,7 @@ mod hmac;
 mod mac;
 mod sign;
 
-pub use data_key::{AwsDataKeySource, AwsPooledDataKeySource, Error as AwsDataKeySourceError};
+pub use data_key::{AwsDataKeySource, Error as AwsDataKeySourceError};
 pub use hmac::{AwsKmsHmac, Error as AwsKmsHmacError};
 pub use mac::{AwsMacKey, Error as AwsMacKeyError};
 pub use sign::{AwsSigningKey, Error as AwsSigningKeyError};

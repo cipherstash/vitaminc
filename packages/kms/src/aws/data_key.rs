@@ -5,7 +5,6 @@ use crate::data_key::{
     RetrieveDataKey,
 };
 use crate::key_id::KeyId;
-use crate::pooled::PooledDataKeySource;
 use aws_sdk_kms::{primitives::Blob, Client};
 use thiserror::Error;
 use vitaminc_protected::{Controlled, Protected};
@@ -229,12 +228,6 @@ impl<const N: usize> BatchRetrieveDataKey<N> for AwsDataKeySource<N> {
     }
 }
 
-/// [`AwsDataKeySource`] with pooled key isolation (`KeyIsolation::Pooled`):
-/// one key shared across the whole batch, one round trip per batch. Build
-/// it as `PooledDataKeySource::new(AwsDataKeySource::new(client, key_id))`.
-/// See [`PooledDataKeySource`] for the trade-off; opt in deliberately.
-pub type AwsPooledDataKeySource<const N: usize> = PooledDataKeySource<AwsDataKeySource<N>>;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,32 +314,6 @@ mod tests {
         assert_eq!(keys.len(), 3);
         assert_eq!(generate_rule.num_calls(), 3);
         assert_eq!(AwsDataKeySource::<32>::ISOLATION, KeyIsolation::PerValue);
-    }
-
-    #[tokio::test]
-    async fn pooled_batch_generate_makes_one_call_for_the_whole_batch() {
-        let generate_rule = mock!(Client::generate_data_key).then_output(|| {
-            GenerateDataKeyOutput::builder()
-                .plaintext(Blob::new(fixed_plaintext().to_vec()))
-                .ciphertext_blob(Blob::new(fixed_ciphertext_blob()))
-                .key_id(TEST_KEY_ID)
-                .build()
-        });
-        let client = mock_client!(aws_sdk_kms, RuleMode::MatchAny, &[&generate_rule]);
-        let source: AwsPooledDataKeySource<32> =
-            PooledDataKeySource::new(AwsDataKeySource::new(client, TEST_KEY_ID));
-
-        let keys = source
-            .generate_data_keys(&[Binding::EMPTY; 5])
-            .await
-            .unwrap();
-
-        assert_eq!(keys.len(), 5);
-        assert_eq!(generate_rule.num_calls(), 1);
-        assert_eq!(
-            <AwsPooledDataKeySource<32> as BatchGenerateDataKey<32>>::ISOLATION,
-            KeyIsolation::Pooled
-        );
     }
 
     #[tokio::test]
@@ -468,9 +435,7 @@ mod tests {
                 .build()
         });
         let client = mock_client!(aws_sdk_kms, RuleMode::MatchAny, &[&generate_rule]);
-        let per_value = AwsDataKeySource::<32>::new(client.clone(), TEST_KEY_ID);
-        let pooled: AwsPooledDataKeySource<32> =
-            PooledDataKeySource::new(AwsDataKeySource::new(client, TEST_KEY_ID));
+        let per_value = AwsDataKeySource::<32>::new(client, TEST_KEY_ID);
         let bindings = [
             Binding::from("users/email"),
             Binding::from("users/age"),
@@ -484,15 +449,6 @@ mod tests {
         assert_eq!(
             <AwsDataKeySource<32> as KeyProvider<32>>::ISOLATION,
             KeyIsolation::PerValue
-        );
-
-        // Pooled isolation: one round trip for the whole batch.
-        let keys = pooled.generate_keys(&bindings).await.unwrap();
-        assert_eq!(keys.len(), 3);
-        assert_eq!(generate_rule.num_calls(), 4);
-        assert_eq!(
-            <AwsPooledDataKeySource<32> as KeyProvider<32>>::ISOLATION,
-            KeyIsolation::Pooled
         );
     }
 

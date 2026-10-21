@@ -45,12 +45,6 @@ mod sign;
 mod test_support;
 
 pub use data_key::{Error as GcpDataKeySourceError, GcpDataKeySource};
-
-/// [`GcpDataKeySource`] with pooled key isolation: one key shared across a
-/// batch, one `encrypt` per batch. Build it as
-/// `PooledDataKeySource::new(GcpDataKeySource::new(...))`. See
-/// [`PooledDataKeySource`](crate::PooledDataKeySource) for the trade-off.
-pub type GcpPooledDataKeySource<const N: usize> = crate::PooledDataKeySource<GcpDataKeySource<N>>;
 pub use ed25519::{Error as GcpEd25519KeyError, GcpEd25519Key};
 pub use mac::{Error as GcpMacKeyError, GcpMacKey};
 pub use sign::{Error as GcpSigningKeyError, GcpSigningKey};

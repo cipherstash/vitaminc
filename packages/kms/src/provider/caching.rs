@@ -23,10 +23,10 @@ type CacheKey = (KeyId, Vec<u8>);
 ///
 /// Only retrieval is cached. `generate_keys` passes straight through and
 /// its keys never enter the cache: serving a fresh mint from a cache would
-/// hand one key to more than one value, reintroducing the
+/// hand one key to more than one value, which is the
 /// [`Pooled`](KeyIsolation::Pooled) isolation trade-off as a silent side
-/// effect instead of the explicit choice
-/// [`pooled_key_generate`](crate::pooled_key_generate) makes a caller name.
+/// effect. It would also give up binding, because one key cannot carry the
+/// bindings of several values.
 ///
 /// `max_entries` bounds memory and `ttl` bounds how long a cached key can be
 /// served — not correctness. Nothing here ever needs invalidating for

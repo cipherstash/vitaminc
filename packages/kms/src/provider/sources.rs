@@ -75,21 +75,14 @@ macro_rules! impl_key_provider_for_size {
 impl_key_provider_for_any_n! {
     #[cfg(feature = "aws")]
     crate::aws::AwsDataKeySource<N>,
-    #[cfg(feature = "aws")]
-    crate::aws::AwsPooledDataKeySource<N>,
     #[cfg(feature = "azure")]
     crate::azure::AzureDataKeySource<N>,
-    #[cfg(feature = "azure")]
-    crate::azure::AzurePooledDataKeySource<N>,
     #[cfg(feature = "gcp")]
     crate::gcp::GcpDataKeySource<N>,
-    #[cfg(feature = "gcp")]
-    crate::gcp::GcpPooledDataKeySource<N>,
 }
 
 // Vault accepts only 128-, 256- and 512-bit data keys, so its source seals
-// `N` to those sizes. It batches natively at per-value isolation, so there
-// is no pooled Vault source.
+// `N` to those sizes.
 impl_key_provider_for_size! {
     #[cfg(feature = "vault")]
     crate::vault::VaultDataKeySource<16> => 16,
@@ -118,12 +111,6 @@ mod tests {
                 <crate::aws::AwsDataKeySource<32> as KeyProvider<32>>::BINDING,
                 BindingSupport::Bound
             );
-            // Pooling gives up binding whatever the inner source supports:
-            // one key cannot carry a batch's several bindings.
-            assert_eq!(
-                <crate::aws::AwsPooledDataKeySource<32> as KeyProvider<32>>::BINDING,
-                BindingSupport::Unbound
-            );
         }
         #[cfg(feature = "gcp")]
         {
@@ -132,10 +119,6 @@ mod tests {
                 <crate::gcp::GcpDataKeySource<32> as KeyProvider<32>>::BINDING,
                 BindingSupport::Bound
             );
-            assert_eq!(
-                <crate::gcp::GcpPooledDataKeySource<32> as KeyProvider<32>>::BINDING,
-                BindingSupport::Unbound
-            );
         }
         #[cfg(feature = "azure")]
         {
@@ -143,10 +126,6 @@ mod tests {
             // place for additional authenticated data.
             assert_eq!(
                 <crate::azure::AzureDataKeySource<32> as KeyProvider<32>>::BINDING,
-                BindingSupport::Unbound
-            );
-            assert_eq!(
-                <crate::azure::AzurePooledDataKeySource<32> as KeyProvider<32>>::BINDING,
                 BindingSupport::Unbound
             );
         }

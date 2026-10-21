@@ -211,8 +211,7 @@ impl<const N: usize> RetrieveDataKey<N> for GcpDataKeySource<N> {
 
 impl<const N: usize> BatchGenerateDataKey<N> for GcpDataKeySource<N> {
     /// Google Cloud KMS has no batch primitive, so a batch is N separate
-    /// `encrypt` calls, each over its own freshly generated key. See
-    /// [`crate::PooledDataKeySource`] for the one-key-per-batch trade.
+    /// `encrypt` calls, each over its own freshly generated key.
     const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
 
     async fn generate_data_keys(

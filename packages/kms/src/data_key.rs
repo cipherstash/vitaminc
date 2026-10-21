@@ -178,7 +178,12 @@ pub trait RetrieveDataKey<const N: usize> {
 /// item (`PerValue` — every value access is its own auditable retrieval)
 /// or shares one key across the whole batch (`Pooled` — a compromised
 /// key's blast radius is the batch, not one value). See
-/// [`pooled_key_generate`]/[`fan_out_generate`].
+/// [`fan_out_generate`].
+///
+/// No source in this crate is `Pooled`. One key shared across a batch
+/// cannot carry the batch's several bindings, so a pooled source cannot
+/// bind. ADR 0007 records the replacement: pool the authority to mint
+/// keys, never a data key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyIsolation {
     PerValue,
@@ -217,27 +222,10 @@ pub async fn fan_out_generate<const N: usize, T: GenerateDataKey<N> + Sync>(
     try_join_all(bindings.iter().map(|b| backend.generate_data_key(*b))).await
 }
 
-/// One round trip: mints a single key and clones it `count` times.
-/// WEAKENS per-value isolation — every value in this batch shares one key.
-/// Opt in deliberately; never a default.
-///
-/// Mints under [`Binding::EMPTY`], and so cannot honour a binding: one key
-/// cannot carry the several bindings a batch may ask for, and binding it to
-/// the first would make every other item unretrievable. A pooled source is
-/// therefore [`BindingSupport::Unbound`], and pooling is a choice against
-/// binding as well as against per-value isolation.
-pub async fn pooled_key_generate<const N: usize, T: GenerateDataKey<N>>(
-    backend: &T,
-    count: usize,
-) -> Result<Vec<GeneratedDataKey<N>>, T::Error> {
-    let key = backend.generate_data_key(Binding::EMPTY).await?;
-    Ok((0..count).map(|_| key.clone()).collect())
-}
-
 /// Dedupes by KeyId, retrieves each distinct id once, expands to input
-/// order/length. Degrades to N round trips against a fan-out-generated
-/// batch (ids always distinct); gets the full benefit against a
-/// pooled-key-generated batch (ids repeat) — no separate opt-in needed.
+/// order/length. Against a fan-out-generated batch the ids are always
+/// distinct, so this is N round trips; it saves a round trip only when a
+/// caller presents the same id more than once.
 /// Dedupes on the whole `(KeyId, Binding)` pair, not on the id alone: a
 /// `Bound` backend answers the same id differently under different
 /// bindings — one of them by refusing — so collapsing them would hand one

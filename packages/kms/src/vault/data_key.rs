@@ -73,8 +73,7 @@ fn into_sized<const N: usize>(bytes: Vec<u8>) -> Result<[u8; N], Error> {
 /// after the server has once answered `404 unsupported path` or
 /// `403 permission denied`; see
 /// [`generate_data_keys`](BatchGenerateDataKey::generate_data_keys).
-/// Isolation is per value either way, so there is deliberately no pooled
-/// Vault source (ADR 0003).
+/// Isolation is per value either way (ADR 0003).
 ///
 /// # Token policy
 ///
@@ -278,9 +277,8 @@ impl<const N: usize> BatchGenerateDataKey<N> for VaultDataKeySource<N>
 where
     Self: ValidDataKeySize<N>,
 {
-    /// Every key in a `datakeys` batch is distinct — native batching costs
-    /// nothing in isolation here, unlike the pooled fallback the backends
-    /// without a batch primitive need.
+    /// Every key in a `datakeys` batch is distinct, so native batching
+    /// costs nothing in isolation.
     const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
 
     /// `count` distinct keys: one round trip on Vault Enterprise, `count`
