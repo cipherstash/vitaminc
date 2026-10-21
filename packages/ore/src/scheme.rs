@@ -816,20 +816,40 @@ impl<'s, S: Supports<OrderTarget> + ?Sized> OrderSpace<'s, S, OrderTarget> {
 }
 
 impl<S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<'_, S, Nulls<T>> {
+    /// The space's sentinel, sealed.
+    pub(crate) fn sentinel(&self) -> OrderPlaintext {
+        null_plaintext(self.target.runtime(), self.target.order())
+            .expect("a null policy is only ever set on a fixed-width target")
+    }
+}
+
+impl<S: Supports<T> + Supports<OrderTarget> + ?Sized, T: FixedWidth> OrderSpace<'_, S, Nulls<T>> {
     /// The term of a null in this space: its sentinel, encrypted. The same
     /// as [`encrypt_checked`](OrderSpace::encrypt_checked) of any null.
     ///
     /// # Errors
     ///
-    /// The scheme's own failure, and nothing else.
+    /// The scheme's own failure, and nothing else: the scheme
+    /// [`Supports`] the target.
     pub fn encrypt_null(&self) -> Result<OrderTerm<S::Term, Nulls<T>>, S::Error> {
         self.encrypt_opened(&self.sentinel())
     }
+}
 
-    /// The space's sentinel, sealed.
-    pub(crate) fn sentinel(&self) -> OrderPlaintext {
-        null_plaintext(self.target.runtime(), self.target.order())
-            .expect("a null policy is only ever set on a fixed-width target")
+impl<S: Supports<OrderTarget> + ?Sized> OrderSpace<'_, S, Nulls<OrderTarget>> {
+    /// The term of a null in this space, for a target chosen while the
+    /// program runs: its sentinel, encrypted. The same as
+    /// [`encrypt_checked`](OrderSpace::encrypt_checked) of any null.
+    ///
+    /// # Errors
+    ///
+    /// [`OrderError::Unsupported`] if the scheme does not take this
+    /// target, [`OrderError::Backend`] if the scheme failed.
+    pub fn encrypt_null(
+        &self,
+    ) -> Result<OrderTerm<S::Term, Nulls<OrderTarget>>, OrderError<S::Error>> {
+        self.supported()?;
+        self.encrypt_plaintext(&self.sentinel())
     }
 }
 

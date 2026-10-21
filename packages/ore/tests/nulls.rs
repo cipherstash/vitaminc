@@ -229,6 +229,26 @@ fn a_scheme_takes_a_policy_space_exactly_when_it_takes_the_target() {
         ),
         "the refusal names the policy's label"
     );
+    // The null's own term and query are refused the same way, before the
+    // scheme is handed a plaintext of a width it does not take.
+    assert!(
+        matches!(
+            wide.encrypt_null(),
+            Err(OrderError::Unsupported { scheme: "fixed", domain: d }) if d == domain::INT64_NULLS_LAST
+        ),
+        "the null's term is refused for a target the scheme does not take"
+    );
+    assert!(
+        matches!(
+            wide.null_query(),
+            Err(OrderError::Unsupported { scheme: "fixed", domain: d }) if d == domain::INT64_NULLS_LAST
+        ),
+        "the null's query is refused for a target the scheme does not take"
+    );
+    assert!(
+        ages.null_query().is_ok(),
+        "four bytes is the scheme's width"
+    );
 }
 
 /// `IS NULL` is equality with the null's query; a range in a space that

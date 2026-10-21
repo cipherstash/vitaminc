@@ -21,7 +21,7 @@ use vitaminc_normalize::NormalizeError;
 use vitaminc_protected::OpaqueDebug;
 
 use crate::scheme::{same, OrderError, OrderPlaintext, OrderScheme, OrderSpace, OrderTerm, Scalar};
-use crate::target::{FitsIn, Nulls, StaticTarget, Supports, Target};
+use crate::target::{FitsIn, FixedWidth, Nulls, StaticTarget, Supports, Target};
 use crate::{NullOrder, OrderTarget};
 
 /// An order scheme that makes queries: what a caller makes from the
@@ -264,7 +264,7 @@ impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: StaticTarg
     }
 }
 
-impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: Target>
+impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: FixedWidth>
     OrderSpace<'_, S, Nulls<T>>
 {
     /// The query of a null in this space: its sentinel, as a query. The
@@ -280,8 +280,28 @@ impl<S: OrderQuery + Supports<T> + Supports<OrderTarget> + ?Sized, T: Target>
     ///
     /// # Errors
     ///
-    /// The scheme's own failure, and nothing else.
+    /// The scheme's own failure, and nothing else: the scheme
+    /// [`Supports`] the target.
     pub fn null_query(&self) -> Result<QueryTerm<S::Query, Nulls<T>>, S::Error> {
         self.query_opened(&self.sentinel())
+    }
+}
+
+impl<S: OrderQuery + Supports<OrderTarget> + ?Sized> OrderSpace<'_, S, Nulls<OrderTarget>> {
+    /// The query of a null in this space, for a target chosen while the
+    /// program runs: its sentinel, as a query. As
+    /// [`null_query`](OrderSpace::null_query) on a marker target, which
+    /// says how a layer uses it.
+    ///
+    /// # Errors
+    ///
+    /// [`OrderError::Unsupported`] if the scheme does not take this
+    /// target, [`OrderError::Backend`] if the scheme failed.
+    pub fn null_query(
+        &self,
+    ) -> Result<QueryTerm<S::Query, Nulls<OrderTarget>>, OrderError<S::Error>> {
+        self.supported()?;
+        self.query_opened(&self.sentinel())
+            .map_err(OrderError::Backend)
     }
 }
