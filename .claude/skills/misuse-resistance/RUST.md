@@ -46,19 +46,30 @@ Put the invariant in the type.
 - **Typestate.** Encode protocol steps as types, so the unsafe order does not type-check:
 
 ```rust
-pub struct Unverified(Vec<u8>);
+pub struct VerifyingKey { /* public key */ }
+
+pub struct Unverified { message: Vec<u8>, signature: [u8; 64] }
 pub struct Verified(Vec<u8>);
 
 pub struct BadSignature;
 
 impl Unverified {
-    pub fn verify(self, signature_is_valid: impl FnOnce(&[u8]) -> bool) -> Result<Verified, BadSignature> {
-        if signature_is_valid(&self.0) { Ok(Verified(self.0)) } else { Err(BadSignature) }
+    // The caller supplies a key, never the check: the library owns the
+    // verification, so there is no predicate to stub out with `|_| true`.
+    pub fn verify(self, key: &VerifyingKey) -> Result<Verified, BadSignature> {
+        key.check(&self.message, &self.signature)?;
+        Ok(Verified(self.message))
     }
 }
 
-/// Only verified messages can be processed. There is no path from `Unverified`
-/// to `Verified` except `verify`.
+impl VerifyingKey {
+    fn check(&self, _message: &[u8], _signature: &[u8; 64]) -> Result<(), BadSignature> {
+        todo!("signature verification")
+    }
+}
+
+/// Only verified messages can be processed. `Verified` has a private field, so
+/// the only way to obtain one is a signature check the library performs.
 pub fn process(message: Verified) -> usize { message.0.len() }
 ```
 
