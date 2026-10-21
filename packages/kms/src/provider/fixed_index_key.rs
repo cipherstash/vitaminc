@@ -1,4 +1,4 @@
-use super::{only, Binding, DelegatedError, IndexKeyProvider, KeyProvider};
+use super::{only, Binding, DelegatedError, IndexKeyProvider, KeyProvider, MaybeSync};
 use crate::{GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyReconstruction};
 use vitaminc_protected::Protected;
 
@@ -39,7 +39,7 @@ impl<T> FixedIndexKeySource<T> {
 
 impl<const N: usize, T> IndexKeyProvider<N> for FixedIndexKeySource<T>
 where
-    T: KeyProvider<N> + Sync,
+    T: KeyProvider<N> + MaybeSync,
 {
     type Error = DelegatedError<T::Error>;
 
@@ -55,7 +55,7 @@ where
     }
 }
 
-impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for FixedIndexKeySource<T> {
+impl<const N: usize, T: KeyProvider<N> + MaybeSync> KeyProvider<N> for FixedIndexKeySource<T> {
     type Error = T::Error;
 
     const RECONSTRUCTION: KeyReconstruction = T::RECONSTRUCTION;
@@ -75,6 +75,40 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for FixedIndexKeyS
         self.inner.retrieve_keys(keys).await
     }
 }
+
+/// Compile check for wasm32: a provider that is not `Sync` (it holds a
+/// `RefCell`) still gets both provider traits through this wrapper. The
+/// CI wasm32 build check compiles this item. It fails to compile if a
+/// bound above asks for `Sync` instead of [`MaybeSync`].
+#[cfg(target_arch = "wasm32")]
+const _: fn() = || {
+    struct NotSync(core::cell::RefCell<()>);
+
+    impl KeyProvider<32> for NotSync {
+        type Error = std::convert::Infallible;
+        const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
+        const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
+
+        async fn generate_keys(
+            &self,
+            _bindings: &[Binding<'_>],
+        ) -> Result<Vec<GeneratedDataKey<32>>, Self::Error> {
+            let _borrow = self.0.borrow();
+            Ok(Vec::new())
+        }
+
+        async fn retrieve_keys(
+            &self,
+            _keys: &[(KeyId, Binding<'_>)],
+        ) -> Result<Vec<Protected<[u8; 32]>>, Self::Error> {
+            let _borrow = self.0.borrow();
+            Ok(Vec::new())
+        }
+    }
+
+    fn assert_impl<T: KeyProvider<32> + IndexKeyProvider<32>>() {}
+    assert_impl::<FixedIndexKeySource<NotSync>>();
+};
 
 #[cfg(test)]
 mod tests {

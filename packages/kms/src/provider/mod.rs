@@ -50,7 +50,7 @@ pub use caching::CachingKeyProvider;
 #[cfg(feature = "test-support")]
 pub use fake::{FakeKeyProvider, FakeKeyProviderError};
 pub use fixed_index_key::FixedIndexKeySource;
-pub use maybe_send::MaybeSend;
+pub use maybe_send::{MaybeSend, MaybeSync};
 
 /// Mint and retrieve batches of data keys against one backend key bound at
 /// construction.

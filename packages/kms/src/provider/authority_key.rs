@@ -3,7 +3,7 @@
 
 use super::{
     only, AuthorityKeyCachePolicy, Binding, DelegatedError, DerivesFromAuthorityKey,
-    IndexKeyProvider, KeyProvider,
+    IndexKeyProvider, KeyProvider, MaybeSync,
 };
 use crate::{GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyReconstruction};
 use hmac::digest::{FixedOutput, KeyInit};
@@ -292,7 +292,7 @@ impl<T> AuthorityKeySource<T> {
     }
 }
 
-impl<T: KeyProvider<AUTHORITY_KEY_LEN> + Sync> AuthorityKeySource<T> {
+impl<T: KeyProvider<AUTHORITY_KEY_LEN> + MaybeSync> AuthorityKeySource<T> {
     /// The plaintext authority key for `version`: from the cache, or from
     /// one unwrap by the inner provider that every concurrent miss shares.
     async fn authority_key(
@@ -315,7 +315,7 @@ impl<T: KeyProvider<AUTHORITY_KEY_LEN> + Sync> AuthorityKeySource<T> {
     }
 }
 
-impl<const N: usize, T: KeyProvider<AUTHORITY_KEY_LEN> + Sync> KeyProvider<N>
+impl<const N: usize, T: KeyProvider<AUTHORITY_KEY_LEN> + MaybeSync> KeyProvider<N>
     for AuthorityKeySource<T>
 {
     type Error = AuthorityKeyError<T::Error>;
@@ -394,7 +394,7 @@ impl<const N: usize, T: KeyProvider<AUTHORITY_KEY_LEN> + Sync> KeyProvider<N>
 
 impl<T> DerivesFromAuthorityKey for AuthorityKeySource<T>
 where
-    T: Sync,
+    T: MaybeSync,
 {
     fn cache_policy(&self) -> AuthorityKeyCachePolicy {
         self.policy
@@ -408,7 +408,9 @@ where
 /// Pure delegation, so that the source composes with an inner provider
 /// that also loads the index key, as
 /// [`CachingKeyProvider`](super::CachingKeyProvider) does.
-impl<const N: usize, T: IndexKeyProvider<N> + Sync> IndexKeyProvider<N> for AuthorityKeySource<T> {
+impl<const N: usize, T: IndexKeyProvider<N> + MaybeSync> IndexKeyProvider<N>
+    for AuthorityKeySource<T>
+{
     type Error = T::Error;
 
     async fn load_index_key(&self) -> Result<IndexKeyMaterial<N>, Self::Error> {

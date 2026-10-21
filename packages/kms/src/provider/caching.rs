@@ -1,4 +1,4 @@
-use super::{Binding, DelegatedError, IndexKeyProvider, KeyProvider};
+use super::{Binding, DelegatedError, IndexKeyProvider, KeyProvider, MaybeSync};
 use crate::{GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyReconstruction};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -94,7 +94,7 @@ impl<T, const N: usize> CachingKeyProvider<T, N> {
     }
 }
 
-impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for CachingKeyProvider<T, N> {
+impl<const N: usize, T: KeyProvider<N> + MaybeSync> KeyProvider<N> for CachingKeyProvider<T, N> {
     type Error = DelegatedError<T::Error>;
 
     const RECONSTRUCTION: KeyReconstruction = T::RECONSTRUCTION;
@@ -177,7 +177,7 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for CachingKeyProv
 /// Pure delegation: the index key is one fixed key the inner provider
 /// already answers for, and caching it here would only duplicate whatever
 /// that provider does.
-impl<const N: usize, T: IndexKeyProvider<N> + Sync> IndexKeyProvider<N>
+impl<const N: usize, T: IndexKeyProvider<N> + MaybeSync> IndexKeyProvider<N>
     for CachingKeyProvider<T, N>
 {
     type Error = DelegatedError<T::Error>;
