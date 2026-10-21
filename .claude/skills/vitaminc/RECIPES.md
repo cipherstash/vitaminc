@@ -49,16 +49,17 @@ assert!(tag_matches(&a, &b));
 
 ```rust
 use vitaminc_protected::Protected;
-use vitaminc_random::{Generatable, RandomError, SafeRand, SeedableRng};
+use vitaminc_random::{Generatable, RandomError, SafeRand};
 
 fn random_secret() -> Result<Protected<[u8; 32]>, RandomError> {
     let mut rng = SafeRand::from_entropy()?;
     Protected::random(&mut rng)
 }
 
-/// A uniform index in `0..len`, for choosing from a list.
-fn random_index(rng: &mut SafeRand, len: u32) -> u32 {
-    rng.next_below(len)
+/// A uniform index in `0..len`, for choosing from a list. `next_below` panics on a
+/// zero bound, since `0..0` has nothing to draw, so an empty list is refused here.
+fn random_index(rng: &mut SafeRand, len: u32) -> Option<u32> {
+    (len > 0).then(|| rng.next_below(len))
 }
 ```
 
@@ -66,7 +67,7 @@ Derive `Generatable` to generate a whole struct of random fields:
 
 ```rust
 use vitaminc_protected::Protected;
-use vitaminc_random::{Generatable, RandomError, SafeRand, SeedableRng};
+use vitaminc_random::{Generatable, RandomError, SafeRand};
 
 #[derive(Generatable)]
 struct SessionSecrets {
@@ -81,7 +82,7 @@ fn new_session() -> Result<SessionSecrets, RandomError> {
 
 ## Generate a password
 
-Draw each character uniformly with `next_below`, and build the string inside `Protected::generate` so it is wrapped from the start. Reserve the full capacity first, so the string never reallocates and leaves an unwiped copy behind.
+Draw each character uniformly with `next_below`, and build the string inside `Protected::generate` so it is wrapped from the start. Reserve the full capacity first, so the string never reallocates and leaves an unwiped copy behind. With this 62-character set, 16 characters give about 95 bits; refuse a shorter `len` rather than issue a guessable password.
 
 ```rust
 use vitaminc_protected::{Controlled, Protected};
@@ -89,20 +90,23 @@ use vitaminc_random::SafeRand;
 
 const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
-fn new_password(rng: &mut SafeRand, len: usize) -> Protected<String> {
-    Protected::generate(|| {
+fn new_password(rng: &mut SafeRand, len: usize) -> Option<Protected<String>> {
+    if len < 16 {
+        return None;
+    }
+    Some(Protected::generate(|| {
         let mut password = String::with_capacity(len);
         for _ in 0..len {
             password.push(CHARSET[rng.next_below(CHARSET.len() as u32) as usize] as char);
         }
         password
-    })
+    }))
 }
 ```
 
 ## Encrypt a value or a struct
 
-Build the cipher once at startup from a key that outlives the process (see "Wrap a data key" below), and pass it to every call. A key generated inside the function that encrypts is lost when it returns, and so is everything sealed under it. Encrypt under associated data (AAD) naming the record the ciphertext belongs to. Decryption must present the same AAD, so a ciphertext copied onto another record fails to open. Nonces are generated for you.
+Build the cipher at startup from a key that outlives the process (see "Wrap a data key" below), and pass it to every call. `Aes256Cipher` is not `Sync`, so build one per thread or task from the same key rather than sharing one across threads. A key generated inside the function that encrypts is lost when it returns, and so is everything sealed under it. Encrypt under associated data (AAD) naming the record the ciphertext belongs to. Decryption must present the same AAD, so a ciphertext copied onto another record fails to open. Nonces are generated for you.
 
 ```rust
 use vitaminc_encrypt::{
@@ -118,7 +122,7 @@ struct User {
     date_of_birth: String,
 }
 
-/// Seal a user for storage. `cipher` is built once at startup and shared by every call.
+/// Seal a user for storage. `cipher` is built at startup, one per thread or task.
 fn seal_user(cipher: &Aes256Cipher, user: &User) -> Result<AesCipherText, EncryptError<Unspecified>> {
     encrypt(user, cipher, format!("users/{}", user.id).as_str())
 }
@@ -165,7 +169,9 @@ Wrap each data key under AAD naming its owner. Under one KEK, a wrapped key copi
 use vitaminc_encrypt::{Aes256Cipher, AesCipherText, Key};
 use vitaminc_random::{Generatable, SafeRand};
 
-/// Run at startup, on the root key's bytes fetched from the secret store.
+/// Run at startup, on the root key's bytes fetched from the secret store. `Key` takes a
+/// plain array (it has no constructor from `Protected` yet) and wraps it at once: fetch
+/// straight into this call, and keep no other copy of the bytes.
 fn key_encryption_cipher(root_key: [u8; 32]) -> Result<Aes256Cipher, Box<dyn std::error::Error>> {
     Ok(Aes256Cipher::new(&Key::from(root_key))?)
 }
@@ -204,12 +210,15 @@ async fn email_term(prf: &HmacSha256Prf, email: &str) -> Result<[u8; 32], Box<dy
     Ok(email.prf_with_context(prf, "users/email/exact/v1").await?)
 }
 
-fn index_key_from_secret_store(bytes: Vec<u8>) -> Result<HmacSha256Prf, Box<dyn std::error::Error>> {
+/// Take the key bytes already wrapped, straight from the secret store's read.
+fn index_key_from_secret_store(
+    bytes: Protected<Vec<u8>>,
+) -> Result<HmacSha256Prf, Box<dyn std::error::Error>> {
     // Rejects keys shorter than the minimum length instead of deriving weak terms.
-    Ok(HmacSha256Prf::try_from_bytes(Protected::new(bytes))?)
+    Ok(HmacSha256Prf::try_from_bytes(bytes)?)
 }
 
-let prf = index_key_from_secret_store(vec![7; 32]).unwrap();
+let prf = index_key_from_secret_store(Protected::new(vec![7; 32])).unwrap();
 let a = futures::executor::block_on(email_term(&prf, "ada@example.com")).unwrap();
 let b = futures::executor::block_on(email_term(&prf, "ada@example.com")).unwrap();
 assert_eq!(a, b);
