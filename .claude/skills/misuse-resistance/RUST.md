@@ -4,23 +4,27 @@ Techniques for reaching each rung of the ladder in [SKILL.md](SKILL.md). The sni
 
 ## Rung 1: impossible to get wrong
 
-Remove the parameter. If the library generates the nonce, no caller can reuse one.
+Remove the parameter. If the library generates the nonce, no caller can reuse one. A random 96-bit nonce still bounds how much one key may seal: past about 2³² messages the chance of a repeat is no longer negligible (NIST SP 800-38D), so a long-lived key must be rotated, or the cipher must use a longer nonce (XChaCha20-Poly1305) or a nonce-misuse-resistant mode (AES-GCM-SIV). The caller still cannot get the nonce wrong; the library owns that limit too.
 
 ```rust
 pub struct Ciphertext { nonce: [u8; 12], sealed: Vec<u8> }
 
 pub struct Cipher { /* key, rng */ }
 
+/// Opaque: says that sealing failed, not why.
+pub struct EncryptError;
+
 impl Cipher {
-    // No `nonce` argument: the cipher draws a fresh one per call.
-    pub fn encrypt(&self, plaintext: &[u8], aad: &[u8]) -> Ciphertext {
-        let nonce = self.fresh_nonce();
-        let sealed = self.seal(&nonce, plaintext, aad);
-        Ciphertext { nonce, sealed }
+    // No `nonce` argument: the cipher draws a fresh one per call. Drawing it can
+    // fail (the OS RNG is unavailable), so the call returns an error, not a panic.
+    pub fn encrypt(&self, plaintext: &[u8], aad: &[u8]) -> Result<Ciphertext, EncryptError> {
+        let nonce = self.fresh_nonce()?;
+        let sealed = self.seal(&nonce, plaintext, aad)?;
+        Ok(Ciphertext { nonce, sealed })
     }
 
-    fn fresh_nonce(&self) -> [u8; 12] { todo!("draw from the CSPRNG") }
-    fn seal(&self, _nonce: &[u8; 12], _plaintext: &[u8], _aad: &[u8]) -> Vec<u8> { todo!("AEAD seal") }
+    fn fresh_nonce(&self) -> Result<[u8; 12], EncryptError> { todo!("draw from the CSPRNG") }
+    fn seal(&self, _nonce: &[u8; 12], _plaintext: &[u8], _aad: &[u8]) -> Result<Vec<u8>, EncryptError> { todo!("AEAD seal") }
 }
 ```
 
@@ -42,7 +46,7 @@ impl Algorithm for Aes256Gcm { const NAME: &'static str = "AES-256-GCM"; }
 Put the invariant in the type.
 
 - **Newtypes over raw bytes.** `Key([u8; 32])`, never `&[u8]`. A key, a nonce and a ciphertext should not be interchangeable.
-- **Const generics for lengths.** A `[u8; 32]` argument makes the length check infallible and removes the error path. Take runtime-length material through a separate, fallible `try_from_bytes` that rejects weak inputs.
+- **Fixed-size arrays for fixed lengths.** A `[u8; 32]` argument makes the length check infallible and removes the error path; a const generic `[u8; N]` does the same for a family of sizes. Take runtime-length material through a separate, fallible `try_from_bytes` that rejects weak inputs.
 - **Typestate.** Encode protocol steps as types, so the unsafe order does not type-check:
 
 ```rust
@@ -54,6 +58,11 @@ pub struct Verified(Vec<u8>);
 pub struct BadSignature;
 
 impl Unverified {
+    /// Anyone may hold a message they received; only `verify` turns it into a `Verified`.
+    pub fn new(message: Vec<u8>, signature: [u8; 64]) -> Self {
+        Self { message, signature }
+    }
+
     // The caller supplies a key, never the check: the library owns the
     // verification, so there is no predicate to stub out with `|_| true`.
     pub fn verify(self, key: &VerifyingKey) -> Result<Verified, BadSignature> {
