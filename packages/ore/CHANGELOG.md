@@ -1,4 +1,27 @@
 
+## [0.8.0] - 2026-10-21
+
+### Breaking
+
+- **Breaking:** seal a fixed-width None as a typed null as long as a Some, so ciphertext length no longer shows which values are absent
+- **Breaking:** give every null an equality term so the index no longer shows which values were absent
+- **Breaking:** let an order space place nulls first or last so ORDER BY with nulls can be answered from the index
+
+### Documentation
+
+- explain placing nulls first or last, what a placed null reveals, and how a range must skip the sentinel
+- match the ADR to the shipped API and say what Reserved means in plain words
+- say how terms of the two policies meet, and why a scheme cannot answer for every target
+
+### Features
+
+- make a marker space's null policy part of its type, so two policies' terms cannot meet
+
+### Fixes
+
+- refuse a null's term or query for a runtime target the scheme does not take
+- read every byte when checking for the sentinel so the time does not depend on the value
+
 ## [0.7.0] - 2026-10-20
 
 Order terms stored by 0.6 stay valid and compare with terms made by 0.7: the encodings, the domain labels and the salt do not change. The exceptions are the removed one-byte targets, and a scheme crate that added its own text and bytes marker byte, which it must now drop (see below).

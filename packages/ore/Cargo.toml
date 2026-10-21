@@ -19,16 +19,16 @@ rust-version.workspace = true
 exclude = ["tools/"]
 
 [dependencies]
-vitaminc-aead = { version = "0.7.0", path = "../aead" }
+vitaminc-aead = { version = "0.8.0", path = "../aead" }
 # The typed values callers hold, for the rows of the `FitsIn` and
 # `OwnTarget` tables that name them. Each turns on the matching
 # `vitaminc-aead` feature, which has the `Encrypt` impls.
 chrono = { version = "0.4.44", default-features = false, features = ["std"], optional = true }
 rust_decimal = { version = "1.41", default-features = false, features = ["std"], optional = true }
 uuid = { version = "1", default-features = false, optional = true }
-vitaminc-context = { version = "0.7.0", path = "../context" }
-vitaminc-normalize = { version = "0.7.0", path = "../normalize" }
-vitaminc-protected = { version = "0.7.0", path = "../protected" }
+vitaminc-context = { version = "0.8.0", path = "../context" }
+vitaminc-normalize = { version = "0.8.0", path = "../normalize" }
+vitaminc-protected = { version = "0.8.0", path = "../protected" }
 zeroize = { workspace = true }
 thiserror = { workspace = true }
 

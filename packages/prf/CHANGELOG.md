@@ -1,4 +1,14 @@
 
+## [0.8.0] - 2026-10-21
+
+### Breaking
+
+- **Breaking:** give every null an equality term so the index no longer shows which values were absent
+
+### Documentation
+
+- say a null has an equality term, as the normalizer now gives it one
+
 ## [0.7.0] - 2026-10-20
 
 ## [0.6.1] - 2026-10-18

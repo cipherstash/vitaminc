@@ -1,4 +1,16 @@
 
+## [0.8.0] - 2026-10-21
+
+### Breaking
+
+- **Breaking:** seal a fixed-width None as a typed null as long as a Some, so ciphertext length no longer shows which values are absent
+- **Breaking:** give every null an equality term so the index no longer shows which values were absent
+
+### Documentation
+
+- match the ADR to the shipped API and say what Reserved means in plain words
+- say how terms of the two policies meet, and why a scheme cannot answer for every target
+
 ## [0.7.0] - 2026-10-20
 
 ### Fixes
