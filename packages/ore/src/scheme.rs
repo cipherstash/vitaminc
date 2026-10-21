@@ -846,6 +846,7 @@ impl<S: Supports<OrderTarget> + ?Sized> OrderSpace<'_, S, Nulls<OrderTarget>> {
     ///
     /// [`OrderError::Unsupported`] if the scheme does not take this
     /// target, [`OrderError::Backend`] if the scheme failed.
+    #[allow(clippy::type_complexity)]
     pub fn encrypt_null(
         &self,
     ) -> Result<OrderTerm<S::Term, Nulls<OrderTarget>>, OrderError<S::Error>> {

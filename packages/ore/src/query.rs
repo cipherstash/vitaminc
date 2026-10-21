@@ -297,6 +297,7 @@ impl<S: OrderQuery + Supports<OrderTarget> + ?Sized> OrderSpace<'_, S, Nulls<Ord
     ///
     /// [`OrderError::Unsupported`] if the scheme does not take this
     /// target, [`OrderError::Backend`] if the scheme failed.
+    #[allow(clippy::type_complexity)]
     pub fn null_query(
         &self,
     ) -> Result<QueryTerm<S::Query, Nulls<OrderTarget>>, OrderError<S::Error>> {
