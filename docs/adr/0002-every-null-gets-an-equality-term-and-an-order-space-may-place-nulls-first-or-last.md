@@ -160,11 +160,14 @@ pub enum NullOrder {
 
 // A space with no policy, as today: a null has no term.
 let space = scheme.context("users.age").target(I32);
-// A space that places nulls.
-let space = scheme.context("users.age").target(I32).nulls(NullOrder::Last);
-// The normalizer for a walk, the same way. On a target chosen while the
-// program runs, `nulls` can refuse (text and bytes take no policy), so it
-// returns a `Result`.
+// A space that places nulls. On a marker target the policy is a marker
+// too, `First` or `Last`, each standing for one `NullOrder`.
+let space = scheme.context("users.age").target(I32).nulls(Last);
+// On a target chosen while the program runs, the policy is chosen then,
+// and `nulls` can refuse (text and bytes take no policy), so it returns a
+// `Result`.
+let space = scheme.target(OrderTarget::I32).nulls(NullOrder::Last)?;
+// The normalizer for a walk, the same way.
 let found = terms_by(Order::new(OrderTarget::I32).nulls(NullOrder::Last)?, &value)?;
 ```
 
@@ -181,11 +184,16 @@ in an order would hide nothing, and a variable-width column is not where
 `ORDER BY` with nulls is asked for. On a marker target `nulls` compiles
 only for the fixed-width markers; on `OrderTarget` it returns
 `NormalizeError::NoDomain` for `Text` and `Bytes` rather than make a
-space every encryption refuses. The policy is part of the space's type
-(`OrderSpace<S, Nulls<T>>`), so a term from a space that places nulls
-does not compile against a plain space's `compare`, and such a space has
-no unchecked `encrypt`: the maximum can be refused, so every value goes
-through `encrypt_checked`.
+space every encryption refuses. On a marker target the policy is part of
+the space's type (`OrderSpace<S, Nulls<T, P>>`, with `P` the `First` or
+`Last` marker), so a term from a space that places nulls does not
+compile against a plain space's `compare`, and a nulls-first term does
+not compile against a nulls-last space's. Such a space has no unchecked
+`encrypt`: the maximum can be refused, so every value goes through
+`encrypt_checked`. On an `OrderTarget` the policy is a value
+(`OrderSpace<S, RuntimeNulls>`), because a layer that reads its columns
+from a schema chooses it while the program runs; every term carries it,
+and a term of one policy compares with a term of the other as `None`.
 
 Without a policy nothing changes: a null, typed or plain, is `NoDomain`,
 a walk skips it and `encrypt_checked` refuses it. With one, a null, typed
