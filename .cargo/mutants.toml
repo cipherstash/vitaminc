@@ -85,6 +85,13 @@ exclude_re = [
     # as in CI, both return `None` whatever their body is. A test that set a
     # real flag would also turn on the live tests that run in parallel.
     "packages/kms/src/live.rs:.*replace (enabled|configured) -> Option<LiveEnv> with None",
+    # Not compiled, not untested: `NotSync` (vitaminc-kms
+    # provider/fixed_index_key.rs) is a stub inside a wasm32-only compile
+    # check. The check proves that `FixedIndexKeySource` takes a provider
+    # that is not `Sync` there; its methods never run. The mutation run is
+    # native, so the item is cfg'd out and every mutant of its bodies
+    # survives spuriously. The CI wasm32 build check is what checks it.
+    "packages/kms/src/provider/fixed_index_key.rs:.*<impl KeyProvider<32> for NotSync>",
 ]
 
 # Property tests (quickcheck) and AEAD round-trips run slower under mutation than
