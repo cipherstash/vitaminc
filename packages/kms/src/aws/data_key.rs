@@ -496,20 +496,7 @@ mod tests {
     /// how to bring it up.
     mod localstack {
         use super::*;
-        use crate::aws::testing::localstack_client;
-        use aws_sdk_kms::types::{KeySpec, KeyUsageType};
-
-        async fn encrypt_decrypt_key(client: &Client) -> String {
-            let key = client
-                .create_key()
-                .key_usage(KeyUsageType::EncryptDecrypt)
-                .key_spec(KeySpec::SymmetricDefault)
-                .send()
-                .await
-                .expect("LocalStack CreateKey");
-
-            key.key_metadata().unwrap().key_id().to_owned()
-        }
+        use crate::aws::testing::{encrypt_decrypt_key, localstack_client};
 
         #[tokio::test]
         async fn data_key_generate_and_retrieve_round_trip() {

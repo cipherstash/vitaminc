@@ -71,6 +71,19 @@ the same consumer runs on any of them. The pieces built on top:
   key across values, and one shared key cannot carry the binding of each
   value. Opt in deliberately: against a backend that audits each
   retrieval, a hit skips that audit entry and policy check.
+- `AuthorityKeySource<T>` (feature
+  `authority-keys`, off by default) makes one backend call per cache
+  refresh instead of one per value. It caches an *authority key*, a data
+  key of the inner provider that the deployment provisioned once per
+  version and stores in wrapped form, and derives each value's own key from
+  it with HKDF-SHA256, a fresh 16-byte salt and the value's binding
+  (`docs/adr/0007`, `docs/adr/0008`). Every value still gets its own key.
+  A wrong binding derives a different key rather than an error, and the
+  consumer's AEAD detects it. The trade is the one `CachingKeyProvider`
+  makes, one tier up: the backend authorizes one fetch per refresh, not
+  each value, and the authority key stays in memory for its TTL, which is
+  a security control. A deployment that needs an audit record per value
+  must not use it.
 - `FakeKeyProvider`, behind the `test-support` feature, is an in-memory
   provider whose generate/retrieve round-trips and whose bindings are
   enforced, for consumers' own tests.
@@ -101,9 +114,10 @@ and [`AwsKmsHmac`], which predate the modules, are also at the crate root.
 Design notes that apply across vendors:
 
 - **Batches.** AWS, Azure and Google have no batch primitive, so their
-  batch traits fan out one call per key. There is no pooled source that
-  mints one key per batch: one shared key cannot carry the bindings of
-  several values (`docs/adr/0007`). Vault batches retrieval natively on
+  batch traits fan out one call per key. There is no source that shares
+  one key across a batch: one shared key cannot carry the bindings of
+  several values. For fewer round trips, wrap a source in
+  `AuthorityKeySource` (`docs/adr/0007`). Vault batches retrieval natively on
   every edition and generation natively on Vault Enterprise (on Community
   the adapter falls back to one call per key, see `docs/adr/0003`), always
   at per-value isolation. The token needs `read` on `<mount>/keys/<name>`

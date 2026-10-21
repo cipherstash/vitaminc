@@ -26,7 +26,7 @@ run = [
   # as .github/workflows/crap.yml, so a local run scores the same code as CI.
   # Needs the vitaminc-kms emulators running (packages/kms/docker-compose.yml:
   # LocalStack, Vault and Lowkey Vault), same as `cargo test --all-features`.
-  "cargo llvm-cov --workspace --features vitaminc-aead-frame/serde,vitaminc-kms/azure,vitaminc-kms/gcp,vitaminc-kms/vault,vitaminc-kms/test-support --lcov --output-path {{ config_root }}/target/vitaminc-lcov.info",
+  "cargo llvm-cov --workspace --features vitaminc-aead-frame/serde,vitaminc-kms/azure,vitaminc-kms/gcp,vitaminc-kms/vault,vitaminc-kms/test-support,vitaminc-kms/authority-keys --lcov --output-path {{ config_root }}/target/vitaminc-lcov.info",
   # Score against the threshold + exclude/allow rules in .cargo-crap.toml.
   # `--fail-above` mirrors the CI gate, so a green local run means a green CI run.
   "cargo crap --workspace --lcov {{ config_root }}/target/vitaminc-lcov.info --fail-above",

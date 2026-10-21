@@ -61,15 +61,28 @@ _Avoid_: Group 1 (design-ticket jargon), backend
 **Binding**:
 Bytes a caller attaches to a data key when it is minted and must present
 again to retrieve it. Every data key source binds it into the key
-server-side, so a retrieval under a different binding fails. A backend key
-that cannot bind cannot back a data key source. Stack Encrypt's descriptor
-is a binding.
+server-side, so a retrieval under a different binding fails. An
+authority-key source binds it into the local derivation instead, so a
+retrieval under a different binding gives a different key, which opens
+nothing. A backend key that cannot bind cannot back a data key source.
+Stack Encrypt's descriptor is a binding.
 _Avoid_: context (overloaded), AAD (one vendor's mechanism)
 
 **Data key**:
 Key material that a data key source mints or retrieves for a caller to use
 locally.
 _Avoid_: DEK, plaintext key, wrapped key (for the material itself)
+
+**Authority key**:
+A key that mints many data keys locally. It is the third tier, between the
+backend key and the data key: the backend key wraps it, the client caches it
+in plaintext for a limited time, and each data key is derived from it with a
+per-value salt and the value's binding. It is versioned. The deployment
+stores the wrapped form of each version and says which version is current;
+new data keys use the current version, and older versions stay for
+retrieval. While it is cached, the backend sees one call per cache refresh
+and none per value, so per-value retrieval is not per-value authorization.
+_Avoid_: Branch key (AWS's name for a similar key), master key, wrapping key
 
 **KeyId**:
 The opaque, backend-encoded handle that retrieves one data key. Each
@@ -81,9 +94,9 @@ that names what a client-held handle contains, not the handle.
 **Key custody**:
 Whether a KeyId is the data key in wrapped form, which the caller holds and
 the backend keeps no copy of, or a reference the backend resolves from
-material it holds. Every vendor backend is the first, ZeroKMS the second. A
-client-held handle is the only copy of its key, so losing it loses the data
-the key sealed.
+material it holds. Every vendor backend is the first. ZeroKMS and an
+authority-key source are the second. A client-held handle is the only copy
+of its key, so losing it loses the data the key sealed.
 _Avoid_: Key ownership, key location
 
 **Key reconstruction**:

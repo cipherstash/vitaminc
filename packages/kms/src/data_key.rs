@@ -25,6 +25,12 @@ pub(crate) fn into_sized<const N: usize, E>(
 /// Vault Transit binds the derivation context of a derived key. A source
 /// that cannot bind cannot be a data key source (ADR 0006).
 ///
+/// `provider::AuthorityKeySource` binds
+/// locally: the binding is an input to the derivation of each key. A
+/// retrieval under a different binding there does not fail. It derives a
+/// different key, which opens nothing, and the consumer's AEAD reports
+/// that.
+///
 /// A newtype rather than a bare `&[u8]`, so a plaintext or a key id cannot
 /// be passed where a binding belongs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

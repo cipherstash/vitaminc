@@ -29,6 +29,8 @@ KeyId    = (authority key version, salt)
 
 The caller still gets one distinct key per value, still under its own binding,
 and the backend is called once per cache refresh rather than once per value.
+`AuthorityKeySource` (feature `authority-keys`) implements this. ADR 0008
+records the KDF, the salt and the `KeyId` bytes.
 
 This follows AWS's Hierarchical keyring, which is the same idea: it "derives a
 unique wrapping key from the plaintext branch key and a 16-byte random salt",
@@ -59,12 +61,17 @@ key.
 It also means a pooled source needs no special pleading about binding. It
 binds, like everything else.
 
+The cost is that retrieval cannot detect a wrong binding. It returns a key,
+and that key opens nothing. The consumer's AEAD reports the failure, as it
+does for any wrong key. This is the one source where a wrong binding is not
+an error from the provider, and its documentation says so.
+
 ## Isolation is the wrong axis for this
 
-`KeyIsolation` says whether a batch holds one key per value or one key shared
-across it. A source built this way reports `PerValue`, because that is what it
-delivers. What differs from `fan_out_generate` is not isolation but how many
-round trips it makes and what it keeps in memory.
+`KeyIsolation` said whether a batch holds one key per value or one key shared
+across it. A source built this way delivers one key per value. What differs
+from `fan_out_generate` is not isolation but how many round trips it makes and
+what it keeps in memory.
 
 The constant bundles three properties that only move together because
 clone-one-key makes them:
@@ -77,41 +84,66 @@ clone-one-key makes them:
 
 So the capability belongs on its own trait, not as a third `KeyIsolation`
 variant. A source that can mint locally from cached authority material says so
-by implementing that trait, and cache policy — TTL, entry capacity, refresh
-behaviour under load — is configuration on it. Hanging strategies off
-`KeyIsolation` would re-bundle exactly what this design separates.
+by implementing `DerivesFromAuthorityKey`, and cache policy is configuration
+on it: `AuthorityKeyCachePolicy` holds the TTL and the entry capacity, and the
+refresh behaviour under load is fixed (concurrent misses share one fetch).
+Hanging strategies off `KeyIsolation` would re-bundle exactly what this design
+separates.
 
-Nothing implements `Pooled` now, so the variant should go (CIP-5062). A
-two-valued enum with one unreachable value is worse than no enum.
+Nothing implemented `Pooled`, so the variant went (CIP-5062). That left an
+enum with one value, which tells a reader nothing, so `KeyIsolation` and every
+`ISOLATION` constant went too. No consumer read them.
 
 ## The authority key is a new kind of key
 
-`CONTEXT.md` knows two tiers: a **backend key**, held by the vendor and bound
+`CONTEXT.md` knew two tiers: a **backend key**, held by the vendor and bound
 at construction, and a **data key**, minted or retrieved for the caller. An
-authority key is a third, and it is unlike both: the backend wraps it, the
-client holds it in plaintext while it is cached, and it mints many data keys.
+authority key is a third, between them, and it is unlike both: the backend
+wraps it, the client holds it in plaintext while it is cached, and it mints
+many data keys.
 
-That raises questions this ADR does not answer, because they need the
-implementation to answer honestly:
+**What it is.** An authority key is a 32-byte data key of an ordinary inner
+`KeyProvider` (any vendor source, or ZeroKMS), minted under a fixed binding
+that names its version (ADR 0008). So no backend needs a new primitive, and
+the backend binds and authorizes the authority key as it does any data key.
 
-* where the store lives, and whether it is ours or the deployment's;
-* how versioning and rotation work, and what a `KeyId` naming a retired
-  version does;
-* whether an authority key is per backend key, per tenant, or per keyset.
+**Where the store lives.** In the deployment's configuration, not in this
+crate and not in a service. `AuthorityKeySource::provision` mints a version
+once and returns its wrapped id. The deployment persists that id, exactly as
+it persists the index key id of a `FixedIndexKeySource`, and builds an
+`AuthorityKeys` from its configuration: one wrapped id per version, and the
+version that is current. We do not build a key store like AWS's DynamoDB
+branch-key store. A map that the deployment already knows how to keep is
+enough, and a service would be one more thing to secure.
 
-The glossary term lands with the implementation rather than here, so
-`CONTEXT.md` keeps describing what the crate actually does.
+**Versioning and rotation.** New data keys use the current version, and each
+`KeyId` names the version it was derived under. To rotate, the deployment
+provisions a new version, adds it, and makes it current. Earlier versions
+stay for retrieval. A `KeyId` that names a version the deployment does not
+hold is a typed error, `UnknownVersion`. A version can go only when no
+stored `KeyId` names it. Rotation of the backend key under an authority key
+is the backend's business, as for any wrapped data key.
+
+**Scope.** One `AuthorityKeySource` holds the authority keys of one inner
+provider, which is bound to one backend key. Per tenant or per keyset is a
+deployment choice: build one source per tenant, each with its own
+`AuthorityKeys`. The crate does not decide it.
 
 ## This is the first source whose KeyId is a descriptor
 
 `KeyCustody` (CIP-4980) says whether a `KeyId` is wrapped key material or a
-reference the backend resolves. Every source in the
-crate today is `ClientHeld`: the bytes are the data key under encryption.
+reference the backend resolves. Every vendor source in the
+crate is `ClientHeld`: the bytes are the data key under encryption.
 
 An authority-key source is the first `BackendHeld` one. Its `KeyId` is
 `(version, salt)` — a descriptor that carries no key material and is useless
-without the authority key, which the backend still holds wrapped. Losing the
+without the authority key, which only the backend can unwrap. Losing the
 `KeyId` loses the value; losing the cache costs a round trip and nothing more.
+The storage obligation moves to the authority key: losing the wrapped id of a
+version loses every value derived under it.
+
+Its `KeyReconstruction` is the inner provider's. A data key is recoverable
+exactly when its authority key is, and the inner provider decides that.
 
 ## Auditing and material in memory
 
@@ -136,6 +168,14 @@ normal path. Two consequences follow, and both are deliberate:
   memory one — which is the opposite of how `CachingKeyProvider` documents its
   own bounds.
 
+Both are now stated where a reader finds them: on `AuthorityKeySource`, on
+`DerivesFromAuthorityKey`, on `AuthorityKeyCachePolicy`, and on
+`CachingKeyProvider`, which points to the authority-key source as the same
+trade one tier up. The cached authority key is `Protected` and zeroizes when
+it leaves the cache. The cache has no background task, so an expired key
+leaves memory at the next maintenance, or when the deployment calls
+`purge_expired`, as for `CachingKeyProvider`.
+
 ## Consequences
 
 * `pooled_key_generate`, `PooledDataKeySource`, `AwsPooledDataKeySource`,
@@ -143,8 +183,11 @@ normal path. Two consequences follow, and both are deliberate:
   Nothing replaces them one-for-one: callers that wanted fewer round trips get an authority-key
   source, and callers that wanted per-value isolation already had
   `fan_out_generate`.
-* `KeyIsolation` loses `Pooled`, and probably loses its reason to exist.
+* `KeyIsolation` and its `ISOLATION` constants are removed (CIP-5062).
 * A backend can support this only if it can wrap and unwrap a key we hold in
-  plaintext. All four vendors can.
-* The KDF, the salt width and the `KeyId` encoding become a wire format, and
-  need the same canonical treatment as ADR 0002 gave signatures.
+  plaintext. All four vendors can, because the authority key is one of their
+  own data keys.
+* The KDF, the salt width and the `KeyId` encoding are a wire format. ADR 0008
+  records them, with known-answer vectors.
+* An empty batch makes no backend call, and does not fetch or refresh an
+  authority key.

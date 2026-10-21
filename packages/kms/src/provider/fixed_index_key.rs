@@ -1,4 +1,4 @@
-use super::{Binding, DelegatedError, IndexKeyProvider, KeyProvider};
+use super::{only, Binding, DelegatedError, IndexKeyProvider, KeyProvider};
 use crate::{GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyReconstruction};
 use vitaminc_protected::Protected;
 
@@ -46,18 +46,12 @@ where
     async fn load_index_key(&self) -> Result<IndexKeyMaterial<N>, Self::Error> {
         // retrieve_keys returns exactly one entry per input, in order: a
         // single-element slice in, the one result out.
-        let mut keys = self
+        let keys = self
             .inner
             .retrieve_keys(&[(self.index_key_id.clone(), Binding::EMPTY)])
             .await
             .map_err(DelegatedError::Inner)?;
-        match (keys.pop(), keys.len()) {
-            (Some(key), 0) => Ok(IndexKeyMaterial(key)),
-            (key, rest) => Err(DelegatedError::BatchLength {
-                expected: 1,
-                received: rest + usize::from(key.is_some()),
-            }),
-        }
+        only(keys).map(IndexKeyMaterial)
     }
 }
 

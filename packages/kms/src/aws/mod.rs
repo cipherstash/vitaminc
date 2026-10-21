@@ -25,8 +25,9 @@ pub use mac::{AwsMacKey, Error as AwsMacKeyError};
 pub use sign::{AwsSigningKey, Error as AwsSigningKeyError};
 
 #[cfg(test)]
-mod testing {
+pub(crate) mod testing {
     use aws_config::{BehaviorVersion, Region};
+    use aws_sdk_kms::types::{KeySpec, KeyUsageType};
     use aws_sdk_kms::Client;
 
     /// A client pointed at LocalStack on `localhost:4566` with throwaway
@@ -44,5 +45,18 @@ mod testing {
                 .endpoint_url("http://localhost:4566")
                 .build(),
         )
+    }
+
+    /// A new symmetric `ENCRYPT_DECRYPT` key in LocalStack, by key id.
+    pub async fn encrypt_decrypt_key(client: &Client) -> String {
+        let key = client
+            .create_key()
+            .key_usage(KeyUsageType::EncryptDecrypt)
+            .key_spec(KeySpec::SymmetricDefault)
+            .send()
+            .await
+            .expect("LocalStack CreateKey");
+
+        key.key_metadata().unwrap().key_id().to_owned()
     }
 }

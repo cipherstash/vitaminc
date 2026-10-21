@@ -5065,6 +5065,7 @@ dependencies = [
  "futures",
  "google-cloud-gax",
  "google-cloud-kms-v1",
+ "hmac",
  "httpmock",
  "mockall",
  "moka",

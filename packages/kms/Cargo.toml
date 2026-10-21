@@ -27,6 +27,18 @@ moka = { version = "0.12.16", features = ["future"], optional = true }
 thiserror = { workspace = true }
 zeroize = { workspace = true }
 
+# --- `authority-keys` feature ------------------------------------------------
+# `provider::AuthorityKeySource` derives each data key from a cached authority
+# key with HKDF-SHA256 (ADR 0008). No crate in this workspace exposes HKDF:
+# `vitaminc-hmac` is a structured PRF with its own encoding and a fixed
+# 32-byte output, and is not a KDF. The source builds HKDF on `hmac` 0.13
+# itself (RFC 5869 is two HMAC calls), not on the `hkdf` crate, because that
+# crate keeps the PRK and each expand block in arrays that it drops without
+# wiping; here each one is `Protected`. The feature turns on `zeroize` for
+# `hmac` and `sha2`, as `vitaminc-hmac` does, so the HMAC states that take in
+# the authority key and the PRK wipe on drop.
+hmac = { version = "0.13.0", optional = true }
+
 # --- `aws` feature -----------------------------------------------------------
 aws-sdk-kms = { version = "1.109.0", optional = true }
 
@@ -133,6 +145,18 @@ default = ["aws", "caching"]
 # must be a string.
 aws = ["dep:aws-sdk-kms", "dep:base64"]
 caching = ["dep:moka"]
+# `provider::AuthorityKeySource`: one backend call per cache refresh, and one
+# key per value derived locally (ADR 0007, ADR 0008). Not a default: a cached
+# authority key changes the auditing and in-memory stance of a deployment,
+# so a deployment opts in.
+authority-keys = [
+    "caching",
+    "dep:vitaminc-random",
+    "dep:hmac",
+    "hmac/zeroize",
+    "dep:sha2",
+    "sha2/zeroize",
+]
 # `provider::FakeKeyProvider`, an in-memory key provider for consumers'
 # tests (Stack Encrypt, its WASI guest). Not a default: it needs a CSPRNG.
 test-support = ["dep:vitaminc-random"]

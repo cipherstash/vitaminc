@@ -38,10 +38,21 @@ type CacheKey = (KeyId, Vec<u8>);
 /// schedule.
 ///
 /// **Opt in deliberately; never a default.** Against a backend that
-/// audits each retrieval, such as ZeroKMS, every retrieval is an authorization decision the backend logs: a hit skips
-/// that round trip, and with it the audit entry and the policy check for
-/// that access. A deployment that relies on per-retrieval auditing must
-/// not wrap its provider in this.
+/// audits each retrieval, such as ZeroKMS, every retrieval is an
+/// authorization decision the backend logs: a hit skips that round trip,
+/// and with it the audit entry and the policy check for that access. A
+/// deployment that relies on per-retrieval auditing must not wrap its
+/// provider in this.
+///
+/// `AuthorityKeySource` (feature
+/// `authority-keys`) makes the same trade one tier up, and makes it the
+/// normal path: it caches one authority key and derives every value's key
+/// from it, so the backend sees one call per refresh and none per value.
+/// There, `ttl` is a security control, because a cached authority key can
+/// derive any data key under its version (ADR 0007). Here, a cached entry
+/// is one data key that the caller already retrieved, so `max_entries`
+/// and `ttl` bound memory and staleness. The auditing caveat above applies
+/// to both.
 pub struct CachingKeyProvider<T, const N: usize> {
     inner: T,
     cache: moka::future::Cache<CacheKey, Protected<[u8; N]>>,
