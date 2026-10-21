@@ -126,6 +126,52 @@ mod tests {
     const INTEGRATION_ADDRESS: &str = "http://localhost:8200";
     const INTEGRATION_TOKEN: &str = "root";
 
+    /// The address and root token of the Vault Enterprise server, if
+    /// [`Backend::VaultEnterprise`](crate::live::Backend::VaultEnterprise)
+    /// is on. The defaults are the `vault-enterprise` service of
+    /// `packages/kms/docker-compose.yml`.
+    pub(crate) const ENTERPRISE_ADDR: &str = "VITAMINC_KMS_VAULT_ENTERPRISE_ADDR";
+    pub(crate) const ENTERPRISE_TOKEN: &str = "VITAMINC_KMS_VAULT_ENTERPRISE_TOKEN";
+    const ENTERPRISE_DEFAULT_ADDR: &str = "http://localhost:8210";
+    const ENTERPRISE_DEFAULT_TOKEN: &str = "root";
+
+    /// The Vault every integration test talks to, as `(address, token)`.
+    ///
+    /// When `VITAMINC_KMS_LIVE_VAULT_ENTERPRISE` is on, this is the Vault
+    /// Enterprise server, so the whole integration suite runs against
+    /// Enterprise as well as the Enterprise-only tests. Otherwise it is
+    /// the dev-mode Community Vault.
+    fn integration_server() -> (String, String) {
+        use crate::live::{configured, Backend};
+
+        match configured(
+            Backend::VaultEnterprise,
+            &[],
+            &[ENTERPRISE_ADDR, ENTERPRISE_TOKEN],
+        ) {
+            Some(env) => (
+                env.optional(ENTERPRISE_ADDR, ENTERPRISE_DEFAULT_ADDR)
+                    .to_owned(),
+                env.optional(ENTERPRISE_TOKEN, ENTERPRISE_DEFAULT_TOKEN)
+                    .to_owned(),
+            ),
+            None => (INTEGRATION_ADDRESS.to_owned(), INTEGRATION_TOKEN.to_owned()),
+        }
+    }
+
+    /// A client for [`integration_server`] with `token`.
+    fn integration_client(token: String) -> vaultrs::client::VaultClient {
+        let (address, _) = integration_server();
+        vaultrs::client::VaultClient::new(
+            VaultClientSettingsBuilder::default()
+                .address(address)
+                .token(token)
+                .build()
+                .unwrap(),
+        )
+        .unwrap()
+    }
+
     /// Build a Transit key of `key_type` under a name no other test uses,
     /// enabling the Transit engine first if it is not already mounted.
     ///
@@ -152,14 +198,8 @@ mod tests {
         use vaultrs::api::transit::requests::CreateKeyRequest;
         use vaultrs::error::ClientError;
 
-        let client = vaultrs::client::VaultClient::new(
-            VaultClientSettingsBuilder::default()
-                .address(INTEGRATION_ADDRESS)
-                .token(INTEGRATION_TOKEN)
-                .build()
-                .unwrap(),
-        )
-        .unwrap();
+        let (address, token) = integration_server();
+        let client = integration_client(token);
 
         // Idempotent: concurrent tests race to enable the same mount and
         // all but one of them lose.
@@ -167,7 +207,7 @@ mod tests {
             Ok(()) => {}
             Err(ClientError::APIError { errors, .. })
                 if errors.iter().any(|e| e.contains("path is already in use")) => {}
-            Err(e) => panic!("could not enable the transit engine at {INTEGRATION_ADDRESS}: {e}"),
+            Err(e) => panic!("could not enable the transit engine at {address}: {e}"),
         }
 
         let name = unique_key_name();
@@ -180,8 +220,8 @@ mod tests {
         (client, name)
     }
 
-    /// A client for the dev-mode Vault whose token has only `policy`, made
-    /// with the root `client` that [`transit_key`] returns.
+    /// A client for the integration Vault whose token has only `policy`,
+    /// made with the root `client` that [`transit_key`] returns.
     pub(crate) async fn least_privilege_client(
         client: &vaultrs::client::VaultClient,
         policy: &str,
@@ -200,14 +240,7 @@ mod tests {
             .unwrap()
             .client_token;
 
-        vaultrs::client::VaultClient::new(
-            VaultClientSettingsBuilder::default()
-                .address(INTEGRATION_ADDRESS)
-                .token(token)
-                .build()
-                .unwrap(),
-        )
-        .unwrap()
+        integration_client(token)
     }
 
     fn unique_key_name() -> String {

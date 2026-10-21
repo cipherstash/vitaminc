@@ -1328,3 +1328,230 @@ mod integration_tests {
         );
     }
 }
+
+/// Round trips against Vault Enterprise, which has the native batch path
+/// that the Community server of the other tests does not. Each test skips
+/// unless `VITAMINC_KMS_LIVE_VAULT_ENTERPRISE` is on; see
+/// `packages/kms/docs/live-tests.md` (CIP-4071).
+///
+/// The tests prove which path a batch took with token policies, not with
+/// a hook in the adapter. A token that may call only the plural
+/// `datakeys` path can mint a batch only natively, because the fan-out
+/// would get `403`. A token that may call only the singular `datakey`
+/// path, and that leaves `native_batch_unsupported` unset, never probed
+/// the plural path, because that probe would have got `403` and set it.
+#[cfg(test)]
+mod enterprise_tests {
+    use super::tests::{bound, TEST_BINDING};
+    use super::*;
+    use crate::live::{enabled, Backend};
+    use crate::vault::tests::{
+        derived_transit_key, least_privilege_client, DEFAULT_MOUNT, ENTERPRISE_ADDR,
+        ENTERPRISE_TOKEN,
+    };
+    use vaultrs::api::transit::KeyType;
+
+    /// `None`, after one `skipped:` line, unless Vault Enterprise is on.
+    fn enterprise(test: &str) -> Option<()> {
+        enabled(
+            Backend::VaultEnterprise,
+            test,
+            &[],
+            &[ENTERPRISE_ADDR, ENTERPRISE_TOKEN],
+        )
+        .map(|_| ())
+    }
+
+    /// A source over a new derived key, whose token has `read` on the key,
+    /// `update` on `decrypt`, and `update` on `<path>/plaintext/<name>` for
+    /// each path in `generate`.
+    async fn source_with_generate_paths(generate: &[&str]) -> VaultDataKeySource<32> {
+        let (root, name) = derived_transit_key(KeyType::Aes256Gcm96).await;
+        let mut policy = format!(
+            r#"
+            path "{DEFAULT_MOUNT}/keys/{name}" {{ capabilities = ["read"] }}
+            path "{DEFAULT_MOUNT}/decrypt/{name}" {{ capabilities = ["update"] }}
+            "#
+        );
+        for path in generate {
+            policy.push_str(&format!(
+                "path \"{DEFAULT_MOUNT}/{path}/plaintext/{name}\" {{ capabilities = [\"update\"] }}\n"
+            ));
+        }
+        let client = least_privilege_client(&root, &policy).await;
+        VaultDataKeySource::new(client, DEFAULT_MOUNT, name)
+            .await
+            .unwrap()
+    }
+
+    /// Every pair of keys is different key material.
+    fn assert_distinct(keys: &[GeneratedDataKey<32>]) {
+        let material: Vec<[u8; 32]> = keys
+            .iter()
+            .map(|k| k.plaintext.clone().risky_unwrap())
+            .collect();
+        for (i, a) in material.iter().enumerate() {
+            for b in &material[i + 1..] {
+                assert_ne!(a, b, "a batch must not repeat key material");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_batch_under_one_binding_takes_the_native_path() {
+        let Some(()) = enterprise("a_batch_under_one_binding_takes_the_native_path") else {
+            return;
+        };
+        // No `datakey` (singular) in the policy, so the fan-out cannot
+        // mint even one key.
+        let source = source_with_generate_paths(&["datakeys"]).await;
+
+        let keys = source.generate_data_keys(&[TEST_BINDING; 5]).await.unwrap();
+
+        assert_eq!(keys.len(), 5);
+        assert!(!source.native_batch_unsupported.load(Ordering::Relaxed));
+        assert!(keys
+            .iter()
+            .all(|k| k.key_id.as_bytes().starts_with(b"vault:v1:")));
+        assert_distinct(&keys);
+
+        // The `key_pairs` of the native response decrypt, in order, under
+        // the binding of the batch.
+        let ids: Vec<KeyId> = keys.iter().map(|k| k.key_id.clone()).collect();
+        let retrieved = source.retrieve_data_keys(&bound(&ids)).await.unwrap();
+        for (key, back) in keys.iter().zip(&retrieved) {
+            assert_eq!(
+                back.clone().risky_unwrap(),
+                key.plaintext.clone().risky_unwrap()
+            );
+        }
+
+        // The token cannot reach the singular path. This checks that the
+        // policy above proves what it says.
+        assert!(source.generate_data_key(TEST_BINDING).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_native_batch_is_bound_to_its_binding() {
+        let Some(()) = enterprise("a_native_batch_is_bound_to_its_binding") else {
+            return;
+        };
+        let source = source_with_generate_paths(&["datakeys"]).await;
+
+        let keys = source.generate_data_keys(&[TEST_BINDING; 2]).await.unwrap();
+        assert!(!source.native_batch_unsupported.load(Ordering::Relaxed));
+
+        for binding in [Binding::from("users/name"), Binding::EMPTY] {
+            let err = source
+                .retrieve_data_key(&keys[0].key_id, binding)
+                .await
+                .unwrap_err();
+            assert!(matches!(err, Error::Vault(_)), "{err}");
+        }
+        let back = source
+            .retrieve_data_key(&keys[1].key_id, TEST_BINDING)
+            .await
+            .unwrap();
+        assert_eq!(
+            back.risky_unwrap(),
+            keys[1].plaintext.clone().risky_unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_batch_under_an_empty_binding_takes_the_native_path() {
+        let Some(()) = enterprise("a_batch_under_an_empty_binding_takes_the_native_path") else {
+            return;
+        };
+        let source = source_with_generate_paths(&["datakeys"]).await;
+
+        let keys = source
+            .generate_data_keys(&[Binding::EMPTY; 3])
+            .await
+            .unwrap();
+
+        assert_eq!(keys.len(), 3);
+        assert!(!source.native_batch_unsupported.load(Ordering::Relaxed));
+        let back = source
+            .retrieve_data_key(&keys[2].key_id, Binding::EMPTY)
+            .await
+            .unwrap();
+        assert_eq!(
+            back.risky_unwrap(),
+            keys[2].plaintext.clone().risky_unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_batch_with_mixed_bindings_fans_out_on_enterprise() {
+        let Some(()) = enterprise("a_batch_with_mixed_bindings_fans_out_on_enterprise") else {
+            return;
+        };
+        // No `datakeys` (plural) in the policy: a probe of it would get
+        // `403` and set `native_batch_unsupported`.
+        let source = source_with_generate_paths(&["datakey"]).await;
+        let bindings = [
+            Binding::from("users/email"),
+            Binding::from("users/name"),
+            Binding::from("users/email"),
+        ];
+
+        let keys = source.generate_data_keys(&bindings).await.unwrap();
+
+        assert_eq!(keys.len(), 3);
+        assert!(
+            !source.native_batch_unsupported.load(Ordering::Relaxed),
+            "a mixed batch must not probe the native path"
+        );
+        assert_distinct(&keys);
+
+        let pairs: Vec<(KeyId, Binding<'_>)> = keys
+            .iter()
+            .map(|k| k.key_id.clone())
+            .zip(bindings)
+            .collect();
+        let retrieved = source.retrieve_data_keys(&pairs).await.unwrap();
+        assert_eq!(
+            retrieved[1].clone().risky_unwrap(),
+            keys[1].plaintext.clone().risky_unwrap()
+        );
+
+        // Each key is bound to its own binding, not to the first one.
+        let err = source
+            .retrieve_data_key(&keys[1].key_id, bindings[0])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::Vault(_)), "{err}");
+    }
+
+    /// The root token may call both paths. A batch under one binding is
+    /// native, and a later mixed batch on the same source fans out.
+    #[tokio::test]
+    async fn one_source_takes_both_paths_as_the_bindings_need() {
+        let Some(()) = enterprise("one_source_takes_both_paths_as_the_bindings_need") else {
+            return;
+        };
+        let (client, name) = derived_transit_key(KeyType::Aes256Gcm96).await;
+        let source = VaultDataKeySource::<32>::new(client, DEFAULT_MOUNT, name)
+            .await
+            .unwrap();
+
+        let same = source.generate_data_keys(&[TEST_BINDING; 4]).await.unwrap();
+        let mixed = source
+            .generate_data_keys(&[TEST_BINDING, Binding::from("users/name")])
+            .await
+            .unwrap();
+
+        assert_eq!(same.len(), 4);
+        assert_eq!(mixed.len(), 2);
+        assert!(!source.native_batch_unsupported.load(Ordering::Relaxed));
+        let back = source
+            .retrieve_data_key(&mixed[1].key_id, Binding::from("users/name"))
+            .await
+            .unwrap();
+        assert_eq!(
+            back.risky_unwrap(),
+            mixed[1].plaintext.clone().risky_unwrap()
+        );
+    }
+}

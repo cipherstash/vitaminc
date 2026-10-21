@@ -12,6 +12,11 @@ mod sign;
 #[cfg(feature = "canonical-encoding")]
 pub(crate) mod encoding;
 
+/// The opt-in switch for the tests against real Vault Enterprise, Azure
+/// Managed HSM and Google Cloud KMS.
+#[cfg(all(test, any(feature = "azure", feature = "gcp", feature = "vault")))]
+pub(crate) mod live;
+
 #[cfg(feature = "aws")]
 pub mod aws;
 #[cfg(feature = "azure")]

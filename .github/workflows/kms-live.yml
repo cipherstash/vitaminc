@@ -1,0 +1,213 @@
+name: "KMS live backends"
+
+# Runs the opt-in tests of vitaminc-kms against real Vault Enterprise,
+# Azure Managed HSM and Google Cloud KMS (CIP-4071, CIP-4072, CIP-4073).
+# See packages/kms/docs/live-tests.md for the resources, roles, secrets
+# and variables each job needs.
+#
+# Triggers: by hand and once a week, never on a pull request. A pull
+# request from a fork gets no secrets, so the jobs would only skip; a
+# pull request from this repository would spend cloud quota and use the
+# cloud identities on code that nobody has reviewed yet. The weekly run
+# finds drift in the vendor services; run it by hand before you merge a
+# change to an adapter.
+on:
+  workflow_dispatch:
+  schedule:
+    # 04:23 UTC on Mondays: off the hour, when the runners are less busy.
+    - cron: "23 4 * * 1"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+concurrency:
+  group: kms-live
+  cancel-in-progress: false
+
+env:
+  # Pinned to the toolchain of the `test` job in test.yml.
+  RUST_TOOLCHAIN: 1.96.0
+
+jobs:
+  # `if:` cannot read `secrets`, so this job reads them into outputs that
+  # the backend jobs can read. A backend whose secrets and variables are
+  # not all there is skipped, and the summary says why.
+  gate:
+    runs-on: ubuntu-latest
+    name: "Which backends are configured"
+    outputs:
+      vault: ${{ steps.check.outputs.vault }}
+      azure: ${{ steps.check.outputs.azure }}
+      gcp: ${{ steps.check.outputs.gcp }}
+    steps:
+      - id: check
+        env:
+          VAULT_LICENSE: ${{ secrets.VAULT_LICENSE }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_HSM_URL: ${{ vars.VITAMINC_KMS_AZURE_HSM_URL }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_PROJECT: ${{ vars.VITAMINC_KMS_GCP_PROJECT }}
+          GCP_LOCATION: ${{ vars.VITAMINC_KMS_GCP_LOCATION }}
+          GCP_KEY_RING: ${{ vars.VITAMINC_KMS_GCP_KEY_RING }}
+        run: |
+          configured() {
+            local name=$1; shift
+            local missing=()
+            for var in "$@"; do
+              [ -n "${!var}" ] || missing+=("$var")
+            done
+            if [ ${#missing[@]} -eq 0 ]; then
+              echo "$name=true" >> "$GITHUB_OUTPUT"
+              echo "- $name: runs" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "$name=false" >> "$GITHUB_OUTPUT"
+              echo "- $name: skipped, not set: ${missing[*]}" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
+          echo "### KMS live backends" >> "$GITHUB_STEP_SUMMARY"
+          configured vault VAULT_LICENSE
+          configured azure AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_HSM_URL
+          configured gcp GCP_WORKLOAD_IDENTITY_PROVIDER GCP_SERVICE_ACCOUNT \
+            GCP_PROJECT GCP_LOCATION GCP_KEY_RING
+
+  vault-enterprise:
+    needs: gate
+    if: needs.gate.outputs.vault == 'true'
+    runs-on: ubuntu-latest
+    name: "Vault Enterprise"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-kms-live-vault-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Start Vault Enterprise
+        env:
+          VAULT_LICENSE: ${{ secrets.VAULT_LICENSE }}
+        run: docker compose -f packages/kms/docker-compose.yml --profile enterprise up -d --wait vault-enterprise
+
+      - name: test (the whole Vault suite, against Enterprise)
+        # With the flag on, every Vault integration test talks to the
+        # Enterprise server, and the Enterprise-only tests run too.
+        env:
+          VITAMINC_KMS_LIVE_VAULT_ENTERPRISE: "1"
+          VITAMINC_KMS_VAULT_ENTERPRISE_ADDR: http://localhost:8210
+          VITAMINC_KMS_VAULT_ENTERPRISE_TOKEN: root
+        run: "cargo test -p vitaminc-kms --features vault --locked -- vault:: --nocapture"
+
+      - name: Vault Enterprise logs
+        if: failure()
+        run: docker compose -f packages/kms/docker-compose.yml --profile enterprise logs vault-enterprise
+
+  azure-managed-hsm:
+    needs: gate
+    if: needs.gate.outputs.azure == 'true'
+    runs-on: ubuntu-latest
+    name: "Azure Managed HSM"
+    permissions:
+      contents: read
+      # For the OIDC token that azure/login exchanges for an Entra ID one.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-kms-live-azure-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Sign in to Azure (OIDC)
+        # Federated credential, no client secret. The Managed HSM data
+        # plane needs no subscription, so none is selected.
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: test (Azure Managed HSM)
+        # The tests get each token from the Azure CLI that azure/login
+        # signed in.
+        env:
+          VITAMINC_KMS_LIVE_AZURE: "1"
+          VITAMINC_KMS_AZURE_HSM_URL: ${{ vars.VITAMINC_KMS_AZURE_HSM_URL }}
+          VITAMINC_KMS_AZURE_DATA_KEY: ${{ vars.VITAMINC_KMS_AZURE_DATA_KEY }}
+          VITAMINC_KMS_AZURE_MAC_KEY: ${{ vars.VITAMINC_KMS_AZURE_MAC_KEY }}
+          VITAMINC_KMS_AZURE_API_VERSION: ${{ vars.VITAMINC_KMS_AZURE_API_VERSION }}
+        run: cargo test -p vitaminc-kms --features azure --locked -- azure::live_tests --nocapture
+
+  google-cloud-kms:
+    needs: gate
+    if: needs.gate.outputs.gcp == 'true'
+    runs-on: ubuntu-latest
+    name: "Google Cloud KMS"
+    permissions:
+      contents: read
+      # For the OIDC token that workload identity federation exchanges.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-kms-live-gcp-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: setup rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Authenticate to Google Cloud (workload identity federation)
+        # Writes an `external_account` credentials file and points
+        # GOOGLE_APPLICATION_CREDENTIALS at it, which is what Application
+        # Default Credentials read. No service account key.
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: test (Google Cloud KMS)
+        env:
+          VITAMINC_KMS_LIVE_GCP: "1"
+          VITAMINC_KMS_GCP_PROJECT: ${{ vars.VITAMINC_KMS_GCP_PROJECT }}
+          VITAMINC_KMS_GCP_LOCATION: ${{ vars.VITAMINC_KMS_GCP_LOCATION }}
+          VITAMINC_KMS_GCP_KEY_RING: ${{ vars.VITAMINC_KMS_GCP_KEY_RING }}
+          VITAMINC_KMS_GCP_ENCRYPT_KEY: ${{ vars.VITAMINC_KMS_GCP_ENCRYPT_KEY }}
+          VITAMINC_KMS_GCP_MAC_KEY: ${{ vars.VITAMINC_KMS_GCP_MAC_KEY }}
+          VITAMINC_KMS_GCP_EC_P256_KEY: ${{ vars.VITAMINC_KMS_GCP_EC_P256_KEY }}
+          VITAMINC_KMS_GCP_EC_P384_KEY: ${{ vars.VITAMINC_KMS_GCP_EC_P384_KEY }}
+          VITAMINC_KMS_GCP_RSA_PSS_KEY: ${{ vars.VITAMINC_KMS_GCP_RSA_PSS_KEY }}
+          VITAMINC_KMS_GCP_RSA_PKCS1_KEY: ${{ vars.VITAMINC_KMS_GCP_RSA_PKCS1_KEY }}
+          VITAMINC_KMS_GCP_ED25519_KEY: ${{ vars.VITAMINC_KMS_GCP_ED25519_KEY }}
+        run: cargo test -p vitaminc-kms --features gcp --locked -- gcp::live_tests --nocapture

@@ -26,6 +26,8 @@
 
 mod data_key;
 mod envelope;
+#[cfg(test)]
+mod live_tests;
 mod mac;
 mod sign;
 #[cfg(test)]

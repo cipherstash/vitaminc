@@ -6,7 +6,8 @@
 #
 # Google Cloud KMS has no viable emulator: the community ones are gRPC-only
 # or miss the MAC and asymmetric operations. Its adapter is tested against
-# the official crate's `stub` trait only.
+# the official crate's `stub` trait, and against a real project only when
+# asked (packages/kms/docs/live-tests.md).
 #
 # Usage:
 #   docker compose -f packages/kms/docker-compose.yml up -d --wait
@@ -43,6 +44,33 @@ services:
     environment:
       - VAULT_DEV_ROOT_TOKEN_ID=root
       - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  # Vault Enterprise, dev mode, for the opt-in tests of the native batch
+  # path (`datakeys`), which Community Vault does not have (CIP-4071). The
+  # `enterprise` profile keeps it out of a plain `up`; start it with
+  #   VAULT_LICENSE=... docker compose -f packages/kms/docker-compose.yml \
+  #     --profile enterprise up -d --wait vault-enterprise
+  # and run the tests with VITAMINC_KMS_LIVE_VAULT_ENTERPRISE=1 (see
+  # packages/kms/docs/live-tests.md). Without a licence the server stops
+  # at once with "license check failed: no autoloaded license provided",
+  # so `--wait` fails. The version is the Community one above.
+  vault-enterprise:
+    image: hashicorp/vault-enterprise:2.1.0-ent
+    profiles: ["enterprise"]
+    ports:
+      - "8210:8200"
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=root
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+      # Passed through from the host, never written here.
+      - VAULT_LICENSE
     cap_add:
       - IPC_LOCK
     healthcheck:

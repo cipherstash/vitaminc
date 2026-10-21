@@ -38,6 +38,8 @@
 mod data_key;
 mod ed25519;
 mod integrity;
+#[cfg(test)]
+mod live_tests;
 mod mac;
 mod sign;
 

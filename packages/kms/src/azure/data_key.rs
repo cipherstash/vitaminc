@@ -87,8 +87,8 @@ pub enum Error {
 /// is N round trips ([`fan_out_generate`]).
 ///
 /// No emulator covers this source. Lowkey Vault, which the other Azure
-/// adapters test against, rejects `A256GCM`, so only stub-transport unit
-/// tests cover it (CIP-4072).
+/// adapters test against, rejects `A256GCM`, so stub-transport unit tests
+/// cover it, and opt-in tests against a real Managed HSM (CIP-4072).
 pub struct AzureDataKeySource<const N: usize> {
     client: KeyClient,
     key_name: String,

@@ -172,7 +172,8 @@ mod tests {
     // Lowkey Vault 7.3.98 refuses to create an `oct-HSM` key with the SIGN
     // or VERIFY operation ("Operation not allowed for this key type: [SIGN,
     // VERIFY]"), so HMAC cannot be exercised against the emulator at all.
-    // Everything below is stub-transport cover.
+    // Everything below is stub-transport cover; `live_tests` runs HMAC
+    // against a real Managed HSM when asked.
 
     #[tokio::test]
     async fn generate_mac_signs_the_message_with_hs256() {

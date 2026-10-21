@@ -198,6 +198,14 @@ docker compose -f packages/kms/docker-compose.yml down
 `cargo test -p vitaminc-kms` with default features runs only the AWS
 adapter's tests and needs only LocalStack.
 
+Some paths have no emulator: the native batch path of Vault Enterprise,
+`A256GCM` and HMAC on Azure Managed HSM, and all of Google Cloud KMS. Their
+*live tests* run against a real backend only when you set
+`VITAMINC_KMS_LIVE_VAULT_ENTERPRISE`, `VITAMINC_KMS_LIVE_AZURE` or
+`VITAMINC_KMS_LIVE_GCP` to `1`. Otherwise they skip. See
+[the live test guide](https://github.com/cipherstash/vitaminc/blob/main/packages/kms/docs/live-tests.md)
+for the variables, keys and permissions.
+
 ## CipherStash
 
 Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
