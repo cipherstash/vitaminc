@@ -37,8 +37,9 @@ never truncated, and a value of another kind is refused too: an integer
 is not a float, a date or a decimal.
 
 The set of terms that compare with each other is a **space**: one scheme
-and key, one target, and one context (a table and column, a tenant,
-whatever the terms must compare within). A caller opens a space by
+and key, one target, one context (a table and column, a tenant,
+whatever the terms must compare within), and where it places nulls, if
+it places them at all. A caller opens a space by
 chaining a target and a context on a scheme, and encrypts values there.
 Every step of the chain is usable for terms, and a step left out takes
 its default: a target alone is under the empty context, and a value
@@ -162,6 +163,16 @@ writing them into a term's place. Under block ORE every later `compare`
 against those bytes returns `None`; under a scheme whose query is its
 term the mistake is invisible.
 
+In a space that places nulls, `null_query` is the sentinel's query, and
+so is `encrypt_query_checked` of any null. A layer answers `IS NULL`
+with an equality comparison against it, and `IS NOT NULL` with the
+negation. A range in such a space must exclude the sentinel itself,
+because a SQL comparison never matches a null: under nulls-first
+`age < 10` is "above the sentinel and below 10", and under nulls-last
+`age > 10` is "above 10 and below the sentinel". Building the predicate
+is the layer's work, as it is for every other predicate. In a space
+without a policy a null query is refused with `NoDomain`.
+
 A query exists for the comparison at hand, and should not be persisted
 or logged. Held beside the stored terms, it orders every one of them
 against the searched value. And block ORE's queries are deterministic,
@@ -171,6 +182,99 @@ what was searched.
 
 A layer above maps its own column types onto targets: an EQL `int`
 column is `OrderTarget::I32`. This crate knows nothing of that layer.
+
+### Nulls first or last
+
+By default a space gives a null no term: `encrypt_checked` refuses one
+and a walk skips it, so the term column holds a SQL `NULL` exactly where
+the value was absent. A space can instead place its nulls, as SQL's
+`NULLS FIRST` and `NULLS LAST` do, so that an absent value is indexed
+like any other and `ORDER BY ... NULLS FIRST` can be answered from the
+index alone. The policy is a [`NullOrder`], fixed when the space is
+made, like the target and the context:
+
+```rust
+use std::cmp::Ordering;
+use vitaminc_ore::target::I32;
+use vitaminc_ore::{NormalizeError, NullOrder, OrderEncrypt, OrderError, OrderTarget};
+# use vitaminc_ore::{Context, OrderPlaintext, OrderScheme};
+# struct Clear;
+# impl OrderScheme for Clear {
+#     const NAME: &'static str = "clear";
+#     type Term = Vec<u8>;
+#     type Error = core::convert::Infallible;
+#     type Space = ();
+#     fn open(&self, _: vitaminc_ore::OrderTarget, _: &Context<'_>) -> Result<(), Self::Error> {
+#         Ok(())
+#     }
+#     fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
+#         use vitaminc_protected::Controlled;
+#         Ok(p.bytes().risky_ref().clone())
+#     }
+#     fn compare(a: &Vec<u8>, b: &Vec<u8>) -> Option<Ordering> {
+#         Some(a.cmp(b))
+#     }
+# }
+# vitaminc_ore::supports_every_target!(Clear);
+# let scheme = Clear;
+
+let ages = scheme.context("users.age").target(I32).nulls(NullOrder::Last);
+let (age, absent) = (ages.encrypt_checked(36i32)?, ages.encrypt_checked(None::<i32>)?);
+assert_eq!(ages.compare(&age, &absent), Some(Ordering::Less));
+
+// The column cannot hold its type's maximum.
+assert!(matches!(
+    ages.encrypt_checked(i32::MAX),
+    Err(OrderError::Term(NormalizeError::Reserved))
+));
+
+// A target chosen while the program runs: text and bytes take no policy.
+assert!(scheme.target(OrderTarget::I32).nulls(NullOrder::First).is_ok());
+assert_eq!(
+    scheme.target(OrderTarget::Text).nulls(NullOrder::First).err(),
+    Some(NormalizeError::NoDomain)
+);
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+In a space that places nulls, every null, typed or plain, encodes to the
+space's sentinel: the lowest code of the target's width (all `0x00`) for
+nulls-first, the highest (all `0xFF`) for nulls-last. No byte is added,
+so every width and every scheme stays as it is. For an integer or uuid
+target that code belongs to a value, so the space makes room: under
+nulls-first every code moves up by one, and under both policies the one
+value refused is the target's maximum, with `NormalizeError::Reserved`.
+The rule is one sentence: a column that places nulls cannot hold its
+type's maximum. Float, date, timestamp and decimal codes never reach
+either extreme, so those targets move nothing and refuse nothing. An
+`undefined` has no term under any policy: it is not a value and not a
+null.
+
+Only a fixed-width target takes a policy. On a marker, `nulls` compiles
+only for the fixed-width ones; on an `OrderTarget` it refuses text and
+bytes with `NormalizeError::NoDomain` rather than make a space that
+refuses every value. A text or bytes null already shows by its length,
+so placing it would hide nothing. A space that places nulls has no
+`encrypt`, only `encrypt_checked`, because it can refuse a value that
+fits the target.
+
+A policy is a space of its own, with its own domain labels (see
+Encodings), and the salt binds the label. So a term of a nulls-last
+space never compares with a term of the plain space of the same target,
+and turning a policy on for a column is a re-index, visibly, rather than
+a column whose stored maximums silently became nulls.
+
+**What a placed null reveals.** In any order index whose stored terms
+compare with each other, the nulls are visible as the tied group at one
+end, and in a sparse domain as the group that differs from every value
+at the top of the encoding. That is never more than the SQL `NULL` it
+replaces, which needs no inference to read, and the term column no
+longer carries a plaintext signal. Both schemes in use leak where two
+terms first differ, so in a sparse domain (ages in an `I32`, say) the
+nulls are the one group that differs from every value in its top bytes;
+in a dense domain the group is only the tied extreme. The decision, and
+the options set aside, are recorded in the vitaminc repository at
+`docs/adr/0002-every-null-gets-an-equality-term-and-an-order-space-may-place-nulls-first-or-last.md`.
 
 ## A whole value
 
@@ -205,8 +309,11 @@ assert_eq!(equality.len(), order.len());
 # Ok::<(), vitaminc_normalize::TermsError>(())
 ```
 
-A null, a boolean or an `undefined` has no order term and does not stop
-the walk. Anything else without a term stops it: a term silently missing
+A boolean or an `undefined` has no order term and does not stop the
+walk, and nor does a null, unless the normalizer places nulls:
+`Order::new(target).nulls(NullOrder::Last)` gives every null of the walk
+the space's sentinel, at its path, where the equality walk puts the
+null's equality term. Anything else without a term stops it: a term silently missing
 from an index is worse than an error. A collected term goes into its
 space with `OrderSpace::encrypt_term`, which refuses a term of another
 target.
@@ -337,6 +444,25 @@ a new label.
 | `Bytes` | `vitaminc/ore/value/bytes/v1` | `0x01`, then the bytes as they are |
 | `Uuid` | `vitaminc/ore/value/uuid/v1` | the sixteen raw bytes |
 
+A space that places nulls has its own label for each fixed-width target:
+the plain label with the policy before its version, `<kind>` as above.
+
+| Target | Domain | Bytes |
+| --- | --- | --- |
+| any fixed-width, nulls first | `vitaminc/ore/value/<kind>/nulls-first/v1` | a null is all `0x00` at the target's width; integer and uuid codes are one higher than in the plain space, as a big-endian number over the width (zero as `U16` is `00 01`, the nil uuid `00…01`); every other code as in the plain space; an integer or uuid target's maximum is refused |
+| any fixed-width, nulls last | `vitaminc/ore/value/<kind>/nulls-last/v1` | a null is all `0xFF` at the target's width; every code as in the plain space; an integer or uuid target's maximum is refused |
+| `Text`, `Bytes` | none | no null policy |
+
+So `I32` places nulls under `vitaminc/ore/value/int32/nulls-first/v1`
+and `vitaminc/ore/value/int32/nulls-last/v1`, and `Timestamp` under
+`vitaminc/ore/value/timestamp-micros/nulls-last/v1`: twenty-six labels,
+listed with the plain ones in `domain::ALL`. The float, date, timestamp
+and decimal extremes are never reached: all `0x00` or all `0xFF` as an
+`f64` would be a NaN other than the one every NaN folds to, as a date or
+a timestamp's seconds it is outside the admitted range (and all `0xFF`
+sub-seconds are more than a second), and as a decimal its exponent field
+would be one no value has.
+
 An integer of any width goes into an integer target it fits: `100` as
 an `i8` and `100` as a `u64` are one term of an `I32` space. There is
 no `f32` target: JavaScript numbers are always `f64`, and an `f32`
@@ -396,7 +522,9 @@ published crate.
 
 ## Known exceptions
 
-Booleans, nulls and `undefined` have no order term under any target.
+Booleans and `undefined` have no order term under any target, and a
+null has one only in a space that places nulls (see Nulls first or
+last).
 An order term reveals the order of the values it encrypts, which is
 safe only when there are enough possible values that the order of the
 rows does not give the values away. A boolean has two, so an order term
