@@ -1,4 +1,5 @@
 use crate::key_id::KeyId;
+use crate::provider::MaybeSync;
 use futures::future::TryFutureExt as _;
 use futures::stream::{self, StreamExt as _, TryStreamExt as _};
 use std::collections::HashMap;
@@ -213,7 +214,7 @@ pub const DEFAULT_MAX_IN_FLIGHT: NonZeroUsize = match NonZeroUsize::new(32) {
 /// At most `max_in_flight` requests run at one time (see
 /// [`DEFAULT_MAX_IN_FLIGHT`]). The keys come back in the order of
 /// `bindings`.
-pub async fn fan_out_generate<const N: usize, T: GenerateDataKey<N> + Sync>(
+pub async fn fan_out_generate<const N: usize, T: GenerateDataKey<N> + MaybeSync>(
     backend: &T,
     bindings: &[Binding<'_>],
     max_in_flight: NonZeroUsize,
@@ -239,7 +240,7 @@ pub async fn fan_out_generate<const N: usize, T: GenerateDataKey<N> + Sync>(
 /// At most `max_in_flight` requests run at one time (see
 /// [`DEFAULT_MAX_IN_FLIGHT`]). The dedup is a hash lookup per item, so a
 /// large batch costs time in proportion to its length.
-pub async fn dedup_retrieve<const N: usize, T: RetrieveDataKey<N> + Sync>(
+pub async fn dedup_retrieve<const N: usize, T: RetrieveDataKey<N> + MaybeSync>(
     backend: &T,
     keys: &[(KeyId, Binding<'_>)],
     max_in_flight: NonZeroUsize,
