@@ -28,9 +28,7 @@ mod fake;
 
 use std::future::Future;
 
-use crate::{
-    GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyIsolation, KeyReconstruction,
-};
+use crate::{GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyReconstruction};
 use vitaminc_protected::Protected;
 
 pub use crate::data_key::Binding;
@@ -56,8 +54,6 @@ pub trait KeyProvider<const N: usize> {
     const RECONSTRUCTION: KeyReconstruction;
     /// See [`KeyCustody`].
     const CUSTODY: KeyCustody;
-    /// See [`KeyIsolation`].
-    const ISOLATION: KeyIsolation;
 
     fn generate_keys(
         &self,

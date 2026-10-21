@@ -1,7 +1,5 @@
 use super::{Binding, DelegatedError, IndexKeyProvider, KeyProvider};
-use crate::{
-    GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyIsolation, KeyReconstruction,
-};
+use crate::{GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyReconstruction};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use vitaminc_protected::Protected;
@@ -23,10 +21,9 @@ type CacheKey = (KeyId, Vec<u8>);
 ///
 /// Only retrieval is cached. `generate_keys` passes straight through and
 /// its keys never enter the cache: serving a fresh mint from a cache would
-/// hand one key to more than one value, which is the
-/// [`Pooled`](KeyIsolation::Pooled) isolation trade-off as a silent side
-/// effect. It would also give up binding, because one key cannot carry the
-/// bindings of several values.
+/// hand one key to more than one value, as a silent side effect. It would
+/// also give up binding, because one key cannot carry the bindings of
+/// several values.
 ///
 /// `max_entries` bounds memory and `ttl` bounds how long a cached key can be
 /// served — not correctness. Nothing here ever needs invalidating for
@@ -91,7 +88,6 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for CachingKeyProv
 
     const RECONSTRUCTION: KeyReconstruction = T::RECONSTRUCTION;
     const CUSTODY: KeyCustody = T::CUSTODY;
-    const ISOLATION: KeyIsolation = T::ISOLATION;
 
     /// Straight through to the inner provider. See the type's docs for why
     /// minting is never cached.
@@ -187,7 +183,7 @@ impl<const N: usize, T: IndexKeyProvider<N> + Sync> IndexKeyProvider<N>
 mod tests {
     use super::*;
     use crate::provider::{Binding, KeyProvider};
-    use crate::{GeneratedDataKey, KeyId, KeyIsolation, KeyReconstruction};
+    use crate::{GeneratedDataKey, KeyId, KeyReconstruction};
     use std::convert::Infallible;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -237,7 +233,6 @@ mod tests {
 
         const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ClientAndServer;
         const CUSTODY: KeyCustody = KeyCustody::BackendHeld;
-        const ISOLATION: KeyIsolation = KeyIsolation::Pooled;
 
         async fn generate_keys(
             &self,
@@ -428,6 +423,5 @@ mod tests {
             KeyReconstruction::ClientAndServer
         );
         assert_eq!(<Cached as KeyProvider<4>>::CUSTODY, KeyCustody::BackendHeld);
-        assert_eq!(<Cached as KeyProvider<4>>::ISOLATION, KeyIsolation::Pooled);
     }
 }

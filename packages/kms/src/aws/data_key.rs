@@ -1,8 +1,7 @@
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
-    GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
-    RetrieveDataKey,
+    GenerateDataKey, GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey,
 };
 use crate::key_id::KeyId;
 use aws_sdk_kms::{primitives::Blob, Client};
@@ -42,8 +41,8 @@ fn into_sized<const N: usize>(bytes: Vec<u8>) -> Result<[u8; N], Error> {
     })
 }
 
-/// AWS KMS-backed data key source with per-value key isolation
-/// (`KeyIsolation::PerValue`) — one distinct key per item, via
+/// AWS KMS-backed data key source with per-value key isolation — one
+/// distinct key per item, via
 /// [`fan_out_generate`]. AWS KMS has no native batch primitive for
 /// `GenerateDataKey`/`Decrypt` (one operation per network call); this is
 /// the N-round-trips option that preserves the same per-value isolation
@@ -207,8 +206,6 @@ impl<const N: usize> DecryptWithKey for AwsDataKeySource<N> {
 }
 
 impl<const N: usize> BatchGenerateDataKey<N> for AwsDataKeySource<N> {
-    const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
-
     async fn generate_data_keys(
         &self,
         bindings: &[Binding<'_>],
@@ -311,7 +308,6 @@ mod tests {
 
         assert_eq!(keys.len(), 3);
         assert_eq!(generate_rule.num_calls(), 3);
-        assert_eq!(AwsDataKeySource::<32>::ISOLATION, KeyIsolation::PerValue);
     }
 
     #[tokio::test]
@@ -444,10 +440,6 @@ mod tests {
         let keys = per_value.generate_keys(&bindings).await.unwrap();
         assert_eq!(keys.len(), 3);
         assert_eq!(generate_rule.num_calls(), 3);
-        assert_eq!(
-            <AwsDataKeySource<32> as KeyProvider<32>>::ISOLATION,
-            KeyIsolation::PerValue
-        );
     }
 
     #[tokio::test]

@@ -50,7 +50,7 @@ pub(super) struct GenerateDataKeysRequest {
     #[endpoint(skip)]
     pub name: String,
     /// How many keys to mint. Every key in the batch is distinct, which is
-    /// what makes `KeyIsolation::PerValue` affordable here.
+    /// what makes one key per value affordable here.
     pub count: u64,
     /// Key size in bits. Vault accepts only 128, 256 or 512.
     pub bits: u16,

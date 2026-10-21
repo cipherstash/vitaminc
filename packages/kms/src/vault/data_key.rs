@@ -6,7 +6,7 @@ use super::{b64_decode, b64_encode};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding, GenerateDataKey,
-    GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction, RetrieveDataKey,
+    GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey,
 };
 use crate::key_id::KeyId;
 use private::ValidDataKeySize;
@@ -88,7 +88,7 @@ fn into_sized<const N: usize>(bytes: Vec<u8>) -> Result<[u8; N], Error> {
 }
 
 /// A Vault Transit-backed data key source with per-value key isolation
-/// (`KeyIsolation::PerValue`), bound to one Transit key at construction.
+/// (one distinct key per item), bound to one Transit key at construction.
 ///
 /// Vault is the only backend of the four with native batch primitives:
 /// `decrypt` with a `batch_input` (every edition) and
@@ -353,10 +353,6 @@ impl<const N: usize> BatchGenerateDataKey<N> for VaultDataKeySource<N>
 where
     Self: ValidDataKeySize<N>,
 {
-    /// Every key in a `datakeys` batch is distinct, so native batching
-    /// costs nothing in isolation.
-    const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
-
     /// `count` distinct keys: one round trip on Vault Enterprise, `count`
     /// concurrent `datakey` calls on Community.
     ///
@@ -370,7 +366,7 @@ where
     /// batch pays that one failed probe, then this adapter remembers the
     /// answer and uses [`fan_out_generate`] for every batch after it, until
     /// the source is rebuilt. The result is the same either way: `count`
-    /// distinct keys at `KeyIsolation::PerValue`; only the round-trip
+    /// distinct keys, one per value; only the round-trip
     /// count differs. See the [token policy](VaultDataKeySource#token-policy).
     ///
     /// [`retrieve_data_keys`](BatchRetrieveDataKey::retrieve_data_keys) is
@@ -670,7 +666,6 @@ mod tests {
         assert_eq!(keys.len(), 3);
         assert_eq!(keys[2].plaintext.clone().risky_unwrap(), [3u8; 32]);
         assert_eq!(keys[2].key_id.as_bytes(), b"vault:v1:three");
-        assert_eq!(VaultDataKeySource::<32>::ISOLATION, KeyIsolation::PerValue);
     }
 
     #[tokio::test]
@@ -1101,13 +1096,11 @@ mod integration_tests {
     async fn a_batch_mints_distinct_keys_on_either_edition() {
         let source = source().await;
 
-        assert_eq!(VaultDataKeySource::<32>::ISOLATION, KeyIsolation::PerValue);
-
         let keys = source.generate_data_keys(&[TEST_BINDING; 5]).await.unwrap();
 
         assert_eq!(keys.len(), 5);
 
-        // `KeyIsolation::PerValue` is the claim; distinctness is the test.
+        // One distinct key per value is the claim; distinctness is the test.
         let material: Vec<[u8; 32]> = keys
             .iter()
             .map(|k| k.plaintext.clone().risky_unwrap())

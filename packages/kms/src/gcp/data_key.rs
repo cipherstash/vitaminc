@@ -2,8 +2,7 @@ use super::integrity::{self, CallError, Encrypted};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
-    GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
-    RetrieveDataKey,
+    GenerateDataKey, GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey,
 };
 use crate::key_id::KeyId;
 use google_cloud_kms_v1::client::KeyManagementService;
@@ -207,11 +206,9 @@ impl<const N: usize> RetrieveDataKey<N> for GcpDataKeySource<N> {
     }
 }
 
+/// Google Cloud KMS has no batch primitive, so a batch is N separate
+/// `encrypt` calls, each over its own freshly generated key.
 impl<const N: usize> BatchGenerateDataKey<N> for GcpDataKeySource<N> {
-    /// Google Cloud KMS has no batch primitive, so a batch is N separate
-    /// `encrypt` calls, each over its own freshly generated key.
-    const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
-
     async fn generate_data_keys(
         &self,
         bindings: &[Binding<'_>],
@@ -460,10 +457,6 @@ mod tests {
 
         assert_eq!(keys.len(), 3);
         assert_ne!(keys[0].key_id, keys[1].key_id);
-        assert_eq!(
-            <GcpDataKeySource<32> as BatchGenerateDataKey<32>>::ISOLATION,
-            KeyIsolation::PerValue
-        );
     }
 
     #[tokio::test]

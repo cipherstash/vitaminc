@@ -153,26 +153,15 @@ pub trait RetrieveDataKey<const N: usize> {
     ) -> Result<Protected<[u8; N]>, Self::Error>;
 }
 
-/// Whether a batch-generate implementation mints one distinct key per
-/// item (`PerValue` — every value access is its own auditable retrieval)
-/// or shares one key across the whole batch (`Pooled` — a compromised
-/// key's blast radius is the batch, not one value). See
-/// [`fan_out_generate`].
+/// Capability: mint a batch of data keys.
 ///
-/// No source in this crate is `Pooled`. One key shared across a batch
-/// cannot carry the batch's several bindings, so a pooled source cannot
-/// bind. ADR 0007 records the replacement: pool the authority to mint
-/// keys, never a data key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyIsolation {
-    PerValue,
-    Pooled,
-}
-
+/// Every implementation mints one distinct key per binding. A batch never
+/// shares one key across values: one key cannot carry the bindings of
+/// several values (ADR 0006). To make fewer backend calls than one per
+/// value, derive each key from a cached authority key (ADR 0007), which
+/// still gives one key per value.
 #[allow(async_fn_in_trait)]
 pub trait BatchGenerateDataKey<const N: usize>: GenerateDataKey<N> {
-    const ISOLATION: KeyIsolation;
-
     /// One key per binding, in order.
     async fn generate_data_keys(
         &self,

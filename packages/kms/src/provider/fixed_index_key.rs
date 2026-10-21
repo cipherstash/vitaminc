@@ -1,7 +1,5 @@
 use super::{Binding, DelegatedError, IndexKeyProvider, KeyProvider};
-use crate::{
-    GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyIsolation, KeyReconstruction,
-};
+use crate::{GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyReconstruction};
 use vitaminc_protected::Protected;
 
 /// Pairs any [`KeyProvider`] with the one fixed, persisted [`KeyId`] its
@@ -68,7 +66,6 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for FixedIndexKeyS
 
     const RECONSTRUCTION: KeyReconstruction = T::RECONSTRUCTION;
     const CUSTODY: KeyCustody = T::CUSTODY;
-    const ISOLATION: KeyIsolation = T::ISOLATION;
 
     async fn generate_keys(
         &self,
@@ -88,7 +85,7 @@ impl<const N: usize, T: KeyProvider<N> + Sync> KeyProvider<N> for FixedIndexKeyS
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{KeyIsolation, KeyReconstruction};
+    use crate::KeyReconstruction;
     use vitaminc_protected::Controlled;
 
     /// Returns `count` keys per request instead of one.
@@ -98,7 +95,6 @@ mod tests {
         type Error = std::convert::Infallible;
         const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
         const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
-        const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
 
         /// One key per binding, with the binding's length as the material,
         /// so a test can see that a call reached this provider.
@@ -135,7 +131,6 @@ mod tests {
         type Error = std::convert::Infallible;
         const RECONSTRUCTION: KeyReconstruction = KeyReconstruction::ServerOnly;
         const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
-        const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
 
         async fn generate_keys(
             &self,

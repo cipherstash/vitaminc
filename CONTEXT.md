@@ -86,10 +86,6 @@ client-held handle is the only copy of its key, so losing it loses the data
 the key sealed.
 _Avoid_: Key ownership, key location
 
-**Key isolation**:
-Whether a batch of data keys holds one distinct key per value or one key
-shared across the batch.
-
 **Key reconstruction**:
 Whether a backend can rebuild a data key from server-side material alone,
 or needs material the client holds as well.

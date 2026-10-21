@@ -16,7 +16,7 @@
 use super::{Binding, KeyProvider};
 use crate::{
     BatchGenerateDataKey, BatchRetrieveDataKey, GenerateDataKey, GeneratedDataKey, KeyCustody,
-    KeyId, KeyIsolation, KeyReconstruction, RetrieveDataKey,
+    KeyId, KeyReconstruction, RetrieveDataKey,
 };
 use vitaminc_protected::Protected;
 
@@ -26,7 +26,6 @@ macro_rules! key_provider_body {
 
         const RECONSTRUCTION: KeyReconstruction = <Self as RetrieveDataKey<$n>>::RECONSTRUCTION;
         const CUSTODY: KeyCustody = <Self as RetrieveDataKey<$n>>::CUSTODY;
-        const ISOLATION: KeyIsolation = <Self as BatchGenerateDataKey<$n>>::ISOLATION;
 
         async fn generate_keys(
             &self,

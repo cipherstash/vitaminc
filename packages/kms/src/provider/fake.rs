@@ -1,7 +1,5 @@
 use super::{Binding, IndexKeyProvider, KeyProvider};
-use crate::{
-    GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyIsolation, KeyReconstruction,
-};
+use crate::{GeneratedDataKey, IndexKeyMaterial, KeyCustody, KeyId, KeyReconstruction};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -111,7 +109,6 @@ impl<const N: usize> KeyProvider<N> for FakeKeyProvider<N> {
     /// The fake hands out a random id and keeps the key in a map, so the
     /// id is a reference rather than the key itself.
     const CUSTODY: KeyCustody = KeyCustody::BackendHeld;
-    const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
 
     async fn generate_keys(
         &self,

@@ -2,8 +2,7 @@ use super::envelope::{Envelope, EnvelopeError};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
-    GenerateDataKey, GeneratedDataKey, KeyCustody, KeyIsolation, KeyReconstruction,
-    RetrieveDataKey,
+    GenerateDataKey, GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey,
 };
 use crate::key_id::KeyId;
 use azure_security_keyvault_keys::models::{
@@ -57,7 +56,7 @@ pub enum Error {
 }
 
 /// An Azure Managed HSM-backed data key source, with per-value key
-/// isolation (`KeyIsolation::PerValue`).
+/// isolation: one distinct key per item.
 ///
 /// The bound key must be an `oct-HSM` 256-bit symmetric key. Only that key
 /// type does `A256GCM`, and `A256GCM` is the only Key Vault operation that
@@ -283,8 +282,6 @@ impl<const N: usize> RetrieveDataKey<N> for AzureDataKeySource<N> {
 }
 
 impl<const N: usize> BatchGenerateDataKey<N> for AzureDataKeySource<N> {
-    const ISOLATION: KeyIsolation = KeyIsolation::PerValue;
-
     async fn generate_data_keys(
         &self,
         bindings: &[Binding<'_>],
@@ -634,7 +631,6 @@ mod tests {
             .collect();
         sent.sort();
         assert_eq!(sent, [b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]);
-        assert_eq!(AzureDataKeySource::<32>::ISOLATION, KeyIsolation::PerValue);
     }
 
     #[tokio::test]
