@@ -176,6 +176,34 @@ fn a_space_takes_a_collected_term_of_its_own_policy_only() {
     }
 }
 
+/// A collected plaintext carries its policy as a value, so the query side
+/// checks it by domain as the term side does: the same target under
+/// another policy, or under none, is another space's.
+#[test]
+fn a_space_takes_a_collected_query_of_its_own_policy_only() {
+    let mock = Mock::new(key());
+    let last = mock
+        .target(T::I32)
+        .nulls(NullOrder::Last)
+        .expect("fixed width");
+    let placed =
+        order_with_nulls(T::I32, NullOrder::Last, None, Physical::Int(Int::I8(3))).expect("term");
+    assert!(last.encrypt_query_term(&placed).is_ok());
+    for other in [
+        order(T::I32, None, Physical::Int(Int::I8(3))).expect("term"),
+        order_with_nulls(T::I32, NullOrder::First, None, Physical::Int(Int::I8(3))).expect("term"),
+    ] {
+        assert!(
+            matches!(
+                last.encrypt_query_term(&other),
+                Err(OrderError::Term(NormalizeError::Mismatch))
+            ),
+            "{}: a query of another space is refused",
+            other.domain()
+        );
+    }
+}
+
 /// The policy of a marker space is part of its type, so a term of one
 /// policy does not reach the other's comparison (the compile-fail cases
 /// show that); each space and its terms and queries name their own.
