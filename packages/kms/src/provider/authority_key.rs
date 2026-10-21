@@ -1190,4 +1190,36 @@ mod tests {
             assert_eq!(derived_okm, hex(okm));
         }
     }
+    #[test]
+    fn a_version_shows_and_returns_its_number() {
+        let version = AuthorityKeyVersion::new(7);
+        assert_eq!(version.get(), 7);
+        assert_eq!(version.to_string(), "7");
+    }
+
+    /// HKDF-SHA256 can expand 255 blocks, so the longest data key is 8160
+    /// bytes. Expand at that length runs the block counter up to 255, and
+    /// its output starts with the shorter output under the same `info`.
+    #[test]
+    fn a_data_key_can_be_as_long_as_hkdf_allows() {
+        assert_eq!(MAX_DATA_KEY_LEN, 8160);
+
+        let prk = hkdf_extract(&[1; SALT_LEN], &[2; AUTHORITY_KEY_LEN]);
+        let info: [&[u8]; 1] = [b"info"];
+        let mut long = vec![0u8; 8160];
+        hkdf_expand(&prk, &info, &mut long);
+        let mut short = vec![0u8; 82];
+        hkdf_expand(&prk, &info, &mut short);
+        assert_eq!(long[..82], short[..]);
+        assert_ne!(long[8128..], [0u8; 32]);
+
+        let authority_key = Protected::new([3u8; AUTHORITY_KEY_LEN]);
+        let key = derive_data_key::<8160>(
+            &authority_key,
+            AuthorityKeyVersion::new(1),
+            &[4; SALT_LEN],
+            Binding::EMPTY,
+        );
+        assert_eq!(key.risky_ref().len(), 8160);
+    }
 }
