@@ -659,9 +659,8 @@ fn make_room(
     nulls: NullOrder,
     mut code: Protected<Vec<u8>>,
 ) -> Result<Protected<Vec<u8>>, NormalizeError> {
-    let all = |code: &Protected<Vec<u8>>, byte: u8| code.risky_ref().iter().all(|b| *b == byte);
     if target.owns_every_code() {
-        if all(&code, 0xFF) {
+        if every_byte_is(code.risky_ref(), 0xFF) {
             return Err(NormalizeError::Reserved);
         }
         if nulls == NullOrder::First {
@@ -673,10 +672,19 @@ fn make_room(
         NullOrder::First => 0x00,
         NullOrder::Last => 0xFF,
     };
-    if all(&code, reserved) {
+    if every_byte_is(code.risky_ref(), reserved) {
         return Err(NormalizeError::Reserved);
     }
     Ok(code)
+}
+
+/// Whether every byte of `code` is `byte`. Reads every byte whatever it
+/// finds, so the time taken does not depend on how many leading bytes of
+/// a value's code match, as the fixed-width encoders take the same time
+/// for every value. Only the answer, which the caller reports, says
+/// anything about the value.
+fn every_byte_is(code: &[u8], byte: u8) -> bool {
+    code.iter().fold(0u8, |differ, b| differ | (b ^ byte)) == 0
 }
 
 /// Add one to `code` as a big-endian unsigned number, in place. The caller
