@@ -71,12 +71,13 @@ fn no_domain<P: Prf, T: Send + 'static>(prf: &P) -> P::Ok<T> {
 /// single scalar and its type (a query parameter, say) rather than a
 /// value to walk, and is the direct replacement for deriving from a
 /// `&Value`. It refuses what [`normalize`] refuses: a scalar with no
-/// equality domain (a null, a boolean, a logical type outside the opt-in
-/// table), text with a code point unassigned in Unicode 16, or a value
-/// that is not valid for its logical type fails with
+/// equality domain (a boolean, an `undefined`, a logical type outside the
+/// opt-in table), text with a code point unassigned in Unicode 16, or a
+/// value that is not valid for its logical type fails with
 /// [`PrfError::Normalize`] before anything is derived. That differs from
-/// the document sink, which skips a null or a boolean, because a caller
-/// who asks for one term and gets none should hear about it.
+/// the document sink, which skips a boolean, because a caller who asks
+/// for one term and gets none should hear about it. A null has a term,
+/// under the null domain, as it does in the document sink.
 ///
 /// The types it takes, [`Logical`] and [`Physical`], are
 /// `vitaminc_aead`'s.

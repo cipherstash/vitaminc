@@ -10,7 +10,10 @@ pub mod target;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 
-pub use order::{domain, order, order_terms, text, Order, OrderTarget, VARIABLE_WIDTH_MARKER};
+pub use order::{
+    domain, order, order_terms, order_with_nulls, text, NullOrder, Order, OrderTarget,
+    VARIABLE_WIDTH_MARKER,
+};
 pub use query::{OrderQuery, QueryTerm};
 #[allow(deprecated)]
 pub use scheme::OrderColumn;
@@ -18,7 +21,7 @@ pub use scheme::{
     OrderContext, OrderEncrypt, OrderError, OrderKeyInit, OrderPlaintext, OrderScheme, OrderSpace,
     OrderTerm,
 };
-pub use target::{FitsIn, OwnTarget, StaticTarget, Supports, Target};
+pub use target::{FitsIn, FixedWidth, OwnTarget, StaticTarget, Supports, Target};
 // The types in this crate's signatures, so a caller needs no second import:
 // a scheme encrypts values of the data model, and a typed scalar goes in
 // as `Raw(ty, physical)`, without depending on vitaminc-aead.

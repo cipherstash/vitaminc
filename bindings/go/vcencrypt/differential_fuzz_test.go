@@ -129,6 +129,21 @@ func corpusCiphertexts(f *testing.F) [][]byte {
 	return out
 }
 
+// intWidths is the payload width of each int tag, which a timestamp in the
+// envelope rides on.
+var intWidths = map[byte]int{0x0C: 1, 0x0D: 1, 0x0E: 2, 0x0F: 2, 0x04: 4, 0x06: 4, 0x05: 8, 0x07: 8, 0x10: 16, 0x11: 16}
+
+// typedNullWidths is the payload width of each header a typed null may
+// carry: an int, a float, a date, a timestamp, a decimal, and bytes, which
+// only a UUID's typed null carries, sixteen wide.
+var typedNullWidths = func() map[byte]int {
+	m := map[byte]int{0x08: 4, 0x12: 4, 0x09: 8, 0x13: 12, 0x14: 16, 0x0B: 16}
+	for tag, width := range intWidths {
+		m[tag] = width
+	}
+	return m
+}()
+
 // requireGoMatchesRust fails unless goOut is rustOut with exactly Go's
 // documented projections applied: an Undefined value-node tag (0x01) turned
 // into Null (0x00), and a timestamp in the 0xF3 envelope (seconds,
@@ -144,8 +159,9 @@ func requireGoMatchesRust(t *testing.T, data, rustOut, goOut []byte) {
 }
 
 // rustCanonical is what Rust re-encodes an accepted value as: the input,
-// with a decimal negative zero read back as zero (ADR 0001). Rust keeps
-// Undefined and envelope timestamps as they are.
+// with a decimal negative zero read back as zero (ADR 0001) and a typed null
+// written as the plain null, since a frame is never sealed (vitaminc#493).
+// Rust keeps Undefined and envelope timestamps as they are.
 func rustCanonical(data []byte) []byte {
 	return rewrite(data, false)
 }
@@ -153,7 +169,8 @@ func rustCanonical(data []byte) []byte {
 // rewrite walks an accepted value tree following the transport format
 // independently of either decoder, so a walk that falls out of step with it
 // produces the wrong bytes and fails the comparison rather than passing. It
-// always normalizes a decimal negative zero; with goProjection it also
+// always normalizes a decimal negative zero and writes a typed null as the
+// plain null; with goProjection it also
 // applies Go's two projections. vcffi's fuzz tests have the same walker, but
 // this is a separate Go module and cannot import test code.
 func rewrite(data []byte, goProjection bool) []byte {
@@ -226,6 +243,18 @@ func rewrite(data []byte, goProjection bool) []byte {
 		case 0xF2: // Passthrough
 			out = append(out, tag)
 			walk()
+		case 0x15: // a typed null: both sides write it back as the plain null
+			header := take(1)
+			if len(header) == 1 && header[0] == 0xF3 {
+				// id and parameter, then the physical tag the width follows.
+				if envelope := take(3); len(envelope) == 3 {
+					header = envelope[2:]
+				}
+			}
+			if len(header) == 1 {
+				take(typedNullWidths[header[0]] - 1)
+			}
+			out = append(out, 0x00)
 		case 0xF3: // the envelope: id, parameter, then a physical scalar
 			header := take(2)
 			if goProjection && len(header) == 2 && header[0] == 3 && header[1] <= 2 {
@@ -253,8 +282,7 @@ func shorthandTimestamp(data []byte, pos *int, unit byte) ([]byte, bool) {
 		return nil, false
 	}
 	tag := data[*pos]
-	widths := map[byte]int{0x0C: 1, 0x0D: 1, 0x0E: 2, 0x0F: 2, 0x04: 4, 0x06: 4, 0x05: 8, 0x07: 8, 0x10: 16, 0x11: 16}
-	width, ok := widths[tag]
+	width, ok := intWidths[tag]
 	if !ok || *pos+1+width > len(data) {
 		return nil, false
 	}

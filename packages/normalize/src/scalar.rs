@@ -18,6 +18,11 @@
 //! a uuid never matches the same sixteen bytes written as bytes. Every other
 //! logical type, [`Logical::Unknown`] included, has no term and is refused
 //! with [`NormalizeError::NoDomain`].
+//!
+//! A null has a term too, under [`domain::NULL`]: one byte, the same in
+//! every column, so an absent value is indexed like any other value and
+//! the nulls show only as one more tied group. A boolean and an
+//! `undefined` have none.
 
 use unicode_general_category::{get_general_category, GeneralCategory};
 use unicode_normalization::UnicodeNormalization;
@@ -43,9 +48,14 @@ pub mod domain {
     pub const BYTES: &str = "vitaminc/prf/value/bytes/v1";
     /// A uuid, over its sixteen raw bytes.
     pub const UUID: &str = "vitaminc/prf/value/uuid/v1";
+    /// A null, typed or plain, whatever column it sits in: the one byte
+    /// `0x00`.
+    pub const NULL: &str = "vitaminc/prf/value/null/v1";
     /// Every domain, for a test or an index layer that enumerates them. A
     /// slice, so a domain added later does not change its type.
-    pub const ALL: &[&str] = &[INTEGER, FLOAT, DATE, TIMESTAMP, DECIMAL, TEXT, BYTES, UUID];
+    pub const ALL: &[&str] = &[
+        INTEGER, FLOAT, DATE, TIMESTAMP, DECIMAL, TEXT, BYTES, UUID, NULL,
+    ];
 }
 
 /// The normalized bytes for one equality term and the domain they belong
@@ -70,10 +80,12 @@ pub struct Normalized {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum NormalizeError {
-    /// The scalar has no domain under the normalizer: a null, an
-    /// `undefined`, a boolean, or a logical type outside its opt-in table.
-    /// The message does not name an index, because the equality and order
-    /// normalizers both report it; whatever wraps it says which.
+    /// The scalar has no domain under the normalizer: an `undefined`, a
+    /// boolean, a logical type outside its opt-in table, or a null under
+    /// an index that gives nulls no term (an order index whose space does
+    /// not place them). The message does not name an index, because the
+    /// equality and order normalizers both report it; whatever wraps it
+    /// says which.
     #[error("no domain for this kind of value")]
     NoDomain,
     /// The value is not valid for its logical type.
@@ -92,6 +104,13 @@ pub enum NormalizeError {
     /// normalizer, which declares no type.
     #[error("the value does not fit the type the index declares")]
     OutOfRange,
+    /// The value is of the kind the index declares, and fits it, but its
+    /// code is the one the index keeps for nulls: the maximum of an
+    /// integer or uuid target in an order space that places nulls first
+    /// or last. Not reported by the equality normalizer, which gives a
+    /// null a domain of its own.
+    #[error("the value's code is the one this space keeps for the null")]
+    Reserved,
 }
 
 /// The opt-in table: the domain for a scalar, or `None` for one that has
@@ -103,7 +122,8 @@ pub fn domain_of(ty: Option<Logical>, v: &Physical<'_>) -> Option<&'static str> 
         (None, Physical::Float(_)) => Some(domain::FLOAT),
         (None, Physical::Text(_)) => Some(domain::TEXT),
         (None, Physical::Bytes(_)) => Some(domain::BYTES),
-        (None, Physical::Null | Physical::Bool(_)) => None,
+        (None, Physical::Null) => Some(domain::NULL),
+        (None, Physical::Bool(_)) => None,
         (Some(Logical::Date), _) => Some(domain::DATE),
         (Some(Logical::Timestamp(_)), _) => Some(domain::TIMESTAMP),
         (Some(Logical::Decimal { .. }), _) => Some(domain::DECIMAL),
@@ -124,7 +144,22 @@ pub fn domain_of(ty: Option<Logical>, v: &Physical<'_>) -> Option<&'static str> 
 /// (`f32` 1.5 matches, `f32` 0.1 does not match `f64` 0.1). Float zero
 /// signs and NaN payloads are folded. A timestamp in any unit is truncated
 /// to microseconds. A decimal's scale is normalized, so `1.50` and `1.5`
-/// are one term, as are `-0.00` and `0`.
+/// are one term, as are `-0.00` and `0`. A null is [`domain::NULL`] and
+/// the one byte `0x00`; a typed null is walked as a plain one, so it is
+/// the same term.
+///
+/// # Examples
+///
+/// ```
+/// use vitaminc_aead::Physical;
+/// use vitaminc_normalize::{domain, normalize};
+/// use vitaminc_protected::Controlled;
+///
+/// let null = normalize(None, Physical::Null)?;
+/// assert_eq!(null.domain, domain::NULL);
+/// assert_eq!(null.bytes.risky_ref(), &[0x00]);
+/// # Ok::<(), vitaminc_normalize::NormalizeError>(())
+/// ```
 pub fn normalize(ty: Option<Logical>, v: Physical<'_>) -> Result<Normalized, NormalizeError> {
     // A value that does not fit its logical type is refused as invalid
     // before the type is looked up, so `undefined` over an int is `Invalid`
@@ -138,6 +173,7 @@ pub fn normalize(ty: Option<Logical>, v: Physical<'_>) -> Result<Normalized, Nor
         (None, Physical::Float(f)) => Some(float(f)),
         (None, Physical::Text(s)) => Some(text(s)?),
         (None, Physical::Bytes(b)) => Some(bytes(b)),
+        (None, Physical::Null) => Some(null()),
         (Some(Logical::Date), Physical::Int(days)) => date(days),
         (Some(Logical::Timestamp(unit)), Physical::Int(count)) => timestamp(unit, count),
         (Some(Logical::Decimal { scale }), Physical::Int(mantissa)) => decimal(scale, mantissa),
@@ -277,6 +313,14 @@ pub fn text(text: &str) -> Result<Protected<Vec<u8>>, NormalizeError> {
 /// Bytes, as they are.
 pub fn bytes(value: &[u8]) -> Protected<Vec<u8>> {
     Protected::new(value.to_vec())
+}
+
+/// A null, typed or plain: the one byte `0x00`, under [`domain::NULL`].
+/// Every null is this one term, whatever column it sits in, as SQL says
+/// `NULL IS NULL` whatever the column. Spaces that must not tie already
+/// differ in context.
+pub fn null() -> Protected<Vec<u8>> {
+    fixed::<1>(|b| *b = [0x00])
 }
 
 /// A uuid's sixteen raw bytes. `None` for any other length.

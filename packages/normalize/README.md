@@ -43,9 +43,32 @@ assert_ne!(day.bytes.risky_ref(), a.bytes.risky_ref());
 ```
 
 Logical types opt in: a date, a timestamp, a decimal and a uuid have
-domains of their own. A null, a boolean, an `undefined` and a logical type
-this crate does not know have no term, and `normalize` refuses them with
+domains of their own. A boolean, an `undefined` and a logical type this
+crate does not know have no term, and `normalize` refuses them with
 [`NormalizeError::NoDomain`].
+
+Every null has a term, typed or plain, under a domain of its own. It is
+the same term in every column, as SQL says `NULL IS NULL` whatever the
+column; spaces that must not tie already differ in context. So the term
+column of an index holds a term where the value was absent, as it does
+where the value was there, and the nulls show only as one more group of
+equal terms, which is what any repeated value shows.
+
+```rust
+use vitaminc_normalize::{domain, normalize};
+use vitaminc_aead::Physical;
+use vitaminc_protected::Controlled;
+
+let null = normalize(None, Physical::Null)?;
+assert_eq!(null.domain, domain::NULL);
+assert_eq!(null.bytes.risky_ref(), &[0x00]);
+# Ok::<(), vitaminc_normalize::NormalizeError>(())
+```
+
+A layer that must keep a SQL `NULL` in the term column for some column
+drops the term it was handed. It knows the term is a null's because its
+domain is [`domain::NULL`]. Producing the term is the default, because the
+secure path should be the easy one, and dropping it is an explicit act.
 
 ## A whole value, beside encryption
 
@@ -97,11 +120,12 @@ container with children, even though it seals nothing itself. Read such a
 refusal with `TermsError::refusal`; encryption reports the same one as
 `EncryptError::Shape`.
 
-A scalar whose kind has no domain (a null, a boolean, an `undefined`)
-produces no term and does not stop the walk; passthrough subtrees get none
-either. A scalar whose *logical type* has no domain, one from a newer
-client, stops the walk: encrypting it with no term and no error would leave
-an index silently incomplete. That refusal and an unassigned code point
+A null, typed or plain, has its term at its own path. A scalar whose kind
+has no domain (a boolean, an `undefined`) produces no term and does not
+stop the walk; passthrough subtrees get none either. A scalar whose
+*logical type* has no domain, one from a newer client, stops the walk:
+encrypting it with no term and no error would leave an index silently
+incomplete. That refusal and an unassigned code point
 arrive as `EncryptError::Source` carrying a `TermError` (from `terms`, as
 `TermsError::term`), which holds the `NormalizeError` and the path to the
 refused field. Downcast to `TermError`; the `NormalizeError` is also its
@@ -124,6 +148,7 @@ new label.
 | text | `vitaminc/prf/value/text-nfc/unicode-16/v1` | Unicode 16 NFC; a code point unassigned in Unicode 16 is refused |
 | bytes | `vitaminc/prf/value/bytes/v1` | as they are |
 | uuid | `vitaminc/prf/value/uuid/v1` | the sixteen raw bytes |
+| null, typed or plain | `vitaminc/prf/value/null/v1` | one byte, `0x00` |
 
 Text normalization is variable-time. The integer and float paths use no
 floating-point arithmetic.

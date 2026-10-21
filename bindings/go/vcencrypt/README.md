@@ -231,7 +231,8 @@ these find inputs where both are self-consistent but differ from each other.
 
 - **`FuzzDifferentialValue`** checks that both sides accept or reject the
   same value bytes. When both accept, it checks that Rust re-encodes the
-  input exactly and that Go's re-encoding matches, allowing only Go's
+  input exactly, apart from a typed null, which both sides write back as
+  the plain null, and that Go's re-encoding matches, allowing only Go's
   `undefined` to `null` projection.
 - **`FuzzDifferentialCipherText`** checks that both sides accept or reject
   the same ciphertext bytes. Fuzzed seals never authenticate, so there is no

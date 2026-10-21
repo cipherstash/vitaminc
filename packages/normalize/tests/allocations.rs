@@ -50,7 +50,8 @@ fn allocations(f: impl FnOnce()) -> usize {
 fn a_walk_with_no_terms_allocates_only_the_key_buffer() {
     let mut inner = BTreeMap::new();
     for key in ["a", "b", "c", "d"] {
-        inner.insert(key, vec![None::<u32>, None]);
+        // Booleans, because they have no equality term. A null has one.
+        inner.insert(key, vec![true, false]);
     }
     let mut doc = BTreeMap::new();
     for key in ["p", "q", "r"] {

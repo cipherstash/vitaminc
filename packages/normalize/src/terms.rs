@@ -20,8 +20,8 @@ use vitaminc_aead::plaintext::{Error, Path, Step};
 use vitaminc_aead::seal::{seal_all, seal_all_async, AsyncCipher, Cipher};
 use vitaminc_aead::shape::{self, Locate, MapRules, SeqRules, Settle};
 use vitaminc_aead::{
-    Encrypt, EncryptError, EncryptSink, IntoAad, Logical, MapSink, Node, Pending, Physical,
-    Refusal, SeqSink, Sink, SourceError, Tee,
+    Encrypt, EncryptError, EncryptSink, FixedType, IntoAad, Logical, MapSink, Node, Pending,
+    Physical, Refusal, SeqSink, Sink, SourceError, Tee,
 };
 
 use vitaminc_protected::OpaqueDebug;
@@ -33,8 +33,9 @@ use crate::scalar::{normalize, NormalizeError, Normalized};
 /// [`Equality`] is the normalizer this crate is about. An index of another
 /// kind supplies its own, with a term type of its own (an order index
 /// seals its term so only a scheme can read it) and the same outcome
-/// contract: a scalar whose kind has no term under this index (a null, a
-/// boolean) returns [`NormalizeError::NoDomain`], and [`Terms`] skips it
+/// contract: a scalar whose kind has no term under this index (a boolean,
+/// or a null where the index gives nulls none) returns
+/// [`NormalizeError::NoDomain`], and [`Terms`] skips it
 /// when it has no logical type; a scalar whose logical type has no term
 /// returns the same error and stops the walk; any other error stops the
 /// walk too.
@@ -182,10 +183,16 @@ impl Error for TermsError {
 /// scalar, [`Equality`] unless [`by`](Terms::by) is given another, so an
 /// index of another kind collects its terms through this same walk.
 ///
-/// A scalar whose *kind* has no domain (a null, a boolean, an `undefined`)
-/// produces no term and does not stop the walk: an absent or unindexable
-/// value is an ordinary thing to find in a document, and the caller has
-/// the paths to see which fields were indexed. A scalar whose *logical
+/// Under [`Equality`] every null has a term, typed or plain, at the
+/// null's path and under [`domain::NULL`](crate::domain::NULL), so an
+/// absent value is indexed like any other. A layer that must keep a SQL
+/// `NULL` for some column drops that term; its domain says it is a null.
+///
+/// A scalar whose *kind* has no domain (a boolean, an `undefined`, or a
+/// null under a normalizer that gives nulls none) produces no term and
+/// does not stop the walk: an unindexable value is an ordinary thing to
+/// find in a document, and the caller has the paths to see which fields
+/// were indexed. A scalar whose *logical
 /// type* has no domain ([`Logical::Unknown`], or a type this crate does
 /// not know) stops the walk instead: it came from a newer client and
 /// means something, and encrypting it with no term and no error would
@@ -442,6 +449,13 @@ impl<'t, E: Error, N: Normalize> Sink for Terms<'t, E, N> {
             rules.sealed();
         }
         Ok(())
+    }
+
+    /// Indexed as a plain null. Equality has no width, so the type adds
+    /// nothing: under [`Equality`] a typed null is the same term as a
+    /// plain one.
+    fn typed_null(self, _: FixedType) -> Result<(), E> {
+        self.scalar(None, Physical::Null)
     }
 
     fn seq(self, _: Option<usize>) -> Result<Self::Seq, E> {

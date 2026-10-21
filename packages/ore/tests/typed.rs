@@ -390,7 +390,7 @@ fn spaces_contexts_and_terms_debug_without_the_key() {
     let space = context.target(target::I32);
     let shown = format!("{space:?}");
     assert!(
-        shown.ends_with(r#"OrderSpace<'_, typed::common::Mock, vitaminc_ore::target::I32> { scheme: "***", target: I32, salt: "***", opened: "***" }"#),
+        shown.ends_with(r#"OrderSpace<'_, typed::common::Mock, vitaminc_ore::target::I32> { scheme: "***", target: I32, domain: "vitaminc/ore/value/int32/v1", context: "***", salt: "***", opened: "***" }"#),
         "{shown}"
     );
     let term = space.encrypt(1i32).expect("mock");

@@ -1,0 +1,31 @@
+error[E0308]: mismatched types
+  --> tests/ui/negative_space/terms_of_two_null_policies_do_not_compare.rs:14:26
+   |
+14 |     let _ = last.compare(&a, &b);
+   |                  ------- ^^ expected `&OrderTerm<Vec<u8>, Nulls<I32, Last>>`, found `&OrderTerm<Vec<u8>, Nulls<I32, First>>`
+   |                  |
+   |                  arguments to this method are incorrect
+   |
+   = note: expected reference `&OrderTerm<Vec<u8>, Nulls<vitaminc_ore::target::I32, vitaminc_ore::target::Last>>`
+              found reference `&OrderTerm<Vec<u8>, Nulls<vitaminc_ore::target::I32, vitaminc_ore::target::First>>`
+note: method defined here
+  --> src/scheme.rs
+   |
+   |     pub fn compare(
+   |            ^^^^^^^
+
+error[E0308]: mismatched types
+  --> tests/ui/negative_space/terms_of_two_null_policies_do_not_compare.rs:16:40
+   |
+16 |     let _ = last.compare_query(&query, &a);
+   |                  -------------         ^^ expected `&OrderTerm<Vec<u8>, Nulls<I32, Last>>`, found `&OrderTerm<Vec<u8>, Nulls<I32, First>>`
+   |                  |
+   |                  arguments to this method are incorrect
+   |
+   = note: expected reference `&OrderTerm<Vec<u8>, Nulls<vitaminc_ore::target::I32, vitaminc_ore::target::Last>>`
+              found reference `&OrderTerm<Vec<u8>, Nulls<vitaminc_ore::target::I32, vitaminc_ore::target::First>>`
+note: method defined here
+  --> src/query.rs
+   |
+   |     pub fn compare_query(
+   |            ^^^^^^^^^^^^^

@@ -55,16 +55,30 @@ exclude_re = [
     # and the port is checked byte for byte against the frozen crate besides.
     "replace \\| with \\^ in (orderable|strip_trailing_zeros)$",
     # Unreachable, not untested: `Nothing` (vitaminc-aead typed.rs) is an
-    # uninhabited enum, so no value exists to call `scalar` or `passthrough`
-    # on and replacing either body with `Ok(())` cannot be observed. Its
-    # `seq` and `map` mutants are unviable for the same reason.
-    "replace <impl Sink for Nothing>::(scalar|passthrough) ",
+    # uninhabited enum, so no value exists to call `scalar`, `typed_null` or
+    # `passthrough` on and replacing any of those bodies with `Ok(())` cannot
+    # be observed. Its `seq` and `map` mutants are unviable for the same
+    # reason.
+    "replace <impl Sink for Nothing>::(scalar|typed_null|passthrough) ",
     # Equivalent mutant: `max` (vitaminc-aead plaintext/depth.rs) picks the
     # larger of two depths, and when they are equal `a > b` and `a >= b`
     # return the same number, so no input can tell them apart.
     # (`Ord::max` is not a `const fn`, so the comparison has to be written
     # out.) Its other mutants stay gated.
     "packages/aead/src/plaintext/depth.rs:.*replace > with >= in max",
+    # Equivalent mutant: `null` (vitaminc-normalize scalar.rs) returns the
+    # one byte `0x00` in a protected vector, which is exactly what the
+    # replacements `Protected::new(vec![0])` and `Protected::from(vec![0])`
+    # return, so no input can tell them apart. Its other replacements
+    # (`vec![]`, `vec![1]`) stay gated, and the byte is pinned by the
+    # known-answer tests and the HMAC vector for the null domain.
+    "packages/normalize/src/scalar.rs:.*replace null -> Protected<Vec<u8>> with Protected::(new|from)\\(vec!\\[0\\]\\)",
+    # Equivalent mutant: `Nulls::target` (vitaminc-ore target.rs) returns
+    # the marker the policy is set on, and every marker it can hold is a
+    # fixed-width marker, a zero-sized type with one value, which is also
+    # what `Default::default()` returns. No input can tell them apart. Its
+    # sibling `RuntimeNulls::target` holds an `OrderTarget` and stays gated.
+    "packages/ore/src/target.rs:.*replace Nulls<T, P>::target -> T with Default::default\\(\\)",
 ]
 
 # Property tests (quickcheck) and AEAD round-trips run slower under mutation than

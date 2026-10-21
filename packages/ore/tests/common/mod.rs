@@ -651,3 +651,38 @@ vitaminc_ore::supports_every_target!(Gated<4>);
 pub fn key() -> Protected<[u8; 32]> {
     Protected::new([7; 32])
 }
+
+/// A scheme that forgets the salt and the key for an all-ones timestamp
+/// plaintext: a special case at the extreme of a width the plain rows of
+/// the conformance checks never reach, which only the nulls-last sentinel
+/// does. For the checks over spaces that place nulls to catch.
+pub struct Extreme(pub Mock);
+
+impl OrderScheme for Extreme {
+    const NAME: &'static str = "extreme";
+    type Term = MockTerm;
+    type Error = Infallible;
+    type Space = MockSpace;
+
+    fn open(&self, target: OrderTarget, salt: &Context<'_>) -> Result<MockSpace, Infallible> {
+        self.0.open(target, salt)
+    }
+
+    fn encrypt_plaintext(
+        &self,
+        space: &MockSpace,
+        plaintext: &OrderPlaintext,
+    ) -> Result<MockTerm, Infallible> {
+        let bytes = plaintext.bytes().risky_ref();
+        if plaintext.target() == OrderTarget::Timestamp && bytes.iter().all(|b| *b == 0xFF) {
+            return Ok(MockTerm::new(Vec::new(), bytes));
+        }
+        self.0.encrypt_plaintext(space, plaintext)
+    }
+
+    fn compare(a: &MockTerm, b: &MockTerm) -> Option<Ordering> {
+        compare(a, b)
+    }
+}
+
+vitaminc_ore::supports_every_target!(Extreme);

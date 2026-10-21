@@ -3,6 +3,8 @@ use quickcheck_macros::quickcheck;
 use vitaminc_aead::{Float, TimeUnit};
 use vitaminc_normalize::normalize;
 
+use crate::NullOrder;
+
 use OrderTarget as T;
 
 fn term(target: OrderTarget, ty: Option<Logical>, v: Physical<'_>) -> OrderPlaintext {
@@ -344,10 +346,90 @@ fn every_domain_is_distinct_and_listed_once() {
     all.sort_unstable();
     all.dedup();
     assert_eq!(all.len(), domain::ALL.len());
-    assert_eq!(domain::ALL.len(), 15);
-    // One target per domain, in the same order.
+    assert_eq!(
+        domain::ALL.len(),
+        41,
+        "fifteen plain labels and two policies' thirteen"
+    );
+    // One target per plain domain, in the same order.
     let by_target: Vec<_> = OrderTarget::ALL.iter().map(|t| t.domain()).collect();
-    assert_eq!(by_target, domain::ALL);
+    assert_eq!(by_target, domain::ALL[..15]);
+    // Then each policy's labels, one per fixed-width target, in the same
+    // order: the plain label with the policy before its version.
+    let fixed: Vec<_> = OrderTarget::ALL
+        .iter()
+        .filter(|t| t.width().is_some())
+        .collect();
+    assert_eq!(fixed.len(), 13);
+    for (nulls, part, listed) in [
+        (NullOrder::First, "/nulls-first/v1", &domain::ALL[15..28]),
+        (NullOrder::Last, "/nulls-last/v1", &domain::ALL[28..]),
+    ] {
+        let by_target: Vec<_> = fixed
+            .iter()
+            .map(|t| t.domain_with_nulls(nulls).expect("a fixed-width target"))
+            .collect();
+        assert_eq!(by_target, listed, "{nulls:?}");
+        for (target, label) in fixed.iter().zip(&by_target) {
+            let plain = target.domain().strip_suffix("/v1").expect("a version");
+            assert_eq!(
+                *label,
+                format!("{plain}{part}"),
+                "{target:?} {nulls:?}: the label is the plain one with the policy"
+            );
+        }
+    }
+    assert_eq!(T::Text.domain_with_nulls(NullOrder::First), None);
+    assert_eq!(T::Bytes.domain_with_nulls(NullOrder::Last), None);
+    // The labels are protocol data, so they are written out here too: the
+    // rule above would follow a renamed plain label without a word.
+    assert_eq!(
+        domain::ALL,
+        [
+            "vitaminc/ore/value/int16/v1",
+            "vitaminc/ore/value/uint16/v1",
+            "vitaminc/ore/value/int32/v1",
+            "vitaminc/ore/value/uint32/v1",
+            "vitaminc/ore/value/int64/v1",
+            "vitaminc/ore/value/uint64/v1",
+            "vitaminc/ore/value/int128/v1",
+            "vitaminc/ore/value/uint128/v1",
+            "vitaminc/ore/value/float64/v1",
+            "vitaminc/ore/value/date/v1",
+            "vitaminc/ore/value/timestamp-micros/v1",
+            "vitaminc/ore/value/decimal/v1",
+            "vitaminc/ore/value/text-folded/unicode-16/v1",
+            "vitaminc/ore/value/bytes/v1",
+            "vitaminc/ore/value/uuid/v1",
+            "vitaminc/ore/value/int16/nulls-first/v1",
+            "vitaminc/ore/value/uint16/nulls-first/v1",
+            "vitaminc/ore/value/int32/nulls-first/v1",
+            "vitaminc/ore/value/uint32/nulls-first/v1",
+            "vitaminc/ore/value/int64/nulls-first/v1",
+            "vitaminc/ore/value/uint64/nulls-first/v1",
+            "vitaminc/ore/value/int128/nulls-first/v1",
+            "vitaminc/ore/value/uint128/nulls-first/v1",
+            "vitaminc/ore/value/float64/nulls-first/v1",
+            "vitaminc/ore/value/date/nulls-first/v1",
+            "vitaminc/ore/value/timestamp-micros/nulls-first/v1",
+            "vitaminc/ore/value/decimal/nulls-first/v1",
+            "vitaminc/ore/value/uuid/nulls-first/v1",
+            "vitaminc/ore/value/int16/nulls-last/v1",
+            "vitaminc/ore/value/uint16/nulls-last/v1",
+            "vitaminc/ore/value/int32/nulls-last/v1",
+            "vitaminc/ore/value/uint32/nulls-last/v1",
+            "vitaminc/ore/value/int64/nulls-last/v1",
+            "vitaminc/ore/value/uint64/nulls-last/v1",
+            "vitaminc/ore/value/int128/nulls-last/v1",
+            "vitaminc/ore/value/uint128/nulls-last/v1",
+            "vitaminc/ore/value/float64/nulls-last/v1",
+            "vitaminc/ore/value/date/nulls-last/v1",
+            "vitaminc/ore/value/timestamp-micros/nulls-last/v1",
+            "vitaminc/ore/value/decimal/nulls-last/v1",
+            "vitaminc/ore/value/uuid/nulls-last/v1",
+        ],
+        "every label, in the order `domain::ALL` promises"
+    );
     // No order domain is an equality domain.
     for d in domain::ALL {
         assert!(!vitaminc_normalize::domain::ALL.contains(d), "{d}");
@@ -357,7 +439,7 @@ fn every_domain_is_distinct_and_listed_once() {
 
 #[test]
 fn the_order_normalizer_is_order_at_its_target() {
-    let by_sink = Order(T::I32)
+    let by_sink = Order::new(T::I32)
         .normalize(None, Physical::Int(Int::I16(-3)))
         .expect("term");
     let direct = order(T::I32, None, Physical::Int(Int::I16(-3))).expect("term");
@@ -568,4 +650,498 @@ mod given_an_integer_at_any_width {
             assert!(fills_exactly(&int(value), width), "{value:?}");
         }
     }
+}
+
+// A null policy: the sentinel, the shift and the one refused value.
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn placed(target: OrderTarget, nulls: NullOrder, ty: Option<Logical>, v: Physical<'_>) -> String {
+    let p = order_with_nulls(target, nulls, ty, v).expect("valid test value");
+    assert_eq!(
+        p.null_order(),
+        Some(nulls),
+        "the plaintext carries its policy"
+    );
+    assert_eq!(
+        Some(p.domain()),
+        target.domain_with_nulls(nulls),
+        "the plaintext is under its policy's label"
+    );
+    hex(p.bytes().risky_ref())
+}
+
+const FIXED_TARGETS: [OrderTarget; 13] = [
+    T::I16,
+    T::U16,
+    T::I32,
+    T::U32,
+    T::I64,
+    T::U64,
+    T::I128,
+    T::U128,
+    T::F64,
+    T::Date,
+    T::Timestamp,
+    T::Decimal,
+    T::Uuid,
+];
+
+/// Every sentinel, written out byte for byte, so neither the width table
+/// nor the fill can drift without a test naming the target.
+#[test]
+fn every_null_is_the_extreme_code_of_its_targets_width() {
+    let first = |target| placed(target, NullOrder::First, None, Physical::Null);
+    let last = |target| placed(target, NullOrder::Last, None, Physical::Null);
+    let pinned: [(OrderTarget, &str, &str); 13] = [
+        (T::I16, "0000", "ffff"),
+        (T::U16, "0000", "ffff"),
+        (T::I32, "00000000", "ffffffff"),
+        (T::U32, "00000000", "ffffffff"),
+        (T::I64, "0000000000000000", "ffffffffffffffff"),
+        (T::U64, "0000000000000000", "ffffffffffffffff"),
+        (
+            T::I128,
+            "00000000000000000000000000000000",
+            "ffffffffffffffffffffffffffffffff",
+        ),
+        (
+            T::U128,
+            "00000000000000000000000000000000",
+            "ffffffffffffffffffffffffffffffff",
+        ),
+        (T::F64, "0000000000000000", "ffffffffffffffff"),
+        (T::Date, "00000000", "ffffffff"),
+        (
+            T::Timestamp,
+            "000000000000000000000000",
+            "ffffffffffffffffffffffff",
+        ),
+        (
+            T::Decimal,
+            "0000000000000000000000000000",
+            "ffffffffffffffffffffffffffff",
+        ),
+        (
+            T::Uuid,
+            "00000000000000000000000000000000",
+            "ffffffffffffffffffffffffffffffff",
+        ),
+    ];
+    for (target, below, above) in pinned {
+        assert_eq!(first(target), below, "{target:?}: the nulls-first sentinel");
+        assert_eq!(last(target), above, "{target:?}: the nulls-last sentinel");
+    }
+    let listed: Vec<_> = pinned.iter().map(|(target, ..)| *target).collect();
+    assert_eq!(listed, FIXED_TARGETS, "every fixed-width target is pinned");
+}
+
+/// Under nulls-first every integer's code is one higher than in the plain
+/// space, so zero and the minimum stay encodable; the value below the
+/// maximum takes the highest code.
+#[test]
+fn nulls_first_moves_every_integer_code_up_by_one() {
+    use Int::*;
+    let first = |target, i| placed(target, NullOrder::First, None, Physical::Int(i));
+    // (target, minimum, zero, one, below the maximum)
+    let rows = [
+        (
+            T::I16,
+            I16(i16::MIN),
+            "0001",
+            "8001",
+            "8002",
+            I16(i16::MAX - 1),
+            "ffff",
+        ),
+        (
+            T::U16,
+            U16(0),
+            "0001",
+            "0001",
+            "0002",
+            U16(u16::MAX - 1),
+            "ffff",
+        ),
+        (
+            T::I32,
+            I32(i32::MIN),
+            "00000001",
+            "80000001",
+            "80000002",
+            I32(i32::MAX - 1),
+            "ffffffff",
+        ),
+        (
+            T::U32,
+            U32(0),
+            "00000001",
+            "00000001",
+            "00000002",
+            U32(u32::MAX - 1),
+            "ffffffff",
+        ),
+        (
+            T::I64,
+            I64(i64::MIN),
+            "0000000000000001",
+            "8000000000000001",
+            "8000000000000002",
+            I64(i64::MAX - 1),
+            "ffffffffffffffff",
+        ),
+        (
+            T::U64,
+            U64(0),
+            "0000000000000001",
+            "0000000000000001",
+            "0000000000000002",
+            U64(u64::MAX - 1),
+            "ffffffffffffffff",
+        ),
+        (
+            T::I128,
+            I128(i128::MIN),
+            "00000000000000000000000000000001",
+            "80000000000000000000000000000001",
+            "80000000000000000000000000000002",
+            I128(i128::MAX - 1),
+            "ffffffffffffffffffffffffffffffff",
+        ),
+        (
+            T::U128,
+            U128(0),
+            "00000000000000000000000000000001",
+            "00000000000000000000000000000001",
+            "00000000000000000000000000000002",
+            U128(u128::MAX - 1),
+            "ffffffffffffffffffffffffffffffff",
+        ),
+    ];
+    for (target, min, min_code, zero_code, one_code, below_max, below_max_code) in rows {
+        assert_eq!(first(target, min), min_code, "{target:?}: the minimum");
+        assert_eq!(first(target, I8(0)), zero_code, "{target:?}: zero");
+        assert_eq!(first(target, I8(1)), one_code, "{target:?}: one");
+        assert_eq!(
+            first(target, below_max),
+            below_max_code,
+            "{target:?}: the value below the maximum"
+        );
+    }
+    // The shift carries across bytes, as far as it has to.
+    assert_eq!(first(T::U16, U16(0x00FF)), "0100", "the shift carries");
+    assert_eq!(
+        first(T::U32, U32(0x00FF_FFFF)),
+        "01000000",
+        "the shift carries across three bytes"
+    );
+    assert_eq!(
+        first(T::I32, I32(-1)),
+        "80000000",
+        "minus one carries across every byte to zero's plain code"
+    );
+    assert_eq!(
+        first(T::I64, I64(-1)),
+        "8000000000000000",
+        "minus one carries across every byte to zero's plain code"
+    );
+    assert_eq!(
+        first(T::U128, U64(u64::MAX)),
+        "00000000000000010000000000000000",
+        "the shift carries across eight bytes of sixteen"
+    );
+    assert_eq!(
+        first(T::I128, I128(-1)),
+        "80000000000000000000000000000000",
+        "minus one carries across all sixteen bytes"
+    );
+}
+
+/// Under nulls-last every integer keeps its plain code: the sentinel is the
+/// maximum's code, so only the maximum moves out.
+#[test]
+fn nulls_last_keeps_every_integer_code_but_the_maximums() {
+    for (target, _, _) in INT_TARGETS {
+        for v in [Int::I8(0), Int::I8(1), Int::U8(200), Int::U16(300)] {
+            assert_eq!(
+                placed(target, NullOrder::Last, None, Physical::Int(v)),
+                hex(&int_bytes(target, v)),
+                "{target:?} {v:?}: the code is the plain space's"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_maximum_of_an_integer_or_uuid_target_is_refused_under_both_policies() {
+    use Int::*;
+    let maxima = [
+        (T::I16, I16(i16::MAX)),
+        (T::U16, U16(u16::MAX)),
+        (T::I32, I32(i32::MAX)),
+        (T::U32, U32(u32::MAX)),
+        (T::I64, I64(i64::MAX)),
+        (T::U64, U64(u64::MAX)),
+        (T::I128, I128(i128::MAX)),
+        (T::U128, U128(u128::MAX)),
+    ];
+    for nulls in [NullOrder::First, NullOrder::Last] {
+        for (target, max) in maxima {
+            assert_eq!(
+                order_with_nulls(target, nulls, None, Physical::Int(max)).err(),
+                Some(NormalizeError::Reserved),
+                "{target:?} {nulls:?}: the maximum is the nulls' code"
+            );
+            // A narrower width holding the target's maximum is refused the
+            // same way: the code decides, not the width it arrived at.
+            if let Some(wide) = max.to_i128().map(I128) {
+                assert_eq!(
+                    order_with_nulls(target, nulls, None, Physical::Int(wide)).err(),
+                    Some(NormalizeError::Reserved),
+                    "{target:?} {nulls:?}: the maximum at another width"
+                );
+            }
+        }
+        assert_eq!(
+            order_with_nulls(
+                T::Uuid,
+                nulls,
+                Some(Logical::Uuid),
+                Physical::Bytes(&[0xFF; 16])
+            )
+            .err(),
+            Some(NormalizeError::Reserved),
+            "{nulls:?}: the maximum uuid is the nulls' code"
+        );
+    }
+    // The plain space still holds every maximum, at the code it always had.
+    for (target, max) in maxima {
+        let width = target.width().expect("fixed width");
+        assert_eq!(
+            hex(&int_bytes(target, max)),
+            "ff".repeat(width),
+            "{target:?}: the plain space is unchanged"
+        );
+    }
+}
+
+#[test]
+fn the_nil_uuid_moves_up_by_one_under_nulls_first_and_stays_under_nulls_last() {
+    let uuid =
+        |nulls, b: &[u8; 16]| placed(T::Uuid, nulls, Some(Logical::Uuid), Physical::Bytes(b));
+    assert_eq!(
+        uuid(NullOrder::First, &[0; 16]),
+        "00000000000000000000000000000001",
+        "the nil uuid is one above the sentinel"
+    );
+    let mut below_max = [0xFF; 16];
+    below_max[15] = 0xFE;
+    assert_eq!(
+        uuid(NullOrder::First, &below_max),
+        "ffffffffffffffffffffffffffffffff",
+        "the uuid below the maximum takes the highest code"
+    );
+    let mut carries = [0x00; 16];
+    carries[8..].fill(0xFF);
+    assert_eq!(
+        uuid(NullOrder::First, &carries),
+        "00000000000000010000000000000000",
+        "a uuid's shift carries across bytes"
+    );
+    assert_eq!(
+        uuid(NullOrder::Last, &[0; 16]),
+        "00000000000000000000000000000000",
+        "under nulls-last the nil uuid keeps its bytes"
+    );
+    assert_eq!(
+        uuid(NullOrder::Last, &below_max),
+        "fffffffffffffffffffffffffffffffe",
+        "under nulls-last a uuid keeps its bytes"
+    );
+}
+
+/// Float, date, timestamp and decimal codes never reach either extreme of
+/// their width, so a policy shifts nothing and refuses nothing for them.
+/// Each encoding sorts as its values do (pinned elsewhere in this file),
+/// so its range's two ends bound every code; NaN, which the float
+/// encoding folds to one quiet NaN, is checked on its own.
+#[test]
+fn float_date_timestamp_and_decimal_codes_never_reach_a_sentinel() {
+    use vitaminc_aead::plaintext::kinds::{
+        MAX_DATE_DAYS, MAX_TIMESTAMP_NANOS, MIN_DATE_DAYS, MIN_TIMESTAMP_NANOS,
+    };
+    let mantissa = (1i128 << 96) - 1;
+    let ns = Some(Logical::Timestamp(TimeUnit::Nanos));
+    let ends: [(OrderTarget, Option<Logical>, Vec<Physical<'_>>); 4] = [
+        (
+            T::F64,
+            None,
+            vec![
+                Physical::Float(Float::F64(f64::NEG_INFINITY)),
+                Physical::Float(Float::F64(f64::INFINITY)),
+                Physical::Float(Float::F64(f64::NAN)),
+                Physical::Float(Float::F64(-f64::NAN)),
+                // The two NaNs whose orderable bytes, were they not folded
+                // to one quiet NaN, would be all `0x00` and all `0xFF`.
+                Physical::Float(Float::F64(f64::from_bits(u64::MAX))),
+                Physical::Float(Float::F64(f64::from_bits(0x7FFF_FFFF_FFFF_FFFF))),
+                // The same at `f32`, which widens before it is folded.
+                Physical::Float(Float::F32(f32::from_bits(u32::MAX))),
+                Physical::Float(Float::F32(f32::from_bits(0x7FFF_FFFF))),
+            ],
+        ),
+        (
+            T::Date,
+            Some(Logical::Date),
+            vec![
+                Physical::Int(Int::I32(MIN_DATE_DAYS)),
+                Physical::Int(Int::I32(MAX_DATE_DAYS)),
+            ],
+        ),
+        (
+            T::Timestamp,
+            ns,
+            vec![
+                Physical::Int(Int::I128(MIN_TIMESTAMP_NANOS)),
+                Physical::Int(Int::I128(MAX_TIMESTAMP_NANOS)),
+            ],
+        ),
+        (
+            T::Decimal,
+            Some(Logical::Decimal { scale: 0 }),
+            vec![
+                Physical::Int(Int::I128(-mantissa)),
+                Physical::Int(Int::I128(mantissa)),
+                Physical::Int(Int::I128(0)),
+            ],
+        ),
+    ];
+    for (target, ty, values) in ends {
+        let width = target.width().expect("fixed width");
+        let (floor, ceiling) = (vec![0x00; width], vec![0xFF; width]);
+        for v in values {
+            let plain = bytes(target, ty, v);
+            assert!(
+                floor < plain && plain < ceiling,
+                "{target:?} {v:?}: a code reached an extreme"
+            );
+            for nulls in [NullOrder::First, NullOrder::Last] {
+                assert_eq!(
+                    placed(target, nulls, ty, v),
+                    hex(&plain),
+                    "{target:?} {v:?} {nulls:?}: a policy moves nothing here"
+                );
+            }
+        }
+    }
+    // The decimal's smallest magnitudes, at the largest scale.
+    for m in [-1i128, 1] {
+        let v = Physical::Int(Int::I128(m));
+        let code = bytes(T::Decimal, Some(Logical::Decimal { scale: 28 }), v);
+        assert!(code > vec![0; 14] && code < vec![0xFF; 14], "{m}e-28");
+    }
+}
+
+#[quickcheck]
+fn no_float_reaches_a_sentinel(bits: u64) -> bool {
+    let code = bytes(
+        T::F64,
+        None,
+        Physical::Float(Float::F64(f64::from_bits(bits))),
+    );
+    code != [0x00; 8] && code != [0xFF; 8]
+}
+
+/// Only a NaN could reach an extreme, and a uniform bit pattern is a NaN
+/// about once in two thousand draws. This draws only infinities and NaNs,
+/// of either sign and any payload.
+#[quickcheck]
+fn no_nan_reaches_a_sentinel(bits: u64) -> bool {
+    let nan_or_infinite = f64::from_bits(bits | 0x7FF0_0000_0000_0000);
+    let code = bytes(T::F64, None, Physical::Float(Float::F64(nan_or_infinite)));
+    code != [0x00; 8] && code != [0xFF; 8]
+}
+
+#[quickcheck]
+fn a_policy_keeps_the_order_and_puts_the_null_at_its_end(a: i64, b: i64) -> bool {
+    // The maximum is refused, so leave it out.
+    let (a, b) = (a.min(i64::MAX - 1), b.min(i64::MAX - 1));
+    let code = |nulls, v: i64| placed(T::I64, nulls, None, Physical::Int(Int::I64(v)));
+    let null = |nulls| placed(T::I64, nulls, None, Physical::Null);
+    let first = code(NullOrder::First, a).cmp(&code(NullOrder::First, b)) == a.cmp(&b)
+        && null(NullOrder::First) < code(NullOrder::First, a);
+    let last = code(NullOrder::Last, a).cmp(&code(NullOrder::Last, b)) == a.cmp(&b)
+        && code(NullOrder::Last, a) < null(NullOrder::Last);
+    first && last
+}
+
+#[test]
+fn text_and_bytes_take_no_null_policy() {
+    for nulls in [NullOrder::First, NullOrder::Last] {
+        for (target, v) in [
+            (T::Text, Physical::Text("a")),
+            (T::Text, Physical::Null),
+            (T::Bytes, Physical::Bytes(b"a")),
+            (T::Bytes, Physical::Null),
+        ] {
+            assert_eq!(
+                order_with_nulls(target, nulls, None, v).err(),
+                Some(NormalizeError::NoDomain),
+                "{target:?} {nulls:?}: no label, so no term"
+            );
+        }
+        assert_eq!(
+            Order::new(T::Text).nulls(nulls).err(),
+            Some(NormalizeError::NoDomain),
+            "the normalizer refuses a policy on text"
+        );
+        assert_eq!(
+            Order::new(T::Bytes).nulls(nulls).err(),
+            Some(NormalizeError::NoDomain)
+        );
+    }
+}
+
+#[test]
+fn a_boolean_and_an_undefined_have_no_term_under_any_policy() {
+    for target in FIXED_TARGETS {
+        for nulls in [NullOrder::First, NullOrder::Last] {
+            assert_eq!(
+                order_with_nulls(target, nulls, None, Physical::Bool(true)).err(),
+                Some(NormalizeError::NoDomain),
+                "{target:?} {nulls:?}: a boolean"
+            );
+            assert_eq!(
+                order_with_nulls(target, nulls, Some(Logical::Undefined), Physical::Null).err(),
+                Some(NormalizeError::NoDomain),
+                "{target:?} {nulls:?}: an undefined is not a null"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_order_normalizer_with_a_policy_gives_every_null_the_sentinel_at_its_path() {
+    use vitaminc_normalize::{terms_by, Step};
+    let ages = vec![Some(36i32), None];
+    let plain = terms_by(Order::new(T::I32), &ages).expect("terms");
+    assert_eq!(plain.len(), 1, "a plain normalizer skips the null");
+    let order = Order::new(T::I32)
+        .nulls(NullOrder::First)
+        .expect("fixed width");
+    assert_eq!(order.target(), T::I32);
+    assert_eq!(order.null_order(), Some(NullOrder::First));
+    assert_eq!(Order::new(T::I32).null_order(), None);
+    let placed = terms_by(order, &ages).expect("terms");
+    assert_eq!(placed.len(), 2, "the null has a term");
+    assert_eq!(placed[1].path.steps(), [Step::Index(1)]);
+    assert_eq!(placed[1].normalized.domain(), domain::INT32_NULLS_FIRST);
+    assert_eq!(placed[1].normalized.bytes().risky_ref(), &[0; 4]);
+    assert_eq!(
+        hex(placed[0].normalized.bytes().risky_ref()),
+        "80000025",
+        "36 moves up by one"
+    );
 }

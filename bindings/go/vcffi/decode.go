@@ -12,6 +12,8 @@ import (
 // Unmarshal decodes value transport bytes into Go natives:
 //
 //   - Null and Undefined → nil (Go has no undefined analog);
+//   - a typed null       → nil: an absent value is absent whatever its type
+//     once it is out of the seal, so it re-encodes as the plain null;
 //   - Bool               → bool;
 //   - Int32              → int32;
 //   - Int64              → int64;
@@ -169,6 +171,8 @@ func decodeTagged(r *reader, tag byte, depth int) (any, error) {
 		return vcvalue.Plain{V: inner}, nil
 	case tagEnvelope:
 		return decodeEnvelope(r)
+	case tagTypedNull:
+		return decodeTypedNull(r)
 	default:
 		return nil, ErrMalformed
 	}

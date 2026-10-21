@@ -123,6 +123,14 @@ fn every_equality_domain_has_a_known_answer() {
                 "212c08cbe7d388777e819e618a0d2b0f529c5b268c3a3e9682dd380ae6da0a56",
             ),
         ),
+        (
+            (None, Physical::Null),
+            (
+                domain::NULL,
+                "00",
+                "f6e01b71b0b46b17cfeaf180b657886e11994c818fe1d60e85d78e544cb42a11",
+            ),
+        ),
     ];
     let mut covered = Vec::new();
     for ((ty, value), (expected_domain, payload, expected)) in vectors {
@@ -174,6 +182,7 @@ fn every_equality_domain_has_a_known_answer() {
             "vitaminc/prf/value/text-nfc/unicode-16/v1",
             "vitaminc/prf/value/bytes/v1",
             "vitaminc/prf/value/uuid/v1",
+            "vitaminc/prf/value/null/v1",
         ]
     );
 }
@@ -188,7 +197,7 @@ fn unsupported_values_return_typed_errors_without_hashing() {
         Err(PrfError::Normalize(NormalizeError::NoDomain))
     ));
     assert!(matches!(
-        EqualityTerm::new(None, Physical::Null)
+        EqualityTerm::new(Some(Logical::Undefined), Physical::Null)
             .prf(&prf)
             .into_result(),
         Err(PrfError::Normalize(NormalizeError::NoDomain))
@@ -275,7 +284,7 @@ fn a_normalize_error_inside_a_container_fails_the_whole_derivation() {
         Err(PrfError::Normalize(NormalizeError::Invalid))
     ));
     assert!(matches!(
-        Some(EqualityTerm::new(None, Physical::Null))
+        Some(EqualityTerm::new(None, Physical::Bool(false)))
             .prf(&prf)
             .into_result(),
         Err(PrfError::Normalize(NormalizeError::NoDomain))

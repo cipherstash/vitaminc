@@ -118,9 +118,11 @@ and the PRF only derives under the domain it is handed.
 `EqualityTerm::new(logical, physical)` is the one-scalar convenience that
 normalizes on the way in, for a caller holding a single scalar (a query
 parameter, say) rather than a document to walk; a scalar with no equality
-domain (a null, a boolean, a logical type the normalizer does not know), text
-with code points unassigned in Unicode 16, or a value invalid for its logical
-type returns `PrfError::Normalize`. Without `normalize`, this crate does not
+domain (a boolean, an `undefined`, a logical type the normalizer does not
+know), text with code points unassigned in Unicode 16, or a value invalid for
+its logical type returns `PrfError::Normalize`. A null has an equality term,
+under `vitaminc/prf/value/null/v1`, the same for every null. Without
+`normalize`, this crate does not
 depend on `vitaminc-normalize`, `vitaminc-aead` or the Unicode tables.
 
 `vitaminc-normalize` owns the encodings and the opt-in table of logical

@@ -7,21 +7,25 @@
 //! It never sees the encoding. A scheme opens a space once, under the
 //! salt the space derives, and encrypts the sealed [`OrderPlaintext`]s of
 //! that space with what it derived; it never sees bytes that skipped the
-//! encoding (the only way to make a plaintext is [`order`]) or a salt it
-//! could derive differently from another scheme.
+//! encoding (the only ways to make a plaintext are
+//! [`order`](crate::order) and [`order_with_nulls`](crate::order_with_nulls))
+//! or a salt it could derive differently from another scheme.
 
 use core::cmp::Ordering;
 use core::fmt;
 use std::sync::OnceLock;
 
 use vitaminc_aead::plaintext::{self, SourceError};
-use vitaminc_aead::{Encrypt, Logical, MapSink, Physical, SeqSink, Sink};
+use vitaminc_aead::{Encrypt, FixedType, Logical, MapSink, Physical, SeqSink, Sink};
 use vitaminc_context::{Context, IntoContext};
 use vitaminc_normalize::NormalizeError;
 use vitaminc_protected::{Controlled, OpaqueDebug, Protected};
 
-use crate::target::{FitsIn, OwnTarget, StaticTarget, Supports, Target};
-use crate::{order, OrderTarget};
+use crate::order::{encode, label, null_plaintext};
+use crate::target::{
+    FitsIn, FixedWidth, NullPolicy, Nulls, OwnTarget, RuntimeNulls, StaticTarget, Supports, Target,
+};
+use crate::{NullOrder, OrderTarget};
 
 /// The label every salt this crate derives leads with.
 const SALT_LABEL: &[u8] = b"vitaminc/ore/v1";
@@ -29,7 +33,8 @@ const SALT_LABEL: &[u8] = b"vitaminc/ore/v1";
 /// One scalar's order term before encryption: bytes whose order is the
 /// value's order, encoded as the target they were made for.
 ///
-/// Only [`order`] builds one, so a scheme can rely on the bytes being the
+/// Only [`order`](crate::order) and [`order_with_nulls`](crate::order_with_nulls)
+/// build one, so a scheme can rely on the bytes being the
 /// encoding of their target, and on there being at least one: a
 /// fixed-width target encodes to its width, and text and bytes start with
 /// [`VARIABLE_WIDTH_MARKER`](crate::VARIABLE_WIDTH_MARKER). A caller
@@ -39,11 +44,25 @@ const SALT_LABEL: &[u8] = b"vitaminc/ore/v1";
 pub struct OrderPlaintext {
     #[non_sensitive]
     target: OrderTarget,
+    #[non_sensitive]
+    nulls: Option<NullOrder>,
+    #[non_sensitive]
+    domain: &'static str,
     bytes: Protected<Vec<u8>>,
 }
 
 impl OrderPlaintext {
-    pub(crate) fn new(target: OrderTarget, bytes: Protected<Vec<u8>>) -> Self {
+    pub(crate) fn new(
+        target: OrderTarget,
+        nulls: Option<NullOrder>,
+        domain: &'static str,
+        bytes: Protected<Vec<u8>>,
+    ) -> Self {
+        debug_assert_eq!(
+            label(target, nulls),
+            Some(domain),
+            "the domain is the space's label"
+        );
         debug_assert!(
             target.width().is_none_or(|w| w == bytes.risky_ref().len()),
             "{target:?} encodes to its width"
@@ -52,7 +71,12 @@ impl OrderPlaintext {
             !bytes.risky_ref().is_empty(),
             "an order plaintext is never empty"
         );
-        Self { target, bytes }
+        Self {
+            target,
+            nulls,
+            domain,
+            bytes,
+        }
     }
 
     /// The target the bytes were encoded as.
@@ -60,10 +84,16 @@ impl OrderPlaintext {
         self.target
     }
 
+    /// Where the space the plaintext was encoded for places nulls, or
+    /// `None` for a space that gives them no term.
+    pub fn null_order(&self) -> Option<NullOrder> {
+        self.nulls
+    }
+
     /// The frozen domain label, one of the [`domain`](crate::domain)
-    /// constants: the target's.
+    /// constants: the target's, or the label of its null policy.
     pub fn domain(&self) -> &'static str {
-        self.target.domain()
+        self.domain
     }
 
     /// The width every term of this target has, or `None` for text and
@@ -371,12 +401,14 @@ impl<S: OrderScheme + ?Sized> OrderEncrypt for S {}
 
 /// `PAE("vitaminc/ore/v1", scheme, domain, context)`. Leading with this
 /// crate's own label keeps it apart from any context another crate
-/// derives from the same parts.
-fn salt(scheme: &str, target: OrderTarget, context: &Context<'_>) -> Context<'static> {
+/// derives from the same parts. The domain is the space's label, which
+/// names its null policy, so a space that places nulls never shares a
+/// salt with the plain space of its target.
+fn salt(scheme: &str, domain: &str, context: &Context<'_>) -> Context<'static> {
     Context::pae(&[
         SALT_LABEL,
         scheme.as_bytes(),
-        target.domain().as_bytes(),
+        domain.as_bytes(),
         context.as_bytes(),
     ])
 }
@@ -439,8 +471,8 @@ impl<'s, S: OrderScheme + ?Sized> OrderContext<'s, S> {
 /// so every term of it agrees, and what the scheme derives under that
 /// salt ([`OrderScheme::Space`]), derived once for every term of the
 /// space. From [`OrderEncrypt::target`] or [`OrderContext::target`].
-/// `Debug` shows the target and masks the scheme, whose key it holds,
-/// the salt and what was derived.
+/// `Debug` shows the target and domain and masks the scheme, whose key
+/// it holds, the context, the salt and what was derived.
 ///
 /// The scheme opens the space when its first value is encrypted, or when
 /// [`open`](Self::open) is called, so making one cannot fail and a chain
@@ -465,6 +497,13 @@ pub struct OrderSpace<'s, S: OrderScheme + ?Sized, T: Target = OrderTarget> {
     pub(crate) scheme: &'s S,
     #[non_sensitive]
     pub(crate) target: T,
+    /// The space's domain label: the target's, or its null policy's.
+    #[non_sensitive]
+    domain: &'static str,
+    /// The context the space was made under, kept so that
+    /// [`nulls`](OrderSpace::nulls) can make the same space with a policy.
+    /// Masked in `Debug` with the salt it is bound into.
+    context: Context<'static>,
     salt: Context<'static>,
     /// What the scheme derived under the salt, once it has.
     opened: OnceLock<S::Space>,
@@ -488,10 +527,16 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
             S::NAME,
             target.runtime()
         );
+        // Every `Nulls` target is made by a `nulls` method, which takes a
+        // fixed-width target only, so every space's target has a label.
+        let domain = label(target.runtime(), target.null_order())
+            .expect("a null policy is only ever set on a fixed-width target");
         Self {
             scheme,
             target,
-            salt: salt(S::NAME, target.runtime(), context),
+            domain,
+            context: context.clone().into_owned(),
+            salt: salt(S::NAME, domain, context),
             opened: OnceLock::new(),
         }
     }
@@ -532,6 +577,18 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
         self.target.runtime()
     }
 
+    /// Where this space places nulls, or `None` if it gives them no term.
+    /// Set with [`nulls`](OrderSpace::nulls).
+    pub fn null_order(&self) -> Option<NullOrder> {
+        self.target.null_order()
+    }
+
+    /// The frozen domain label of every term of this space: the target's,
+    /// or the label of its null policy.
+    pub fn domain(&self) -> &'static str {
+        self.domain
+    }
+
     /// The salt every term of this space is bound under. Not secret.
     pub fn salt(&self) -> &Context<'static> {
         &self.salt
@@ -544,21 +601,25 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
     /// while the program ran.
     ///
     /// A scalar with no term is refused rather than skipped: a caller who
-    /// asks for one term and gets none should hear about it.
+    /// asks for one term and gets none should hear about it. A null has a
+    /// term only in a space that places nulls, where it is the space's
+    /// sentinel.
     ///
     /// # Errors
     ///
     /// [`OrderError::Unsupported`] if the scheme does not take this
     /// target, [`OrderError::Term`] if the scalar has no term as the
-    /// space's target, [`OrderError::NotScalar`] if the value is a
-    /// container, [`OrderError::Source`] if the value could not be read,
+    /// space's target (with [`NormalizeError::Reserved`] for the maximum
+    /// of an integer or uuid target in a space that places nulls),
+    /// [`OrderError::NotScalar`] if the value is a container,
+    /// [`OrderError::Source`] if the value could not be read,
     /// [`OrderError::Backend`] if the scheme failed.
     pub fn encrypt_checked<V: Encrypt>(
         &self,
         value: V,
     ) -> Result<OrderTerm<S::Term, T>, OrderError<S::Error>> {
         self.supported()?;
-        let plaintext = value.visit(Scalar(self.target()))?;
+        let plaintext = value.visit(Scalar::of(self.target))?;
         self.encrypt_plaintext(&plaintext)
     }
 
@@ -568,13 +629,14 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
     /// # Errors
     ///
     /// [`OrderError::Term`] with [`NormalizeError::Mismatch`] if it was
-    /// encoded as another target than this space's, else as
+    /// encoded for another space than this one (another target, or
+    /// another null policy), else as
     /// [`encrypt_checked`](Self::encrypt_checked).
     pub fn encrypt_term(
         &self,
         plaintext: &OrderPlaintext,
     ) -> Result<OrderTerm<S::Term, T>, OrderError<S::Error>> {
-        if plaintext.target() != self.target() {
+        if plaintext.domain() != self.domain {
             return Err(OrderError::Term(NormalizeError::Mismatch));
         }
         self.supported()?;
@@ -597,19 +659,19 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
     /// space's terms, so they sort by it.
     ///
     /// Both terms must be this space's. A term of a target named when the
-    /// program is compiled cannot be another target's; a term of one
-    /// chosen while it ran carries its target, and two of different
-    /// targets, or of another target than this space's, are `None`. The
-    /// scheme cannot always tell two spaces' terms apart otherwise, and
-    /// may order them as noise. `None` where it can tell: a term not of
-    /// this scheme, or two terms not made to compare.
+    /// program is compiled cannot be another target's or another null
+    /// policy's: that does not compile. A term of one chosen while it ran
+    /// carries its target and its null policy, so two of different
+    /// targets or policies, or of another than this space's, are `None`. The scheme cannot always
+    /// tell two spaces' terms apart otherwise, and may order them as
+    /// noise. `None` where it can tell: a term not of this scheme, or two
+    /// terms not made to compare.
     pub fn compare(
         &self,
         a: &OrderTerm<S::Term, T>,
         b: &OrderTerm<S::Term, T>,
     ) -> Option<Ordering> {
-        let target = self.target();
-        (a.target() == target && b.target() == target)
+        (same(a.target, self.target) && same(b.target, self.target))
             .then(|| S::compare(&a.raw, &b.raw))
             .flatten()
     }
@@ -623,7 +685,7 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
         } else {
             Err(OrderError::Unsupported {
                 scheme: S::NAME,
-                domain: self.target().domain(),
+                domain: self.domain,
             })
         }
     }
@@ -659,7 +721,7 @@ impl<S: Supports<T> + Supports<OrderTarget> + ?Sized, T: StaticTarget> OrderSpac
     /// and the scheme [`Supports`] the target. A scheme whose `Error` is
     /// [`Infallible`](core::convert::Infallible) cannot fail at all.
     pub fn encrypt<V: FitsIn<T>>(&self, value: V) -> Result<OrderTerm<S::Term, T>, S::Error> {
-        let plaintext = match value.visit(Scalar(T::TARGET)) {
+        let plaintext = match value.visit(Scalar::of(T::default())) {
             Ok(plaintext) => plaintext,
             // `FitsIn` is a sealed table of conversions the encoding never
             // refuses, and this crate's tests encrypt every row at its
@@ -670,16 +732,168 @@ impl<S: Supports<T> + Supports<OrderTarget> + ?Sized, T: StaticTarget> OrderSpac
     }
 }
 
+/// Whether two targets name one space's target: the same type and the
+/// same null policy.
+pub(crate) fn same<T: Target>(a: T, b: T) -> bool {
+    a.runtime() == b.runtime() && a.null_order() == b.null_order()
+}
+
+impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: FixedWidth> OrderSpace<'s, S, T> {
+    /// This target and context in a space that places nulls as the policy
+    /// marker says, [`First`](crate::target::First) or
+    /// [`Last`](crate::target::Last): a new space, whose terms do not
+    /// compare with this one's.
+    ///
+    /// Every null in it, typed or plain, encodes to the space's sentinel,
+    /// and for an integer or uuid target the target's maximum is refused
+    /// with [`NormalizeError::Reserved`]; [`NullOrder`] has the rule and
+    /// what a placed null reveals. A value that might be the maximum goes
+    /// through [`encrypt_checked`](OrderSpace::encrypt_checked), which
+    /// reports it, so a space with a policy has no
+    /// [`encrypt`](OrderSpace::encrypt).
+    ///
+    /// The policy is part of the space's type, `Nulls<T, P>`, so a term of
+    /// a nulls-first space does not compile against a nulls-last space's
+    /// [`compare`](OrderSpace::compare). Compiles only for a fixed-width
+    /// marker: text and bytes take no null policy. A layer that chooses
+    /// the policy while the program runs opens the space with an
+    /// [`OrderTarget`] and passes a [`NullOrder`] instead, as the second
+    /// half of the example shows.
+    ///
+    /// ```
+    /// use vitaminc_ore::target::{Last, I32};
+    /// use vitaminc_ore::{NormalizeError, NullOrder, OrderEncrypt, OrderError, OrderTarget};
+    /// # use vitaminc_ore::{Context, OrderPlaintext, OrderScheme};
+    /// # struct Clear;
+    /// # impl OrderScheme for Clear {
+    /// #     const NAME: &'static str = "clear";
+    /// #     type Term = Vec<u8>;
+    /// #     type Error = core::convert::Infallible;
+    /// #     type Space = ();
+    /// #     fn open(&self, _: vitaminc_ore::OrderTarget, _: &Context<'_>) -> Result<(), Self::Error> {
+    /// #         Ok(())
+    /// #     }
+    /// #     fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
+    /// #         use vitaminc_protected::Controlled;
+    /// #         Ok(p.bytes().risky_ref().clone())
+    /// #     }
+    /// #     fn compare(a: &Vec<u8>, b: &Vec<u8>) -> Option<core::cmp::Ordering> {
+    /// #         Some(a.cmp(b))
+    /// #     }
+    /// # }
+    /// # vitaminc_ore::supports_every_target!(Clear);
+    /// # let scheme = Clear;
+    /// use std::cmp::Ordering;
+    ///
+    /// // A marker target takes a marker policy, checked by the compiler.
+    /// let ages = scheme.context("users.age").target(I32).nulls(Last);
+    /// let (age, absent) = (ages.encrypt_checked(36i32)?, ages.encrypt_checked(None::<i32>)?);
+    /// assert_eq!(ages.compare(&age, &absent), Some(Ordering::Less));
+    /// assert!(matches!(
+    ///     ages.encrypt_checked(i32::MAX),
+    ///     Err(OrderError::Term(NormalizeError::Reserved))
+    /// ));
+    ///
+    /// // A target chosen while the program runs takes a policy chosen then
+    /// // too, and refuses text and bytes.
+    /// let index = scheme.target(OrderTarget::I32).context("users.age").nulls(NullOrder::Last)?;
+    /// let (age, absent) = (index.encrypt_checked(36i32)?, index.encrypt_null()?);
+    /// assert_eq!(index.compare(&age, &absent), Some(Ordering::Less));
+    /// assert_eq!(
+    ///     scheme.target(OrderTarget::Text).nulls(NullOrder::Last).err(),
+    ///     Some(NormalizeError::NoDomain)
+    /// );
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn nulls<P: NullPolicy>(&self, _: P) -> OrderSpace<'s, S, Nulls<T, P>> {
+        OrderSpace::new(self.scheme, Nulls::new(self.target), &self.context)
+    }
+}
+
+impl<'s, S: Supports<OrderTarget> + ?Sized> OrderSpace<'s, S, OrderTarget> {
+    /// This target and context in a space that places nulls as `nulls`
+    /// says, for a target chosen while the program runs: a new space,
+    /// whose terms do not compare with this one's. As
+    /// [`nulls`](OrderSpace::nulls) on a marker target, which has the
+    /// rules, except that the policy is a value: a term carries it, and
+    /// two terms of different policies compare as `None`.
+    ///
+    /// # Errors
+    ///
+    /// [`NormalizeError::NoDomain`] for text and bytes, which take no null
+    /// policy, rather than a space that refuses every value.
+    pub fn nulls(
+        &self,
+        nulls: NullOrder,
+    ) -> Result<OrderSpace<'s, S, RuntimeNulls>, NormalizeError> {
+        if self.target.domain_with_nulls(nulls).is_none() {
+            return Err(NormalizeError::NoDomain);
+        }
+        Ok(OrderSpace::<'s, S, RuntimeNulls>::new(
+            self.scheme,
+            RuntimeNulls::new(self.target, nulls),
+            &self.context,
+        ))
+    }
+}
+
+impl<S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<'_, S, T> {
+    /// The space's sentinel, sealed. Called only on a space that places
+    /// nulls, whose target is a [`Nulls`] or a [`RuntimeNulls`].
+    pub(crate) fn sentinel(&self) -> OrderPlaintext {
+        self.target
+            .null_order()
+            .and_then(|order| null_plaintext(self.target.runtime(), order))
+            .expect("a null policy is only ever set on a fixed-width target")
+    }
+}
+
+impl<S: Supports<T> + Supports<OrderTarget> + ?Sized, T: FixedWidth, P: NullPolicy>
+    OrderSpace<'_, S, Nulls<T, P>>
+{
+    /// The term of a null in this space: its sentinel, encrypted. The same
+    /// as [`encrypt_checked`](OrderSpace::encrypt_checked) of any null.
+    ///
+    /// # Errors
+    ///
+    /// The scheme's own failure, and nothing else: the scheme
+    /// [`Supports`] the target.
+    #[allow(clippy::type_complexity)]
+    pub fn encrypt_null(&self) -> Result<OrderTerm<S::Term, Nulls<T, P>>, S::Error> {
+        self.encrypt_opened(&self.sentinel())
+    }
+}
+
+impl<S: Supports<OrderTarget> + ?Sized> OrderSpace<'_, S, RuntimeNulls> {
+    /// The term of a null in this space, for a target chosen while the
+    /// program runs: its sentinel, encrypted. The same as
+    /// [`encrypt_checked`](OrderSpace::encrypt_checked) of any null.
+    ///
+    /// # Errors
+    ///
+    /// [`OrderError::Unsupported`] if the scheme does not take this
+    /// target, [`OrderError::Backend`] if the scheme failed.
+    #[allow(clippy::type_complexity)]
+    pub fn encrypt_null(&self) -> Result<OrderTerm<S::Term, RuntimeNulls>, OrderError<S::Error>> {
+        self.supported()?;
+        self.encrypt_plaintext(&self.sentinel())
+    }
+}
+
 /// One term of an order space: the scheme's term, labelled with the target
 /// it was made under.
 ///
 /// Under a marker from [`target`](crate::target) the label is a zero-sized
 /// type, so two terms of different targets cannot meet in
-/// [`OrderSpace::compare`]: that does not compile. Under an
-/// [`OrderTarget`] the label is stored, and two of different targets
-/// compare as `None` instead of as noise. Storage reads the scheme's bytes
-/// through `AsRef<[u8]>`, and [`raw`](Self::raw) is the scheme's term
-/// itself.
+/// [`OrderSpace::compare`]: that does not compile, and nor does a term of a
+/// space that places nulls in a plain space's comparison, or a term of a
+/// nulls-first space in a nulls-last space's, since the policy is part of
+/// the [`Nulls`] label's type. Under an [`OrderTarget`] the label is
+/// stored, and two of different targets compare as `None` instead of as
+/// noise. A [`RuntimeNulls`] label stores its policy beside its target,
+/// so a nulls-first and a nulls-last term of it compare as `None` too. Storage reads
+/// the scheme's bytes through `AsRef<[u8]>`, and [`raw`](Self::raw) is the
+/// scheme's term itself.
 ///
 /// `==` compares the stored term, byte for byte, not the value: the order
 /// of two values is [`OrderSpace::compare`], and a randomised scheme
@@ -688,13 +902,19 @@ impl<S: Supports<T> + Supports<OrderTarget> + ?Sized, T: StaticTarget> OrderSpac
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrderTerm<R, T: Target> {
     raw: R,
-    target: T,
+    pub(crate) target: T,
 }
 
 impl<R, T: Target> OrderTerm<R, T> {
     /// The target the term was made under.
     pub fn target(&self) -> OrderTarget {
         self.target.runtime()
+    }
+
+    /// Where the space the term was made in places nulls, or `None` for a
+    /// space that gives them no term.
+    pub fn null_order(&self) -> Option<NullOrder> {
+        self.target.null_order()
     }
 
     /// The scheme's own term.
@@ -745,9 +965,23 @@ pub trait OrderKeyInit: OrderScheme + Sized {
 }
 
 /// The sink one scalar is walked into: it encodes the scalar as its
-/// target with [`order`] and refuses a container.
+/// space's target, under the space's null policy, and refuses a
+/// container.
 #[derive(Clone, Copy)]
-pub(crate) struct Scalar(pub(crate) OrderTarget);
+pub(crate) struct Scalar {
+    target: OrderTarget,
+    nulls: Option<NullOrder>,
+}
+
+impl Scalar {
+    /// The sink for a space of `target`.
+    pub(crate) fn of<T: Target>(target: T) -> Self {
+        Self {
+            target: target.runtime(),
+            nulls: target.null_order(),
+        }
+    }
+}
 
 /// How one scalar fails to become a plaintext.
 #[derive(Debug, thiserror::Error)]
@@ -787,7 +1021,15 @@ impl Sink for Scalar {
         ty: Option<Logical>,
         value: Physical<'_>,
     ) -> Result<OrderPlaintext, ScalarError> {
-        order(self.0, ty, value).map_err(ScalarError::Term)
+        encode(self.target, self.nulls, ty, value).map_err(ScalarError::Term)
+    }
+
+    /// The same as a plain null: the space's sentinel in a space that
+    /// places nulls, and no term in one that does not. The sentinel is the
+    /// extreme code of the space's target, so the null's own type adds
+    /// nothing.
+    fn typed_null(self, _: FixedType) -> Result<OrderPlaintext, ScalarError> {
+        self.scalar(None, Physical::Null)
     }
 
     fn seq(self, _: Option<usize>) -> Result<Never, ScalarError> {
@@ -851,7 +1093,7 @@ impl fmt::Display for OrderPlaintext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain;
+    use crate::{domain, order};
     use vitaminc_aead::Int;
 
     #[test]
@@ -875,7 +1117,7 @@ mod tests {
     #[test]
     fn the_salt_binds_label_scheme_domain_and_context() {
         let context = ("tenant", 1u64).into_context().encode();
-        let salted = salt("mock", OrderTarget::I16, &context);
+        let salted = salt("mock", domain::INT16, &context);
         assert_eq!(
             salted,
             Context::pae(&[
@@ -885,16 +1127,19 @@ mod tests {
                 context.as_bytes()
             ])
         );
-        assert_ne!(salted, salt("other", OrderTarget::I16, &context));
-        assert_ne!(salted, salt("mock", OrderTarget::U16, &context));
+        assert_ne!(salted, salt("other", domain::INT16, &context));
+        assert_ne!(salted, salt("mock", domain::UINT16, &context));
         assert_ne!(
             salted,
             salt(
                 "mock",
-                OrderTarget::I16,
+                domain::INT16,
                 &("tenant", 2u64).into_context().encode()
             )
         );
+        // A null policy is its own label, so its own salt.
+        assert_ne!(salted, salt("mock", domain::INT16_NULLS_FIRST, &context));
+        assert_ne!(salted, salt("mock", domain::INT16_NULLS_LAST, &context));
     }
 
     #[test]
@@ -947,19 +1192,73 @@ mod tests {
 
     #[test]
     fn the_scalar_sink_encodes_one_scalar_as_its_target_and_refuses_a_container() {
-        let p = 7i16.visit(Scalar(OrderTarget::I64)).expect("scalar");
+        let p = 7i16.visit(Scalar::of(OrderTarget::I64)).expect("scalar");
         assert_eq!(p.domain(), domain::INT64);
         assert!(matches!(
-            vec![1u16, 2].visit(Scalar(OrderTarget::U16)),
+            vec![1u16, 2].visit(Scalar::of(OrderTarget::U16)),
             Err(ScalarError::NotScalar)
         ));
         assert!(matches!(
-            std::collections::BTreeMap::from([("k", 1u16)]).visit(Scalar(OrderTarget::U16)),
+            std::collections::BTreeMap::from([("k", 1u16)]).visit(Scalar::of(OrderTarget::U16)),
             Err(ScalarError::NotScalar)
         ));
         assert!(matches!(
-            true.visit(Scalar(OrderTarget::U16)),
+            true.visit(Scalar::of(OrderTarget::U16)),
             Err(ScalarError::Term(NormalizeError::NoDomain))
         ));
+    }
+
+    /// A fixed-width `None` reaches the sink as a typed null. In a space
+    /// with no null policy it has no order term, as a plain null has none;
+    /// in a space that places nulls it is the space's sentinel.
+    #[test]
+    fn the_scalar_sink_gives_a_typed_null_no_term_without_a_policy_and_the_sentinel_with_one() {
+        let plain = Scalar::of(OrderTarget::U32);
+        assert!(
+            matches!(
+                None::<u32>.visit(plain),
+                Err(ScalarError::Term(NormalizeError::NoDomain))
+            ),
+            "a typed null must have no order term in a plain space"
+        );
+        assert!(
+            matches!(
+                None::<u32>.visit(Scalar::of(OrderTarget::Text)),
+                Err(ScalarError::Term(NormalizeError::NoDomain))
+            ),
+            "the target does not give a typed null a term either"
+        );
+        for (nulls, fill, label) in [
+            (NullOrder::First, 0x00, domain::UINT32_NULLS_FIRST),
+            (NullOrder::Last, 0xFF, domain::UINT32_NULLS_LAST),
+        ] {
+            let placed = Scalar::of(RuntimeNulls::new(OrderTarget::U32, nulls));
+            let typed = None::<u32>
+                .visit(placed)
+                .expect("a typed null is the sentinel");
+            assert_eq!(
+                typed.domain(),
+                label,
+                "the sentinel is under the policy's label"
+            );
+            assert_eq!(
+                typed.null_order(),
+                Some(nulls),
+                "the plaintext carries its policy"
+            );
+            assert_eq!(
+                typed.bytes().risky_ref(),
+                &[fill; 4],
+                "a typed null is the sentinel's bytes"
+            );
+            // The null's own type adds nothing: an `i16` null in a `u32`
+            // space is the same sentinel, and so is a plain null.
+            let other = None::<i16>.visit(placed).expect("sentinel");
+            let raw = vitaminc_aead::Raw(None, Physical::Null)
+                .visit(placed)
+                .expect("sentinel");
+            assert_eq!(other.bytes().risky_ref(), typed.bytes().risky_ref());
+            assert_eq!(raw.bytes().risky_ref(), typed.bytes().risky_ref());
+        }
     }
 }

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use vitaminc_aead::plaintext::render;
 use vitaminc_aead::{Encrypt, Int, Logical, Physical, Raw, Tee};
 use vitaminc_normalize::{
-    terms, terms_by, Equality, Normalize, NormalizeError, Normalized, Terms, TermsError,
+    domain, terms, terms_by, Equality, Normalize, NormalizeError, Normalized, Terms, TermsError,
 };
 use vitaminc_protected::{Controlled, Protected};
 
@@ -54,7 +54,7 @@ fn the_terms_are_the_normalizers_and_the_walk_is_the_same() {
     // `terms` is `terms_by(Equality, ..)`.
     let equality = terms(doc()).expect("terms");
     let by_name = terms_by(Equality, doc()).expect("terms");
-    assert_eq!(equality.len(), 2);
+    assert_eq!(equality.len(), 3, "under equality the null has a term too");
     assert_eq!(equality.len(), by_name.len());
     assert_eq!(
         equality[1].normalized.bytes.risky_ref(),
@@ -89,10 +89,46 @@ fn two_normalizers_share_one_walk() {
         .expect("walk");
     assert_eq!(
         equality.iter().map(|t| render(&t.path)).collect::<Vec<_>>(),
-        [".a", ".b"]
+        [".a", ".b", ".c"]
     );
     assert_eq!(
         low.iter().map(|t| render(&t.path)).collect::<Vec<_>>(),
         [".a"]
     );
+}
+
+/// A fixed-width `None` reaches the sink as a typed null. Under equality
+/// it is indexed as a plain null, so the absent field has a term at its
+/// own path under the null domain, and the walk carries on. A normalizer
+/// that gives nulls no term still skips it.
+#[test]
+fn a_fixed_width_none_has_the_null_term_at_its_path_and_does_not_stop_the_walk() {
+    let mut doc = BTreeMap::new();
+    doc.insert("gone", None::<i32>);
+    doc.insert("here", Some(5i32));
+    let found = terms(doc).expect("a typed null does not stop the walk");
+    assert_eq!(
+        found.iter().map(|t| render(&t.path)).collect::<Vec<_>>(),
+        [".gone", ".here"],
+        "the absent field has a term as the present one does"
+    );
+    assert_eq!(
+        found[0].normalized.domain,
+        domain::NULL,
+        "the absent field's term is under the null domain"
+    );
+    assert_eq!(
+        found[0].normalized.bytes.risky_ref(),
+        &[0x00],
+        "the absent field's term is the null's one byte"
+    );
+    let plain = terms(BTreeMap::from([("gone", Raw(None, Physical::Null))])).expect("terms");
+    assert_eq!(
+        plain[0].normalized.bytes.risky_ref(),
+        found[0].normalized.bytes.risky_ref(),
+        "a typed null and a plain null are one term"
+    );
+    let by_name = terms_by(LowByte, BTreeMap::from([("gone", None::<i32>)]))
+        .expect("a typed null does not stop a normalizer of the caller's own");
+    assert!(by_name.is_empty(), "a typed null has no term under LowByte");
 }
