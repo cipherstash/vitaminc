@@ -24,7 +24,7 @@ macro_rules! impl_bitwise_permutable {
                 for j in 0..$N {
                     bits[j] = (bytes[j / 8] >> (7 - (j % 8))) & 1;
                 }
-                let permuted = Zeroizing::new(permute_array(self, *bits));
+                let permuted = Zeroizing::new(permute_array(self, &bits));
                 let mut out = [0u8; $array_size];
                 for j in 0..$N {
                     out[j / 8] |= (permuted[j] & 1) << (7 - (j % 8));

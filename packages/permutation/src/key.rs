@@ -157,14 +157,9 @@ impl<const N: usize> PermutationKey<N> {
     where
         [u8; N]: IsPermutable + Zeroed,
     {
-        // `invert` borrows, so we map the inverse of the borrowed `target`
-        // through `permute_array` without ever copying the key.
-        Self(
-            target
-                .invert()
-                .0
-                .map(|arr| permute_array(self, arr.into_inner())),
-        )
+        // `invert` borrows `target`, and `permute_array` reads the inverse
+        // through the `Owned`, so no bare copy of either key is made.
+        Self(target.invert().0.map(|arr| permute_array(self, &arr)))
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = Protected<u8>> + '_ {
@@ -198,7 +193,7 @@ where
     [u8; N]: IsPermutable + Zeroed,
 {
     fn permute(&self, Self(inner): Self) -> Self {
-        Self(inner.map(|arr| permute_array(self, arr.into_inner())))
+        Self(inner.map(|arr| permute_array(self, &arr)))
     }
 }
 

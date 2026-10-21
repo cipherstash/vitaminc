@@ -20,7 +20,7 @@ where
     [T; N]: IsPermutable + Zeroed,
 {
     fn permute(&self, input: [T; N]) -> [T; N] {
-        permute_array(self, input)
+        permute_array(self, &Zeroizing::new(input))
     }
 }
 
@@ -35,7 +35,7 @@ where
 }
 
 #[inline]
-pub fn permute_array<const N: usize, T>(key: &PermutationKey<N>, input: [T; N]) -> [T; N]
+pub fn permute_array<const N: usize, T>(key: &PermutationKey<N>, input: &[T; N]) -> [T; N]
 where
     [T; N]: IsPermutable + Zeroed,
     T: Zeroize + Copy + ConditionallySelectable,
@@ -50,8 +50,9 @@ where
     // `ConditionallySelectable` so the access pattern is independent of `kv`,
     // preventing cache-line timing leaks of the secret key bytes. Secret
     // locals — including the partially-populated `out` — are wrapped in
-    // `Zeroizing` so they are wiped on any unwind path.
-    let input = Zeroizing::new(input);
+    // `Zeroizing` so they are wiped on any unwind path. The input is
+    // borrowed, so the caller keeps it where its own wipe reaches it, and no
+    // by-value copy is made here.
     let mut out: Zeroizing<[T; N]> = Zeroizing::new(Zeroed::zeroed());
     for (i, k) in key.iter().enumerate() {
         let kv = Zeroizing::new(k.risky_unwrap());
