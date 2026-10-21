@@ -105,13 +105,13 @@ fn the_opt_in_table_names_every_domain_and_nothing_else() {
         domain_of(Some(Logical::Uuid), &Physical::Bytes(&[0; 16])),
         Some(domain::UUID)
     );
-    assert_eq!(domain_of(None, &Physical::Null), None);
+    assert_eq!(domain_of(None, &Physical::Null), Some(domain::NULL));
     assert_eq!(domain_of(None, &Physical::Bool(true)), None);
     assert_eq!(domain_of(Some(Logical::Undefined), &Physical::Null), None);
     let unknown = Logical::from_wire(200, 1).expect("unknown");
     assert!(matches!(unknown, Logical::Unknown(UnknownLogical { .. })));
     assert_eq!(domain_of(Some(unknown), &one), None);
-    assert_eq!(domain::ALL.len(), 8);
+    assert_eq!(domain::ALL.len(), 9);
     for label in domain::ALL {
         assert!(label.starts_with("vitaminc/prf/value/"), "{label}");
     }
@@ -121,7 +121,6 @@ fn the_opt_in_table_names_every_domain_and_nothing_else() {
 fn a_scalar_with_no_domain_is_refused_with_no_domain() {
     let unknown = Logical::from_wire(200, 1).expect("unknown");
     for (ty, v) in [
-        (None, Physical::Null),
         (None, Physical::Bool(false)),
         (Some(Logical::Undefined), Physical::Null),
         (Some(unknown), Physical::Int(Int::I32(1))),
@@ -136,6 +135,7 @@ fn a_scalar_with_no_domain_is_refused_with_no_domain() {
         NormalizeError::NoDomain,
         NormalizeError::Invalid,
         NormalizeError::UnassignedCodePoint,
+        NormalizeError::Reserved,
     ] {
         assert!(!error.to_string().is_empty());
     }
@@ -585,4 +585,24 @@ fn decimal_refuses_a_mantissa_outside_96_bits_by_itself() {
     );
     assert!(decimal(0, Int::I128(i128::MAX)).is_none());
     assert!(decimal(0, Int::I128(i128::MIN)).is_none());
+}
+
+/// A null is one byte under a domain of its own, so every null in a space
+/// ties with every other and with nothing else.
+#[test]
+fn a_null_is_one_zero_byte_under_the_null_domain() {
+    let null = normalize(None, Physical::Null).expect("a null has a term");
+    assert_eq!(null.domain, domain::NULL, "a null has its own domain");
+    assert_eq!(
+        null.domain, "vitaminc/prf/value/null/v1",
+        "the null label is frozen"
+    );
+    assert_eq!(null.bytes.risky_ref(), &[0x00], "a null is the byte 0x00");
+    assert_eq!(super::null().risky_ref(), &[0x00], "the encoder agrees");
+    // No other domain's encoding is one zero byte under the null label.
+    let zero = normalize(None, Physical::Bytes(&[0x00])).expect("bytes");
+    assert_ne!(
+        zero.domain, null.domain,
+        "the byte 0x00 as bytes is not a null"
+    );
 }

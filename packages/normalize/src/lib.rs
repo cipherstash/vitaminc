@@ -6,8 +6,8 @@ mod scalar;
 mod terms;
 
 pub use scalar::{
-    bytes, date, decimal, domain, domain_of, float, integer, normalize, text, timestamp, uuid,
-    NormalizeError, Normalized,
+    bytes, date, decimal, domain, domain_of, float, integer, normalize, null, text, timestamp,
+    uuid, NormalizeError, Normalized,
 };
 pub use terms::{
     encrypt_with_terms, encrypt_with_terms_async, plan_with_terms, terms, terms_by, Equality,

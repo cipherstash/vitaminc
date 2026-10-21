@@ -84,8 +84,18 @@ fn order_and_equality_terms_come_from_one_walk() {
             Terms::by(Order(OrderTarget::I64), &mut ordered),
         ))
         .expect("walk");
-    assert_eq!(paths(&equality), paths(&ordered));
-    assert_eq!(equality.len(), 4);
+    // The null has an equality term, and no order term in a space that
+    // does not place nulls; the boolean has neither.
+    assert_eq!(
+        paths(&equality),
+        [".low", ".age", ".gone", ".more[0]", ".more[1]"],
+        "every scalar but the boolean has an equality term"
+    );
+    assert_eq!(
+        paths(&ordered),
+        [".low", ".age", ".more[0]", ".more[1]"],
+        "a space with no null policy gives the null no order term"
+    );
     assert!(equality
         .iter()
         .all(|t| t.normalized.domain.starts_with("vitaminc/prf/")));

@@ -246,7 +246,8 @@ fn both_accept_a_well_formed_value_with_the_same_terms() {
         doc.insert("empty", vec![]);
         doc
     };
-    agree(doc, Terms(vec![".ages[0]".into()]));
+    // The absent age has a term as the present one does.
+    agree(doc, Terms(vec![".ages[0]".into(), ".ages[1]".into()]));
     // A passthrough beside a sealed sibling, and nesting right up to the
     // limit, are fine.
     agree(|| Passes("public"), Terms(vec!["[0]".into()]));

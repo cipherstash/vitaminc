@@ -1002,6 +1002,23 @@ fn decimals_normalize_to_their_pinned_terms() {
     );
 }
 
+/// Every null is one term, typed or plain, under a domain of its own:
+/// the walk sends a typed null as a plain one, so a `None` of any fixed
+/// width is the same pinned byte.
+#[test]
+fn a_null_is_one_pinned_byte_under_the_null_domain_whatever_its_type() {
+    pin(None, Physical::Null, "vitaminc/prf/value/null/v1", "00");
+    let typed = |found: Vec<Term>| {
+        assert_eq!(found.len(), 1, "a typed null has one term");
+        assert_eq!(found[0].normalized.domain, domain::NULL);
+        hex(found[0].normalized.bytes.risky_ref())
+    };
+    assert_eq!(typed(terms(None::<u32>).expect("walks")), "00");
+    assert_eq!(typed(terms(None::<i128>).expect("walks")), "00");
+    assert_eq!(typed(terms(None::<f64>).expect("walks")), "00");
+    assert_eq!(typed(terms(None::<uuid::Uuid>).expect("walks")), "00");
+}
+
 #[test]
 fn a_uuid_has_a_domain_of_its_own() {
     let id = uuid::Uuid::from_bytes([
@@ -1106,10 +1123,15 @@ fn refused(error: NormalizeError, at: &str) -> Option<(NormalizeError, String)> 
 #[test]
 fn plan_with_terms_has_every_term_without_a_cipher() {
     let (planned, terms) = plan_with_terms::<_, Refused, _>(user(), "ctx").expect("plans");
-    assert_eq!(paths(&terms), [".ages[0]", ".ages[2]"]);
+    assert_eq!(paths(&terms), [".ages[0]", ".ages[1]", ".ages[2]"]);
     assert_eq!(terms[0].normalized.domain, domain::INTEGER);
     assert_eq!(
-        terms[1].normalized.bytes.risky_ref(),
+        terms[1].normalized.domain,
+        domain::NULL,
+        "the absent age has the null term"
+    );
+    assert_eq!(
+        terms[2].normalized.bytes.risky_ref(),
         normalize(None, Physical::Int(Int::U32(41)))
             .expect("int")
             .bytes
@@ -1124,7 +1146,7 @@ fn plan_with_terms_has_every_term_without_a_cipher() {
 fn encrypt_with_terms_seals_the_same_leaves_and_returns_the_terms() {
     let cipher = Counting::default();
     let (sealed, terms) = encrypt_with_terms(user(), &cipher, "ctx").expect("encrypts");
-    assert_eq!(terms.len(), 2);
+    assert_eq!(terms.len(), 3, "the absent age has a term too");
     // Three elements, one empty marker.
     assert_eq!(cipher.calls.load(Ordering::SeqCst), 4);
     let back: BTreeMap<String, Vec<Option<u32>>> =
@@ -1133,7 +1155,7 @@ fn encrypt_with_terms_seals_the_same_leaves_and_returns_the_terms() {
 }
 
 #[test]
-fn scalars_without_a_domain_and_passthroughs_get_no_term() {
+fn scalars_without_a_domain_and_passthroughs_get_no_term_and_a_null_gets_one() {
     struct Doc;
     impl Encrypt for Doc {
         fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
@@ -1149,8 +1171,13 @@ fn scalars_without_a_domain_and_passthroughs_get_no_term() {
         }
     }
     let (_, terms) = plan_with_terms::<_, Refused, _>(Doc, "ctx").expect("plans");
-    assert_eq!(paths(&terms), [".name"]);
-    assert_eq!(terms[0].normalized.domain, domain::TEXT);
+    assert_eq!(
+        paths(&terms),
+        [".missing", ".name"],
+        "a boolean, a passthrough and an undefined get no term; a null does"
+    );
+    assert_eq!(terms[0].normalized.domain, domain::NULL);
+    assert_eq!(terms[1].normalized.domain, domain::TEXT);
 }
 
 /// A logical type this build does not know means something to the client
@@ -1305,8 +1332,9 @@ fn the_normalize_error_is_on_the_source_chain() {
 #[test]
 fn terms_collects_every_term_without_encrypting() {
     let found = terms(user()).expect("walks");
-    assert_eq!(paths(&found), [".ages[0]", ".ages[2]"]);
-    assert_eq!(found[1].normalized.domain, domain::INTEGER);
+    assert_eq!(paths(&found), [".ages[0]", ".ages[1]", ".ages[2]"]);
+    assert_eq!(found[1].normalized.domain, domain::NULL);
+    assert_eq!(found[2].normalized.domain, domain::INTEGER);
     // A borrowed value walks too, and a scalar at the root has no steps.
     let name = String::from("Ada");
     let found = terms(&name).expect("walks");
