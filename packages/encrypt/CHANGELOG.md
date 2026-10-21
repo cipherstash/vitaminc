@@ -3,11 +3,7 @@
 
 ### Breaking
 
-- **Breaking:** seal a fixed-width None as a typed null as long as a Some, so ciphertext length no longer shows which values are absent
-
-### Fixes
-
-- address review of the typed null: plain null in frames, widening-tolerant reads, uuid
+- **Breaking:** A `None` of a fixed-width type sealed under this crate's cipher is now padded to a `Some`'s length, and a 0.7 reader refuses it (`vitaminc-aead` 0.8.0). An `Absent` is unchanged: an `Encrypted` holds bytes, which have no fixed width, so its absence is still the one-byte null and is not padded.
 
 ## [0.7.0] - 2026-10-20
 

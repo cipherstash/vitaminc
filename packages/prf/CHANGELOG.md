@@ -3,11 +3,7 @@
 
 ### Breaking
 
-- **Breaking:** give every null an equality term so the index no longer shows which values were absent
-
-### Documentation
-
-- say a null has an equality term, as the normalizer now gives it one
+- **Breaking:** A null now has an equality term, so an `EqualityTerm` of `None` and `Physical::Null` derives a term under the domain `vitaminc/prf/value/null/v1` where it failed with `NormalizeError::NoDomain`, and a PRF walk over a value with a null produces one more term. A boolean and an `undefined` still have none. See `vitaminc-normalize` 0.8.0 for why, and for how a layer keeps a SQL `NULL`.
 
 ## [0.7.0] - 2026-10-20
 

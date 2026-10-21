@@ -1,26 +1,23 @@
 
 ## [0.8.0] - 2026-10-21
 
+Order terms stored by 0.7 stay valid and compare with terms made by 0.8: no plain-space encoding, domain label or salt changes. A space that places nulls is a new space with its own labels, so turning a policy on for a column is a re-index. Nothing in `OrderScheme` changes, so a scheme crate needs no code change; its `test-support` conformance now also runs every fixed-width target under both policies, so a scheme meets an all-zero and an all-ones plaintext.
+
 ### Breaking
 
-- **Breaking:** seal a fixed-width None as a typed null as long as a Some, so ciphertext length no longer shows which values are absent
-- **Breaking:** give every null an equality term so the index no longer shows which values were absent
-- **Breaking:** let an order space place nulls first or last so ORDER BY with nulls can be answered from the index
-
-### Documentation
-
-- explain placing nulls first or last, what a placed null reveals, and how a range must skip the sentinel
-- match the ADR to the shipped API and say what Reserved means in plain words
-- say how terms of the two policies meet, and why a scheme cannot answer for every target
+- **Breaking:** An order space can place its nulls first or last, as SQL's `NULLS FIRST` and `NULLS LAST` do, so `ORDER BY` with nulls is answered from the index and the term column no longer holds a SQL `NULL` exactly where a value was absent. The policy is fixed when the space is made, like its target and context. On a marker target it is a marker too, `First` or `Last` from `target`, and it becomes part of the space's type: `scheme.target(I32).nulls(Last)` makes a space whose target is `Nulls<I32, Last>`, so a nulls-first term in a nulls-last space's `compare` is a compile error, as a term of another target already was. On an `OrderTarget` it is a `NullOrder` value, `space.nulls(NullOrder::Last)?`, which every term carries, so terms of two policies compare as `None`. Only the fixed-width targets take a policy: on a marker `nulls` compiles only for them, and on an `OrderTarget` text and bytes are refused with `NoDomain`, since their nulls already show by length.
+- **Breaking:** In a space that places nulls every null, typed or plain, encodes to the sentinel: all `0x00` under nulls-first, all `0xFF` under nulls-last, at the target's width, so no scheme sees a new width. For an integer or uuid target that code belongs to a value, so the space makes room: under nulls-first every code moves up by one, and under both policies the target's maximum is refused with the new `NormalizeError::Reserved`. A column that places nulls cannot hold its type's maximum. Float, date, timestamp and decimal codes never reach either extreme, so those targets move nothing and refuse nothing. A space that places nulls has `encrypt_checked` only, not `encrypt`, since it can refuse a value that fits the target.
+- **Breaking:** `Order` is no longer a tuple struct with a public field. Write `Order::new(target)` where `Order(target)` was written, and `Order::new(target).nulls(NullOrder::Last)` for a walk that places nulls. Without a policy a walk still skips a null.
+- **Breaking:** Every null now also has an equality term (`vitaminc-normalize` 0.8.0), so a walk over a value with a null returns one more equality term than before.
 
 ### Features
 
-- make a marker space's null policy part of its type, so two policies' terms cannot meet
+- `encrypt_null` and `null_query` give the sentinel's term and query in a space that places nulls, so a layer answers `IS NULL` with an equality comparison against it and bounds a range to skip it: under nulls-first `age < 10` is "above the sentinel and below 10". `encrypt_query_checked` of a null is the same query. `order_with_nulls` encodes for a policy space, and `OrderPlaintext`, `OrderTerm` and `QueryTerm` report their policy with `nulls()`. Without a policy a null's term and query are refused with `NoDomain`, as before.
+- Each policy has a frozen label of its own per fixed-width target, `vitaminc/ore/value/<kind>/nulls-first/v1` and `.../nulls-last/v1`, twenty-six in all, and `domain::ALL` lists all forty-one. The salt binds the label, so a term of a nulls-last space never compares with a plain-space term of the same target, and a column's stored maximums cannot silently become nulls.
 
-### Fixes
+### Not guaranteed
 
-- refuse a null's term or query for a runtime target the scheme does not take
-- read every byte when checking for the sentinel so the time does not depend on the value
+- In any order index whose terms compare with each other, the placed nulls are visible as the tied group at one end, and in a sparse domain (ages in an `I32`, say) as the one group that differs from every value in its top bytes, since both schemes in use reveal where two terms first differ. That is never more than the SQL `NULL` it replaces, which needed no inference to read.
 
 ## [0.7.0] - 2026-10-20
 
