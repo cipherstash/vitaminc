@@ -23,6 +23,7 @@ members = [
     "packages/hmac",
     "packages/random",
     "packages/random-derives",
+    "packages/skill-doctests",
     "packages/traits",
     "packages/vitaminc",
 ]
