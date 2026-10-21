@@ -9,6 +9,9 @@
 //! `vaultrs` uses — and executing them through the caller's
 //! [`vaultrs::client::VaultClient`] via [`vaultrs::api::exec_with_result`].
 //!
+//! `keys/:name` is here too, for the one field of a key's metadata the
+//! data key source checks (see [`ReadKeyDerivationRequest`]).
+//!
 //! `sign` and `verify` are here too, because the `vaultrs` 0.8 requests
 //! have no `salt_length` field, and RSA-PSS needs it (see [`SignRequest`]).
 //! Their `ed25519` forms are here for the same reason of shape: they send
@@ -51,6 +54,10 @@ pub(super) struct GenerateDataKeysRequest {
     pub count: u64,
     /// Key size in bits. Vault accepts only 128, 256 or 512.
     pub bits: u16,
+    /// The base64 derivation context, which is the binding. One context
+    /// serves the whole batch, so the adapter sends this request only when
+    /// every key in the batch has the same binding.
+    pub context: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,6 +103,33 @@ pub(super) struct BatchDecryptRequest {
 #[derive(Debug, Serialize)]
 pub(super) struct BatchDecryptItem {
     pub ciphertext: String,
+    /// The base64 derivation context, which is the binding. Each item
+    /// carries its own.
+    pub context: String,
+}
+
+/// `GET {mount}/keys/{name}` — read whether a Transit key is derived.
+///
+/// `vaultrs` has `transit::key::read`, but its response type requires every
+/// field of the key's metadata, including a `type` from a closed enum. This
+/// request reads the one field the adapter checks, so a key type that
+/// `vaultrs` 0.8 does not know cannot make construction fail.
+#[derive(Debug, Endpoint)]
+#[endpoint(
+    path = "{self.mount}/keys/{self.name}",
+    response = "KeyDerivationResponse"
+)]
+pub(super) struct ReadKeyDerivationRequest {
+    #[endpoint(skip)]
+    pub mount: String,
+    #[endpoint(skip)]
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct KeyDerivationResponse {
+    /// True when the key was created with `derived=true`.
+    pub derived: bool,
 }
 
 #[derive(Debug, Deserialize)]

@@ -130,11 +130,10 @@ mod tests {
         }
         #[cfg(feature = "vault")]
         {
-            // Transit's derivation context exists only on a `derived=true`
-            // key, which this source does not require.
+            // Vault binds the derivation context of a derived key.
             assert_eq!(
                 <crate::vault::VaultDataKeySource<32> as KeyProvider<32>>::BINDING,
-                BindingSupport::Unbound
+                BindingSupport::Bound
             );
         }
     }

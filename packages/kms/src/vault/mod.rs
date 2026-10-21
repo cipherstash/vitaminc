@@ -3,7 +3,8 @@
 //! One adapter type per key purpose (see `CONTEXT.md`):
 //!
 //! - [`VaultDataKeySource`]: data keys via `datakey`/`datakeys` (native
-//!   batch) and `decrypt` with `batch_input`, plus direct `encrypt`/`decrypt`.
+//!   batch) and `decrypt` with `batch_input`, each bound by a derivation
+//!   context, plus direct `encrypt`/`decrypt`.
 //! - [`VaultMacKey`]: HMAC via `hmac` and `verify`.
 //! - [`VaultSigningKey`]: signatures over a digest via `sign` and `verify`,
 //!   public key via `export/public-key`.
@@ -11,9 +12,14 @@
 //!   with the same calls on an `ed25519` key.
 //!
 //! Every adapter takes a ready [`vaultrs::client::VaultClient`]; address,
-//! token, namespace and TLS are the caller's concern. Keys must not be
-//! `derived` (the traits carry no context). One Transit key may back both
-//! a MAC key and a signing key.
+//! token, namespace and TLS are the caller's concern.
+//!
+//! A data key source needs a key created with `derived=true`: the binding
+//! is the derivation context, and a key that is not derived ignores it. A
+//! MAC key and a signing key need a key that is *not* derived, because
+//! their traits carry no context. So one Transit key cannot back both a
+//! data key source and a MAC key. One Transit key may still back both a
+//! MAC key and a signing key.
 //!
 //! One edition caveat: batch *generation* (`datakeys`) is Vault
 //! Enterprise-only, which HashiCorp's API reference does not say. Batch
@@ -128,6 +134,21 @@ mod tests {
     pub(crate) async fn transit_key(
         key_type: vaultrs::api::transit::KeyType,
     ) -> (vaultrs::client::VaultClient, String) {
+        create_transit_key(key_type, false).await
+    }
+
+    /// [`transit_key`], but created with `derived=true`, which is the only
+    /// kind of key a `VaultDataKeySource` accepts.
+    pub(crate) async fn derived_transit_key(
+        key_type: vaultrs::api::transit::KeyType,
+    ) -> (vaultrs::client::VaultClient, String) {
+        create_transit_key(key_type, true).await
+    }
+
+    async fn create_transit_key(
+        key_type: vaultrs::api::transit::KeyType,
+        derived: bool,
+    ) -> (vaultrs::client::VaultClient, String) {
         use vaultrs::api::transit::requests::CreateKeyRequest;
         use vaultrs::error::ClientError;
 
@@ -151,7 +172,7 @@ mod tests {
 
         let name = unique_key_name();
         let mut opts = CreateKeyRequest::builder();
-        opts.key_type(key_type);
+        opts.key_type(key_type).derived(derived);
         vaultrs::transit::key::create(&client, DEFAULT_MOUNT, &name, Some(&mut opts))
             .await
             .unwrap();

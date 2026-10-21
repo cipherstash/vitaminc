@@ -73,7 +73,7 @@ SDK. `aws` is on by default.
 | `aws` | AWS KMS | `AwsDataKeySource` | same type | `AwsMacKey` | `AwsSigningKey` | LocalStack |
 | `azure` | Azure Key Vault / Managed HSM | `AzureDataKeySource` (Managed HSM `oct-HSM` only) | same type | `AzureMacKey` | `AzureSigningKey` | Lowkey Vault (MAC and signing only) |
 | `gcp` | Google Cloud KMS | `GcpDataKeySource` | same type | `GcpMacKey` | `GcpSigningKey`, `GcpEd25519Key` | SDK stub only |
-| `vault` | HashiCorp Vault Transit | `VaultDataKeySource` | same type | `VaultMacKey` | `VaultSigningKey`, `VaultEd25519Key` | Vault dev server |
+| `vault` | HashiCorp Vault Transit | `VaultDataKeySource` (`derived=true` keys only) | same type | `VaultMacKey` | `VaultSigningKey`, `VaultEd25519Key` | Vault dev server |
 
 There is one adapter type per key purpose, because a backend key is created
 for one purpose. A data key source also implements direct encryption under
@@ -94,11 +94,11 @@ Design notes that apply across vendors:
   several values (`docs/adr/0007`). Vault batches retrieval natively on
   every edition and generation natively on Vault Enterprise (on Community
   the adapter falls back to one call per key, see `docs/adr/0003`), always
-  at per-value isolation. The token needs
-  `update` on `<mount>/datakey/plaintext/<name>` and `<mount>/decrypt/<name>`;
-  `update` on `<mount>/datakeys/plaintext/<name>` is optional. If Vault
-  answers that path with `403`, the source uses the fan-out until it is
-  rebuilt.
+  at per-value isolation. The token needs `read` on `<mount>/keys/<name>`
+  and `update` on `<mount>/datakey/plaintext/<name>` and
+  `<mount>/decrypt/<name>`; `update` on `<mount>/datakeys/plaintext/<name>`
+  is optional. If Vault answers that path with `403`, the source uses the
+  fan-out until it is rebuilt.
 - **Signature algorithms** are named once, by [`SignatureAlgorithm`], and
   mapped by each adapter. ECDSA signatures are DER, Ed25519 signatures are
   the raw 64 bytes, and public keys are DER `SubjectPublicKeyInfo`, whatever
