@@ -66,6 +66,13 @@ exclude_re = [
     # (`Ord::max` is not a `const fn`, so the comparison has to be written
     # out.) Its other mutants stay gated.
     "packages/aead/src/plaintext/depth.rs:.*replace > with >= in max",
+    # Equivalent mutant: `null` (vitaminc-normalize scalar.rs) returns the
+    # one byte `0x00` in a protected vector, which is exactly what the
+    # replacements `Protected::new(vec![0])` and `Protected::from(vec![0])`
+    # return, so no input can tell them apart. Its other replacements
+    # (`vec![]`, `vec![1]`) stay gated, and the byte is pinned by the
+    # known-answer tests and the HMAC vector for the null domain.
+    "packages/normalize/src/scalar.rs:.*replace null -> Protected<Vec<u8>> with Protected::(new|from)\\(vec!\\[0\\]\\)",
 ]
 
 # Property tests (quickcheck) and AEAD round-trips run slower under mutation than
