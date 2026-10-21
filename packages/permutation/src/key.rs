@@ -157,8 +157,8 @@ impl<const N: usize> PermutationKey<N> {
     where
         [u8; N]: IsPermutable + Zeroed,
     {
-        // `invert` borrows, so we map the inverse of the borrowed `target`
-        // through `permute_array` without ever copying the key.
+        // `invert` borrows `target`, and `map` lends the inverse to
+        // `permute_array`, so no bare copy of either key is made.
         Self(target.invert().0.map(|arr| permute_array(self, arr)))
     }
 

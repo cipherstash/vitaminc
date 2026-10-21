@@ -89,12 +89,16 @@ impl CiphertextAndTagReader {
         self,
         f: impl FnOnce(&mut [u8]) -> Result<usize, E>,
     ) -> Plaintext<E> {
-        Plaintext(self.0.map_ok(|raw| {
-            let mut raw = zeroize::Zeroizing::new(raw);
-            let len = f(&mut raw)?;
-            raw.truncate(len);
-            Ok(core::mem::take(&mut *raw))
-        }))
+        let mut buf = self.0;
+        // On an error `buf` is dropped, and so wiped, with the closure.
+        Plaintext(
+            buf.risky_try_update(|raw| {
+                let len = f(raw)?;
+                raw.truncate(len);
+                Ok(())
+            })
+            .map(|()| buf),
+        )
     }
 }
 

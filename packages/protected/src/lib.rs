@@ -62,49 +62,64 @@ pub use vitaminc_protected_derive::{OpaqueDebug, TimingSafeEq};
 ///
 /// # Safety
 ///
-/// `inner_ptr` must return a valid, well-aligned pointer to the wrapper's live,
-/// owned inner field (i.e. `&self.0`), and the implementing type's `Drop` must do
-/// nothing but zeroize — so that [`move_inner_out`] skipping it leaks only the
-/// wipe, never a resource.
+/// `inner_ptr_mut` must return a valid, well-aligned pointer to the wrapper's
+/// live, owned inner field (i.e. `&mut self.0`), and the implementing type's
+/// `Drop` must do nothing but zeroize — so that [`move_inner_out`] skipping it
+/// leaks only the wipe, never a resource.
 pub(crate) unsafe trait MoveInner {
     /// The owned inner field type.
     type Inner;
     /// Pointer to the live, owned inner field (see the trait's safety contract).
-    fn inner_ptr(&self) -> *const Self::Inner;
+    fn inner_ptr_mut(&mut self) -> *mut Self::Inner;
 }
 
 /// Move the single owned field out of a controlled wrapper (e.g. `Protected<T>`)
-/// **without** running its zeroizing `Drop`.
+/// **without** running its zeroizing `Drop`, and wipe the slot it came from.
 ///
-/// The inner field is bit-copied to the caller and `wrapper` is forgotten so its
+/// The inner field is bit-copied to the caller, the bytes of the wrapper's
+/// field are then overwritten with zeroes, and the wrapper is forgotten so its
 /// `Drop` never runs against the now-moved-out field (no double-free, no
 /// use-after-zeroize). This is the shared primitive behind
 /// `risky_unwrap` / `flatten` / `transpose`.
 ///
-/// This is a *safe* function: the only soundness obligation — that `inner_ptr`
-/// names the wrapper's live, owned field — is discharged by the [`MoveInner`]
-/// `unsafe` trait, and the pointer is derived from `wrapper` *after* this
-/// function owns it, so no pointer outlives the move that produced it.
+/// This is a *safe* function: the only soundness obligation — that
+/// `inner_ptr_mut` names the wrapper's live, owned field — is discharged by the
+/// [`MoveInner`] `unsafe` trait, and the pointer is derived from `wrapper`
+/// *after* this function owns it, so no pointer outlives the move that
+/// produced it.
 ///
-/// # Why the source slot is deliberately NOT scrubbed
+/// # Why the slot is wiped bitwise, not zeroized
 ///
 /// `ptr::read` produces a **bitwise** copy. For heap-backed inners (`Vec`,
 /// `String`, `Box`, …) the returned value and `wrapper`'s field then alias the
-/// *same* heap allocation. Scrubbing the source semantically (e.g.
-/// `inner.zeroize()` against the source) would wipe the heap the returned value
-/// still owns — a use-after-zeroize that hands the caller corrupted data (a
-/// decrypted `Protected<Vec<u8>>` would come back all zeroes). For inline inners
-/// (`[u8; N]`) the abandoned stack copy is the inherent cost of an explicit
-/// move-out: `risky_unwrap` & friends transfer ownership — and the wiping
-/// obligation — to the caller by contract.
+/// *same* heap allocation. Zeroizing the source (`inner.zeroize()`) would wipe
+/// the heap the returned value still owns, and a decrypted
+/// `Protected<Vec<u8>>` would come back all zeroes. Overwriting the field's
+/// own bytes instead touches only what lives inline: for a `Vec` that is its
+/// pointer, length and capacity, which is harmless; for an inline inner
+/// (`[u8; N]`) it is the secret itself, which would otherwise stay in the
+/// abandoned stack slot. The wipe uses volatile stores and a fence, so it is
+/// not removed as a dead store. It mirrors `Locked::move_in`, which wipes the
+/// source slot on the way in.
+///
+/// The wipe reaches the slot this function is given. A copy the caller made
+/// before the call, such as an argument temporary at `opt-level = 0`, is
+/// outside it.
 pub(crate) fn move_inner_out<W: MoveInner>(wrapper: W) -> W::Inner {
-    // SAFETY: by `MoveInner`'s contract, `inner_ptr` points to `wrapper`'s live,
-    // owned inner field. It is read exactly once and `wrapper` is then forgotten,
-    // so the returned value is the sole owner — no double-free, and the wrapper's
-    // zeroizing `Drop` never wipes the moved-out value.
-    let inner = unsafe { core::ptr::read(wrapper.inner_ptr()) };
-    core::mem::forget(wrapper);
-    inner
+    let mut wrapper = core::mem::ManuallyDrop::new(wrapper);
+    let slot = wrapper.inner_ptr_mut();
+    // SAFETY: by `MoveInner`'s contract, `slot` points to `wrapper`'s live,
+    // owned inner field. It is read exactly once, and `wrapper` is never
+    // dropped (it is in a `ManuallyDrop` that is not taken), so the returned
+    // value is the sole owner — no double-free, and the wrapper's zeroizing
+    // `Drop` never wipes the moved-out value. The slot is then overwritten
+    // bitwise and never read as an `Inner` again, which is `wipe_bytes`'s
+    // contract.
+    unsafe {
+        let inner = core::ptr::read(slot);
+        locked::wipe_bytes(slot);
+        inner
+    }
 }
 
 /// ReplaceT is a sealed trait that is used to replace the inner value of a type.
@@ -177,9 +192,7 @@ mod private {
     impl<T: Zeroize> Sealed for Exportable<T> {}
     impl<T, S> Sealed for Usage<T, S> {}
 
-    /// Private trait that is used to hide the inner value of a Controlled type
-    /// as well as preventing consumers from implementing Controlled themselves.
-    /// Marker trait used to seal the `Controlled` trait, preventing external implementations.
-    /// This trait is only implemented within this crate.
+    /// Marker trait that seals [`Controlled`](crate::Controlled), so that it
+    /// is only implemented within this crate.
     pub trait ControlledPrivate {}
 }

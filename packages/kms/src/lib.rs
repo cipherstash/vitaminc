@@ -71,7 +71,7 @@ where
 {
     fn update(&mut self, data: &Protected<T>) {
         let pref: ProtectedRef<T> = data.as_protected_ref();
-        self.input.update_with_ref(pref, |input, data| {
+        self.input.risky_update_with_ref(pref, |input, data| {
             input.extend(data.as_ref());
         });
     }
@@ -82,9 +82,9 @@ where
     T: AsRef<[u8]> + Zeroize,
 {
     fn update(&mut self, data: Protected<T>) {
-        self.input.update_with(data, |input, mut data| {
+        // `data` is wiped when `risky_update_with` drops it.
+        self.input.risky_update_with(data, |input, data| {
             input.extend_from_slice(data.as_ref());
-            data.zeroize();
         });
     }
 }
@@ -92,7 +92,7 @@ where
 impl<const N: usize> Update<Info> for AwsKmsHmac<N> {
     fn update(&mut self, data: Info) {
         let pref: ProtectedRef<[u8]> = data.0.as_protected_ref();
-        self.input.update_with_ref(pref, |input, data| {
+        self.input.risky_update_with_ref(pref, |input, data| {
             input.extend(data);
         });
     }
@@ -100,7 +100,7 @@ impl<const N: usize> Update<Info> for AwsKmsHmac<N> {
 
 impl<'r, const N: usize> Update<ProtectedRef<'r, [u8]>> for AwsKmsHmac<N> {
     fn update(&mut self, pref: ProtectedRef<[u8]>) {
-        self.input.update_with_ref(pref, |input, data| {
+        self.input.risky_update_with_ref(pref, |input, data| {
             input.extend(data);
         });
     }
@@ -116,7 +116,7 @@ where
         let output = self.generate_mac().await?;
         let response = Protected::new(output.into_inner());
 
-        out.update_with(response, |out, data| {
+        out.risky_update_with(response, |out, data| {
             out.copy_from_slice(data.as_ref());
         });
 
@@ -135,11 +135,11 @@ where
         let output = self.generate_mac().await?;
         let response = Protected::new(output.into_inner());
 
-        out.update_with(response, |out, data| {
+        out.risky_update_with(response, |out, data| {
             out.copy_from_slice(data.as_ref());
         });
 
-        self.input.update(|input| input.clear());
+        self.input.risky_update(|input| input.zeroize());
 
         Ok(())
     }

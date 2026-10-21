@@ -34,8 +34,10 @@ unsafe impl GlobalAlloc for Inspecting {
             // SAFETY: `ptr` is a live block of `layout.size()` bytes.
             let block = unsafe { core::slice::from_raw_parts(ptr, layout.size()) };
             let found = block
-                .chunks_exact(8)
-                .filter(|w| *w == SECRET.to_ne_bytes())
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .filter(|w| **w == SECRET.to_ne_bytes())
                 .count();
             LEFT_IN_FREED_BLOCKS.fetch_add(found, Ordering::SeqCst);
         }

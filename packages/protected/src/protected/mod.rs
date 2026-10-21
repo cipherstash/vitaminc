@@ -36,19 +36,18 @@ impl<T: Zeroize> Protected<T> {
     ///
     /// Ownership of the (still sensitive) value transfers to the caller, which
     /// becomes responsible for its lifecycle. See [`crate::move_inner_out`] for
-    /// the shared primitive and the rationale (including why the source slot is
-    /// not scrubbed).
+    /// the shared primitive, which also wipes the slot the value leaves.
     fn into_inner_unchecked(self) -> T {
         crate::move_inner_out(self)
     }
 }
 
-// SAFETY: `inner_ptr` returns a pointer to `self`'s live, owned inner field, and
+// SAFETY: `inner_ptr_mut` returns a pointer to `self`'s live, owned inner field, and
 // `Protected`'s derived `Drop` only zeroizes — satisfying `MoveInner`'s contract.
 unsafe impl<T: Zeroize> crate::MoveInner for Protected<T> {
     type Inner = T;
-    fn inner_ptr(&self) -> *const T {
-        &self.0
+    fn inner_ptr_mut(&mut self) -> *mut T {
+        &mut self.0
     }
 }
 
@@ -69,6 +68,22 @@ impl<T: Zeroize> Protected<Protected<T>> {
     ///
     pub fn flatten(self) -> Protected<T> {
         self.into_inner_unchecked()
+    }
+}
+
+impl<T: Zeroize> Protected<T> {
+    /// Move the value into a protected `Some`, without it leaving
+    /// protection. The inverse of [`transpose`](Protected::transpose) for a
+    /// value that is present.
+    ///
+    /// ```
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{Controlled, Protected};
+    /// let x = Protected::new([1u8; 32]).into_some();
+    /// assert_eq!(x.risky_unwrap(), Some([1u8; 32]));
+    /// ```
+    pub fn into_some(self) -> Protected<Option<T>> {
+        Protected::new(Some(self.into_inner_unchecked()))
     }
 }
 

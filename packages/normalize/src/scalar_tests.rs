@@ -432,7 +432,7 @@ fn f64_canonicalisation_is_idempotent(bits: u64) -> bool {
 /// wrapper. Only the answer, which is not secret, is taken out.
 fn holds(bytes: &Protected<Vec<u8>>, expected: &[u8]) -> bool {
     Protected::new(expected.to_vec())
-        .zip_ref(bytes, |expected, bytes: &Vec<u8>| *bytes == expected)
+        .zip_ref(bytes, |expected, bytes: &Vec<u8>| *bytes == *expected)
         .risky_unwrap()
 }
 
@@ -468,7 +468,7 @@ fn timestamps_one_past_chronos_range_are_invalid() {
 fn fills_exactly(bytes: &Protected<Vec<u8>>, len: usize) -> bool {
     Protected::new(len)
         .zip_ref(bytes, |len, bytes: &Vec<u8>| {
-            bytes.len() == len && bytes.capacity() == len
+            bytes.len() == *len && bytes.capacity() == *len
         })
         .risky_unwrap()
 }

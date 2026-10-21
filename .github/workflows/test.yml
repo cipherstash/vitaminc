@@ -145,6 +145,14 @@ jobs:
           echo "RLIMIT_MEMLOCK soft: $(ulimit -l) KiB"
           cargo test
 
+      - name: test (protected residue scans, optimised)
+        # What the `Controlled` combinators leave behind on the stack and the
+        # heap, measured by scanning dead memory. The stack guarantee is
+        # stated for optimised builds, and the plain `cargo test` above
+        # skips those cases at opt-level 0, so they run here under
+        # `--release`.
+        run: cargo test -p vitaminc-protected --release --test residue_stack --test residue_heap
+
       - name: test (aead optional scalar features)
         # Only dev-dependencies enable these on vitaminc-aead, so a build
         # of the crate alone skips the tests that pin the chrono,
