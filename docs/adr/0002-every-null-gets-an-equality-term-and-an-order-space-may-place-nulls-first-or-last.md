@@ -171,7 +171,7 @@ let found = terms_by(Order::new(OrderTarget::I32).nulls(NullOrder::Last)?, &valu
 The policy is fixed when the space is made, like the target and the
 context, and every term of the space agrees with it. `OrderSpace::nulls`
 and `Order::nulls` are the only way to set one. `OrderPlaintext` learns
-`nulls() -> Option<NullOrder>`, and `order_with_nulls` takes the policy
+`null_order() -> Option<NullOrder>`, and `order_with_nulls` takes the policy
 beside the target, leaving `order` as the plain space's encoder.
 
 Only a fixed-width target takes a policy. Text and bytes do not, for the

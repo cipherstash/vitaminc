@@ -38,7 +38,7 @@ pub trait Target: private::Sealed + Copy + fmt::Debug {
 
     /// Where a space of this target places nulls: `None`, unless the
     /// target is a [`Nulls`], which a space's `nulls` method makes.
-    fn nulls(self) -> Option<NullOrder> {
+    fn null_order(self) -> Option<NullOrder> {
         None
     }
 }
@@ -89,7 +89,7 @@ impl<T: Target> Nulls<T> {
     }
 
     /// Where the space places nulls.
-    pub fn order(self) -> NullOrder {
+    pub fn null_order(self) -> NullOrder {
         self.order
     }
 }
@@ -101,7 +101,7 @@ impl<T: Target> Target for Nulls<T> {
         self.target.runtime()
     }
 
-    fn nulls(self) -> Option<NullOrder> {
+    fn null_order(self) -> Option<NullOrder> {
         Some(self.order)
     }
 }
@@ -636,11 +636,15 @@ mod tests {
             );
             let placed = Nulls::new(Date, nulls);
             assert_eq!(placed.target(), Date);
-            assert_eq!(placed.order(), nulls);
+            assert_eq!(placed.null_order(), nulls);
             assert_eq!(placed.runtime(), OrderTarget::Date);
-            assert_eq!(placed.nulls(), Some(nulls));
+            assert_eq!(Target::null_order(placed), Some(nulls));
         }
-        assert_eq!(I32.nulls(), None, "a marker places no nulls");
-        assert_eq!(OrderTarget::I32.nulls(), None, "nor does a runtime target");
+        assert_eq!(I32.null_order(), None, "a marker places no nulls");
+        assert_eq!(
+            OrderTarget::I32.null_order(),
+            None,
+            "nor does a runtime target"
+        );
     }
 }

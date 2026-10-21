@@ -122,8 +122,8 @@ impl<R, T: Target> QueryTerm<R, T> {
 
     /// Where the space the query was made in places nulls, or `None` for
     /// a space that gives them no term.
-    pub fn nulls(&self) -> Option<NullOrder> {
-        self.target.nulls()
+    pub fn null_order(&self) -> Option<NullOrder> {
+        self.target.null_order()
     }
 
     /// The scheme's own query.

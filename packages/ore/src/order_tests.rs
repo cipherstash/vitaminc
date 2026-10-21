@@ -660,7 +660,11 @@ fn hex(bytes: &[u8]) -> String {
 
 fn placed(target: OrderTarget, nulls: NullOrder, ty: Option<Logical>, v: Physical<'_>) -> String {
     let p = order_with_nulls(target, nulls, ty, v).expect("valid test value");
-    assert_eq!(p.nulls(), Some(nulls), "the plaintext carries its policy");
+    assert_eq!(
+        p.null_order(),
+        Some(nulls),
+        "the plaintext carries its policy"
+    );
     assert_eq!(
         Some(p.domain()),
         target.domain_with_nulls(nulls),

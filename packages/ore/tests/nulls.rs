@@ -48,7 +48,7 @@ fn a_null_sorts_below_every_value_under_nulls_first_and_above_under_nulls_last()
                 "{nulls:?}: every null is the sentinel"
             );
         }
-        assert_eq!(typed.nulls(), Some(nulls), "a term carries its policy");
+        assert_eq!(typed.null_order(), Some(nulls), "a term carries its policy");
     }
 }
 
@@ -188,13 +188,13 @@ fn a_marker_space_tells_its_two_policies_apart() {
         first.encrypt_checked(1i32).expect("mock"),
         last.encrypt_checked(1i32).expect("mock"),
     );
-    assert_eq!(a.nulls(), Some(NullOrder::First));
-    assert_eq!(b.nulls(), Some(NullOrder::Last));
+    assert_eq!(a.null_order(), Some(NullOrder::First));
+    assert_eq!(b.null_order(), Some(NullOrder::Last));
     assert_eq!(first.compare(&a, &a), Some(Ordering::Equal));
     assert_eq!(first.compare(&a, &b), None, "two policies do not compare");
     assert_eq!(last.compare(&a, &b), None, "two policies do not compare");
     let query = last.null_query().expect("mock");
-    assert_eq!(query.nulls(), Some(NullOrder::Last));
+    assert_eq!(query.null_order(), Some(NullOrder::Last));
     assert_eq!(
         first.compare_query(&query, &a),
         None,
@@ -309,7 +309,7 @@ fn a_query_of_a_null_finds_the_nulls_and_bounds_a_range() {
     assert_eq!(is_null, typed, "a typed null's query is the null's query");
     assert_eq!(is_null, plain, "a plain null's query is the null's query");
     assert_eq!(
-        is_null.nulls(),
+        is_null.null_order(),
         Some(NullOrder::First),
         "a query carries its space's policy"
     );

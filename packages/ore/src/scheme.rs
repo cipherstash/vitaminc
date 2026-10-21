@@ -84,7 +84,7 @@ impl OrderPlaintext {
 
     /// Where the space the plaintext was encoded for places nulls, or
     /// `None` for a space that gives them no term.
-    pub fn nulls(&self) -> Option<NullOrder> {
+    pub fn null_order(&self) -> Option<NullOrder> {
         self.nulls
     }
 
@@ -527,7 +527,7 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
         );
         // Every `Nulls` target is made by a `nulls` method, which takes a
         // fixed-width target only, so every space's target has a label.
-        let domain = label(target.runtime(), target.nulls())
+        let domain = label(target.runtime(), target.null_order())
             .expect("a null policy is only ever set on a fixed-width target");
         Self {
             scheme,
@@ -578,7 +578,7 @@ impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<
     /// Where this space places nulls, or `None` if it gives them no term.
     /// Set with [`nulls`](OrderSpace::nulls).
     pub fn null_order(&self) -> Option<NullOrder> {
-        self.target.nulls()
+        self.target.null_order()
     }
 
     /// The frozen domain label of every term of this space: the target's,
@@ -733,7 +733,7 @@ impl<S: Supports<T> + Supports<OrderTarget> + ?Sized, T: StaticTarget> OrderSpac
 /// Whether two targets name one space's target: the same type and the
 /// same null policy.
 pub(crate) fn same<T: Target>(a: T, b: T) -> bool {
-    a.runtime() == b.runtime() && a.nulls() == b.nulls()
+    a.runtime() == b.runtime() && a.null_order() == b.null_order()
 }
 
 impl<'s, S: Supports<T> + Supports<OrderTarget> + ?Sized, T: FixedWidth> OrderSpace<'s, S, T> {
@@ -819,7 +819,7 @@ impl<'s, S: Supports<OrderTarget> + ?Sized> OrderSpace<'s, S, OrderTarget> {
 impl<S: Supports<T> + Supports<OrderTarget> + ?Sized, T: Target> OrderSpace<'_, S, Nulls<T>> {
     /// The space's sentinel, sealed.
     pub(crate) fn sentinel(&self) -> OrderPlaintext {
-        null_plaintext(self.target.runtime(), self.target.order())
+        null_plaintext(self.target.runtime(), self.target.null_order())
             .expect("a null policy is only ever set on a fixed-width target")
     }
 }
@@ -887,8 +887,8 @@ impl<R, T: Target> OrderTerm<R, T> {
 
     /// Where the space the term was made in places nulls, or `None` for a
     /// space that gives them no term.
-    pub fn nulls(&self) -> Option<NullOrder> {
-        self.target.nulls()
+    pub fn null_order(&self) -> Option<NullOrder> {
+        self.target.null_order()
     }
 
     /// The scheme's own term.
@@ -952,7 +952,7 @@ impl Scalar {
     pub(crate) fn of<T: Target>(target: T) -> Self {
         Self {
             target: target.runtime(),
-            nulls: target.nulls(),
+            nulls: target.null_order(),
         }
     }
 }
@@ -1216,7 +1216,7 @@ mod tests {
                 "the sentinel is under the policy's label"
             );
             assert_eq!(
-                typed.nulls(),
+                typed.null_order(),
                 Some(nulls),
                 "the plaintext carries its policy"
             );
