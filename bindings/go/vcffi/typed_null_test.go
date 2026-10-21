@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -41,31 +42,33 @@ func zeros(n int) string { return hex.EncodeToString(make([]byte, n)) }
 
 func TestTypedNullKnownAnswers(t *testing.T) {
 	for _, row := range typedNullAnswers {
-		got, err := Marshal(vcvalue.TypedNull{Type: row.t})
-		if err != nil {
-			t.Fatalf("%v: %v", row.t, err)
-		}
-		if hex.EncodeToString(got) != row.hex {
-			t.Fatalf("%v: got %x, want %s", row.t, got, row.hex)
-		}
-		present, err := Marshal(row.present)
-		if err != nil {
-			t.Fatalf("%v: %v", row.t, err)
-		}
-		// A frame gives bytes a length prefix; a typed null of a UUID has
-		// none, because its sealed leaf has none.
-		want := len(present)
-		if row.t == vcvalue.TypeUUID {
-			want -= 4
-		}
-		if len(got) != want {
-			t.Fatalf("%v: typed null is %d bytes, a value %d", row.t, len(got), want)
-		}
-		// It reads back as nil, like every null, and writes back as one.
-		v, err := Unmarshal(got)
-		if err != nil || v != nil {
-			t.Fatalf("%v: decoded %#v, %v", row.t, v, err)
-		}
+		t.Run(fmt.Sprint(row.t), func(t *testing.T) {
+			got, err := Marshal(vcvalue.TypedNull{Type: row.t})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hex.EncodeToString(got) != row.hex {
+				t.Fatalf("got %x, want %s", got, row.hex)
+			}
+			present, err := Marshal(row.present)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// A frame gives bytes a length prefix; a typed null of a UUID
+			// has none, because its sealed leaf has none.
+			want := len(present)
+			if row.t == vcvalue.TypeUUID {
+				want -= 4
+			}
+			if len(got) != want {
+				t.Fatalf("typed null is %d bytes, a value %d", len(got), want)
+			}
+			// It reads back as nil, like every null, and writes back as one.
+			v, err := Unmarshal(got)
+			if err != nil || v != nil {
+				t.Fatalf("decoded %#v, %v", v, err)
+			}
+		})
 	}
 	if len(typedNullAnswers) != int(vcvalue.TypeUUID) {
 		t.Fatalf("pinned %d of %d types", len(typedNullAnswers), vcvalue.TypeUUID)
@@ -87,28 +90,51 @@ func (s selfEncoded) EncryptValue(enc Encoder) error {
 	return nil
 }
 
+// An Encryptable with a pointer receiver: only *ptrEncoded implements it.
+type ptrEncoded int32
+
+func (p *ptrEncoded) EncryptValue(enc Encoder) error {
+	enc.String("custom")
+	return nil
+}
+
+// A pointer type that points at itself never reaches a non-pointer.
+type selfPointer *selfPointer
+
 // A nil pointer to a fixed-width type is a typed null, the Go side of
 // Rust's Option<T>; a nil with no fixed-width type to go by is the plain
-// null.
+// null. Each case is encoded twice, since the second encode reads the
+// per-type cache.
 func TestANilPointerIsATypedNullWhenItsTypeIsFixedWidth(t *testing.T) {
 	type age int32
+	var missing *int32
 	cases := []struct {
 		name string
 		v    any
 		want string
 	}{
 		{"*int8", (*int8)(nil), "150c"},
+		{"*int16", (*int16)(nil), "150e00"},
+		{"*int32", (*int32)(nil), "1504000000"},
+		{"*int64", (*int64)(nil), "1505" + zeros(7)},
 		{"*int", (*int)(nil), "1505" + zeros(7)},
+		{"*uint8", (*uint8)(nil), "150d"},
+		{"*uint16", (*uint16)(nil), "150f00"},
+		{"*uint32", (*uint32)(nil), "1506000000"},
+		{"*uint64", (*uint64)(nil), "1507" + zeros(7)},
 		{"*uint", (*uint)(nil), "1507" + zeros(7)},
 		{"*float32", (*float32)(nil), "1508000000"},
+		{"*float64", (*float64)(nil), "1509" + zeros(7)},
 		{"*time.Time", (*time.Time)(nil), "1513" + zeros(11)},
 		{"*vcvalue.Date", (*vcvalue.Date)(nil), "1512000000"},
 		{"*vcvalue.Timestamp", (*vcvalue.Timestamp)(nil), "1513" + zeros(11)},
 		{"*vcvalue.Decimal", (*vcvalue.Decimal)(nil), "1514" + zeros(15)},
 		{"*vcvalue.UUID", (*vcvalue.UUID)(nil), "15f305000b" + zeros(15)},
 		{"*vcvalue.Int128", (*vcvalue.Int128)(nil), "1510" + zeros(15)},
+		{"*vcvalue.Uint128", (*vcvalue.Uint128)(nil), "1511" + zeros(15)},
 		{"named *age", (*age)(nil), "1504000000"},
 		{"**int32", (**int32)(nil), "1504000000"},
+		{"&(nil *int32)", &missing, "1504000000"},
 		// No fixed width: the plain null.
 		{"*bool", (*bool)(nil), "00"},
 		{"*string", (*string)(nil), "00"},
@@ -116,16 +142,105 @@ func TestANilPointerIsATypedNullWhenItsTypeIsFixedWidth(t *testing.T) {
 		{"*[16]byte", (*[16]byte)(nil), "00"},
 		{"*struct", (*struct{ A int32 })(nil), "00"},
 		{"*Encryptable", (*selfEncoded)(nil), "00"},
+		{"**Encryptable", (**selfEncoded)(nil), "00"},
+		{"*pointer-receiver Encryptable", (*ptrEncoded)(nil), "00"},
+		{"**pointer-receiver Encryptable", (**ptrEncoded)(nil), "00"},
+		{"*any", (*any)(nil), "00"},
+		{"self-pointing type", selfPointer(nil), "00"},
 		{"nil", nil, "00"},
 	}
 	for _, c := range cases {
-		got, err := Marshal(c.v)
-		if err != nil {
-			t.Fatalf("%s: %v", c.name, err)
-		}
-		if hex.EncodeToString(got) != c.want {
-			t.Fatalf("%s: got %x, want %s", c.name, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			for range 2 {
+				got, err := Marshal(c.v)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if hex.EncodeToString(got) != c.want {
+					t.Fatalf("got %x, want %s", got, c.want)
+				}
+			}
+		})
+	}
+}
+
+// An Encryptable that always writes one value of one fixed-width type:
+// a FixedWidth, the Go side of Rust's Encrypt::FIXED.
+type money struct{ cents int64 }
+
+func (m money) EncryptValue(enc Encoder) error {
+	enc.Int64(m.cents)
+	return nil
+}
+
+func (money) FixedType() vcvalue.FixedType { return vcvalue.TypeInt64 }
+
+// The same, declared on the pointer.
+type ptrMoney struct{ cents int64 }
+
+func (m *ptrMoney) EncryptValue(enc Encoder) error {
+	enc.Int64(m.cents)
+	return nil
+}
+
+func (*ptrMoney) FixedType() vcvalue.FixedType { return vcvalue.TypeInt64 }
+
+// A FixedWidth that declares a type that is not one.
+type badWidth struct{}
+
+func (badWidth) EncryptValue(enc Encoder) error {
+	enc.String("custom")
+	return nil
+}
+
+func (badWidth) FixedType() vcvalue.FixedType { return 0 }
+
+func TestANilPointerToAFixedWidthEncryptableIsATypedNullOfItsType(t *testing.T) {
+	want := "1505" + zeros(7)
+	for _, c := range []struct {
+		name string
+		v    any
+	}{
+		{"*money", (*money)(nil)},
+		{"**money", (**money)(nil)},
+		{"*ptrMoney", (*ptrMoney)(nil)},
+		{"**ptrMoney", (**ptrMoney)(nil)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := Marshal(c.v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hex.EncodeToString(got) != want {
+				t.Fatalf("got %x, want %s", got, want)
+			}
+		})
+	}
+	// A present value is as long, and still written by EncryptValue.
+	present, err := Marshal(&money{cents: 150})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(present) != "059600000000000000" {
+		t.Fatalf("present: got %x", present)
+	}
+	// Through a struct field, where a nil would otherwise show by length.
+	type order struct{ Refund *money }
+	absent, err := Marshal(order{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasSuffix(absent, []byte{tagTypedNull, tagInt64, 0, 0, 0, 0, 0, 0, 0}) {
+		t.Fatalf("absent: %x", absent)
+	}
+	// A declared type that is not a fixed-width type fails the encode, and
+	// never writes the plain null in its place. A present value is not
+	// asked.
+	if _, err := Marshal((*badWidth)(nil)); !errors.Is(err, vcvalue.ErrInvalidFixedType) {
+		t.Fatalf("invalid declared type: got %v", err)
+	}
+	if _, err := Marshal(badWidth{}); err != nil {
+		t.Fatalf("present: %v", err)
 	}
 }
 
@@ -260,6 +375,13 @@ func TestEveryFixedTypeIsWrittenWithItsTypedNullsHeader(t *testing.T) {
 		}
 		if !bytes.HasPrefix(value, header) {
 			t.Fatalf("%s: value %x does not start with its typed null's header %x", name, value, header)
+		}
+	}
+	// Every sample is of a fixed-width marker, so a marker that loses its
+	// fixed type is caught, not skipped.
+	for typ := range samples {
+		if markers[typ].fixed == 0 {
+			t.Fatalf("%v has a sample but no typed null", typ)
 		}
 	}
 	for typ, m := range markers {

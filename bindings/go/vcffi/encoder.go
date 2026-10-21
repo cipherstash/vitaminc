@@ -27,6 +27,22 @@ type Encryptable interface {
 	EncryptValue(enc Encoder) error
 }
 
+// FixedWidth is the Go side of Rust's `Encrypt::FIXED`: an Encryptable whose
+// EncryptValue always writes one value of one fixed-width type (a money type
+// that writes its cents with Int64, say). A nil pointer to such a type is
+// written as a typed null of that type, so a sealed absence is as long as a
+// sealed value. A nil pointer to an Encryptable that does not implement it
+// is the plain null, since its encoding is its own.
+//
+// FixedType is called once per type, on a pointer to a zero value, so it
+// must answer from the type alone. A type that returns an invalid FixedType
+// fails the encode with vcvalue.ErrInvalidFixedType rather than write the
+// plain null in its place.
+type FixedWidth interface {
+	Encryptable
+	FixedType() vcvalue.FixedType
+}
+
 // encState is the buffer and first-error shared by an Encoder and every
 // sub-encoder it hands out. Errors accumulate: once one is recorded, further
 // channel calls are no-ops, so consumer code can chain writes without
@@ -500,7 +516,8 @@ func encodeAny(enc Encoder, v any) {
 //     the record's structure.
 //   - Encryptable hands control to the user type — except a typed nil
 //     pointer, which still satisfies the assertion but would dereference nil
-//     in typical implementations; it encodes as Null like every other nil.
+//     in typical implementations; it encodes as Null like every other nil,
+//     or as a typed null when the type declares its width (FixedWidth).
 func interceptMarkers(enc Encoder, v any) bool {
 	if m, ok := markers[reflect.TypeOf(v)]; ok {
 		m.encode(enc, v)
@@ -508,7 +525,11 @@ func interceptMarkers(enc Encoder, v any) bool {
 	}
 	if e, ok := v.(Encryptable); ok {
 		if ev := reflect.ValueOf(e); ev.Kind() == reflect.Pointer && ev.IsNil() {
-			enc.Null()
+			if t, ok := fixedTypeOf(ev.Type()); ok {
+				enc.TypedNull(t)
+			} else {
+				enc.Null()
+			}
 			return true
 		}
 		if err := e.EncryptValue(enc); err != nil {
@@ -680,6 +701,7 @@ type numeric struct {
 
 var (
 	encryptableType = reflect.TypeOf((*Encryptable)(nil)).Elem()
+	fixedWidthType  = reflect.TypeOf((*FixedWidth)(nil)).Elem()
 	float32Type     = reflect.TypeOf(float32(0))
 
 	// markers is filled in init: Plain and Object encode by calling back
@@ -762,32 +784,64 @@ func init() {
 	}
 }
 
+// fixedAnswer is what fixedTypeOf caches: whether the type has a fixed-width
+// type at all, and which. A type declared through FixedWidth is kept even
+// when it is invalid, so that the encode fails instead of writing the plain
+// null in its place.
+type fixedAnswer struct {
+	ft  vcvalue.FixedType
+	has bool
+}
+
 // fixedTypeOf is the fixed-width type a pointer of type t points at, through
 // any number of pointers, when encodeReflect writes every value of it with
 // one fixed-width tag: the int, uint and float kinds (a named type over one
 // included) and the fixed-width marker types, exactly (a named type over a
 // marker is a struct to reflection, written field by field). A type that
 // implements Encryptable chooses its own encoding, which may not be fixed
-// width, so it has none.
+// width, so it has none unless it says so through FixedWidth.
 func fixedTypeOf(t reflect.Type) (vcvalue.FixedType, bool) {
 	if cached, ok := fixedTypes.Load(t); ok {
-		ft := cached.(vcvalue.FixedType)
-		return ft, ft != 0
+		a := cached.(fixedAnswer)
+		return a.ft, a.has
 	}
-	var ft vcvalue.FixedType
+	var a fixedAnswer
 	elem := t
-	for elem.Kind() == reflect.Pointer && !elem.Implements(encryptableType) {
+	// A pointer type that points at itself (type P *P) never reaches a
+	// non-pointer, so the walk is bounded by the same depth budget that
+	// bounds a value cycle. Past it the type has no fixed width.
+	for depth := 0; elem.Kind() == reflect.Pointer && !elem.Implements(encryptableType); depth++ {
+		if depth == maxDepth {
+			fixedTypes.Store(t, a)
+			return 0, false
+		}
 		elem = elem.Elem()
 	}
-	if !elem.Implements(encryptableType) {
+	switch {
+	case elem.Implements(fixedWidthType):
+		a = fixedAnswer{zeroValueOf(elem).Interface().(FixedWidth).FixedType(), true}
+	case elem.Implements(encryptableType):
+		// Its encoding is its own.
+	default:
 		if m, ok := markers[elem]; ok {
-			ft = m.fixed
+			a.ft = m.fixed
 		} else {
-			ft = numericKinds[elem.Kind()].fixed
+			a.ft = numericKinds[elem.Kind()].fixed
 		}
+		a.has = a.ft != 0
 	}
-	fixedTypes.Store(t, ft)
-	return ft, ft != 0
+	fixedTypes.Store(t, a)
+	return a.ft, a.has
+}
+
+// zeroValueOf is a zero value of t that a method can be called on: for a
+// pointer type, a pointer to a zero value rather than nil, so a method with
+// a value receiver does not dereference nil.
+func zeroValueOf(t reflect.Type) reflect.Value {
+	if t.Kind() == reflect.Pointer {
+		return reflect.New(t.Elem())
+	}
+	return reflect.Zero(t)
 }
 
 // interfaceOf is rv.Interface(), or nil where reflection forbids it

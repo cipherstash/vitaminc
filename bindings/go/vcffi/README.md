@@ -193,6 +193,27 @@ date. Where the Go type cannot say what is missing (a nil in a
 `map[string]any`), write `vcvalue.TypedNull{Type: vcvalue.TypeDate}`, or call
 `Encoder.TypedNull` from an `Encryptable`.
 
+An `Encryptable` whose `EncryptValue` always writes one value of one
+fixed-width type can say so by implementing `FixedWidth`, the Go side of
+Rust's `Encrypt::FIXED`. A nil pointer to it is then a typed null of that
+type:
+
+```go
+type Money struct{ cents int64 }
+
+func (m Money) EncryptValue(enc vcffi.Encoder) error { enc.Int64(m.cents); return nil }
+func (Money) FixedType() vcvalue.FixedType            { return vcvalue.TypeInt64 }
+
+type Order struct {
+	Refund *Money // nil seals as long as a Money
+}
+```
+
+`FixedType` is called once per type, on a pointer to a zero value, so it must
+answer from the type alone. A type that returns an invalid `FixedType` fails
+the encode with `vcvalue.ErrInvalidFixedType` rather than write the plain
+null in its place.
+
 A typed null decodes as `nil`, like every null. Out of the seal the padding
 means nothing, and Rust's frame writer writes it back as the plain null, so
 Go does too. A decrypted value therefore no longer says what type an absent
