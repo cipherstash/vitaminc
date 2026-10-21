@@ -31,7 +31,9 @@ _Avoid_: Client, backend (for the Rust type), implementation, Group 2
 **Key purpose**:
 The class of operations a backend key can perform, fixed when the key is
 created: data-key (which includes direct encrypt and decrypt), MAC, or
-signing. On Vault Transit, one key can serve both MAC and signing. A
+signing. A data-key purpose key keeps its two uses apart: a direct
+ciphertext never opens as a data key, and a data key never opens through
+direct decrypt (ADR 0006). On Vault Transit, one key can serve both MAC and signing. A
 data-key purpose needs a `derived=true` Transit key, and MAC needs a key
 that is not derived, so no Transit key serves data keys and another purpose.
 _Avoid_: Key usage, key type (which names the algorithm, not the purpose)

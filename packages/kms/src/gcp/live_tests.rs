@@ -15,6 +15,7 @@ use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
     BatchGenerateDataKey, BatchRetrieveDataKey, Binding, GenerateDataKey, RetrieveDataKey,
 };
+use crate::key_id::KeyId;
 use crate::live::{enabled, Backend, LiveEnv};
 use crate::mac::{GenerateMac, VerifyMac};
 use crate::sign::{GetPublicKey, Sign, SignMessage, Verify, VerifyMessage};
@@ -170,6 +171,38 @@ async fn direct_encryption_round_trips() {
     let plaintext = source.decrypt(&ciphertext).await.unwrap();
 
     assert_eq!(plaintext.risky_unwrap(), b"a short message");
+}
+
+/// A data key and a direct ciphertext bind different additional
+/// authenticated data (ADR 0006), so neither opens as the other. The
+/// direct ciphertext is exactly 32 bytes, the size of a data key, and the
+/// data key is minted under `Binding::EMPTY`, as an index key is.
+#[tokio::test]
+async fn data_keys_and_direct_ciphertexts_do_not_open_as_each_other() {
+    let Some(env) = live("data_keys_and_direct_ciphertexts_do_not_open_as_each_other") else {
+        return;
+    };
+    let source = GcpDataKeySource::<32>::new(client().await, crypto_key(&env, ENCRYPT_KEY));
+
+    let ciphertext = source.encrypt(Protected::new(vec![7u8; 32])).await.unwrap();
+    let error = source
+        .retrieve_data_key(&KeyId::new(ciphertext), Binding::EMPTY)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, super::GcpDataKeySourceError::Gcp(_)),
+        "Cloud KMS must refuse the AAD: {error}"
+    );
+
+    let generated = source.generate_data_key(Binding::EMPTY).await.unwrap();
+    let error = source
+        .decrypt(generated.key_id.as_bytes())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, super::GcpDataKeySourceError::Gcp(_)),
+        "Cloud KMS must refuse the AAD: {error}"
+    );
 }
 
 /// `macVerify` answers with `success` and `verifiedSuccessIntegrity`. The

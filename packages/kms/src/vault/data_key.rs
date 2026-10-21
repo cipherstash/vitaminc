@@ -5,8 +5,9 @@ use super::batch::{
 use super::{b64_decode, b64_encode};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
-    fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding, GenerateDataKey,
-    GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey, DEFAULT_MAX_IN_FLIGHT,
+    fan_out_generate, tagged_binding, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
+    GenerateDataKey, GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey,
+    DEFAULT_MAX_IN_FLIGHT, DIRECT_ENCRYPTION_TAG,
 };
 use crate::key_id::KeyId;
 use private::ValidDataKeySize;
@@ -19,22 +20,16 @@ use vaultrs::api::transit::requests::{
 use vaultrs::client::VaultClient;
 use vitaminc_protected::{Controlled, Protected};
 
-/// The first byte of every data-key derivation context. The binding
-/// follows it.
-///
-/// A derived key refuses an empty context, and [`Binding::EMPTY`] is a
-/// binding like any other. The tag makes every context non-empty, and the
-/// encoding stays one-to-one: two bindings give the same context only if
-/// they are the same bytes.
-const DATA_KEY_CONTEXT_TAG: u8 = 0x01;
-
 /// The derivation context of [`EncryptWithKey`] and [`DecryptWithKey`].
 ///
 /// A derived key refuses every call that has no context, and direct
 /// encryption has no binding to send. So it sends this fixed context. Its
-/// first byte is not [`DATA_KEY_CONTEXT_TAG`], so no binding gives the same
-/// context, and a direct ciphertext never opens as a data key.
+/// first byte is [`DIRECT_ENCRYPTION_TAG`], not the
+/// [`DATA_KEY_TAG`](crate::data_key::DATA_KEY_TAG) that starts the context
+/// of every data key, so no binding gives the same context, and a direct
+/// ciphertext never opens as a data key (ADR 0006).
 const DIRECT_ENCRYPTION_CONTEXT: &[u8] = b"\x00vitaminc-kms/vault/encrypt-with-key";
+const _: () = assert!(DIRECT_ENCRYPTION_CONTEXT[0] == DIRECT_ENCRYPTION_TAG);
 
 /// Errors from [`VaultDataKeySource`].
 #[derive(Debug, Error)]
@@ -208,13 +203,11 @@ where
         self
     }
 
-    /// The base64 derivation context for `binding`: [`DATA_KEY_CONTEXT_TAG`],
-    /// then the binding bytes.
+    /// The base64 derivation context for `binding`:
+    /// [`DATA_KEY_TAG`](crate::data_key::DATA_KEY_TAG), then the binding
+    /// bytes.
     fn context_of(binding: Binding<'_>) -> String {
-        let mut context = Vec::with_capacity(1 + binding.as_bytes().len());
-        context.push(DATA_KEY_CONTEXT_TAG);
-        context.extend_from_slice(binding.as_bytes());
-        b64_encode(&context)
+        b64_encode(&tagged_binding(binding))
     }
 
     /// The one binding every item shares, if they all share one.
@@ -556,6 +549,7 @@ mod private {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data_key::DATA_KEY_TAG;
     use crate::vault::tests::{data, test_client, KEY_NAME};
     use httpmock::prelude::*;
     use serde_json::json;
@@ -1012,7 +1006,8 @@ mod tests {
         // An empty binding is still a context Vault accepts.
         assert_eq!(Source::context_of(Binding::EMPTY), b64_encode(&[0x01]));
         // No binding gives the context of direct encryption.
-        assert_ne!(DIRECT_ENCRYPTION_CONTEXT[0], DATA_KEY_CONTEXT_TAG);
+        assert_eq!(DIRECT_ENCRYPTION_CONTEXT[0], DIRECT_ENCRYPTION_TAG);
+        assert_ne!(DIRECT_ENCRYPTION_CONTEXT[0], DATA_KEY_TAG);
     }
 
     #[tokio::test]
@@ -1294,6 +1289,18 @@ mod integration_tests {
         ] {
             assert!(source.retrieve_data_key(&key_id, binding).await.is_err());
         }
+    }
+
+    /// The other direction: a data key minted under `Binding::EMPTY`, as an
+    /// index key is, does not open through direct decryption. If it did,
+    /// any caller of `decrypt` that can read the index `KeyId` would get the
+    /// index key.
+    #[tokio::test]
+    async fn a_data_key_under_an_empty_binding_is_not_a_direct_ciphertext() {
+        let source = source().await;
+        let generated = source.generate_data_key(Binding::EMPTY).await.unwrap();
+
+        assert!(source.decrypt(generated.key_id.as_bytes()).await.is_err());
     }
 
     /// Each item of a batch carries its own binding, so one wrong binding

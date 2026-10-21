@@ -1,9 +1,9 @@
 use super::envelope::{Envelope, EnvelopeError};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
-    dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
-    GenerateDataKey, GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey,
-    DEFAULT_MAX_IN_FLIGHT,
+    dedup_retrieve, fan_out_generate, tagged_binding, BatchGenerateDataKey, BatchRetrieveDataKey,
+    Binding, GenerateDataKey, GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey,
+    DEFAULT_MAX_IN_FLIGHT, DIRECT_ENCRYPTION_TAG,
 };
 use crate::key_id::KeyId;
 use azure_security_keyvault_keys::models::{
@@ -19,6 +19,19 @@ use vitaminc_random::{Generatable, SafeRand};
 /// The AES-GCM initialization vector length Key Vault's `A256GCM` expects,
 /// in bytes. The service will not invent one, so the adapter mints it.
 const GCM_IV_LEN: usize = 12;
+
+/// The additional authenticated data of [`EncryptWithKey`] and
+/// [`DecryptWithKey`].
+///
+/// A data key and a direct ciphertext are the same `A256GCM` envelope under
+/// the same key, so only the `aad` keeps them apart. A data key binds
+/// [`DATA_KEY_TAG`](crate::data_key::DATA_KEY_TAG) and then its binding,
+/// and direct encryption binds this fixed label, whose first byte is
+/// [`DIRECT_ENCRYPTION_TAG`]. No binding gives the same `aad`, so a direct
+/// ciphertext never opens as a data key, and a data key never opens through
+/// `decrypt` (ADR 0006).
+const DIRECT_ENCRYPTION_AAD: &[u8] = b"\x00vitaminc-kms/azure/encrypt-with-key";
+const _: () = assert!(DIRECT_ENCRYPTION_AAD[0] == DIRECT_ENCRYPTION_TAG);
 
 /// Errors from the Azure Key Vault data key source.
 #[derive(Debug, Error)]
@@ -70,13 +83,15 @@ pub enum Error {
 ///
 /// Key Vault has no "generate data key" call, so a data key is two steps:
 /// mint `N` bytes locally with a CSPRNG, then `encrypt` them under the
-/// backend key with `A256GCM`, a fresh IV and the caller's [`Binding`] as
-/// the additional authenticated data. [`RetrieveDataKey`] reverses that
-/// with `decrypt`, and the vault refuses a binding other than the one the
-/// key was minted under. The same type also encrypts and decrypts small
-/// payloads directly under the backend key
-/// ([`EncryptWithKey`]/[`DecryptWithKey`]), with no additional
-/// authenticated data.
+/// backend key with `A256GCM`, a fresh IV and, as the additional
+/// authenticated data, the byte `0x01` and then the caller's [`Binding`].
+/// [`RetrieveDataKey`] reverses that with `decrypt`, and the vault refuses
+/// a binding other than the one the key was minted under. The same type
+/// also encrypts and decrypts small payloads directly under the backend key
+/// ([`EncryptWithKey`]/[`DecryptWithKey`]), with the additional
+/// authenticated data `0x00` and then `vitaminc-kms/azure/encrypt-with-key`.
+/// The two `aad`s never match, so neither use opens the other's
+/// ciphertexts (ADR 0006).
 ///
 /// The adapter binds to a key *name*. New work (`encrypt`) goes to whichever
 /// version the vault currently considers current, and the `KeyId` and the
@@ -148,7 +163,8 @@ impl<const N: usize> AzureDataKeySource<N> {
     }
 
     /// `A256GCM` `encrypt` under a fresh IV, with `aad` as the additional
-    /// authenticated data.
+    /// authenticated data. `aad` is never empty: a data key sends its tagged
+    /// binding and direct encryption sends [`DIRECT_ENCRYPTION_AAD`].
     async fn seal(&self, plaintext: Vec<u8>, aad: &[u8]) -> Result<Envelope, Error> {
         let mut rng = SafeRand::from_entropy()?;
         let sent_iv: [u8; GCM_IV_LEN] = Generatable::random(&mut rng)?;
@@ -157,7 +173,7 @@ impl<const N: usize> AzureDataKeySource<N> {
             algorithm: Some(EncryptionAlgorithm::A256Gcm),
             value: Some(plaintext),
             iv: Some(sent_iv.to_vec()),
-            additional_authenticated_data: as_aad(aad),
+            additional_authenticated_data: Some(aad.to_vec()),
             ..Default::default()
         };
         let options = KeyClientEncryptOptions {
@@ -190,7 +206,7 @@ impl<const N: usize> AzureDataKeySource<N> {
             value: Some(envelope.value),
             iv: Some(envelope.iv),
             authentication_tag: Some(envelope.tag),
-            additional_authenticated_data: as_aad(aad),
+            additional_authenticated_data: Some(aad.to_vec()),
         };
         let result = self
             .client
@@ -200,13 +216,6 @@ impl<const N: usize> AzureDataKeySource<N> {
 
         result.result.ok_or(Error::MissingField("result value"))
     }
-}
-
-/// An empty binding is sent as *no* `aad`, not an empty one. AES-GCM
-/// authenticates the two the same way, and AWS and Google send an empty
-/// binding as an absent field too.
-fn as_aad(aad: &[u8]) -> Option<Vec<u8>> {
-    (!aad.is_empty()).then(|| aad.to_vec())
 }
 
 /// Which of the two blobs an [`Envelope`] can carry is being read, so an
@@ -249,8 +258,8 @@ fn encode(envelope: &Envelope, what: Reference) -> Result<Vec<u8>, Error> {
 impl<const N: usize> GenerateDataKey<N> for AzureDataKeySource<N> {
     type Error = Error;
 
-    /// The binding is the `aad` of the `A256GCM` encryption, so only the
-    /// same binding can retrieve the key.
+    /// The `aad` of the `A256GCM` encryption is `0x01` and then the
+    /// binding, so only the same binding can retrieve the key.
     async fn generate_data_key(
         &self,
         binding: Binding<'_>,
@@ -259,7 +268,7 @@ impl<const N: usize> GenerateDataKey<N> for AzureDataKeySource<N> {
         let plaintext: Protected<[u8; N]> = Generatable::random(&mut rng)?;
 
         let envelope = self
-            .seal(plaintext.risky_ref().to_vec(), binding.as_bytes())
+            .seal(plaintext.risky_ref().to_vec(), &tagged_binding(binding))
             .await?;
 
         Ok(GeneratedDataKey {
@@ -280,15 +289,20 @@ impl<const N: usize> RetrieveDataKey<N> for AzureDataKeySource<N> {
     /// keeps no copy of the data key, so the envelope is the only one.
     const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
 
-    /// The binding is the `aad` of the `A256GCM` encryption. The vault
-    /// refuses the authentication tag under any other binding.
+    /// The `aad` of the `A256GCM` decryption is `0x01` and then the
+    /// binding. The vault refuses the authentication tag under any other
+    /// binding.
     async fn retrieve_data_key(
         &self,
         key_id: &KeyId,
         binding: Binding<'_>,
     ) -> Result<Protected<[u8; N]>, Self::Error> {
         let value = self
-            .open(key_id.as_bytes(), binding.as_bytes(), Reference::KeyId)
+            .open(
+                key_id.as_bytes(),
+                &tagged_binding(binding),
+                Reference::KeyId,
+            )
             .await?;
         Ok(Protected::new(into_sized(value)?))
     }
@@ -316,7 +330,9 @@ impl<const N: usize> EncryptWithKey for AzureDataKeySource<N> {
     type Error = Error;
 
     async fn encrypt(&self, plaintext: Protected<Vec<u8>>) -> Result<Vec<u8>, Self::Error> {
-        let envelope = self.seal(plaintext.risky_unwrap(), &[]).await?;
+        let envelope = self
+            .seal(plaintext.risky_unwrap(), DIRECT_ENCRYPTION_AAD)
+            .await?;
         encode(&envelope, Reference::Ciphertext)
     }
 }
@@ -325,7 +341,9 @@ impl<const N: usize> DecryptWithKey for AzureDataKeySource<N> {
     type Error = Error;
 
     async fn decrypt(&self, ciphertext: &[u8]) -> Result<Protected<Vec<u8>>, Self::Error> {
-        let value = self.open(ciphertext, &[], Reference::Ciphertext).await?;
+        let value = self
+            .open(ciphertext, DIRECT_ENCRYPTION_AAD, Reference::Ciphertext)
+            .await?;
         Ok(Protected::new(value))
     }
 }
@@ -443,7 +461,7 @@ mod tests {
         let sent = field(&body, "value").unwrap();
         assert_eq!(sent, generated.plaintext.clone().risky_unwrap().to_vec());
         assert_eq!(field(&body, "iv").unwrap().len(), GCM_IV_LEN);
-        assert_eq!(field(&body, "aad").unwrap(), b"users/email");
+        assert_eq!(field(&body, "aad").unwrap(), b"\x01users/email");
 
         // The KeyId is self-describing: the kid, the ciphertext, the IV and
         // the tag.
@@ -454,8 +472,10 @@ mod tests {
         assert_eq!(envelope.tag, vec![8u8; 16]);
     }
 
+    /// An empty binding is still tagged: the `aad` is the tag byte alone,
+    /// never absent.
     #[tokio::test]
-    async fn an_empty_binding_sends_no_aad() {
+    async fn an_empty_binding_sends_the_tag_byte_as_aad() {
         let (client, transport) = stub_client(&[&gcm_response(
             "my-key",
             &[9u8; 32],
@@ -466,7 +486,10 @@ mod tests {
 
         source.generate_data_key(Binding::EMPTY).await.unwrap();
 
-        assert!(transport.requests()[0].json().get("aad").is_none());
+        assert_eq!(
+            field(&transport.requests()[0].json(), "aad").unwrap(),
+            [0x01]
+        );
     }
 
     #[tokio::test]
@@ -490,7 +513,7 @@ mod tests {
         assert_eq!(field(&body, "value").unwrap(), vec![9u8; 32]);
         assert_eq!(field(&body, "iv").unwrap(), vec![7u8; GCM_IV_LEN]);
         assert_eq!(field(&body, "tag").unwrap(), vec![8u8; 16]);
-        assert_eq!(field(&body, "aad").unwrap(), b"users/email");
+        assert_eq!(field(&body, "aad").unwrap(), b"\x01users/email");
     }
 
     #[tokio::test]
@@ -528,7 +551,7 @@ mod tests {
         // The wrong binding reached the vault, which is what refused it.
         assert_eq!(
             field(&transport.requests()[1].json(), "aad").unwrap(),
-            b"users/name"
+            b"\x01users/name"
         );
         // An empty binding is a different binding too.
         assert!(source
@@ -643,7 +666,10 @@ mod tests {
             .map(|request| field(&request.json(), "aad").unwrap())
             .collect();
         sent.sort();
-        assert_eq!(sent, [b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]);
+        assert_eq!(
+            sent,
+            [b"\x01a".to_vec(), b"\x01b".to_vec(), b"\x01c".to_vec()]
+        );
     }
 
     #[tokio::test]
@@ -666,7 +692,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn encrypt_sends_an_iv_and_no_aad_and_keeps_the_tag() {
+    async fn encrypt_sends_an_iv_and_its_fixed_aad_and_keeps_the_tag() {
         let (client, transport) = stub_client(&[&gcm_response(
             "my-key",
             b"ciphertext",
@@ -683,7 +709,10 @@ mod tests {
         let body = transport.requests()[0].json();
         assert_eq!(body["alg"], "A256GCM");
         assert_eq!(field(&body, "iv").unwrap().len(), GCM_IV_LEN);
-        assert!(body.get("aad").is_none());
+        assert_eq!(
+            field(&body, "aad").unwrap(),
+            b"\x00vitaminc-kms/azure/encrypt-with-key"
+        );
 
         let envelope = Envelope::decode(&ciphertext).unwrap();
         assert_eq!(envelope.value, b"ciphertext");
@@ -732,7 +761,7 @@ mod tests {
         let body = request.json();
         assert_eq!(field(&body, "iv").unwrap(), vec![7u8; GCM_IV_LEN]);
         assert_eq!(field(&body, "tag").unwrap(), vec![8u8; 16]);
-        assert!(body.get("aad").is_none());
+        assert_eq!(field(&body, "aad").unwrap(), DIRECT_ENCRYPTION_AAD);
     }
 
     #[tokio::test]
@@ -748,6 +777,73 @@ mod tests {
         source.generate_data_key(Binding::EMPTY).await.unwrap();
 
         assert_eq!(transport.requests()[0].path(), "/keys/my-key/v7/encrypt");
+    }
+
+    /// A direct ciphertext of exactly `N` bytes must not open as a data key,
+    /// under the empty binding or any other. The two are the same `A256GCM`
+    /// envelope, so before CIP-5094, when both sent no `aad` for an empty
+    /// binding, this opened.
+    #[tokio::test]
+    async fn a_direct_ciphertext_is_not_a_data_key() {
+        let (client, _) = responder_client(fake_vault());
+        let source = AzureDataKeySource::<32>::new(client, "my-key");
+        let ciphertext = source.encrypt(Protected::new(vec![7u8; 32])).await.unwrap();
+        // The fake really does open it the right way.
+        assert_eq!(
+            source.decrypt(&ciphertext).await.unwrap().risky_unwrap(),
+            vec![7u8; 32]
+        );
+
+        let key_id = KeyId::new(ciphertext);
+        for binding in [
+            Binding::EMPTY,
+            Binding::from("vitaminc-kms/azure/encrypt-with-key"),
+            Binding::new(DIRECT_ENCRYPTION_AAD),
+        ] {
+            let error = source
+                .retrieve_data_key(&key_id, binding)
+                .await
+                .unwrap_err();
+            assert!(matches!(error, Error::Azure(_)), "{error}");
+        }
+    }
+
+    /// The other direction: a data key minted under `Binding::EMPTY`, as an
+    /// index key is, does not open through `decrypt`. If it did, any caller
+    /// of `decrypt` that can read the index `KeyId` would get the index key.
+    #[tokio::test]
+    async fn a_data_key_under_an_empty_binding_is_not_a_direct_ciphertext() {
+        let (client, _) = responder_client(fake_vault());
+        let source = AzureDataKeySource::<32>::new(client, "my-key");
+
+        let generated = source.generate_data_key(Binding::EMPTY).await.unwrap();
+
+        let error = source
+            .decrypt(generated.key_id.as_bytes())
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::Azure(_)), "{error}");
+    }
+
+    /// The index key is a data key under `Binding::EMPTY`, and it still
+    /// comes back through `FixedIndexKeySource`.
+    #[tokio::test]
+    async fn the_index_key_round_trips_under_the_empty_binding() {
+        use crate::provider::{FixedIndexKeySource, IndexKeyProvider};
+
+        let (client, _) = responder_client(fake_vault());
+        let source = AzureDataKeySource::<32>::new(client, "my-key");
+        let provisioned = source.generate_data_key(Binding::EMPTY).await.unwrap();
+        let index = FixedIndexKeySource::new(source, provisioned.key_id);
+
+        let loaded = IndexKeyProvider::<32>::load_index_key(&index)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            loaded.0.risky_unwrap(),
+            provisioned.plaintext.risky_unwrap()
+        );
     }
 
     // There are no Lowkey Vault integration tests here. Lowkey Vault 7.3.98

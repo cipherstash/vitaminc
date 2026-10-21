@@ -6,6 +6,7 @@ use crate::data_key::{
 };
 use crate::key_id::KeyId;
 use aws_sdk_kms::{primitives::Blob, Client};
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use thiserror::Error;
 use vitaminc_protected::{Controlled, Protected};
@@ -76,7 +77,7 @@ impl<const N: usize> AwsDataKeySource<N> {
     }
 }
 
-/// The `EncryptionContext` entry a [`Binding`] becomes.
+/// The `EncryptionContext` entry a non-empty [`Binding`] becomes.
 ///
 /// AWS requires printable string keys and values, and a binding is
 /// arbitrary bytes, so the bytes are base64 (standard, padded). One fixed
@@ -84,22 +85,51 @@ impl<const N: usize> AwsDataKeySource<N> {
 /// entry under a name nothing else uses cannot collide with a context the
 /// caller sets elsewhere on the same key.
 ///
-/// An **empty** binding is no entry at all, not an entry with an empty
-/// value. `Binding::EMPTY` means "nothing to bind", and the faithful
-/// encoding of that is an absent context — which is also what a caller that
-/// never passes a binding already sends.
+/// An **empty** binding is no entry under this key, not an entry with an
+/// empty value. The [`USE_CONTEXT_KEY`] entry still makes the context of a
+/// data key under `Binding::EMPTY` differ from that of direct encryption.
 const BINDING_CONTEXT_KEY: &str = "vitaminc:binding";
 
-fn binding_context(binding: Binding<'_>) -> Option<(String, String)> {
+/// The `EncryptionContext` entry that names the use of a ciphertext, on
+/// every call this source makes.
+///
+/// A data key and a direct ciphertext are both a `CiphertextBlob` under the
+/// same KMS key, and AWS opens a blob only under the context it was sealed
+/// with. A data key sends [`DATA_KEY_USE`] here, direct encryption sends
+/// [`DIRECT_ENCRYPTION_USE`], and AWS matches the whole map, so neither use
+/// opens the other's ciphertexts (ADR 0006). Without it, a data key under
+/// `Binding::EMPTY` (an index key, for example) and a direct ciphertext had
+/// the same, empty context, and `decrypt` opened the index key.
+///
+/// An `EncryptionContext` is not secret: AWS writes it to CloudTrail in
+/// plaintext. This entry tells a reader only which of the two uses a call
+/// was.
+const USE_CONTEXT_KEY: &str = "vitaminc:use";
+
+/// The [`USE_CONTEXT_KEY`] value of every data-key call.
+const DATA_KEY_USE: &str = "data-key";
+
+/// The [`USE_CONTEXT_KEY`] value of every direct `Encrypt` and `Decrypt`.
+const DIRECT_ENCRYPTION_USE: &str = "encrypt-with-key";
+
+/// The whole `EncryptionContext` of a data key under `binding`: the use
+/// entry always, and the binding entry when the binding is not empty.
+fn data_key_context(binding: Binding<'_>) -> HashMap<String, String> {
     use base64::Engine as _;
+    let mut context = HashMap::from([(USE_CONTEXT_KEY.to_owned(), DATA_KEY_USE.to_owned())]);
     let bytes = binding.as_bytes();
-    if bytes.is_empty() {
-        return None;
+    if !bytes.is_empty() {
+        context.insert(
+            BINDING_CONTEXT_KEY.to_owned(),
+            base64::engine::general_purpose::STANDARD.encode(bytes),
+        );
     }
-    Some((
-        BINDING_CONTEXT_KEY.to_owned(),
-        base64::engine::general_purpose::STANDARD.encode(bytes),
-    ))
+    context
+}
+
+/// The whole `EncryptionContext` of a direct `Encrypt` or `Decrypt`.
+fn direct_encryption_context() -> HashMap<String, String> {
+    HashMap::from([(USE_CONTEXT_KEY.to_owned(), DIRECT_ENCRYPTION_USE.to_owned())])
 }
 
 impl<const N: usize> GenerateDataKey<N> for AwsDataKeySource<N> {
@@ -109,15 +139,15 @@ impl<const N: usize> GenerateDataKey<N> for AwsDataKeySource<N> {
         &self,
         binding: Binding<'_>,
     ) -> Result<GeneratedDataKey<N>, Self::Error> {
-        let mut request = self
+        let response = self
             .client
             .generate_data_key()
             .key_id(&self.key_id)
-            .number_of_bytes(N as i32);
-        if let Some((key, value)) = binding_context(binding) {
-            request = request.encryption_context(key, value);
-        }
-        let response = request.send().await.map_err(aws_sdk_kms::Error::from)?;
+            .number_of_bytes(N as i32)
+            .set_encryption_context(Some(data_key_context(binding)))
+            .send()
+            .await
+            .map_err(aws_sdk_kms::Error::from)?;
 
         let plaintext = response.plaintext.ok_or(Error::MissingPlaintext)?;
         let ciphertext_blob = response
@@ -145,21 +175,22 @@ impl<const N: usize> RetrieveDataKey<N> for AwsDataKeySource<N> {
     const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
 
     /// AWS KMS binds the `EncryptionContext` into the data key and refuses a
-    /// `Decrypt` that presents a different one.
+    /// `Decrypt` that presents a different one. The context names the use
+    /// as well as the binding, so a direct ciphertext does not open here.
     async fn retrieve_data_key(
         &self,
         key_id: &KeyId,
         binding: Binding<'_>,
     ) -> Result<Protected<[u8; N]>, Self::Error> {
-        let mut request = self
+        let response = self
             .client
             .decrypt()
             .ciphertext_blob(Blob::new(key_id.as_bytes().to_vec()))
-            .key_id(&self.key_id);
-        if let Some((key, value)) = binding_context(binding) {
-            request = request.encryption_context(key, value);
-        }
-        let response = request.send().await.map_err(aws_sdk_kms::Error::from)?;
+            .key_id(&self.key_id)
+            .set_encryption_context(Some(data_key_context(binding)))
+            .send()
+            .await
+            .map_err(aws_sdk_kms::Error::from)?;
 
         let plaintext = response.plaintext.ok_or(Error::MissingPlaintext)?;
         Ok(Protected::new(into_sized(plaintext.into_inner())?))
@@ -167,10 +198,12 @@ impl<const N: usize> RetrieveDataKey<N> for AwsDataKeySource<N> {
 }
 
 /// Direct encryption under the bound symmetric key — the `Encrypt`
-/// operation, not envelope encryption. No encryption context is sent, so
-/// the ciphertext is decryptable by [`DecryptWithKey`] below (and by any
-/// other caller authorized on the same backend key) with no extra state to
-/// carry alongside it.
+/// operation, not envelope encryption. The one fixed `EncryptionContext`
+/// `{"vitaminc:use": "encrypt-with-key"}` is sent, so the ciphertext is
+/// decryptable by [`DecryptWithKey`] below with no extra state to carry
+/// alongside it. This context differs from that of every data key, so the
+/// ciphertext never opens as a data key, and a data key never opens through
+/// [`DecryptWithKey`] (ADR 0006).
 ///
 /// AWS caps the plaintext at 4096 bytes for a `SYMMETRIC_DEFAULT` key. The
 /// adapter does not pre-check that: the limit is a property of the backend
@@ -185,6 +218,7 @@ impl<const N: usize> EncryptWithKey for AwsDataKeySource<N> {
             .encrypt()
             .key_id(&self.key_id)
             .plaintext(Blob::new(plaintext.risky_unwrap()))
+            .set_encryption_context(Some(direct_encryption_context()))
             .send()
             .await
             .map_err(aws_sdk_kms::Error::from)?;
@@ -199,7 +233,7 @@ impl<const N: usize> EncryptWithKey for AwsDataKeySource<N> {
 /// The inverse of the [`EncryptWithKey`] impl above. The `ciphertext` is
 /// the AWS `CiphertextBlob` passed straight through — this adapter adds no
 /// framing of its own, so a blob produced by any `Encrypt` call under the
-/// same backend key decrypts here.
+/// same backend key and the same `EncryptionContext` decrypts here.
 impl<const N: usize> DecryptWithKey for AwsDataKeySource<N> {
     type Error = Error;
 
@@ -209,6 +243,7 @@ impl<const N: usize> DecryptWithKey for AwsDataKeySource<N> {
             .decrypt()
             .ciphertext_blob(Blob::new(ciphertext.to_vec()))
             .key_id(&self.key_id)
+            .set_encryption_context(Some(direct_encryption_context()))
             .send()
             .await
             .map_err(aws_sdk_kms::Error::from)?;
@@ -543,6 +578,115 @@ mod tests {
 
             assert_eq!(recovered.risky_unwrap(), plaintext);
         }
+
+        /// A direct ciphertext of exactly `N` bytes must not open as a data
+        /// key, under the empty binding or any other. Before CIP-5094 both
+        /// uses sent no context for an empty binding, and this opened.
+        #[tokio::test]
+        async fn a_direct_ciphertext_is_not_a_data_key() {
+            let client = localstack_client();
+            let key_id = encrypt_decrypt_key(&client).await;
+            let source = AwsDataKeySource::<32>::new(client, key_id);
+
+            let ciphertext = source.encrypt(Protected::new(vec![7u8; 32])).await.unwrap();
+            let key_id = KeyId::new(ciphertext);
+
+            for binding in [Binding::EMPTY, Binding::from("encrypt-with-key")] {
+                let error = source
+                    .retrieve_data_key(&key_id, binding)
+                    .await
+                    .unwrap_err();
+                assert!(
+                    matches!(
+                        error,
+                        Error::AwsSdk(aws_sdk_kms::Error::InvalidCiphertextException(_))
+                    ),
+                    "{error:?}"
+                );
+            }
+        }
+
+        /// The other direction: a data key minted under `Binding::EMPTY`, as
+        /// an index key is, does not open through `decrypt`. If it did, any
+        /// caller of `decrypt` that can read the index `KeyId` would get the
+        /// index key. A data key under a binding does not open either.
+        #[tokio::test]
+        async fn a_data_key_is_not_a_direct_ciphertext() {
+            let client = localstack_client();
+            let key_id = encrypt_decrypt_key(&client).await;
+            let source = AwsDataKeySource::<32>::new(client, key_id);
+
+            for binding in [Binding::EMPTY, Binding::from("users/email")] {
+                let generated = source.generate_data_key(binding).await.unwrap();
+                let error = source
+                    .decrypt(generated.key_id.as_bytes())
+                    .await
+                    .unwrap_err();
+                assert!(
+                    matches!(
+                        error,
+                        Error::AwsSdk(aws_sdk_kms::Error::InvalidCiphertextException(_))
+                    ),
+                    "{error:?}"
+                );
+            }
+        }
+
+        /// The index key is a data key under `Binding::EMPTY`, and it still
+        /// comes back through `FixedIndexKeySource`.
+        #[tokio::test]
+        async fn the_index_key_round_trips_under_the_empty_binding() {
+            use crate::provider::{FixedIndexKeySource, IndexKeyProvider};
+
+            let client = localstack_client();
+            let key_id = encrypt_decrypt_key(&client).await;
+            let source = AwsDataKeySource::<32>::new(client, key_id);
+            let provisioned = source.generate_data_key(Binding::EMPTY).await.unwrap();
+            let index = FixedIndexKeySource::new(source, provisioned.key_id);
+
+            let loaded = IndexKeyProvider::<32>::load_index_key(&index)
+                .await
+                .unwrap();
+
+            assert_eq!(
+                loaded.0.risky_unwrap(),
+                provisioned.plaintext.risky_unwrap()
+            );
+        }
+    }
+
+    /// `entries` as the owned map that a request's context is compared to.
+    fn context_of(entries: &[(&str, &str)]) -> HashMap<String, String> {
+        entries
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    /// A generate rule and a decrypt rule that each match only a request
+    /// whose `EncryptionContext` is exactly `expected`.
+    fn data_key_rules_for(
+        expected: HashMap<String, String>,
+    ) -> (aws_smithy_mocks::Rule, aws_smithy_mocks::Rule) {
+        let sent = expected.clone();
+        let generate_rule = mock!(Client::generate_data_key)
+            .match_requests(move |req| req.encryption_context() == Some(&sent))
+            .then_output(|| {
+                GenerateDataKeyOutput::builder()
+                    .plaintext(Blob::new(fixed_plaintext().to_vec()))
+                    .ciphertext_blob(Blob::new(fixed_ciphertext_blob()))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+        let decrypt_rule = mock!(Client::decrypt)
+            .match_requests(move |req| req.encryption_context() == Some(&expected))
+            .then_output(|| {
+                DecryptOutput::builder()
+                    .plaintext(Blob::new(fixed_plaintext().to_vec()))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+        (generate_rule, decrypt_rule)
     }
 
     /// The binding has to reach AWS, or the claim that AWS binds has
@@ -553,36 +697,11 @@ mod tests {
     #[tokio::test]
     async fn the_binding_reaches_aws_as_an_encryption_context_on_both_calls() {
         use base64::Engine as _;
-        let expected = base64::engine::general_purpose::STANDARD.encode(b"users/email");
-
-        let sent = expected.clone();
-        let generate_rule = mock!(Client::generate_data_key)
-            .match_requests(move |req| {
-                req.encryption_context()
-                    .and_then(|c| c.get(BINDING_CONTEXT_KEY))
-                    == Some(&sent)
-            })
-            .then_output(|| {
-                GenerateDataKeyOutput::builder()
-                    .plaintext(Blob::new(fixed_plaintext().to_vec()))
-                    .ciphertext_blob(Blob::new(fixed_ciphertext_blob()))
-                    .key_id(TEST_KEY_ID)
-                    .build()
-            });
-
-        let sent = expected.clone();
-        let decrypt_rule = mock!(Client::decrypt)
-            .match_requests(move |req| {
-                req.encryption_context()
-                    .and_then(|c| c.get(BINDING_CONTEXT_KEY))
-                    == Some(&sent)
-            })
-            .then_output(|| {
-                DecryptOutput::builder()
-                    .plaintext(Blob::new(fixed_plaintext().to_vec()))
-                    .key_id(TEST_KEY_ID)
-                    .build()
-            });
+        let encoded = base64::engine::general_purpose::STANDARD.encode(b"users/email");
+        let (generate_rule, decrypt_rule) = data_key_rules_for(context_of(&[
+            ("vitaminc:use", "data-key"),
+            ("vitaminc:binding", &encoded),
+        ]));
 
         let client = mock_client!(
             aws_sdk_kms,
@@ -604,25 +723,68 @@ mod tests {
         assert_eq!(decrypt_rule.num_calls(), 1);
     }
 
-    /// An empty binding sends **no** context rather than an empty one: that
-    /// is what makes `Binding::EMPTY` mean "nothing to bind", and what keeps
-    /// a caller who never passes a binding sending exactly what it always
-    /// sent.
+    /// An empty binding sends exactly `{"vitaminc:use": "data-key"}` on
+    /// generate **and** on decrypt (CIP-5036): no binding entry, but never
+    /// an empty context, because an empty context is what direct
+    /// encryption sent before CIP-5094, and the index key, which is a data
+    /// key under `Binding::EMPTY`, then opened through `decrypt`.
     #[tokio::test]
-    async fn an_empty_binding_sends_no_encryption_context() {
-        let generate_rule = mock!(Client::generate_data_key)
-            .match_requests(|req| req.encryption_context().is_none())
+    async fn an_empty_binding_sends_only_the_data_key_use_on_both_calls() {
+        let (generate_rule, decrypt_rule) =
+            data_key_rules_for(context_of(&[("vitaminc:use", "data-key")]));
+        let client = mock_client!(
+            aws_sdk_kms,
+            RuleMode::MatchAny,
+            &[&generate_rule, &decrypt_rule]
+        );
+        let source = AwsDataKeySource::<32>::new(client, TEST_KEY_ID);
+
+        let generated = source.generate_data_key(Binding::EMPTY).await.unwrap();
+        let _ = source
+            .retrieve_data_key(&generated.key_id, Binding::EMPTY)
+            .await
+            .unwrap();
+
+        assert_eq!(generate_rule.num_calls(), 1);
+        assert_eq!(decrypt_rule.num_calls(), 1);
+    }
+
+    /// Direct encryption sends exactly `{"vitaminc:use": "encrypt-with-key"}`
+    /// on `Encrypt` and on `Decrypt`.
+    #[tokio::test]
+    async fn direct_encryption_sends_its_own_use_on_both_calls() {
+        let expected = context_of(&[("vitaminc:use", "encrypt-with-key")]);
+        let sent = expected.clone();
+        let encrypt_rule = mock!(Client::encrypt)
+            .match_requests(move |req| req.encryption_context() == Some(&sent))
             .then_output(|| {
-                GenerateDataKeyOutput::builder()
-                    .plaintext(Blob::new(fixed_plaintext().to_vec()))
+                EncryptOutput::builder()
                     .ciphertext_blob(Blob::new(fixed_ciphertext_blob()))
                     .key_id(TEST_KEY_ID)
                     .build()
             });
-        let client = mock_client!(aws_sdk_kms, RuleMode::MatchAny, &[&generate_rule]);
+        let decrypt_rule = mock!(Client::decrypt)
+            .match_requests(move |req| req.encryption_context() == Some(&expected))
+            .then_output(|| {
+                DecryptOutput::builder()
+                    .plaintext(Blob::new(b"a short secret".to_vec()))
+                    .key_id(TEST_KEY_ID)
+                    .build()
+            });
+        let client = mock_client!(
+            aws_sdk_kms,
+            RuleMode::MatchAny,
+            &[&encrypt_rule, &decrypt_rule]
+        );
         let source = AwsDataKeySource::<32>::new(client, TEST_KEY_ID);
 
-        let _ = source.generate_data_key(Binding::EMPTY).await.unwrap();
-        assert_eq!(generate_rule.num_calls(), 1);
+        let ciphertext = source
+            .encrypt(Protected::new(b"a short secret".to_vec()))
+            .await
+            .unwrap();
+        let _ = source.decrypt(&ciphertext).await.unwrap();
+
+        assert_eq!(encrypt_rule.num_calls(), 1);
+        assert_eq!(decrypt_rule.num_calls(), 1);
     }
 }

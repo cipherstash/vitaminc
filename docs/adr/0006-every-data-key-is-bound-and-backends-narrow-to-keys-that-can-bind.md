@@ -21,16 +21,17 @@ of them do.
 
 **AWS KMS** sends the binding as an `EncryptionContext` entry under one fixed
 key. The value is base64, because AWS requires printable strings and a
-binding is arbitrary bytes.
+binding is arbitrary bytes. A second entry names the use (see "Data keys and
+direct ciphertexts are domain-separated").
 
-**Google Cloud KMS** sends the binding as additional authenticated data, with
-a checksum like the plaintext.
+**Google Cloud KMS** sends the binding, after one tag byte, as additional
+authenticated data, with a checksum like the plaintext.
 
 **Azure narrows to `oct-HSM` keys, which means Managed HSM.** Key Vault takes
 additional authenticated data only on `A256GCM` `encrypt` and `decrypt`.
 `wrapKey` and `unwrapKey` take none, with either `RSA-OAEP-256` or `A256KW`.
 So the data-key path moves from `wrapKey` to `A256GCM` `encrypt`, and the
-binding is its `aad`. The `KeyId` envelope carries the IV and the tag beside
+binding, after one tag byte, is its `aad`. The `KeyId` envelope carries the IV and the tag beside
 the key id and the ciphertext. Only an `oct-HSM` key does `A256GCM`, so:
 
 - RSA keys can no longer back a data key source, and the RSA path goes.
@@ -56,7 +57,8 @@ and silently ignores it. So:
   and then the binding bytes. `Binding::EMPTY` still gives a non-empty
   context, and the encoding stays one-to-one. Direct encryption, which has
   no binding, sends a fixed context with a different tag byte, so a direct
-  ciphertext never opens as a data key.
+  ciphertext never opens as a data key. Google and Azure now use the same
+  encoding (see below).
 - The Enterprise `datakeys` endpoint takes one context for the batch. The
   source uses it only when every key in the batch has the same binding, and
   fans out otherwise.
@@ -68,14 +70,62 @@ We rejected "support both, and let the key decide" for Azure and Vault. A
 source that binds on some keys and not on others gives the caller no way to
 know which one it has, and that is the misuse this decision removes.
 
-## An empty binding sends nothing
+## Data keys and direct ciphertexts are domain-separated
 
-For AWS, Google and Azure, `Binding::EMPTY` is sent as an *absent*
-encryption context, AAD or `aad`, not an empty one. The backends authenticate
-the two the same way, and a caller with nothing to bind sends exactly what
-the backend sends by default. Vault cannot send nothing, so it sends the tag
-byte alone, as above. `Binding::EMPTY` is still a binding everywhere: a key
-minted under it comes back only under it.
+Every vendor data key source also implements `EncryptWithKey` and
+`DecryptWithKey` under the same backend key. The two uses must not open each
+other's ciphertexts. A direct ciphertext must not open as a data key under
+any binding, and a data key's `KeyId` must not open through `decrypt`.
+
+The attack this stops (CIP-5094) is against the index key. The index key is
+a data key under `Binding::EMPTY` (`FixedIndexKeySource`, `load_index_key`).
+An earlier version of this ADR sent `Binding::EMPTY` to AWS, Google and Azure
+as an *absent* encryption context, AAD or `aad`, and direct encryption sent
+none either. So the two uses sent the same request, and:
+
+- A caller that may use `decrypt` and can read the index `KeyId` got the
+  index key in plaintext.
+- A caller that can write a stored `KeyId` could put a direct ciphertext of
+  `N` bytes there, and so choose a data key.
+
+So each source now marks the use in what it binds, and no binding can give
+the bytes of the other use. Vault already did this, because a derived key
+refuses an empty context.
+
+| Backend | Use | What the backend binds |
+|---|---|---|
+| AWS KMS | data key, `Binding::EMPTY` | `EncryptionContext` `{"vitaminc:use": "data-key"}` |
+| AWS KMS | data key, other binding | `EncryptionContext` `{"vitaminc:use": "data-key", "vitaminc:binding": base64(binding)}` |
+| AWS KMS | direct `Encrypt`/`Decrypt` | `EncryptionContext` `{"vitaminc:use": "encrypt-with-key"}` |
+| Google Cloud KMS | data key | AAD `0x01 ‖ binding` (`0x01` alone for `Binding::EMPTY`) |
+| Google Cloud KMS | direct `encrypt`/`decrypt` | AAD `0x00 ‖ "vitaminc-kms/gcp/encrypt-with-key"` |
+| Azure Managed HSM | data key | `A256GCM` `aad` `0x01 ‖ binding` (`0x01` alone for `Binding::EMPTY`) |
+| Azure Managed HSM | direct `encrypt`/`decrypt` | `A256GCM` `aad` `0x00 ‖ "vitaminc-kms/azure/encrypt-with-key"` |
+| Vault Transit | data key | derivation `context` base64(`0x01 ‖ binding`) |
+| Vault Transit | direct `encrypt`/`decrypt` | derivation `context` base64(`0x00 ‖ "vitaminc-kms/vault/encrypt-with-key"`) |
+
+`‖` is concatenation. The base64 is standard and padded.
+
+For Google, Azure and Vault, the first byte is the use. A data key's bytes
+start with `0x01` and a direct ciphertext's start with `0x00`, so the two
+sets of bytes never meet. Within data keys the encoding is one-to-one: two
+bindings give the same bytes only if they are the same binding. The bytes
+are never empty, so an empty `aad` or context is never sent. Vault needs
+that, because a derived key refuses an empty context.
+
+AWS matches the `EncryptionContext` as a whole map, and a `Decrypt` must
+send the same map as the `GenerateDataKey` or `Encrypt` did. The
+`"vitaminc:use"` entry differs between the two uses, so AWS refuses a
+swapped blob with `InvalidCiphertextException`. An empty binding adds no
+`"vitaminc:binding"` entry, but the use entry is always there, so no call
+sends an empty context.
+
+An `EncryptionContext` is not secret: AWS writes it to CloudTrail in
+plaintext. The `"vitaminc:use"` entry tells a reader only which of the two
+uses a call was. The binding entry was already there.
+
+`Binding::EMPTY` is a binding like any other on every backend: a key minted
+under it comes back only under it.
 
 ## Pooling goes
 
@@ -88,7 +138,10 @@ without sharing a data key.
 ## Migration: none
 
 No data key source in this crate has shipped. Nothing was minted under the
-behaviour this replaces, so nothing needs a migration.
+behaviour this replaces, so nothing needs a migration. That includes the
+domain separation above: it changes the wire format of the AWS, Google and
+Azure data key sources, and none of them has shipped. `AwsKmsHmac`, which has
+shipped, is a MAC and does not change.
 
 ## Consequences
 
@@ -100,6 +153,7 @@ behaviour this replaces, so nothing needs a migration.
 - `load_index_key` retrieves under `Binding::EMPTY`. An index key is one per
   backend key rather than one per value, so it has no context to bind, and
   the provisioning call whose result it loads has none either.
-- The direct `EncryptWithKey`/`DecryptWithKey` paths bind nothing. They are
-  not the data-key path and carry no caller context. On Vault they send one
-  fixed derivation context, because a derived key refuses a call with none.
+- The direct `EncryptWithKey`/`DecryptWithKey` paths carry no caller
+  context. Each sends one fixed value that names the use, as in the table
+  above, so a direct ciphertext never opens as a data key. A new source that
+  implements both traits must do the same.

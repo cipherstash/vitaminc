@@ -10,6 +10,10 @@
 //! which becomes the [`KeyId`](crate::KeyId) of a data key and the
 //! ciphertext of [`EncryptWithKey`](crate::EncryptWithKey).
 //!
+//! The two have the same format, so the format does not tell them apart.
+//! The `aad` does: a data key and a direct ciphertext are sealed under
+//! different `aad`, and neither opens as the other (ADR 0006).
+//!
 //! # Wire format
 //!
 //! All integers are big-endian. There is a leading format byte so a later

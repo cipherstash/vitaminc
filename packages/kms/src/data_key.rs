@@ -19,6 +19,35 @@ pub(crate) fn into_sized<const N: usize, E>(
     bytes.try_into().map_err(|_| wrong_length(N, received))
 }
 
+/// The first byte of the bytes a data key binds on Google Cloud KMS, Azure
+/// Managed HSM and Vault Transit. The binding follows it.
+///
+/// These backends also encrypt directly under the same key
+/// ([`EncryptWithKey`](crate::EncryptWithKey)), and the two uses must not
+/// open each other's ciphertexts. Direct encryption binds a fixed label
+/// that starts with [`DIRECT_ENCRYPTION_TAG`] instead, so no binding gives
+/// the same bytes (ADR 0006). The tag also makes the bytes non-empty for
+/// [`Binding::EMPTY`], and the encoding stays one-to-one: two bindings give
+/// the same bytes only if they are the same binding.
+#[cfg(any(feature = "azure", feature = "gcp", feature = "vault"))]
+pub(crate) const DATA_KEY_TAG: u8 = 0x01;
+
+/// The first byte of the fixed label that direct encryption binds on
+/// Google Cloud KMS, Azure Managed HSM and Vault Transit. See
+/// [`DATA_KEY_TAG`].
+#[cfg(any(feature = "azure", feature = "gcp", feature = "vault"))]
+pub(crate) const DIRECT_ENCRYPTION_TAG: u8 = 0x00;
+
+/// The bytes a data key binds under `binding`: [`DATA_KEY_TAG`], then the
+/// binding bytes. Never empty, not even for [`Binding::EMPTY`].
+#[cfg(any(feature = "azure", feature = "gcp", feature = "vault"))]
+pub(crate) fn tagged_binding(binding: Binding<'_>) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(1 + binding.as_bytes().len());
+    bytes.push(DATA_KEY_TAG);
+    bytes.extend_from_slice(binding.as_bytes());
+    bytes
+}
+
 /// Bytes a caller attaches to a data key when it is minted and must present
 /// again to retrieve it. Stack Encrypt passes each leaf's rendered context
 /// (its descriptor).
@@ -29,6 +58,16 @@ pub(crate) fn into_sized<const N: usize, E>(
 /// Cloud KMS and Azure Managed HSM bind additional authenticated data.
 /// Vault Transit binds the derivation context of a derived key. A source
 /// that cannot bind cannot be a data key source (ADR 0006).
+///
+/// What reaches the backend is not always the bare bytes. Each vendor
+/// source also marks the use, so a data key never opens as a direct
+/// ciphertext of [`EncryptWithKey`](crate::EncryptWithKey), and a direct
+/// ciphertext never opens as a data key. AWS KMS adds the
+/// `EncryptionContext` entry `"vitaminc:use": "data-key"`, and sends the
+/// binding, as base64, under `"vitaminc:binding"` only when the binding is
+/// not empty. Google Cloud KMS, Azure Managed HSM and Vault Transit bind the
+/// byte `0x01` and then the binding. So [`Binding::EMPTY`] still binds a
+/// value on every backend. ADR 0006 has the details.
 ///
 /// `provider::AuthorityKeySource` binds
 /// locally: the binding is an input to the derivation of each key. A

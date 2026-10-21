@@ -125,6 +125,17 @@ Design notes that apply across vendors:
   `<mount>/decrypt/<name>`; `update` on `<mount>/datakeys/plaintext/<name>`
   is optional. If Vault answers that path with `403`, the source uses the
   fan-out until it is rebuilt.
+- **Data keys and direct ciphertexts are kept apart.** A data key source
+  encrypts directly under the same backend key, so each source marks the
+  use in what the backend binds: a direct ciphertext never opens as a data
+  key, and a data key never opens through `decrypt`. Without this, a caller
+  of `decrypt` that can read the index `KeyId` gets the index key, which is
+  a data key under `Binding::EMPTY`. AWS adds the `EncryptionContext`
+  entry `"vitaminc:use"` (`"data-key"` or `"encrypt-with-key"`). This entry
+  is not secret and shows in CloudTrail, but it tells only the use. Google,
+  Azure and Vault bind `0x01` and then the binding for a data key, and
+  `0x00` and then `vitaminc-kms/<vendor>/encrypt-with-key` for direct
+  encryption. `docs/adr/0006` has the exact bytes.
 - **Signature algorithms** are named once, by [`SignatureAlgorithm`], and
   mapped by each adapter. ECDSA signatures are DER, Ed25519 signatures are
   the raw 64 bytes, and public keys are DER `SubjectPublicKeyInfo`, whatever

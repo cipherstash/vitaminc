@@ -3,8 +3,9 @@
 //! One adapter type per key purpose (see `CONTEXT.md`):
 //!
 //! - [`AzureDataKeySource`]: data keys via local generation plus `A256GCM`
-//!   `encrypt`/`decrypt` with the binding as `aad`, and direct
-//!   `encrypt`/`decrypt`, over an oct-HSM key. This means Managed HSM in
+//!   `encrypt`/`decrypt` with a tag byte and the binding as `aad`, and
+//!   direct `encrypt`/`decrypt` with a different, fixed `aad`, over an
+//!   oct-HSM key. This means Managed HSM in
 //!   production.
 //! - [`AzureMacKey`]: HMAC via `sign`/`verify` with `HS*` on an oct-HSM key.
 //! - [`AzureSigningKey`]: `sign`/`verify`/`getKey` over an RSA or EC key.

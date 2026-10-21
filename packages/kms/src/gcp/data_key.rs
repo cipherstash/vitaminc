@@ -1,9 +1,9 @@
-use super::integrity::{self, CallError, Encrypted};
+use super::integrity::{self, CallError};
 use crate::crypt::{DecryptWithKey, EncryptWithKey};
 use crate::data_key::{
-    dedup_retrieve, fan_out_generate, BatchGenerateDataKey, BatchRetrieveDataKey, Binding,
-    GenerateDataKey, GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey,
-    DEFAULT_MAX_IN_FLIGHT,
+    dedup_retrieve, fan_out_generate, tagged_binding, BatchGenerateDataKey, BatchRetrieveDataKey,
+    Binding, GenerateDataKey, GeneratedDataKey, KeyCustody, KeyReconstruction, RetrieveDataKey,
+    DEFAULT_MAX_IN_FLIGHT, DIRECT_ENCRYPTION_TAG,
 };
 use crate::key_id::KeyId;
 use google_cloud_kms_v1::client::KeyManagementService;
@@ -11,6 +11,17 @@ use std::num::NonZeroUsize;
 use thiserror::Error;
 use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::{Generatable, SafeRand};
+
+/// The additional authenticated data of [`EncryptWithKey`] and
+/// [`DecryptWithKey`].
+///
+/// A data key binds [`DATA_KEY_TAG`](crate::data_key::DATA_KEY_TAG) and
+/// then its binding, and direct encryption binds this fixed label, whose
+/// first byte is [`DIRECT_ENCRYPTION_TAG`]. No binding gives the same AAD,
+/// so a direct ciphertext never opens as a data key, and a data key never
+/// opens through `decrypt` (ADR 0006).
+const DIRECT_ENCRYPTION_AAD: &[u8] = b"\x00vitaminc-kms/gcp/encrypt-with-key";
+const _: () = assert!(DIRECT_ENCRYPTION_AAD[0] == DIRECT_ENCRYPTION_TAG);
 
 /// Errors from [`GcpDataKeySource`].
 #[derive(Debug, Error)]
@@ -68,6 +79,11 @@ fn into_sized<const N: usize>(bytes: Vec<u8>) -> Result<[u8; N], Error> {
 /// [`EncryptWithKey`]/[`DecryptWithKey`] are the same two calls used
 /// directly, for small payloads that a caller wants encrypted under the
 /// backend key itself rather than under a data key.
+///
+/// The two uses send different additional authenticated data, so neither
+/// opens the other's ciphertexts. A data key sends the byte `0x01` and then
+/// the binding, also for [`Binding::EMPTY`]. Direct encryption sends `0x00`
+/// and then `vitaminc-kms/gcp/encrypt-with-key`. See ADR 0006.
 pub struct GcpDataKeySource<const N: usize> {
     client: KeyManagementService,
     crypto_key_name: String,
@@ -102,71 +118,43 @@ impl<const N: usize> GcpDataKeySource<N> {
     /// and this crate cannot zeroize; that copy lives until the request is
     /// dropped.
     ///
-    /// A non-empty `binding` goes as the additional authenticated data,
-    /// checksummed like the plaintext. An **empty** binding sets no AAD at
-    /// all rather than empty AAD: `Binding::EMPTY` means "nothing to bind",
-    /// and omitting the field is what a caller that never passes a binding
-    /// already sends.
-    async fn encrypt_payload(
-        &self,
-        plaintext: Vec<u8>,
-        binding: Binding<'_>,
-    ) -> Result<Vec<u8>, Error> {
+    /// `aad` goes as the additional authenticated data, checksummed like
+    /// the plaintext. It is never empty: a data key sends its tagged
+    /// binding and direct encryption sends [`DIRECT_ENCRYPTION_AAD`].
+    async fn encrypt_payload(&self, plaintext: Vec<u8>, aad: &[u8]) -> Result<Vec<u8>, Error> {
         let checksum = integrity::crc32c(&plaintext);
-        let aad = binding.as_bytes().to_vec();
-        let aad_checksum = integrity::crc32c(&aad);
+        let aad_checksum = integrity::crc32c(aad);
 
-        let aad_sent = !aad.is_empty();
-
-        let Encrypted { response, .. } = integrity::checked_call(|| {
-            let mut request = self
-                .client
+        let response = integrity::checked_call(|| {
+            self.client
                 .encrypt()
                 .set_name(self.crypto_key_name.clone())
                 .set_plaintext(plaintext.clone())
-                .set_plaintext_crc32c(checksum);
-            if aad_sent {
-                request = request
-                    .set_additional_authenticated_data(aad.clone())
-                    .set_additional_authenticated_data_crc32c(aad_checksum);
-            }
-            let response = request.send();
-            async move {
-                Ok(Encrypted {
-                    response: response.await?,
-                    aad_sent,
-                })
-            }
+                .set_plaintext_crc32c(checksum)
+                .set_additional_authenticated_data(aad.to_vec())
+                .set_additional_authenticated_data_crc32c(aad_checksum)
+                .send()
         })
         .await?;
 
         Ok(response.ciphertext.to_vec())
     }
 
-    /// One `cryptoKeys.decrypt` call, checksummed both ways. The `binding`
-    /// must be the one `encrypt_payload` sent, or Google refuses the call.
-    async fn decrypt_payload(
-        &self,
-        ciphertext: &[u8],
-        binding: Binding<'_>,
-    ) -> Result<Vec<u8>, Error> {
+    /// One `cryptoKeys.decrypt` call, checksummed both ways. The `aad` must
+    /// be the one `encrypt_payload` sent, or Google refuses the call.
+    async fn decrypt_payload(&self, ciphertext: &[u8], aad: &[u8]) -> Result<Vec<u8>, Error> {
         let checksum = integrity::crc32c(ciphertext);
-        let aad = binding.as_bytes().to_vec();
-        let aad_checksum = integrity::crc32c(&aad);
+        let aad_checksum = integrity::crc32c(aad);
 
         let response = integrity::checked_call(|| {
-            let mut request = self
-                .client
+            self.client
                 .decrypt()
                 .set_name(self.crypto_key_name.clone())
                 .set_ciphertext(ciphertext.to_vec())
-                .set_ciphertext_crc32c(checksum);
-            if !aad.is_empty() {
-                request = request
-                    .set_additional_authenticated_data(aad.clone())
-                    .set_additional_authenticated_data_crc32c(aad_checksum);
-            }
-            request.send()
+                .set_ciphertext_crc32c(checksum)
+                .set_additional_authenticated_data(aad.to_vec())
+                .set_additional_authenticated_data_crc32c(aad_checksum)
+                .send()
         })
         .await?;
 
@@ -185,7 +173,7 @@ impl<const N: usize> GenerateDataKey<N> for GcpDataKeySource<N> {
         let plaintext: Protected<[u8; N]> = Generatable::random(&mut rng)?;
 
         let ciphertext = self
-            .encrypt_payload(plaintext.clone().risky_unwrap().to_vec(), binding)
+            .encrypt_payload(plaintext.risky_ref().to_vec(), &tagged_binding(binding))
             .await?;
 
         Ok(GeneratedDataKey {
@@ -206,14 +194,17 @@ impl<const N: usize> RetrieveDataKey<N> for GcpDataKeySource<N> {
     /// KMS keeps no copy of the data key, so that ciphertext is the only one.
     const CUSTODY: KeyCustody = KeyCustody::ClientHeld;
 
-    /// Google Cloud KMS binds the additional authenticated data into the
-    /// ciphertext and refuses a `decrypt` that presents different AAD.
+    /// Google Cloud KMS binds the additional authenticated data (`0x01` and
+    /// then the binding) into the ciphertext and refuses a `decrypt` that
+    /// presents different AAD.
     async fn retrieve_data_key(
         &self,
         key_id: &KeyId,
         binding: Binding<'_>,
     ) -> Result<Protected<[u8; N]>, Self::Error> {
-        let plaintext = self.decrypt_payload(key_id.as_bytes(), binding).await?;
+        let plaintext = self
+            .decrypt_payload(key_id.as_bytes(), &tagged_binding(binding))
+            .await?;
 
         Ok(Protected::new(into_sized(plaintext)?))
     }
@@ -243,7 +234,7 @@ impl<const N: usize> EncryptWithKey for GcpDataKeySource<N> {
     type Error = Error;
 
     async fn encrypt(&self, plaintext: Protected<Vec<u8>>) -> Result<Vec<u8>, Self::Error> {
-        self.encrypt_payload(plaintext.risky_unwrap(), Binding::EMPTY)
+        self.encrypt_payload(plaintext.risky_unwrap(), DIRECT_ENCRYPTION_AAD)
             .await
     }
 }
@@ -253,7 +244,8 @@ impl<const N: usize> DecryptWithKey for GcpDataKeySource<N> {
 
     async fn decrypt(&self, ciphertext: &[u8]) -> Result<Protected<Vec<u8>>, Self::Error> {
         Ok(Protected::new(
-            self.decrypt_payload(ciphertext, Binding::EMPTY).await?,
+            self.decrypt_payload(ciphertext, DIRECT_ENCRYPTION_AAD)
+                .await?,
         ))
     }
 }
@@ -264,6 +256,7 @@ mod tests {
     use crate::gcp::integrity::crc32c;
     use crate::gcp::test_support::{ok, MockKms};
     use google_cloud_kms_v1::model::{DecryptResponse, EncryptResponse};
+    use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -304,7 +297,12 @@ mod tests {
             assert_eq!(req.name, KEY);
             assert_eq!(req.plaintext.len(), 32);
             assert_eq!(req.plaintext_crc32c, Some(crc32c(&req.plaintext)));
-            assert!(req.additional_authenticated_data.is_empty());
+            // An empty binding is still tagged: the AAD is the tag byte alone.
+            assert_eq!(req.additional_authenticated_data, [0x01].as_slice());
+            assert_eq!(
+                req.additional_authenticated_data_crc32c,
+                Some(crc32c(&[0x01]))
+            );
             *recorder.lock().unwrap() = req.plaintext.to_vec();
             ok(encrypt_response(wrap(&req.plaintext)))
         });
@@ -525,7 +523,8 @@ mod tests {
     /// unretrievable, and the existing tests only pin the empty case.
     #[tokio::test]
     async fn the_binding_reaches_google_as_checksummed_aad_on_both_calls() {
-        let aad = b"users/email".to_vec();
+        // The data-key tag, then the binding.
+        let aad = b"\x01users/email".to_vec();
 
         let expected = aad.clone();
         let mut stub = MockKms::new();
@@ -592,13 +591,15 @@ mod tests {
         let mut stub = MockKms::new();
         stub.expect_decrypt().times(2).returning(|req, _| {
             // Material derived from the AAD, so a collapsed dedup would show
-            // up as the wrong bytes rather than merely the wrong count.
-            let first = req
+            // up as the wrong bytes rather than merely the wrong count. The
+            // first byte is the data-key tag, so the last byte is the
+            // binding's.
+            let last = req
                 .additional_authenticated_data
-                .first()
+                .last()
                 .copied()
                 .unwrap_or(0);
-            ok(decrypt_response(vec![first; 32]))
+            ok(decrypt_response(vec![last; 32]))
         });
 
         let source = GcpDataKeySource::<32>::new(KeyManagementService::from_stub(stub), KEY);
@@ -618,6 +619,157 @@ mod tests {
             keys[1].clone().risky_unwrap(),
             [b'b'; 32],
             "the second binding got its own answer, not the first's"
+        );
+    }
+
+    /// Stands in for Google's AEAD check. `encrypt` remembers the plaintext
+    /// and the AAD under a fresh ciphertext. `decrypt` answers
+    /// `INVALID_ARGUMENT`, as Cloud KMS does when the AAD does not
+    /// authenticate, unless it gets the same AAD again.
+    fn fake_kms() -> MockKms {
+        type Sealed = HashMap<Vec<u8>, (Vec<u8>, Vec<u8>)>;
+        let sealed: Arc<Mutex<Sealed>> = Arc::default();
+        let next = Arc::new(AtomicUsize::new(0));
+
+        let mut stub = MockKms::new();
+        let store = Arc::clone(&sealed);
+        stub.expect_encrypt().returning(move |req, _| {
+            let ciphertext = format!("ciphertext-{}", next.fetch_add(1, Ordering::SeqCst));
+            store.lock().unwrap().insert(
+                ciphertext.clone().into_bytes(),
+                (
+                    req.plaintext.to_vec(),
+                    req.additional_authenticated_data.to_vec(),
+                ),
+            );
+            ok(encrypt_response(ciphertext.into_bytes()))
+        });
+        stub.expect_decrypt().returning(move |req, _| {
+            match sealed.lock().unwrap().get(req.ciphertext.as_ref()) {
+                Some((plaintext, aad)) if *aad == req.additional_authenticated_data => {
+                    ok(decrypt_response(plaintext.clone()))
+                }
+                _ => Err(google_cloud_gax::error::Error::service(
+                    google_cloud_gax::error::rpc::Status::default()
+                        .set_code(google_cloud_gax::error::rpc::Code::InvalidArgument)
+                        .set_message("Decryption failed"),
+                )),
+            }
+        });
+        stub
+    }
+
+    /// The exact AAD of each use, as Google receives it.
+    #[tokio::test]
+    async fn direct_encryption_sends_its_own_fixed_aad_on_both_calls() {
+        let expected = b"\x00vitaminc-kms/gcp/encrypt-with-key";
+        assert_eq!(DIRECT_ENCRYPTION_AAD, expected);
+
+        let mut stub = MockKms::new();
+        stub.expect_encrypt().times(1).returning(move |req, _| {
+            assert_eq!(req.additional_authenticated_data, expected.as_slice());
+            assert_eq!(
+                req.additional_authenticated_data_crc32c,
+                Some(crc32c(expected))
+            );
+            ok(encrypt_response(wrap(&req.plaintext)))
+        });
+        stub.expect_decrypt().times(1).returning(move |req, _| {
+            assert_eq!(req.additional_authenticated_data, expected.as_slice());
+            assert_eq!(
+                req.additional_authenticated_data_crc32c,
+                Some(crc32c(expected))
+            );
+            ok(decrypt_response(wrap(&req.ciphertext)))
+        });
+        let source = GcpDataKeySource::<32>::new(KeyManagementService::from_stub(stub), KEY);
+
+        let ciphertext = source
+            .encrypt(Protected::new(b"a short message".to_vec()))
+            .await
+            .unwrap();
+        source.decrypt(&ciphertext).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_empty_binding_sends_the_tag_byte_as_aad_on_retrieve() {
+        let mut stub = MockKms::new();
+        stub.expect_decrypt().times(1).returning(|req, _| {
+            assert_eq!(req.additional_authenticated_data, [0x01].as_slice());
+            assert_eq!(
+                req.additional_authenticated_data_crc32c,
+                Some(crc32c(&[0x01]))
+            );
+            ok(decrypt_response(vec![0u8; 32]))
+        });
+        let source = GcpDataKeySource::<32>::new(KeyManagementService::from_stub(stub), KEY);
+
+        source
+            .retrieve_data_key(&KeyId::new(vec![1u8; 8]), Binding::EMPTY)
+            .await
+            .unwrap();
+    }
+
+    /// A direct ciphertext of exactly `N` bytes must not open as a data key,
+    /// under the empty binding or any other. Before CIP-5094 both uses sent
+    /// no AAD for an empty binding, and this opened.
+    #[tokio::test]
+    async fn a_direct_ciphertext_is_not_a_data_key() {
+        let source = GcpDataKeySource::<32>::new(KeyManagementService::from_stub(fake_kms()), KEY);
+        let ciphertext = source.encrypt(Protected::new(vec![7u8; 32])).await.unwrap();
+        // The fake really does open it the right way.
+        assert_eq!(
+            source.decrypt(&ciphertext).await.unwrap().risky_unwrap(),
+            vec![7u8; 32]
+        );
+
+        let key_id = KeyId::new(ciphertext);
+        for binding in [
+            Binding::EMPTY,
+            Binding::from("vitaminc-kms/gcp/encrypt-with-key"),
+            Binding::new(DIRECT_ENCRYPTION_AAD),
+        ] {
+            let error = source
+                .retrieve_data_key(&key_id, binding)
+                .await
+                .unwrap_err();
+            assert!(matches!(error, Error::Gcp(_)), "{error}");
+        }
+    }
+
+    /// The other direction: a data key minted under `Binding::EMPTY`, as an
+    /// index key is, does not open through `decrypt`. If it did, any caller
+    /// of `decrypt` that can read the index `KeyId` would get the index key.
+    #[tokio::test]
+    async fn a_data_key_under_an_empty_binding_is_not_a_direct_ciphertext() {
+        let source = GcpDataKeySource::<32>::new(KeyManagementService::from_stub(fake_kms()), KEY);
+
+        let generated = source.generate_data_key(Binding::EMPTY).await.unwrap();
+
+        let error = source
+            .decrypt(generated.key_id.as_bytes())
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::Gcp(_)), "{error}");
+    }
+
+    /// The index key is a data key under `Binding::EMPTY`, and it still
+    /// comes back through `FixedIndexKeySource`.
+    #[tokio::test]
+    async fn the_index_key_round_trips_under_the_empty_binding() {
+        use crate::provider::{FixedIndexKeySource, IndexKeyProvider};
+
+        let source = GcpDataKeySource::<32>::new(KeyManagementService::from_stub(fake_kms()), KEY);
+        let provisioned = source.generate_data_key(Binding::EMPTY).await.unwrap();
+        let index = FixedIndexKeySource::new(source, provisioned.key_id);
+
+        let loaded = IndexKeyProvider::<32>::load_index_key(&index)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            loaded.0.risky_unwrap(),
+            provisioned.plaintext.risky_unwrap()
         );
     }
 }
