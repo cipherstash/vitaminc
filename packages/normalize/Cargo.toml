@@ -42,5 +42,5 @@ futures-executor = "0.3.31"
 # the tests can check them byte for byte. It is not a dependency of the
 # crate: ADR 0002 keeps `orderable-bytes` for cipherstash-client's stored
 # terms and has vitaminc own its encodings.
-orderable-bytes = { version = "=0.2.0", features = ["decimal"] }
+orderable-bytes = { version = "=0.2.1", features = ["decimal"] }
 rust_decimal = { version = "1.41", default-features = false, features = ["std"] }

@@ -1645,9 +1645,9 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "orderable-bytes"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b518db63f5d1e58de426f005db601e7569bd5baf3efec920d2d0c586638de8a6"
+checksum = "4c7d30b72ffca73d9936fe5fc80a9c9520c73f5b4f64839a810211903d5ace3c"
 dependencies = [
  "rust_decimal",
 ]
