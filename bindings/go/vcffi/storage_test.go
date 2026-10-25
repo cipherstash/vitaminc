@@ -392,6 +392,8 @@ func goType(t testing.TB, raw json.RawMessage) (reflect.Type, string) {
 				}
 			}
 			return reflect.StructOf(fields), ""
+		case "struct_deny_unknown":
+			return nil, "UnmarshalStorage ignores unknown fields, and has no way to deny them"
 		case "enum":
 			return nil, "Go has no enums"
 		}
