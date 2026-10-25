@@ -8,6 +8,15 @@ name: "Kani"
 # packages/protected/src/locked/proofs.rs and build only under `cfg(kani)`;
 # the four of them verify in well under a minute.
 #
+# And the storage profile's reader, which parses bytes that may be corrupt
+# or tampered with. The header is refused exactly as its rules say, and a
+# count never exceeds the bytes left. A scalar, an object's key and a map's
+# key are read in bounds from any position. Nothing past the depth bound
+# is read. Two map keys are one exactly when the specification says so.
+# Those harnesses live in packages/aead-frame/src/storage/proofs.rs. One
+# after another they take about fifteen minutes, most of it the proofs
+# over map keys, so they run in parallel (`-j`).
+#
 # Kani installs its own pinned nightly and CBMC on first use (`cargo kani
 # setup`, a few minutes); the cache keeps that between runs.
 on:
@@ -16,6 +25,9 @@ on:
   pull_request:
     paths:
       - "packages/protected/**"
+      # The storage reader, and the leaf codec it reads scalars with.
+      - "packages/aead-frame/**"
+      - "packages/aead/src/**"
       - ".github/workflows/kani.yml"
       - "!**.md"
 
@@ -68,3 +80,6 @@ jobs:
 
       - name: prove (vitaminc-protected)
         run: cargo kani -p vitaminc-protected
+
+      - name: prove (vitaminc-aead-frame storage reader)
+        run: cargo kani -p vitaminc-aead-frame --features serde -j
