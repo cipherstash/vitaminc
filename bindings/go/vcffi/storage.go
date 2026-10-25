@@ -167,6 +167,11 @@ func (w *storageWriter) reflect(rv reflect.Value, depth int) error {
 		w.buf = append(w.buf, tagNull)
 		return nil
 	}
+	// Checked by type, before a nil pointer is written as null, so a field
+	// of an Encryptable type is refused whether or not it is set.
+	if encryptable(rv.Type()) {
+		return unwritable("%s implements Encryptable, which has no storage form", rv.Type())
+	}
 	switch rv.Kind() {
 	case reflect.Pointer:
 		if rv.IsNil() {
@@ -263,6 +268,13 @@ func arrayBytes(rv reflect.Value) []byte {
 
 // marshalText is rv's MarshalText, if its type has one, through a pointer
 // to a copy when the method needs one.
+// encryptable reports whether t, or a pointer to it, implements
+// Encryptable: its fields are not its value, so reflection must not write
+// them.
+func encryptable(t reflect.Type) bool {
+	return t.Implements(encryptableType) || reflect.PointerTo(t).Implements(encryptableType)
+}
+
 func marshalText(rv reflect.Value) ([]byte, bool, error) {
 	if rv.Type().Implements(textMarshalerType) && rv.CanInterface() {
 		text, err := rv.Interface().(encoding.TextMarshaler).MarshalText()

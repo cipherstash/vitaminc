@@ -619,24 +619,29 @@ func TestStorageRefusesWhatHasNoStorageForm(t *testing.T) {
 		deep = []any{deep}
 	}
 	for name, v := range map[string]any{
-		"a channel":            make(chan int),
-		"a function":           func() {},
-		"a complex number":     complex(1, 2),
-		"a passthrough":        vcvalue.Plain{V: 1},
-		"a date":               vcvalue.Date{},
-		"a decimal":            vcvalue.Decimal{},
-		"a typed null":         vcvalue.TypedNull{},
-		"unexported fields":    hidden{secret: "s3cr3t"},
-		"a float key":          map[float64]bool{1.5: true},
-		"a bool key":           map[bool]bool{true: true},
-		"a nil key":            StorageEntries{{Key: nil, Value: 1}},
-		"a repeated key":       StorageEntries{{Key: uint8(1)}, {Key: int64(1)}},
-		"a repeated field":     vcvalue.Object{{Key: "k"}, {Key: "k"}},
-		"invalid UTF-8":        string([]byte{0xff}),
-		"invalid UTF-8 key":    map[string]bool{string([]byte{0xff}): true},
-		"too deep":             deep,
-		"a key spelled twice":  map[folded]bool{"A": true, "a": true},
-		"an array element too": [1]any{make(chan int)},
+		"a channel":                      make(chan int),
+		"a function":                     func() {},
+		"a complex number":               complex(1, 2),
+		"a passthrough":                  vcvalue.Plain{V: 1},
+		"a date":                         vcvalue.Date{},
+		"a decimal":                      vcvalue.Decimal{},
+		"a typed null":                   vcvalue.TypedNull{},
+		"unexported fields":              hidden{secret: "s3cr3t"},
+		"a float key":                    map[float64]bool{1.5: true},
+		"a bool key":                     map[bool]bool{true: true},
+		"a nil key":                      StorageEntries{{Key: nil, Value: 1}},
+		"a repeated key":                 StorageEntries{{Key: uint8(1)}, {Key: int64(1)}},
+		"a repeated field":               vcvalue.Object{{Key: "k"}, {Key: "k"}},
+		"invalid UTF-8":                  string([]byte{0xff}),
+		"invalid UTF-8 key":              map[string]bool{string([]byte{0xff}): true},
+		"too deep":                       deep,
+		"a key spelled twice":            map[folded]bool{"A": true, "a": true},
+		"an array element too":           [1]any{make(chan int)},
+		"an Encryptable":                 point{X: 1, Y: 2},
+		"a pointer-receiver Encryptable": sealedSecret{Secret: "s3cr3t"},
+		"a pointer to one":               &sealedSecret{Secret: "s3cr3t"},
+		"a nil pointer to one":           (*sealedSecret)(nil),
+		"an Encryptable field":           struct{ S sealedSecret }{},
 	} {
 		_, err := MarshalStorage(v)
 		if !errors.Is(err, ErrUnwritable) {
@@ -649,6 +654,31 @@ func TestStorageRefusesWhatHasNoStorageForm(t *testing.T) {
 	_, err := MarshalStorage(deep)
 	if !errors.Is(err, ErrTooDeep) {
 		t.Errorf("too deep: %v, want ErrTooDeep as well", err)
+	}
+}
+
+// sealedSecret chooses its own encoding, so its fields are not its value.
+type sealedSecret struct{ Secret string }
+
+func (s *sealedSecret) EncryptValue(enc Encoder) error {
+	enc.String("redacted")
+	return nil
+}
+
+// A bytes key read into an interface key would be a []byte, which a Go map
+// cannot hold: it is a mismatch, not a panic.
+func TestStorageBytesKeyIntoAnyKeyIsAMismatch(t *testing.T) {
+	blob, err := MarshalStorage(map[[1]byte]int{{1}: 42})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var into map[any]any
+	if err := UnmarshalStorage(blob, &into); !errors.Is(err, ErrMismatch) {
+		t.Fatalf("%v, want ErrMismatch", err)
+	}
+	var keyed map[[1]byte]int
+	if err := UnmarshalStorage(blob, &keyed); err != nil || keyed[[1]byte{1}] != 42 {
+		t.Fatalf("%v, %v", err, keyed)
 	}
 }
 

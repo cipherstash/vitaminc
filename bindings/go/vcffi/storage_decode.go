@@ -452,6 +452,11 @@ func assignMap(m any, rv reflect.Value, path string) error {
 		if err := assign(e.Key, key, at); err != nil {
 			return err
 		}
+		// A bytes key read into an interface key is a []byte, which a Go
+		// map cannot hash: SetMapIndex would panic.
+		if !key.Comparable() {
+			return mismatch(at, "a key a Go map can hold", e.Key)
+		}
 		value := reflect.New(rv.Type().Elem()).Elem()
 		if err := assign(e.Value, value, at); err != nil {
 			return err
