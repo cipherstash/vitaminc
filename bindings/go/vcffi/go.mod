@@ -5,7 +5,8 @@
 // encoding must never be forked per binding. Depends only on the sibling
 // vcvalue module via a local replace directive (both live in this repo;
 // neither is published), so `go test ./...` resolves it without a go.work
-// file. NOT a storage format: see doc.go.
+// file. The transport is not a storage format; the storage profile
+// (MarshalStorage, UnmarshalStorage) is: see doc.go.
 module github.com/cipherstash/vitaminc/bindings/go/vcffi
 
 go 1.23

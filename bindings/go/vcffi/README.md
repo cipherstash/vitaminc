@@ -16,12 +16,39 @@ Depends only on the sibling [`vcvalue`](../vcvalue) module (the value model —
 `Plain`, `Object`, the sealed leaf family), via a local `replace` directive.
 No wazero, no crypto.
 
-## Transport, not storage
+## Transport, and one storage profile
 
-These bytes are an FFI detail with **no compatibility commitment**. The only
-frozen format is the sealed leaf inside the AEAD envelope (see
-`vcvalue.Sealed` and the Rust crate `vitaminc-aead`'s leaf codec). Nothing this
-package encodes should ever be persisted.
+The transport bytes are an FFI detail with **no compatibility commitment**:
+nothing `Marshal`, `Encode` or `MarshalCipherText` writes should ever be
+persisted. The one exception is the **storage profile**, `MarshalStorage` and
+`UnmarshalStorage`, which write and read a value as a versioned blob for bytes
+that are kept. Its format is shared with the Rust module
+`vitaminc_aead_frame::storage`, specified in
+[`packages/aead-frame/STORAGE.md`](../../../packages/aead-frame/STORAGE.md),
+frozen at version 1, and pinned by the golden corpus
+[`storage-v1.json`](../../../packages/aead-frame/testdata/storage-v1.json),
+which `storage_test.go` reads row by row. The other frozen format is the
+sealed leaf inside the AEAD envelope (see `vcvalue.Sealed` and the Rust crate
+`vitaminc-aead`'s leaf codec).
+
+```go
+blob, err := vcffi.MarshalStorage(record)     // "VCS", version 1, then the value
+var back Record
+err = vcffi.UnmarshalStorage(blob, &back)     // errors.Is(err, vcffi.ErrUnsupportedVersion) …
+```
+
+A Go struct is an object (field names from `vc` tags, as in the transport), a
+map is a map whose keys keep their kind, a pointer is an optional value (nil
+is null; anything else is marked present), `[]byte` and `[N]byte` are bytes,
+and an `encoding.TextMarshaler` such as `time.Time` is text. Reading follows
+Rust's rules: an integer reads into any integer type it fits, a pointer reads
+a bare value as present, unknown keys are ignored, and a missing field is
+refused unless it is a pointer. Go's `[]uint8` is `[]byte`, so it is always
+bytes; a Rust type sharing a value with Go keeps its `Vec<u8>` as bytes with
+`serde_bytes`. Go has no enums and no unit type, so the corpus rows that read
+those are not run here. `FuzzUnmarshalStorage` holds the reader to the
+hostile-input contract below, and requires every blob it reads to write back
+byte for byte.
 
 ## The `LeafSet` parameter
 
