@@ -74,4 +74,4 @@ trybuild = "1.0.118"
 # the tests can check them byte for byte. Not a dependency of the crate:
 # ADR 0002 keeps `orderable-bytes` for cipherstash-client's stored terms
 # and has vitaminc own its encodings.
-orderable-bytes = { version = "=0.2.0" }
+orderable-bytes = { version = "=0.2.1" }
