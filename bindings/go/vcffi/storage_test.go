@@ -374,7 +374,9 @@ func goType(t testing.TB, raw json.RawMessage) (reflect.Type, string) {
 				return nil, why
 			}
 			return reflect.MapOf(key, value), ""
-		case "struct":
+		// UnmarshalStorage ignores unknown fields: a struct that denies them
+		// reads as one that does not, and its refusals are skipped below.
+		case "struct", "struct_deny_unknown":
 			var pairs [][2]json.RawMessage
 			_ = json.Unmarshal(v, &pairs)
 			fields := make([]reflect.StructField, len(pairs))
@@ -392,8 +394,6 @@ func goType(t testing.TB, raw json.RawMessage) (reflect.Type, string) {
 				}
 			}
 			return reflect.StructOf(fields), ""
-		case "struct_deny_unknown":
-			return nil, "UnmarshalStorage ignores unknown fields, and has no way to deny them"
 		case "enum":
 			return nil, "Go has no enums"
 		}
@@ -411,6 +411,10 @@ func TestStorageCorpusReads(t *testing.T) {
 		ty, why := goType(t, row.Type)
 		if ty == nil {
 			t.Logf("%s: not expressible in Go: %s", row.Name, why)
+			continue
+		}
+		if !row.HasReads && bytes.Contains(row.Type, []byte(`"struct_deny_unknown"`)) {
+			t.Logf("%s: not expressible in Go: UnmarshalStorage has no way to deny unknown fields", row.Name)
 			continue
 		}
 		expressed++
