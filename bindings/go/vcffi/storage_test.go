@@ -425,17 +425,18 @@ func TestStorageCorpusReads(t *testing.T) {
 			t.Errorf("%s: %v", row.Name, err)
 			continue
 		}
-		got, err := MarshalStorage(into.Elem().Interface())
-		if err != nil {
-			t.Errorf("%s: %v", row.Name, err)
-			continue
-		}
-		want, err := MarshalStorage(storageModel(t, row.ReadsAs))
+		// What the row reads as, written canonically, read by the same
+		// type: the Go value both blobs must read as.
+		canonical, err := MarshalStorage(storageModel(t, row.ReadsAs))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(got, want) {
-			t.Errorf("%s: read as %x, want %x", row.Name, got, want)
+		want := reflect.New(ty)
+		if err := UnmarshalStorage(canonical, want.Interface()); err != nil {
+			t.Fatalf("%s: the canonical form: %v", row.Name, err)
+		}
+		if !reflect.DeepEqual(into.Elem().Interface(), want.Elem().Interface()) {
+			t.Errorf("%s: read as %#v, want %#v", row.Name, into.Elem().Interface(), want.Elem().Interface())
 		}
 	}
 	// Most rows are expressible; a new row Go cannot express is logged
@@ -464,6 +465,7 @@ type record struct {
 	Age     uint8             `vc:"age"`
 	Pinned  *bool             `vc:"pinned"`
 	Nested  **int32           `vc:"nested"`
+	Absent  **int32           `vc:"absent"`
 	Tags    []string          `vc:"tags"`
 	Raw     []byte            `vc:"raw"`
 	ID      vcvalue.UUID      `vc:"id"`
@@ -480,12 +482,14 @@ func TestStorageRecordRoundTrips(t *testing.T) {
 	yes := true
 	n := int32(-3)
 	np := &n
+	var nilInt *int32
 	big, _ := vcvalue.ParseInt128("-170141183460469231731687303715884105728")
 	in := record{
 		Name:    "ada",
 		Age:     36,
 		Pinned:  &yes,
 		Nested:  &np,
+		Absent:  &nilInt,
 		Tags:    []string{"x", "y"},
 		Raw:     []byte{1, 2},
 		ID:      vcvalue.UUID{15: 1},
@@ -522,12 +526,16 @@ func TestStorageRecordRoundTrips(t *testing.T) {
 	for _, f := range fields {
 		switch f.Key {
 		case "pinned":
-			if !sameModel(f.Value, Some{V: true}) {
-				t.Errorf("a pointer is an optional value: %#v", f.Value)
+			if !sameModel(f.Value, true) {
+				t.Errorf("a pointer is its value: %#v", f.Value)
 			}
 		case "nested":
-			if !sameModel(f.Value, Some{V: Some{V: int32(-3)}}) {
-				t.Errorf("a pointer to a pointer nests: %#v", f.Value)
+			if !sameModel(f.Value, int32(-3)) {
+				t.Errorf("a pointer to a pointer is its value: %#v", f.Value)
+			}
+		case "absent":
+			if !sameModel(f.Value, Some{V: nil}) {
+				t.Errorf("a pointer to nil is marked, so it is not read as nil: %#v", f.Value)
 			}
 		case "id":
 			if !sameModel(f.Value, append(make([]byte, 15), 1)) {
@@ -695,10 +703,53 @@ func TestStorageOptionalFields(t *testing.T) {
 	if err := UnmarshalStorage(blob, &stricter{}); !errors.Is(err, ErrMismatch) {
 		t.Fatalf("a missing field: %v, want ErrMismatch", err)
 	}
-	// A marked value reads only into a pointer.
+	// A tagged default reads a missing field as its zero value, and keeps
+	// its name, or the field's own with an empty name.
+	type defaulted struct {
+		N uint32 `vc:"n"`
+		M string `vc:"m,default"`
+		K []int8 `vc:",default"`
+	}
+	d := defaulted{M: "x", K: []int8{1}}
+	if err := UnmarshalStorage(blob, &d); err != nil || d.N != 7 || d.M != "" || d.K != nil {
+		t.Fatalf("%+v %v", d, err)
+	}
+	full, _ := MarshalStorage(defaulted{N: 1, M: "m", K: []int8{2}})
+	var model any
+	_ = UnmarshalStorage(full, &model)
+	if names := []string{model.(vcvalue.Object)[1].Key, model.(vcvalue.Object)[2].Key}; names[0] != "m" || names[1] != "K" {
+		t.Fatalf("a tag's options are not part of its name: %v", names)
+	}
+	// A Go pointer is written bare, so a field that is not a pointer on the
+	// reading side reads it; Rust's marked Some reads only into a pointer.
 	blob, _ = MarshalStorage(after{N: a.N})
+	if err := UnmarshalStorage(blob, &before{}); err != nil {
+		t.Fatalf("a pointer into a plain field: %v", err)
+	}
+	blob, _ = MarshalStorage(vcvalue.Object{{Key: "n", Value: Some{V: uint32(7)}}})
 	if err := UnmarshalStorage(blob, &before{}); !errors.Is(err, ErrMismatch) {
 		t.Fatalf("a marked value into a plain field: %v, want ErrMismatch", err)
+	}
+	if err := UnmarshalStorage(blob, &a); err != nil || *a.N != 7 {
+		t.Fatalf("a marked value into a pointer: %v", err)
+	}
+}
+
+// The transport names a struct's fields by the same tags, options and all.
+func TestTransportFieldNamesIgnoreTagOptions(t *testing.T) {
+	type tagged struct {
+		Age uint8 `vc:"age,default"`
+	}
+	buf, err := Marshal(tagged{Age: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := Unmarshal(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := v.(vcvalue.Object)[0].Key; got != "age" {
+		t.Fatalf("the transport named the field %q", got)
 	}
 }
 

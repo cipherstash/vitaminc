@@ -9,6 +9,7 @@ import (
 	"math"
 	"reflect"
 	"slices"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
@@ -27,7 +28,11 @@ import (
 const StorageVersion = 1
 
 // StorageSome marks a present optional value: StorageSome, then the value.
-// A Go pointer is an optional value.
+// Rust writes it for every Some. Go writes it only for a pointer whose
+// target is itself written as null, where leaving it out would read back as
+// nil: a bare value reads as present into a pointer or a Rust Option, and as
+// itself into a plain field, so a Go pointer is read alike in both
+// languages, whatever the other side declares.
 const StorageSome = 0xF5
 
 // StorageMap starts a map whose keys are nodes: StorageMap, a u32 count,
@@ -94,9 +99,13 @@ func unwritable(format string, args ...any) error {
 //     text and bytes by their bytes, as a Rust BTreeMap orders them; K is
 //     an integer, a string, a byte array or a TextMarshaler;
 //   - structs                      → object, by field name, honoring
-//     `vc:"name"` tags (`vc:"-"` skips a field), in declaration order;
-//   - pointers                     → an optional value: nil is null, and a
-//     non-nil pointer is [StorageSome] then what it points at;
+//     `vc:"name"` tags (`vc:"-"` skips a field), in declaration order; a
+//     `vc:"name,default"` field reads as its zero value when a blob does
+//     not have it;
+//   - pointers                     → nil is null, and a non-nil pointer is
+//     what it points at, as encoding/json writes it; a pointer to a nil
+//     pointer or nil interface is [StorageSome] then null, so it does not
+//     read back as nil;
 //   - [Some], [StorageEntries], vcvalue.Object and []any → as they read.
 //
 // The transport's Encryptable, passthrough (vcvalue.Plain) and logical
@@ -164,7 +173,11 @@ func (w *storageWriter) reflect(rv reflect.Value, depth int) error {
 			w.buf = append(w.buf, tagNull)
 			return nil
 		}
-		w.buf = append(w.buf, StorageSome)
+		if writesNull(rv.Elem()) {
+			w.buf = append(w.buf, StorageSome)
+		}
+		// Charged against the depth bound even when unmarked, so a pointer
+		// cycle (p = &p) fails cleanly rather than recursing forever.
 		return w.reflect(rv.Elem(), depth+1)
 	case reflect.Interface:
 		if rv.IsNil() {
@@ -222,6 +235,18 @@ func (w *storageWriter) reflect(rv reflect.Value, depth int) error {
 		return w.goStruct(rv, depth)
 	}
 	return unwritable("a value of kind %s has no storage form", rv.Kind())
+}
+
+// writesNull reports whether rv is written as null: a nil pointer or
+// interface, or an interface holding one.
+func writesNull(rv reflect.Value) bool {
+	switch rv.Kind() {
+	case reflect.Pointer:
+		return rv.IsNil()
+	case reflect.Interface:
+		return rv.IsNil() || writesNull(rv.Elem())
+	}
+	return false
 }
 
 // byteArray reports whether t is [N]byte, a UUID say, written as bytes.
@@ -361,10 +386,14 @@ type storageField struct {
 	name       string
 	index      int
 	unexported bool
+	// defaulted fields read as their zero value when a blob lacks them.
+	defaulted bool
 }
 
 // structFields are t's fields in declaration order, named by their `vc`
-// tags, without the ones a `vc:"-"` tag skips.
+// tags, without the ones a `vc:"-"` tag skips. A tag is a name, then
+// options after commas: `vc:"age,default"`, or `vc:",default"` to keep the
+// field's own name. The transport names fields the same way.
 func structFields(t reflect.Type) []storageField {
 	fields := make([]storageField, 0, t.NumField())
 	for i := range t.NumField() {
@@ -373,16 +402,22 @@ func structFields(t reflect.Type) []storageField {
 			fields = append(fields, storageField{index: i, unexported: true})
 			continue
 		}
-		name := f.Name
+		field := storageField{name: f.Name, index: i}
 		if tag, ok := f.Tag.Lookup("vc"); ok {
 			if tag == "-" {
 				continue
 			}
-			if tag != "" {
-				name = tag
+			name, options, _ := strings.Cut(tag, ",")
+			if name != "" {
+				field.name = name
+			}
+			for options != "" {
+				var option string
+				option, options, _ = strings.Cut(options, ",")
+				field.defaulted = field.defaulted || option == "default"
 			}
 		}
-		fields = append(fields, storageField{name: name, index: i})
+		fields = append(fields, field)
 	}
 	return fields
 }

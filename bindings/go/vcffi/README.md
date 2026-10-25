@@ -38,12 +38,15 @@ err = vcffi.UnmarshalStorage(blob, &back)     // errors.Is(err, vcffi.ErrUnsuppo
 ```
 
 A Go struct is an object (field names from `vc` tags, as in the transport), a
-map is a map whose keys keep their kind, a pointer is an optional value (nil
-is null; anything else is marked present), `[]byte` and `[N]byte` are bytes,
-and an `encoding.TextMarshaler` such as `time.Time` is text. Reading follows
-Rust's rules: an integer reads into any integer type it fits, a pointer reads
-a bare value as present, unknown keys are ignored, and a missing field is
-refused unless it is a pointer. Go's `[]uint8` is `[]byte`, so it is always
+map is a map whose keys keep their kind, `[]byte` and `[N]byte` are bytes, and
+an `encoding.TextMarshaler` such as `time.Time` is text. A pointer is written
+as `encoding/json` writes it: nil is null, and anything else is its value, so
+Rust reads it into an `Option<T>` or a plain `T` alike. Only a pointer to a
+nil pointer is marked present, so it does not read back as nil. Reading
+follows Rust's rules: an integer reads into any integer type it fits, a
+pointer reads a value marked present or not, unknown keys are ignored, and a
+missing field is refused unless it is a pointer or tagged `vc:"name,default"`,
+which reads it as its zero value, as Rust's `#[serde(default)]` does. Go's `[]uint8` is `[]byte`, so it is always
 bytes; a Rust type sharing a value with Go keeps its `Vec<u8>` as bytes with
 `serde_bytes`. Go has no enums and no unit type, so the corpus rows that read
 those are not run here. `FuzzUnmarshalStorage` holds the reader to the

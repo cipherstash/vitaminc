@@ -20,16 +20,16 @@ import (
 //
 //   - an integer reads into any integer type it fits; a float type reads a
 //     float or an integer; an integer type never reads a float;
-//   - a pointer reads null as nil, a marked optional value as a pointer to
-//     it, and any other value as a pointer to that value, so a field that
-//     became a pointer still reads its old blobs;
+//   - a pointer reads null as nil, and any other value, marked present or
+//     not, as a pointer to that value: a Rust Some and a Go pointer alike;
 //   - a string reads only text, []byte and [N]byte only bytes (of length
 //     N), a slice or an array only an array;
 //   - a map reads a map or an object, each key read as a value of the key
 //     type would be;
 //   - a struct reads an object, or a map whose keys are all text; unknown
 //     keys are ignored, and a missing field is refused unless it is a
-//     pointer, which is left nil;
+//     pointer, which is left nil, or tagged `vc:"name,default"`, which is
+//     left its zero value, as Rust's #[serde(default)] reads it;
 //   - an encoding.TextUnmarshaler reads text;
 //   - an `any` reads the value as the blob holds it: nil, bool, the integer
 //     widths (vcvalue.Int128 and Uint128 for 128 bits), float32, float64,
@@ -494,7 +494,7 @@ func assignStruct(m any, rv reflect.Value, path string) error {
 			continue
 		}
 		field := rv.Field(f.index)
-		if field.Kind() != reflect.Pointer {
+		if field.Kind() != reflect.Pointer && !f.defaulted {
 			return fmt.Errorf("%w: %s: missing field %q", ErrMismatch, orRoot(path), f.name)
 		}
 		field.SetZero()

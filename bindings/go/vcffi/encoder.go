@@ -468,7 +468,9 @@ func Marshal(v any) ([]byte, error) {
 //   - slices/arrays              → Seq;
 //   - map[string]T               → Map, keys SORTED for determinism;
 //   - structs                    → Map by field name, honoring `vc:"name"`
-//     tags (`vc:"-"` skips a field), in declaration order;
+//     tags (`vc:"-"` skips a field; options after a comma, such as the
+//     storage profile's `,default`, do not change the name), in
+//     declaration order;
 //   - pointers                   → dereferenced; a nil pointer → a typed
 //     null if its element type is fixed width (see [fixedTypeOf]), Null
 //     otherwise;
@@ -652,22 +654,14 @@ func encodeStruct(enc Encoder, rv reflect.Value) {
 	t := rv.Type()
 	m := enc.Map()
 	encoded, unexported := 0, 0
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		if f.PkgPath != "" {
+	// Named as the storage profile names them: `vc:"name"`, options after
+	// a comma, `vc:"-"` skipped.
+	for _, f := range structFields(t) {
+		if f.unexported {
 			unexported++
 			continue
 		}
-		name := f.Name
-		if tag, ok := f.Tag.Lookup("vc"); ok {
-			if tag == "-" {
-				continue
-			}
-			if tag != "" {
-				name = tag
-			}
-		}
-		encodeReflect(m.Field(name), rv.Field(i))
+		encodeReflect(m.Field(f.name), rv.Field(f.index))
 		encoded++
 	}
 	// A struct whose every field is unexported (time.Time is the canonical
