@@ -56,6 +56,32 @@ jobs:
       - name: cargo check
         run: cargo check --locked ${{ matrix.args }}
 
+  # The storage profile's golden corpus pins bytes customers keep, so a row
+  # it had is never edited or removed; rows may be added. The Rust test
+  # holds the code to the corpus, and this holds the corpus to itself. See
+  # .github/scripts/storage_corpus_append_only.py.
+  storage-corpus:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    name: "📼 Storage corpus only grows"
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The check reads the corpus at the merge base.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: test the check
+        run: python3 -m unittest discover -s .github/scripts -p 'test_storage_corpus_append_only.py'
+
+      - name: check the corpus
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 .github/scripts/storage_corpus_append_only.py --base "origin/$BASE_REF"
+
   test:
     runs-on: ubuntu-latest
     name: "🧪 Test"
@@ -158,7 +184,8 @@ jobs:
 
       - name: test (aead-frame serde feature)
         # No workspace member enables `vitaminc-aead-frame/serde`, so the
-        # workspace run skips the serde format's tests and doctest.
+        # workspace run skips the serde format's tests and doctest, and the
+        # storage profile's, which hold the code to its golden corpus.
         run: cargo test -p vitaminc-aead-frame --features serde
 
       - name: test (equality term feature)
