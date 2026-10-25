@@ -35,6 +35,7 @@ exclude_globs = [
     # ever contains them and every mutant there would survive spuriously.
     # The Kani gate (.github/workflows/kani.yml) is what checks this file.
     "packages/protected/src/locked/proofs.rs",
+    "packages/aead-frame/src/storage/proofs.rs",
 ]
 
 exclude_re = [
