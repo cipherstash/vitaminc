@@ -61,11 +61,11 @@ run = "python3 -m unittest discover -s {{ config_root }}/.github/scripts -p 'tes
 [tasks."storage:corpus:check"]
 description = "Check the storage profile's golden corpus only grows: no row the merge base had is edited or removed"
 # Usage: mise run storage:corpus:check -- [--base origin/main]
-run = "python3 {{ config_root }}/.github/scripts/storage_corpus_append_only.py"
+run = "python3 {{ config_root }}/packages/aead-frame/scripts/storage_corpus_append_only.py"
 
 [tasks."storage:corpus:check:test"]
 description = "Test the storage corpus check"
-run = "python3 -m unittest discover -s {{ config_root }}/.github/scripts -p 'test_storage_corpus_append_only.py'"
+run = "python3 -m unittest discover -s {{ config_root }}/packages/aead-frame/scripts -p 'test_storage_corpus_append_only.py'"
 
 [tasks.docs]
 dir = "{{ config_root }}/packages/vitaminc"

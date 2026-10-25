@@ -22,7 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 CORPUS = "packages/aead-frame/testdata/storage-v1.json"
 # The fields that identify the format, not a row.
 FROZEN_FIELDS = ("version", "header")
@@ -47,28 +47,23 @@ def problems(base: dict, head: dict) -> list[str]:
     return found
 
 
-def git(*args: str) -> str:
+def git(*args: str, root: Path = REPO_ROOT) -> str:
     out = subprocess.run(
-        ["git", *args], cwd=REPO_ROOT, check=True, stdout=subprocess.PIPE, text=True
+        ["git", *args], cwd=root, check=True, stdout=subprocess.PIPE, text=True
     )
     return out.stdout
 
 
-def corpus_at(rev: str) -> dict | None:
-    """The corpus as it was at `rev`, or None if it did not exist there."""
-    try:
-        return json.loads(
-            subprocess.run(
-                ["git", "show", f"{rev}:{CORPUS}"],
-                cwd=REPO_ROOT,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-            ).stdout
-        )
-    except subprocess.CalledProcessError:
+def corpus_at(rev: str, root: Path = REPO_ROOT) -> dict | None:
+    """The corpus as it was at `rev`, or None if the path did not exist there.
+
+    Only a path git lists as absent counts as new. Any other failure (an
+    unknown revision, a blob a partial clone cannot fetch) raises, so the
+    check fails rather than passing with nothing to compare.
+    """
+    if not git("ls-tree", "--name-only", rev, "--", CORPUS, root=root).strip():
         return None
+    return json.loads(git("show", f"{rev}:{CORPUS}", root=root))
 
 
 def main(argv: list[str] | None = None) -> int:

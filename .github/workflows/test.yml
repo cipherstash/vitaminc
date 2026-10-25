@@ -59,7 +59,7 @@ jobs:
   # The storage profile's golden corpus pins bytes customers keep, so a row
   # it had is never edited or removed; rows may be added. The Rust test
   # holds the code to the corpus, and this holds the corpus to itself. See
-  # .github/scripts/storage_corpus_append_only.py.
+  # packages/aead-frame/scripts/storage_corpus_append_only.py.
   storage-corpus:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -75,12 +75,12 @@ jobs:
           persist-credentials: false
 
       - name: test the check
-        run: python3 -m unittest discover -s .github/scripts -p 'test_storage_corpus_append_only.py'
+        run: python3 -m unittest discover -s packages/aead-frame/scripts -p 'test_storage_corpus_append_only.py'
 
       - name: check the corpus
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: python3 .github/scripts/storage_corpus_append_only.py --base "origin/$BASE_REF"
+        run: python3 packages/aead-frame/scripts/storage_corpus_append_only.py --base "origin/$BASE_REF"
 
   test:
     runs-on: ubuntu-latest
