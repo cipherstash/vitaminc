@@ -103,9 +103,10 @@ func unwritable(format string, args ...any) error {
 //     `vc:"name,default"` field reads as its zero value when a blob does
 //     not have it;
 //   - pointers                     → nil is null, and a non-nil pointer is
-//     what it points at, as encoding/json writes it; a pointer to a nil
-//     pointer or nil interface is [StorageSome] then null, so it does not
-//     read back as nil;
+//     what it points at, as encoding/json writes it; a pointer to a value
+//     written starting with null or [StorageSome] (a nil pointer or
+//     interface, [Some], or a pointer to one) is [StorageSome] then that
+//     value, so every level reads back;
 //   - [Some], [StorageEntries], vcvalue.Object and []any → as they read.
 //
 // The transport's Encryptable, passthrough (vcvalue.Plain) and logical
@@ -178,7 +179,7 @@ func (w *storageWriter) reflect(rv reflect.Value, depth int) error {
 			w.buf = append(w.buf, tagNull)
 			return nil
 		}
-		if writesNull(rv.Elem()) {
+		if startsOptional(rv.Elem()) {
 			w.buf = append(w.buf, StorageSome)
 		}
 		// Charged against the depth bound even when unmarked, so a pointer
@@ -242,16 +243,17 @@ func (w *storageWriter) reflect(rv reflect.Value, depth int) error {
 	return unwritable("a value of kind %s has no storage form", rv.Kind())
 }
 
-// writesNull reports whether rv is written as null: a nil pointer or
-// interface, or an interface holding one.
-func writesNull(rv reflect.Value) bool {
+// startsOptional reports whether rv is written starting with null or
+// [StorageSome]: a nil pointer or interface, [Some], or a pointer or
+// interface to one of those. A pointer to such a value is marked, or a
+// reader would take that null or marker for the pointer's own, and the
+// value would read back one level shorter.
+func startsOptional(rv reflect.Value) bool {
 	switch rv.Kind() {
-	case reflect.Pointer:
-		return rv.IsNil()
-	case reflect.Interface:
-		return rv.IsNil() || writesNull(rv.Elem())
+	case reflect.Pointer, reflect.Interface:
+		return rv.IsNil() || startsOptional(rv.Elem())
 	}
-	return false
+	return rv.Type() == reflect.TypeOf(Some{})
 }
 
 // byteArray reports whether t is [N]byte, a UUID say, written as bytes.
@@ -266,8 +268,6 @@ func arrayBytes(rv reflect.Value) []byte {
 	return b
 }
 
-// marshalText is rv's MarshalText, if its type has one, through a pointer
-// to a copy when the method needs one.
 // encryptable reports whether t, or a pointer to it, implements
 // Encryptable: its fields are not its value, so reflection must not write
 // them.
@@ -275,6 +275,8 @@ func encryptable(t reflect.Type) bool {
 	return t.Implements(encryptableType) || reflect.PointerTo(t).Implements(encryptableType)
 }
 
+// marshalText is rv's MarshalText, if its type has one, through a pointer
+// to a copy when the method needs one.
 func marshalText(rv reflect.Value) ([]byte, bool, error) {
 	if rv.Type().Implements(textMarshalerType) && rv.CanInterface() {
 		text, err := rv.Interface().(encoding.TextMarshaler).MarshalText()

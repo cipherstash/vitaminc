@@ -42,7 +42,8 @@ map is a map whose keys keep their kind, `[]byte` and `[N]byte` are bytes, and
 an `encoding.TextMarshaler` such as `time.Time` is text. A pointer is written
 as `encoding/json` writes it: nil is null, and anything else is its value, so
 Rust reads it into an `Option<T>` or a plain `T` alike. Only a pointer to a
-nil pointer is marked present, so it does not read back as nil. Reading
+value that is itself written as null or marked present (a nil pointer, or a
+pointer to one) is marked present, so every level reads back. Reading
 follows Rust's rules: an integer reads into any integer type it fits, a
 pointer reads a value marked present or not, unknown keys are ignored, and a
 missing field is refused unless it is a pointer or tagged `vc:"name,default"`,

@@ -816,3 +816,52 @@ func FuzzUnmarshalStorage(f *testing.F) {
 		_ = UnmarshalStorage(blob, &r)
 	})
 }
+
+// Every level of a pointer to a pointer reads back: a pointer to a value
+// that is itself written as null or marked present is marked, so its
+// reader never takes the inner level's null or marker for its own.
+func TestStoragePointerLevelsReadBack(t *testing.T) {
+	five := 5
+	var leaf *int
+	middle := &leaf
+	present := &five
+	presentMiddle := &present
+	var nilMiddle **int
+	for name, original := range map[string]***int{
+		"all present":   &presentMiddle,
+		"innermost nil": &middle,
+		"middle nil":    &nilMiddle,
+		"outermost nil": nil,
+	} {
+		blob, err := MarshalStorage(original)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var back ***int
+		if err := UnmarshalStorage(blob, &back); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !reflect.DeepEqual(back, original) {
+			t.Errorf("%s: %x read back as a different shape", name, blob)
+		}
+	}
+
+	// The blob Codex found: the innermost nil is two markers, then null.
+	blob, err := MarshalStorage(&middle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []byte{0x56, 0x43, 0x53, 0x01, StorageSome, StorageSome, tagNull}; !bytes.Equal(blob, want) {
+		t.Errorf("%x, want %x", blob, want)
+	}
+
+	// A pointer to [Some] is marked too, so the Some keeps its own marker.
+	some := Some{V: int64(1)}
+	blob, err = MarshalStorage(&some)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(blob[4:], []byte{StorageSome, StorageSome}) {
+		t.Errorf("%x: a pointer to Some is not marked", blob)
+	}
+}
