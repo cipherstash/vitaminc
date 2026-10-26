@@ -60,13 +60,19 @@ assert_eq!(plaintext, "secret message");
 [`Aes256Cipher`] is the sink-based [`Cipher`] of ADR 0001: it seals and
 opens one tagged leaf under the AAD derived for the leaf's place in the
 value, and nothing else. Everything about the *shape* of a value — how a
-sequence's elements and a map's entries are bound to their positions, how
+sequence's elements are bound to their sequence and a map's values to their keys, how
 an empty container is authenticated, the refusal of a container with
 nothing sealed — lives once in `vitaminc-aead`'s encrypting sink and
 opening walk, and is driven by [`encrypt`] and [`decrypt`] (re-exported
 here). A value encrypted from static Rust therefore seals the same tagged
 leaves a value from a host binding does, and every ciphertext is
 self-describing.
+
+**A sequence's order and length are not authenticated.** Elements share the
+sequence's derived AAD without an index or count, so they can be reordered or
+dropped without a cipher failure. For position-sensitive data, use named map
+entries and validate the expected keys and count when reading. Map keys are
+authenticated by their sealed values; passthrough entries are unauthenticated.
 
 The value going in is anything that implements [`Encrypt`], and the
 value coming out is anything that implements the sink-based [`Decrypt`].
@@ -117,7 +123,7 @@ let cipher = Aes256Cipher::new(&key).expect("cipher creation failed");
 // Encrypt a string
 let ciphertext = encrypt("secret message", &cipher, ()).expect("encryption failed");
 
-// Encrypt a collection (element-wise; each element is sealed under its own position)
+// Encrypt a collection (element-wise; order and length are not authenticated)
 let data = vec!["one".to_string(), "two".to_string()];
 let ciphertext = encrypt(data, &cipher, ()).expect("encryption failed");
 
@@ -336,7 +342,17 @@ Vitamin C enforces 256-bit keys to ensure:
 
 ### Automatic Nonce Generation
 
-Each encryption operation generates a unique random nonce, preventing nonce reuse which could compromise security. The nonce generator is a `RefCell`, so [`Aes256Cipher`] is `!Sync`: it is the synchronous cipher, used from one thread at a time.
+Each sealed leaf gets a freshly generated 96-bit nonce from a cryptographically
+secure random number generator. Random generation does not guarantee uniqueness:
+collisions remain possible, and reusing a nonce with the same AES-GCM key can
+compromise confidentiality and authentication. The collision risk grows with the
+total number of leaves sealed under that key, across all documents, cipher
+instances and processes. Creating a new cipher instance with the same key does
+not reset that risk. Applications must limit encryption volume per key and rotate
+keys accordingly; this crate does not track or enforce a per-key usage limit.
+
+The nonce generator is a `RefCell`, so [`Aes256Cipher`] is `!Sync`: it is the
+synchronous cipher, used from one thread at a time.
 
 ### Unspecified Errors
 
