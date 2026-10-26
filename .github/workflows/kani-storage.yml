@@ -32,9 +32,12 @@ on:
       - "packages/aead-frame/src/**"
       # The leaf codec, tags and integers the reader calls.
       - "packages/aead/src/**"
+      # Protected and Zeroizing, which the serde feature compiles in.
+      - "packages/protected/src/**"
       # Anything that changes how those compile.
       - "packages/aead-frame/Cargo.toml"
       - "packages/aead/Cargo.toml"
+      - "packages/protected/Cargo.toml"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/kani-storage.yml"
