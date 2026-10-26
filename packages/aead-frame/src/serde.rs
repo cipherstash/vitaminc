@@ -21,7 +21,7 @@
 //! | bool | bool |
 //! | null, and JavaScript's `undefined` | unit, and `None` |
 //!
-//! A typed null ([`tags::TYPED_NULL`]) is
+//! A typed null ([`tags::TYPED_NULL`](crate::tags::TYPED_NULL)) is
 //! refused as malformed. It is how plaintext marks an absent fixed-width
 //! value so its sealed length matches a present one, which is no concern of
 //! data that is not sealed, and this format never writes one.
@@ -129,9 +129,10 @@ use ::serde::Deserialize;
 use vitaminc_aead::frame::{FrameWriteError, ARRAY, MAX_DEPTH, OBJECT, PASSTHROUGH};
 use vitaminc_aead::leaf::{self, Form};
 use vitaminc_aead::plaintext::{Float, Int, Logical, MapSink, Physical, SeqSink, Sink};
-use vitaminc_aead::{tags, Encrypt, Frame, FrameWriter};
+use vitaminc_aead::tags::{STORAGE_MAP, STORAGE_SOME};
+use vitaminc_aead::{Encrypt, Frame, FrameWriter};
 use vitaminc_protected::Protected;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 // =============================================================================
 // Errors
@@ -373,17 +374,6 @@ pub(crate) const MALFORMED: &str = "malformed frame";
 /// profile gives it its own words.
 pub(crate) const UNREAD_REST: &str = "the value did not read the whole frame";
 
-/// The storage profile's presence marker: `SOME`, then the node an
-/// `Option`'s `Some` holds. It is not in the transport frame's grammar, so
-/// [`Frame::parse`] refuses it, and the reader below meets it only in a
-/// storage blob, whose own validator admits it. See
-/// [`storage`](crate::storage).
-pub(crate) const SOME: u8 = tags::STORAGE_SOME;
-
-/// The storage profile's map: `MAP`, a `u32` count, then a key node and a
-/// value node for each entry. Like [`SOME`], only a storage blob holds one.
-pub(crate) const MAP: u8 = tags::STORAGE_MAP;
-
 /// Reads one validated node. Every read below runs on bytes a validator
 /// accepted ([`Frame::parse`], or the storage profile's), so a read failing
 /// is a bug, and is reported as a malformed frame rather than a panic.
@@ -450,14 +440,14 @@ impl<'de> Deserializer<'de> {
                     self.skip()?;
                 }
             }
-            MAP => {
+            STORAGE_MAP => {
                 self.pos += 1;
                 for _ in 0..self.count()? {
                     self.skip()?;
                     self.skip()?;
                 }
             }
-            PASSTHROUGH | SOME => {
+            PASSTHROUGH | STORAGE_SOME => {
                 self.pos += 1;
                 self.skip()?;
             }
@@ -470,7 +460,10 @@ impl<'de> Deserializer<'de> {
 
     /// Whether the next node is a null scalar.
     fn next_is_null(&self) -> Result<bool, Error> {
-        if matches!(self.peek()?, ARRAY | OBJECT | MAP | PASSTHROUGH | SOME) {
+        if matches!(
+            self.peek()?,
+            ARRAY | OBJECT | STORAGE_MAP | PASSTHROUGH | STORAGE_SOME
+        ) {
             return Ok(false);
         }
         let rest = self.buf.get(self.pos..).ok_or_else(malformed)?;
@@ -497,9 +490,9 @@ impl<'de> Deserializer<'de> {
     fn found(&self) -> Result<Unexpected<'static>, Error> {
         Ok(match self.peek()? {
             ARRAY => Unexpected::Seq,
-            OBJECT | MAP => Unexpected::Map,
+            OBJECT | STORAGE_MAP => Unexpected::Map,
             PASSTHROUGH => Unexpected::Other("a passthrough"),
-            SOME => Unexpected::Option,
+            STORAGE_SOME => Unexpected::Option,
             _ => {
                 let rest = self.buf.get(self.pos..).ok_or_else(malformed)?;
                 let ((ty, value), _) = leaf::read(rest, Form::Frame).map_err(|_| malformed())?;
@@ -647,9 +640,9 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         match self.peek()? {
             ARRAY => self.array(visitor),
             OBJECT => self.entries(&[], Keys::Text, visitor),
-            MAP => self.entries(&[], Keys::Nodes, visitor),
+            STORAGE_MAP => self.entries(&[], Keys::Nodes, visitor),
             PASSTHROUGH => Err(Error::new("a passthrough is not supported")),
-            SOME => {
+            STORAGE_SOME => {
                 self.pos += 1;
                 visitor.visit_some(self)
             }
@@ -660,12 +653,12 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         }
     }
 
-    /// Null is `None`. A storage blob marks a `Some` with [`SOME`], so a
+    /// Null is `None`. A storage blob marks a `Some` with [`STORAGE_SOME`](crate::tags::STORAGE_SOME), so a
     /// `Some(())` or a `Some(None)` is not read as `None`. Any other node is
     /// a `Some` holding it: the transport has no marker, and a storage blob
     /// written before a field became optional has none either.
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
-        if self.peek()? == SOME {
+        if self.peek()? == STORAGE_SOME {
             self.pos += 1;
             return visitor.visit_some(self);
         }
@@ -693,7 +686,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     ) -> Result<V::Value, Error> {
         match self.peek()? {
             OBJECT => self.entries(fields, Keys::Text, visitor),
-            MAP => self.entries(fields, Keys::Names, visitor),
+            STORAGE_MAP => self.entries(fields, Keys::Names, visitor),
             _ => self.only(|found| matches!(found, Unexpected::Map), visitor),
         }
     }
@@ -724,7 +717,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
                 }
                 Ok(value)
             }
-            ARRAY | MAP | PASSTHROUGH | SOME => Err(Error::new(
+            ARRAY | STORAGE_MAP | PASSTHROUGH | STORAGE_SOME => Err(Error::new(
                 "expected an enum: a variant name, or an object of one entry",
             )),
             _ => match self.scalar()? {
@@ -1097,26 +1090,10 @@ pub(crate) fn written(error: FrameWriteError) -> Error {
 }
 
 /// Writes one node into a [`FrameWriter`].
-/// Make room for `additional` more bytes. A `Vec` that regrows frees its
-/// old allocation without wiping it, so grow into a fresh allocation and
-/// wipe the old one instead.
-///
-/// The same as `reserve` in `vitaminc_aead::frame`, which the frame writer
-/// uses; that one is private to its crate. A fix to either belongs in both.
-pub(crate) fn reserve(out: &mut Vec<u8>, additional: usize) {
-    if out.capacity() - out.len() >= additional {
-        return;
-    }
-    let capacity = out
-        .len()
-        .saturating_add(additional)
-        .max(out.len().saturating_mul(2))
-        .max(64);
-    let mut grown = Vec::with_capacity(capacity);
-    grown.extend_from_slice(out);
-    out.zeroize();
-    *out = grown;
-}
+/// Make room for `additional` more bytes, growing into a fresh allocation
+/// and wiping the old one: the frame writer's own, which every writer here
+/// uses.
+pub(crate) use vitaminc_aead::frame::reserve;
 
 /// Appends formatted text to a buffer, growing it as [`reserve`] does.
 pub(crate) struct Appender<'o>(pub(crate) &'o mut Vec<u8>);
