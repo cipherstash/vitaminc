@@ -652,11 +652,16 @@ func encodeMap(enc Encoder, rv reflect.Value) {
 
 func encodeStruct(enc Encoder, rv reflect.Value) {
 	t := rv.Type()
+	// Named as the storage profile names them: `vc:"name"`, options after
+	// a comma, `vc:"-"` skipped, an unknown option refused.
+	fields, err := structFields(t)
+	if err != nil {
+		enc.st.fail(err)
+		return
+	}
 	m := enc.Map()
 	encoded, unexported := 0, 0
-	// Named as the storage profile names them: `vc:"name"`, options after
-	// a comma, `vc:"-"` skipped.
-	for _, f := range structFields(t) {
+	for _, f := range fields {
 		if f.unexported {
 			unexported++
 			continue

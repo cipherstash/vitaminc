@@ -865,3 +865,76 @@ func TestStoragePointerLevelsReadBack(t *testing.T) {
 		t.Errorf("%x: a pointer to Some is not marked", blob)
 	}
 }
+
+// A nil pointer is no map key. It is refused, never handed to its type's
+// MarshalText, which would be called on nil.
+func TestStorageRefusesANilPointerKey(t *testing.T) {
+	for name, v := range map[string]any{
+		"a map":            map[*time.Time]int{nil: 1},
+		"entries":          StorageEntries{{Key: (*time.Time)(nil), Value: 1}},
+		"an interface key": map[any]int{(*time.Time)(nil): 1},
+	} {
+		if _, err := MarshalStorage(v); !errors.Is(err, ErrUnwritable) {
+			t.Errorf("%s: %v, want ErrUnwritable", name, err)
+		}
+	}
+}
+
+// A `vc` tag option other than `default` is refused where a struct is
+// written or read, in a blob or the transport, rather than ignored.
+func TestUnknownTagOptionsAreRefused(t *testing.T) {
+	type misspelt struct {
+		Email string `vc:"email,defualt"`
+	}
+	if _, err := MarshalStorage(misspelt{}); !errors.Is(err, ErrUnwritable) || !strings.Contains(err.Error(), `"defualt"`) {
+		t.Errorf("writing: %v", err)
+	}
+	blob, err := MarshalStorage(map[string]string{"email": "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := UnmarshalStorage(blob, &misspelt{}); err == nil || !strings.Contains(err.Error(), `"defualt"`) {
+		t.Errorf("reading: %v", err)
+	}
+	if _, err := Marshal(misspelt{Email: "x"}); err == nil || !strings.Contains(err.Error(), `"defualt"`) {
+		t.Errorf("the transport: %v", err)
+	}
+	type empty struct {
+		Email string `vc:"email,"`
+	}
+	if _, err := MarshalStorage(empty{}); err != nil {
+		t.Errorf("an empty option: %v", err)
+	}
+}
+
+// A pointer that writes no node of its own costs no depth, so a linked
+// list is as deep in Go as its blob is; a pointer cycle is still refused.
+func TestStoragePointersCostOnlyTheDepthTheyWrite(t *testing.T) {
+	type node struct {
+		Next *node `vc:"next"`
+	}
+	var list *node
+	for range 100 {
+		list = &node{Next: list}
+	}
+	blob, err := MarshalStorage(list)
+	if err != nil {
+		t.Fatalf("a 100-deep list: %v", err)
+	}
+	var back *node
+	if err := UnmarshalStorage(blob, &back); err != nil || !reflect.DeepEqual(back, list) {
+		t.Fatalf("a 100-deep list read back as %v", err)
+	}
+
+	type loop *loop
+	var p loop
+	p = &p
+	if _, err := MarshalStorage(p); !errors.Is(err, ErrTooDeep) {
+		t.Errorf("a pointer cycle: %v, want ErrTooDeep", err)
+	}
+	var a any
+	a = &a
+	if _, err := MarshalStorage(a); !errors.Is(err, ErrTooDeep) {
+		t.Errorf("an interface cycle: %v, want ErrTooDeep", err)
+	}
+}

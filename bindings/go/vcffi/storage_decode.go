@@ -161,14 +161,14 @@ func storageNode(r *reader, depth int) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			id, err := keyOf(key)
-			if err != nil {
+			id, ok := decodedKeyID(key)
+			if !ok {
 				return nil, ErrMalformed
 			}
-			if _, dup := seen[id.id]; dup {
+			if _, dup := seen[id]; dup {
 				return nil, ErrMalformed
 			}
-			seen[id.id] = struct{}{}
+			seen[id] = struct{}{}
 			value, err := storageNode(r, depth+1)
 			if err != nil {
 				return nil, err
@@ -472,7 +472,10 @@ func assignStruct(m any, rv reflect.Value, path string) error {
 	if !ok {
 		return mismatch(path, "an object", m)
 	}
-	fields := structFields(rv.Type())
+	fields, err := structFields(rv.Type())
+	if err != nil {
+		return err
+	}
 	byName := make(map[string]int, len(fields))
 	for i, f := range fields {
 		if !f.unexported {

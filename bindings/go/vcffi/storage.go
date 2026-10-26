@@ -174,23 +174,8 @@ func (w *storageWriter) reflect(rv reflect.Value, depth int) error {
 		return unwritable("%s implements Encryptable, which has no storage form", rv.Type())
 	}
 	switch rv.Kind() {
-	case reflect.Pointer:
-		if rv.IsNil() {
-			w.buf = append(w.buf, tagNull)
-			return nil
-		}
-		if startsOptional(rv.Elem()) {
-			w.buf = append(w.buf, StorageSome)
-		}
-		// Charged against the depth bound even when unmarked, so a pointer
-		// cycle (p = &p) fails cleanly rather than recursing forever.
-		return w.reflect(rv.Elem(), depth+1)
-	case reflect.Interface:
-		if rv.IsNil() {
-			w.buf = append(w.buf, tagNull)
-			return nil
-		}
-		return w.reflect(rv.Elem(), depth)
+	case reflect.Pointer, reflect.Interface:
+		return w.indirect(rv, depth)
 	}
 	if rv.CanInterface() {
 		switch rv.Type() {
@@ -243,17 +228,57 @@ func (w *storageWriter) reflect(rv reflect.Value, depth int) error {
 	return unwritable("a value of kind %s has no storage form", rv.Kind())
 }
 
+// indirect writes what the pointer or interface rv holds: null if it is
+// nil, and otherwise what it points at, marked if that starts with null or
+// a marker (see [startsOptional]). The marker is a node, and costs a level
+// of depth as a reader counts it; a pointer or interface that writes
+// nothing of its own costs none, since the blob is no deeper for it. A run
+// of those is bounded on its own, so a cycle (p = &p) is refused rather
+// than followed forever.
+func (w *storageWriter) indirect(rv reflect.Value, depth int) error {
+	for hops := 0; ; hops++ {
+		if hops > maxDepth {
+			return fmt.Errorf("%w: %w", ErrUnwritable, ErrTooDeep)
+		}
+		if encryptable(rv.Type()) {
+			return unwritable("%s implements Encryptable, which has no storage form", rv.Type())
+		}
+		if rv.IsNil() {
+			w.buf = append(w.buf, tagNull)
+			return nil
+		}
+		elem := rv.Elem()
+		if rv.Kind() == reflect.Pointer && startsOptional(elem) {
+			w.buf = append(w.buf, StorageSome)
+			return w.reflect(elem, depth+1)
+		}
+		if k := elem.Kind(); k != reflect.Pointer && k != reflect.Interface {
+			return w.reflect(elem, depth)
+		}
+		rv = elem
+	}
+}
+
 // startsOptional reports whether rv is written starting with null or
 // [StorageSome]: a nil pointer or interface, [Some], or a pointer or
 // interface to one of those. A pointer to such a value is marked, or a
 // reader would take that null or marker for the pointer's own, and the
-// value would read back one level shorter.
+// value would read back one level shorter. A run of pointers longer than a
+// blob may nest, a cycle say, is refused when it is written, so it is not
+// followed further here.
 func startsOptional(rv reflect.Value) bool {
-	switch rv.Kind() {
-	case reflect.Pointer, reflect.Interface:
-		return rv.IsNil() || startsOptional(rv.Elem())
+	for range maxDepth + 2 {
+		switch rv.Kind() {
+		case reflect.Pointer, reflect.Interface:
+			if rv.IsNil() {
+				return true
+			}
+			rv = rv.Elem()
+		default:
+			return rv.Type() == reflect.TypeOf(Some{})
+		}
 	}
-	return rv.Type() == reflect.TypeOf(Some{})
+	return false
 }
 
 // byteArray reports whether t is [N]byte, a UUID say, written as bytes.
@@ -372,8 +397,12 @@ func (w *storageWriter) field(key string, seen map[string]struct{}) error {
 func (w *storageWriter) goStruct(rv reflect.Value, depth int) error {
 	at := w.open(tagObject)
 	seen := make(map[string]struct{})
+	fields, err := structFields(rv.Type())
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrUnwritable, err)
+	}
 	written, unexported := 0, 0
-	for _, f := range structFields(rv.Type()) {
+	for _, f := range fields {
 		if f.unexported {
 			unexported++
 			continue
@@ -407,8 +436,10 @@ type storageField struct {
 // structFields are t's fields in declaration order, named by their `vc`
 // tags, without the ones a `vc:"-"` tag skips. A tag is a name, then
 // options after commas: `vc:"age,default"`, or `vc:",default"` to keep the
-// field's own name. The transport names fields the same way.
-func structFields(t reflect.Type) []storageField {
+// field's own name. `default` is the only option; any other is refused, so
+// a misspelt one is not quietly ignored. The transport names fields the
+// same way.
+func structFields(t reflect.Type) ([]storageField, error) {
 	fields := make([]storageField, 0, t.NumField())
 	for i := range t.NumField() {
 		f := t.Field(i)
@@ -428,12 +459,18 @@ func structFields(t reflect.Type) []storageField {
 			for options != "" {
 				var option string
 				option, options, _ = strings.Cut(options, ",")
-				field.defaulted = field.defaulted || option == "default"
+				switch option {
+				case "default":
+					field.defaulted = true
+				case "":
+				default:
+					return nil, fmt.Errorf("vcffi: field %s of %s has an unknown vc tag option %q", f.Name, t, option)
+				}
 			}
 		}
 		fields = append(fields, field)
 	}
-	return fields
+	return fields, nil
 }
 
 // mapKey is a map key written as a node, and what makes two keys the same:
@@ -469,6 +506,47 @@ func compareKeys(a, b keyID) int {
 	return cmp.Or(cmp.Compare(a.hi, b.hi), cmp.Compare(a.lo, b.lo), cmp.Compare(a.s, b.s))
 }
 
+// wideKey is the keyID of a 128-bit integer, from its little-endian word.
+func wideKey(word []byte, signed bool) keyID {
+	return keyID{
+		lo:       binary.LittleEndian.Uint64(word),
+		hi:       binary.LittleEndian.Uint64(word[8:]),
+		negative: signed && word[15]&0x80 != 0,
+	}
+}
+
+// decodedKeyID is the keyID of a key as the reader decodes it: a Go
+// integer, Int128 or Uint128, a string, or bytes.
+func decodedKeyID(k any) (keyID, bool) {
+	switch x := k.(type) {
+	case int8:
+		return signedKey(int64(x)), true
+	case int16:
+		return signedKey(int64(x)), true
+	case int32:
+		return signedKey(int64(x)), true
+	case int64:
+		return signedKey(x), true
+	case uint8:
+		return keyID{lo: uint64(x)}, true
+	case uint16:
+		return keyID{lo: uint64(x)}, true
+	case uint32:
+		return keyID{lo: uint64(x)}, true
+	case uint64:
+		return keyID{lo: x}, true
+	case vcvalue.Int128:
+		return wideKey(x[:], true), true
+	case vcvalue.Uint128:
+		return wideKey(x[:], false), true
+	case string:
+		return keyID{kind: 1, s: x}, true
+	case []byte:
+		return keyID{kind: 2, s: string(x)}, true
+	}
+	return keyID{}, false
+}
+
 func signedKey(v int64) keyID {
 	id := keyID{negative: v < 0, lo: uint64(v)}
 	if id.negative {
@@ -483,13 +561,16 @@ func keyOf(k any) (mapKey, error) {
 	if !rv.IsValid() {
 		return mapKey{}, unwritable("a map key must be an integer, text or bytes")
 	}
+	// A nil pointer has no value to write; its type's MarshalText, if it
+	// has one, would be called on nil.
+	if (rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface) && rv.IsNil() {
+		return mapKey{}, unwritable("a map key must be an integer, text or bytes, not a nil %s", rv.Type())
+	}
 	w := &storageWriter{}
 	var id keyID
 	switch t := rv.Type(); {
 	case t == int128Type || t == uint128Type:
-		word := arrayBytes(rv)
-		id = keyID{lo: binary.LittleEndian.Uint64(word), hi: binary.LittleEndian.Uint64(word[8:])}
-		id.negative = t == int128Type && word[15]&0x80 != 0
+		id = wideKey(arrayBytes(rv), t == int128Type)
 		_ = w.any(rv.Interface(), 0)
 	case byteArray(t):
 		b := arrayBytes(rv)

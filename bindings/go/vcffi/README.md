@@ -47,7 +47,10 @@ pointer to one) is marked present, so every level reads back. Reading
 follows Rust's rules: an integer reads into any integer type it fits, a
 pointer reads a value marked present or not, unknown keys are ignored, and a
 missing field is refused unless it is a pointer or tagged `vc:"name,default"`,
-which reads it as its zero value, as Rust's `#[serde(default)]` does. Go's `[]uint8` is `[]byte`, so it is always
+which reads it as its zero value, as Rust's `#[serde(default)]` does.
+`default` is the only tag option: any other is refused, in a blob and in the
+transport, so a misspelt one is not quietly ignored. A pointer costs no depth
+unless it is marked, so Go nests as deep as the blob does. Go's `[]uint8` is `[]byte`, so it is always
 bytes; a Rust type sharing a value with Go keeps its `Vec<u8>` as bytes with
 `serde_bytes`. Go has no enums and no unit type, so the corpus rows that read
 those are not run here. `FuzzUnmarshalStorage` holds the reader to the
