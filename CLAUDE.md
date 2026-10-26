@@ -36,3 +36,10 @@ When working on a release PR (created by release-plz), you may be asked to rewri
 - Group related commits into a single entry where it makes sense
 - Call out breaking changes prominently with a **Breaking:** prefix
 - Keep entries concise — one line per change is ideal
+
+## Reviewing pull requests
+
+Follow the review guidelines in `AGENTS.md`, including its list of known
+non-findings:
+
+@AGENTS.md
