@@ -5,6 +5,12 @@ workflows, test infrastructure, and design history in repository documents.
 See [documentation conventions](docs/documentation.md) for shared README
 links and checks, and [RELEASING.md](RELEASING.md) for release procedures.
 
+The repository includes the [rust-documentation skill](.agents/skills/rust-documentation/SKILL.md)
+with its references and examples, so documentation work does not require a
+global skill installation. The bundled skill declares an Apache-2.0 license.
+Use this repository's documentation conventions when its general guidance
+differs from local requirements.
+
 ## Design records
 
 The [architecture decision records](docs/adr) explain past design decisions:
