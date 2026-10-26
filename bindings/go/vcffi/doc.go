@@ -10,13 +10,19 @@
 // mode this module prevents: one codec, one hostile-input test suite, one
 // fuzz corpus.
 //
-// # Transport, not storage
+// # Transport, and one storage profile
 //
-// These bytes are an FFI detail with no compatibility commitment. The only
-// frozen format is the sealed leaf inside the AEAD envelope (see
-// vcvalue.Sealed and the Rust crate vitaminc-aead's leaf codec). Nothing this
-// package encodes should ever be persisted; durable cross-language interop
-// is a schema-aware layer's job.
+// The transport bytes are an FFI detail with no compatibility commitment:
+// nothing [Marshal], [Encode] or [MarshalCipherText] writes should ever be
+// persisted. The one exception is the storage profile, [MarshalStorage] and
+// [UnmarshalStorage], which write and read a value as a versioned blob for
+// bytes that are kept. Its format is shared with the Rust module
+// vitaminc_aead_frame::storage, specified in packages/aead-frame/STORAGE.md,
+// frozen at version 1, and pinned by the golden corpus in
+// packages/aead-frame/testdata/storage-v1.json, which this package's tests
+// read. Use it, and only it, for bytes that outlive the process that wrote
+// them. The other frozen format is the sealed leaf inside the AEAD envelope
+// (see vcvalue.Sealed and the Rust crate vitaminc-aead's leaf codec).
 //
 // # Values and ciphertexts
 //
