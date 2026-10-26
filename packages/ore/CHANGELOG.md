@@ -1,4 +1,10 @@
 
+## [0.8.1] - 2026-10-26
+
+### Dependencies
+
+- bump orderable-bytes from 0.2.0 to 0.2.1
+
 ## [0.8.0] - 2026-10-21
 
 Order terms stored by 0.7 stay valid and compare with terms made by 0.8: no plain-space encoding, domain label or salt changes. A space that places nulls is a new space with its own labels, so turning a policy on for a column is a re-index. Nothing in `OrderScheme` changes, so a scheme crate needs no code change; its `test-support` conformance now also runs every fixed-width target under both policies, so a scheme meets an all-zero and an all-ones plaintext.

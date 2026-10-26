@@ -13,8 +13,8 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-vitaminc-protected = { version = "0.8.0", path = "../protected", features = ["bitvec"] }
-vitaminc-random = { version = "0.8.0", path = "../random" }
+vitaminc-protected = { version = "0.8.1", path = "../protected", features = ["bitvec"] }
+vitaminc-random = { version = "0.8.1", path = "../random" }
 
 bitvec = { workspace = true }
 rand = { workspace = true }
