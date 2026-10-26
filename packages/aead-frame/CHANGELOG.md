@@ -1,4 +1,11 @@
 
+## [0.8.2] - 2026-10-26
+
+### Documentation
+
+- name the Go implementation of the storage profile
+- name storage blobs in ErrMalformed, and record that Go writes a present pointer unmarked
+
 ## [0.8.1] - 2026-10-26
 
 Nothing 0.8.0 wrote or read changes: the transport frame, the transport serde format and the ciphertext codec write the same bytes, and existing ciphertexts are unaffected.
