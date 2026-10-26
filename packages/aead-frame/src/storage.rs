@@ -63,11 +63,11 @@ pub const HEADER: [u8; 4] = [MAGIC[0], MAGIC[1], MAGIC[2], VERSION];
 
 /// The presence marker: `SOME`, then the node an `Option`'s `Some` holds,
 /// so `Some(())` and `Some(None)` are not `None`.
-pub const SOME: u8 = transport::SOME;
+pub const SOME: u8 = tags::STORAGE_SOME;
 
 /// A serde map: `MAP`, a `u32` count, then a key node and a value node for
 /// each entry. A struct and an enum variant's payload are objects.
-pub const MAP: u8 = transport::MAP;
+pub const MAP: u8 = tags::STORAGE_MAP;
 
 /// The scalar tags a version 1 node may start with. A tag the leaf codec
 /// gains later is not admitted here until a new version says so.
@@ -1115,23 +1115,6 @@ mod tests {
         for byte in MAGIC {
             assert!(!SCALARS.contains(&byte) && ![ARRAY, OBJECT, MAP, SOME].contains(&byte));
         }
-    }
-
-    #[test]
-    fn reserve_keeps_the_bytes_and_makes_room() {
-        let mut out = vec![1, 2, 3];
-        out.shrink_to_fit();
-        reserve(&mut out, 100);
-        assert_eq!(out, [1, 2, 3]);
-        assert!(out.capacity() >= 103);
-        let capacity = out.capacity();
-        reserve(&mut out, 1);
-        assert_eq!(out.capacity(), capacity, "a buffer with room is left alone");
-        // A full buffer grows for even a little more than its length.
-        let mut full = vec![1, 2, 3];
-        full.shrink_to_fit();
-        reserve(&mut full, 4);
-        assert!(full.capacity() >= 7);
     }
 
     /// The two refusals no blob can reach: they mean the reader and the

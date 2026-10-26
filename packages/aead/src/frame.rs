@@ -377,7 +377,11 @@ impl<'o> FrameWriter<'o> {
 /// Make room for `additional` more bytes. A `Vec` that regrows frees its
 /// old allocation without wiping it, and a frame is plaintext, so grow into
 /// a fresh allocation and wipe the old one instead.
-pub(crate) fn reserve(out: &mut Vec<u8>, additional: usize) {
+///
+/// Public, but hidden, for `vitaminc-aead-frame`'s writers, which grow
+/// their buffers the same way: one copy, so a fix reaches every writer.
+#[doc(hidden)]
+pub fn reserve(out: &mut Vec<u8>, additional: usize) {
     if out.capacity() - out.len() >= additional {
         return;
     }
