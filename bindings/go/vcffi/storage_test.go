@@ -374,7 +374,11 @@ func goType(t testing.TB, raw json.RawMessage) (reflect.Type, string) {
 				return nil, why
 			}
 			return reflect.MapOf(key, value), ""
-		case "struct":
+		// UnmarshalStorage ignores unknown fields: a struct that denies them
+		// reads as one that does not, and its refusals are skipped below.
+		case "unit_struct":
+			return nil, "Go has no unit type"
+		case "struct", "struct_deny_unknown":
 			var pairs [][2]json.RawMessage
 			_ = json.Unmarshal(v, &pairs)
 			fields := make([]reflect.StructField, len(pairs))
@@ -400,6 +404,20 @@ func goType(t testing.TB, raw json.RawMessage) (reflect.Type, string) {
 	return nil, ""
 }
 
+// deniesUnknown reports whether a row's type is itself a struct that
+// denies unknown keys. A row refused for one is skipped: UnmarshalStorage
+// has no way to deny them. A struct that denies them nested in another
+// type is not looked for: a row refused for that would fail below, rather
+// than be skipped along with whatever else it shows.
+func deniesUnknown(raw json.RawMessage) bool {
+	var kind map[string]json.RawMessage
+	if json.Unmarshal(raw, &kind) != nil {
+		return false
+	}
+	_, ok := kind["struct_deny_unknown"]
+	return ok
+}
+
 // Every reads row Go can express reads as it says, or is refused as a
 // mismatch. What it reads as is compared as the blob it writes back to.
 func TestStorageCorpusReads(t *testing.T) {
@@ -409,6 +427,10 @@ func TestStorageCorpusReads(t *testing.T) {
 		ty, why := goType(t, row.Type)
 		if ty == nil {
 			t.Logf("%s: not expressible in Go: %s", row.Name, why)
+			continue
+		}
+		if !row.HasReads && deniesUnknown(row.Type) {
+			t.Logf("%s: not expressible in Go: UnmarshalStorage has no way to deny unknown fields", row.Name)
 			continue
 		}
 		expressed++
