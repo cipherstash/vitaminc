@@ -1,4 +1,10 @@
 
+## [0.8.1] - 2026-10-26
+
+### Dependencies
+
+- `orderable-bytes` 0.2.1. It changes no encoding, so every term is the same as 0.8.0's, and terms you stored still compare.
+
 ## [0.8.0] - 2026-10-21
 
 Existing equality terms do not change: every domain label and encoding of 0.7 stays as it is, and the null term is a new label beside them. An index built by 0.7 holds a SQL `NULL` where a value was absent; 0.8 writes a term there instead. Both read correctly, but the rows 0.7 wrote still show their absences until they are re-indexed.

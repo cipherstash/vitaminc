@@ -13,8 +13,8 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-vitaminc-aead = { version = "0.8.0", path = "../aead" }
-vitaminc-protected = { version = "0.8.0", path = "../protected" }
+vitaminc-aead = { version = "0.8.1", path = "../aead" }
+vitaminc-protected = { version = "0.8.1", path = "../protected" }
 thiserror = { workspace = true }
 
 # NFC is stable for assigned code points, and the Unicode 16 assignment check
