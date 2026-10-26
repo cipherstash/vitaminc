@@ -3,7 +3,7 @@
 
 ### Dependencies
 
-- bump orderable-bytes from 0.2.0 to 0.2.1
+- `orderable-bytes` 0.2.1. It changes no encoding, so every term is the same as 0.8.0's, and terms you stored still compare.
 
 ## [0.8.0] - 2026-10-21
 
