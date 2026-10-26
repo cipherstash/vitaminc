@@ -20,8 +20,8 @@ name: "Kani (storage reader)"
 # most of it the proofs over map keys, so they run two at a time. Kept apart
 # from kani.yml so a change to one crate does not run the other's proofs.
 #
-# Kani installs its own pinned nightly and CBMC on first use (`cargo kani
-# setup`, a few minutes); the cache keeps that between runs.
+# Kani is installed by .github/actions/setup-kani, which holds the version
+# pin and the cache both Kani workflows share.
 on:
   # No branch filter: a stacked PR (a feature branch as base) must run this
   # gate too; see go.yml.
@@ -41,6 +41,7 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/kani-storage.yml"
+      - ".github/actions/setup-kani/**"
 
   workflow_dispatch:
 
@@ -55,8 +56,6 @@ concurrency:
   group: kani-storage-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  KANI_VERSION: "0.67.0"
 
 jobs:
   kani:
@@ -69,28 +68,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/bin/cargo-kani
-            ~/.cargo/bin/kani
-            ~/.kani/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-kani-${{ env.KANI_VERSION }}-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: setup rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: install kani
-        # A plain `cargo install`, like the mutants and crap gates, rather
-        # than the Kani GitHub Action the org allowlist may not permit.
-        run: |
-          if ! cargo kani --version 2>/dev/null | grep -q "$KANI_VERSION"; then
-            cargo install --locked kani-verifier --version "$KANI_VERSION"
-            cargo kani setup
-          fi
+      - uses: ./.github/actions/setup-kani
 
       - name: prove
         # Two at a time: the map key proofs each solve over 128-bit values,

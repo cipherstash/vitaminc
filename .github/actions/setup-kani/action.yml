@@ -1,0 +1,41 @@
+name: "Set up Kani"
+description: "Install the pinned Kani verifier, its nightly and CBMC, cached between runs. Used by kani.yml and kani-storage.yml, so a version bump is one edit."
+
+inputs:
+  version:
+    description: "The kani-verifier version."
+    # The one pin for every Kani workflow.
+    default: "0.67.0"
+
+runs:
+  using: "composite"
+  steps:
+    # Both workflows share this cache: it holds only the pinned Kani and
+    # the crates the lockfile names, which are the same for both.
+    - uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/bin/cargo-kani
+          ~/.cargo/bin/kani
+          ~/.kani/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: ${{ runner.os }}-kani-${{ inputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: setup rust stable
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: install kani
+      # A plain `cargo install`, like the mutants and crap gates, rather
+      # than the Kani GitHub Action the org allowlist may not permit. Kani
+      # installs its own pinned nightly and CBMC on first use (`cargo kani
+      # setup`, a few minutes); the cache keeps that between runs.
+      shell: bash
+      env:
+        KANI_VERSION: ${{ inputs.version }}
+      run: |
+        if ! cargo kani --version 2>/dev/null | grep -q "$KANI_VERSION"; then
+          cargo install --locked kani-verifier --version "$KANI_VERSION"
+          cargo kani setup
+        fi
