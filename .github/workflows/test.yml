@@ -144,11 +144,15 @@ jobs:
       # catches a workspace member that release-plz.toml would try to
       # publish although the crate is not publishable, which fails every
       # Release run and nothing else checks.
-      - name: release lockfile re-sync and release-plz config (script tests)
+      - name: release synchronization and release-plz config (script tests)
         run: |
           python3 -m unittest discover -s .github/scripts -p 'test_sync_nested_lockfiles.py'
           python3 -m unittest discover -s .github/scripts -p 'test_commit_on_branch.py'
           python3 -m unittest discover -s .github/scripts -p 'test_release_plz_config.py'
+          python3 -m unittest discover -s .github/scripts -p 'test_sync_readme_versions.py'
+
+      - name: README dependency versions
+        run: python3 .github/scripts/sync_readme_versions.py . --check
 
       # Broken intra-doc links are invisible without this: rustdoc warns and
       # exits 0, so a link to a renamed or newly-private item rots silently and
