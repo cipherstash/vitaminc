@@ -1,3 +1,9 @@
+// These definitions precede the README so rustdoc links to the version being built.
+// The README supplies published-API URLs for GitHub. See docs/documentation.md.
+//! [ConstantTimeEq]: crate::ConstantTimeEq
+//! [Controlled]: crate::Controlled
+//! [Equatable]: crate::Equatable
+//!
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 #![warn(unused_results)]

@@ -201,8 +201,7 @@ impl<'a> Context<'a> {
     /// sealed under the bare context can never be re-tagged as a marker, a
     /// marker can never validate as an encrypted empty byte string, and no
     /// marker can be replayed as a different structural claim. An absent
-    /// value is not a marker: `None` is a null leaf, sealed like any other
-    /// (ADR 0001).
+    /// value is not a marker: `None` is a null leaf, sealed like any other.
     pub fn for_empty_sequence(&self) -> Context<'static> {
         self.for_marker(b"empty-sequence")
     }

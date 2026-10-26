@@ -1,3 +1,7 @@
+// These definitions precede the README so rustdoc links to the version being built.
+// The README supplies published-API URLs for GitHub. See docs/documentation.md.
+//! [`PermutationKey::from_seed`]: crate::PermutationKey::from_seed
+//!
 #![doc = include_str!("../README.md")]
 mod bitwise;
 mod elementwise;

@@ -170,3 +170,11 @@ MSRV increases require a minor release; patch releases retain the existing
 floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
 
 License: MIT.
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[`NormalizeError::NoDomain`]: https://docs.rs/vitaminc-normalize/latest/vitaminc_normalize/enum.NormalizeError.html#variant.NoDomain
+[`Normalized`]: https://docs.rs/vitaminc-normalize/latest/vitaminc_normalize/struct.Normalized.html
+[`Term`]: https://docs.rs/vitaminc-normalize/latest/vitaminc_normalize/struct.Term.html
+[`Terms`]: https://docs.rs/vitaminc-normalize/latest/vitaminc_normalize/struct.Terms.html
+[`decimal`]: https://docs.rs/vitaminc-normalize/latest/vitaminc_normalize/fn.decimal.html
+[`domain::NULL`]: https://docs.rs/vitaminc-normalize/latest/vitaminc_normalize/domain/constant.NULL.html

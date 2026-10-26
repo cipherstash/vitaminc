@@ -1,3 +1,8 @@
+// These definitions precede the README so rustdoc links to the version being built.
+// The README supplies published-API URLs for GitHub. See docs/documentation.md.
+//! [`Generatable`]: trait@crate::Generatable
+//! [`SafeRand`]: crate::SafeRand
+//!
 #![doc = include_str!("../README.md")]
 use thiserror::Error;
 mod bounded;

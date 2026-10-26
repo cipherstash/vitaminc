@@ -4,7 +4,7 @@
 [![Workflow Status](https://github.com/cipherstash/vitaminc/actions/workflows/test.yml/badge.svg)](https://github.com/cipherstash/vitaminc/actions/workflows/test.yml)
 
 A `MAC` implementation using [vitaminc](https://github.com/cipherstash/vitaminc) that uses AWS KMS to generate HMACs.
-This implementation is asynchronous and uses the [aws_sdk_kms] crate to interact with AWS KMS.
+This implementation is asynchronous and uses the [AWS KMS SDK](https://docs.rs/aws-sdk-kms).
 
 This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) framework to make cryptography code healthy.
 

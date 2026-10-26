@@ -135,3 +135,7 @@ floor. See the [workspace compatibility policy](https://github.com/cipherstash/v
 Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
 
 License: MIT
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[`Generatable`]: https://docs.rs/vitaminc-random/latest/vitaminc_random/trait.Generatable.html
+[`SafeRand`]: https://docs.rs/vitaminc-random/latest/vitaminc_random/struct.SafeRand.html

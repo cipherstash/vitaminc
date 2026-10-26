@@ -260,3 +260,8 @@ floor. See the [workspace compatibility policy](https://github.com/cipherstash/v
 Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
 
 License: MIT
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[ConstantTimeEq]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/trait.ConstantTimeEq.html
+[Controlled]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/trait.Controlled.html
+[Equatable]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/struct.Equatable.html

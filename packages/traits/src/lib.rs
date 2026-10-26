@@ -1,3 +1,11 @@
+// These definitions precede the README so rustdoc links to the version being built.
+// The README supplies published-API URLs for GitHub. See docs/documentation.md.
+//!
+// Workspace crates release together; keep cross-crate links on that version.
+#![doc = concat!(
+    "\n[Controlled]: https://docs.rs/vitaminc-protected/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_protected/trait.Controlled.html\n",
+)]
 #![deny(clippy::unwrap_used, clippy::todo, unsafe_code, unused_imports)]
 #![doc = include_str!("../README.md")]
 use vitaminc_protected::{Controlled, Zeroed};

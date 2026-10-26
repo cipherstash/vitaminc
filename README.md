@@ -21,6 +21,24 @@ Vitamin C is in active development and aims to address the following:
 
 * **Fast**: speed and security _can_ be friends!
 
+## Which crate should I use?
+
+| I want to… | Start with |
+| --- | --- |
+| Encrypt and decrypt Rust values with AES-256-GCM | [`vitaminc-encrypt`](https://github.com/cipherstash/vitaminc/tree/main/packages/encrypt) |
+| Keep sensitive values out of debug output and wipe them on drop | [`vitaminc-protected`](https://github.com/cipherstash/vitaminc/tree/main/packages/protected) |
+| Generate cryptographic randomness | [`vitaminc-random`](https://github.com/cipherstash/vitaminc/tree/main/packages/random) |
+| Describe structured values or implement an encryption backend | [`vitaminc-aead`](https://github.com/cipherstash/vitaminc/tree/main/packages/aead), with [`vitaminc-context`](https://github.com/cipherstash/vitaminc/tree/main/packages/context) for associated data |
+| Derive pseudorandom values or equality-index terms | [`vitaminc-prf`](https://github.com/cipherstash/vitaminc/tree/main/packages/prf) for the interfaces, [`vitaminc-hmac`](https://github.com/cipherstash/vitaminc/tree/main/packages/hmac) for HMAC-SHA256, and [`vitaminc-normalize`](https://github.com/cipherstash/vitaminc/tree/main/packages/normalize) for equality encodings |
+| Integrate an order-revealing encryption scheme | [`vitaminc-ore`](https://github.com/cipherstash/vitaminc/tree/main/packages/ore) for terms and scheme interfaces; supply an ORE backend |
+| Implement a hash/MAC adapter, including a remote provider | [`vitaminc-traits`](https://github.com/cipherstash/vitaminc/tree/main/packages/traits) and [`vitaminc-async-traits`](https://github.com/cipherstash/vitaminc/tree/main/packages/async-traits); [`vitaminc-kms`](https://github.com/cipherstash/vitaminc/tree/main/packages/kms) supplies AWS KMS HMAC |
+| Exchange encoded values across a language boundary, or store versioned blobs | [`vitaminc-aead-frame`](https://github.com/cipherstash/vitaminc/tree/main/packages/aead-frame); read its [storage contract](https://github.com/cipherstash/vitaminc/blob/main/packages/aead-frame/STORAGE.md) before persisting data |
+| Build a native Node.js addon | [`vitaminc-aead-napi`](https://github.com/cipherstash/vitaminc/tree/main/packages/aead-napi); this is a Rust library for addons, not an npm package |
+
+The facade's features expose most of these crates. `vitaminc-aead-frame` and
+`vitaminc-aead-napi` are direct dependencies. Indexes reveal information about
+values; read the normalization and ORE guides before choosing an index.
+
 ## Usage
 
 You can install the top-level `vitaminc` crate and enable specific features:
@@ -57,31 +75,16 @@ feature raises its requirement to <!-- msrv:vitaminc/aws-kms -->**1.94.1**<!-- /
 
 MSRV increases require a minor release (for example, 0.8 to 0.9) and must be
 called out in release notes. Patch releases retain the existing floor.
-Dependency updates must respect each crate's declared `rust-version`.
-CI checks the locked dependency graph at these Rust versions; the manifest's
-`rust-version` is the source of truth for each crate.
 
-All crates require `std`; there is no `no_std` configuration yet. CI checks
-native builds, `vitaminc-encrypt` on `wasm32-unknown-unknown` in Node, and the
-separate encryption guest on `wasm32-wasip1`. JavaScript WASM hosts need Web
+All crates require `std`; there is no `no_std` configuration yet. Supported
+targets include native builds, `vitaminc-encrypt` on `wasm32-unknown-unknown`,
+and the separate encryption guest on `wasm32-wasip1`. JavaScript WASM hosts need Web
 Crypto and the generated bindings described in the
 [encryption setup guide](https://github.com/cipherstash/vitaminc/tree/main/packages/encrypt#webassembly-setup).
 The KMS adapter and Node addon bindings target native applications.
 
 License: MIT. `vitaminc-ore` also includes Unicode-licensed data and declares
 `MIT AND Unicode-3.0`; see its license files.
-
-## Testing
-
-Prerequisites:
-
-* [localstack](https://github.com/localstack/localstack) is installed
-
-To run the tests:
-
-* Start localstack (typically done by running `localstack start` from the shell)
-* `cargo test`
-
 
 # Features and sub-crates
 
@@ -106,6 +109,8 @@ crate directly and enable its feature; the facade does not forward them.
 | Feature      | Source            | Crates.io                                                                                              | Documentation |
 |--------------|------------------|--------------------------------------------------------------------------------------------------------|---------------|
 | `aead`  | [`vitaminc-aead`](https://github.com/cipherstash/vitaminc/tree/main/packages/aead) | [![crates.io](https://img.shields.io/crates/v/vitaminc-aead.svg)](https://crates.io/crates/vitaminc-aead) | [![docs.rs](https://docs.rs/vitaminc-aead/badge.svg)](https://docs.rs/vitaminc-aead) |
+| Direct dependency | [`vitaminc-aead-frame`](https://github.com/cipherstash/vitaminc/tree/main/packages/aead-frame) | [![crates.io](https://img.shields.io/crates/v/vitaminc-aead-frame.svg)](https://crates.io/crates/vitaminc-aead-frame) | [![docs.rs](https://docs.rs/vitaminc-aead-frame/badge.svg)](https://docs.rs/vitaminc-aead-frame) |
+| Direct dependency | [`vitaminc-aead-napi`](https://github.com/cipherstash/vitaminc/tree/main/packages/aead-napi) | [![crates.io](https://img.shields.io/crates/v/vitaminc-aead-napi.svg)](https://crates.io/crates/vitaminc-aead-napi) | [![docs.rs](https://docs.rs/vitaminc-aead-napi/badge.svg)](https://docs.rs/vitaminc-aead-napi) |
 | `async-traits`  | [`vitaminc-async-traits`](https://github.com/cipherstash/vitaminc/tree/main/packages/async-traits) | [![crates.io](https://img.shields.io/crates/v/vitaminc-async-traits.svg)](https://crates.io/crates/vitaminc-async-traits) | [![docs.rs](https://docs.rs/vitaminc-async-traits/badge.svg)](https://docs.rs/vitaminc-async-traits) |
 | `context`  | [`vitaminc-context`](https://github.com/cipherstash/vitaminc/tree/main/packages/context) | [![crates.io](https://img.shields.io/crates/v/vitaminc-context.svg)](https://crates.io/crates/vitaminc-context) | [![docs.rs](https://docs.rs/vitaminc-context/badge.svg)](https://docs.rs/vitaminc-context) |
 | `encrypt`  | [`vitaminc-encrypt`](https://github.com/cipherstash/vitaminc/tree/main/packages/encrypt) | [![crates.io](https://img.shields.io/crates/v/vitaminc-encrypt.svg)](https://crates.io/crates/vitaminc-encrypt) | [![docs.rs](https://docs.rs/vitaminc-encrypt/badge.svg)](https://docs.rs/vitaminc-encrypt) |

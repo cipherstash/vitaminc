@@ -6,11 +6,11 @@ batch requests.
 
 The crate defines two sides of the API:
 
-- **Input types implement [`PrfValue`](https://docs.rs/vitaminc-prf/latest/vitaminc_prf/trait.PrfValue.html).**
+- **Input types implement [`PrfValue`].**
   This describes the values to process and their structure: for example, a
   struct's fields and their map keys. It does not choose the cryptographic
   algorithm.
-- **Providers implement [`Prf`](https://docs.rs/vitaminc-prf/latest/vitaminc_prf/trait.Prf.html).**
+- **Providers implement [`Prf`].**
   This defines the backend that computes results from those values, using an
   algorithm such as HMAC-SHA256. A provider can compute locally or send work
   to a remote service.
@@ -37,7 +37,7 @@ cargo add vitaminc-prf
 
 ## Keys, context, and input types
 
-[`PrfKeyInit`](https://docs.rs/vitaminc-prf/latest/vitaminc_prf/trait.PrfKeyInit.html)
+[`PrfKeyInit`]
 constructs a backend by taking ownership of a protected key. The backend owns
 the key and must wipe it when dropped. Derivation methods borrow the backend,
 so you can reuse it without cloning it. The input value and visitor are
@@ -45,7 +45,7 @@ consumed by each call.
 
 Leaf inputs are passed to the backend in `Protected` containers. Each leaf
 also has a context and an explicit
-[`PrfEncoding`](https://docs.rs/vitaminc-prf/latest/vitaminc_prf/struct.PrfEncoding.html)
+[`PrfEncoding`]
 identifier. These are included in the derivation to keep results for different
 uses and input types separate. Map entries add their keys to the context;
 sequence elements share the supplied context without adding an index.
@@ -202,9 +202,7 @@ change them. Use `Normalized` or `EqualityTerm` on both sides when you need
 normalized equality.
 
 Without the `normalize` feature, this crate does not depend on
-`vitaminc-normalize`, `vitaminc-aead`, or the Unicode tables. Each normalization
-domain has an independently calculated HMAC test vector in
-`vitaminc-hmac/tests/normalized_equality.rs`.
+`vitaminc-normalize`, `vitaminc-aead`, or the Unicode tables.
 
 ## Cargo features
 
@@ -221,3 +219,9 @@ MSRV increases require a minor release; patch releases retain the existing
 floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
 
 License: MIT.
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[`PrfEncoding`]: https://docs.rs/vitaminc-prf/latest/vitaminc_prf/struct.PrfEncoding.html
+[`PrfKeyInit`]: https://docs.rs/vitaminc-prf/latest/vitaminc_prf/trait.PrfKeyInit.html
+[`PrfValue`]: https://docs.rs/vitaminc-prf/latest/vitaminc_prf/trait.PrfValue.html
+[`Prf`]: https://docs.rs/vitaminc-prf/latest/vitaminc_prf/trait.Prf.html

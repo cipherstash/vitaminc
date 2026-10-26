@@ -1,3 +1,10 @@
+// These definitions precede the README so rustdoc links to the version being built.
+// The README supplies published-API URLs for GitHub. See docs/documentation.md.
+//! [`PrfEncoding`]: crate::PrfEncoding
+//! [`PrfKeyInit`]: crate::PrfKeyInit
+//! [`PrfValue`]: crate::PrfValue
+//! [`Prf`]: crate::Prf
+//!
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 #![doc = include_str!("../README.md")]

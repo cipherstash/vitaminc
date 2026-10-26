@@ -12,7 +12,7 @@ For example, [AsyncFixedOutputReset], the async version of `FixedOutputReset`, i
 See [`vitaminc-kms`](https://github.com/cipherstash/vitaminc/tree/main/packages/kms).
 
 For a runnable example without a network service or async runtime, see
-[`AsyncFixedOutput`](https://docs.rs/vitaminc-async-traits/latest/vitaminc_async_traits/trait.AsyncFixedOutput.html).
+[`AsyncFixedOutput`].
 It adapts a prepared protected result to the trait, polls the future, and
 checks the returned bytes. For an AWS-backed example, see the
 [KMS setup guide](https://docs.rs/vitaminc-kms).
@@ -44,3 +44,7 @@ Shoutout to [Tony Arcieri](https://github.com/tarcieri), [Artyom Pavlov](https:/
 Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
 
 License: MIT
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[AsyncFixedOutputReset]: https://docs.rs/vitaminc-async-traits/latest/vitaminc_async_traits/trait.AsyncFixedOutputReset.html
+[`AsyncFixedOutput`]: https://docs.rs/vitaminc-async-traits/latest/vitaminc_async_traits/trait.AsyncFixedOutput.html

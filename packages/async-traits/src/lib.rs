@@ -1,3 +1,8 @@
+// These definitions precede the README so rustdoc links to the version being built.
+// The README supplies published-API URLs for GitHub. See docs/documentation.md.
+//! [AsyncFixedOutputReset]: crate::AsyncFixedOutputReset
+//! [`AsyncFixedOutput`]: crate::AsyncFixedOutput
+//!
 #![doc = include_str!("../README.md")]
 use vitaminc_protected::Zeroed;
 use vitaminc_traits::OutputSize;

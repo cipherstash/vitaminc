@@ -288,9 +288,7 @@ replaces, which needs no inference to read, and the term column no
 longer carries a plaintext signal. Both schemes in use leak where two
 terms first differ, so in a sparse domain (ages in an `I32`, say) the
 nulls are the one group that differs from every value in its top bytes;
-in a dense domain the group is only the tied extreme. The decision, and
-the options set aside, are recorded in the vitaminc repository at
-`docs/adr/0002-every-null-gets-an-equality-term-and-an-order-space-may-place-nulls-first-or-last.md`.
+in a dense domain the group is only the tied extreme.
 
 ## A whole value
 
@@ -493,29 +491,13 @@ touched the key or the salt: the same term under every key and context,
 which anyone could write into any index. A constant leading byte keeps
 the order. Fixed-width encodings are never empty and carry no marker. A
 scheme can rely on every plaintext having at least one byte, and every
-term it makes must depend on the key and the salt; `test_support`
-(behind the `test-support` feature) checks a real scheme for both.
+term it makes must depend on the key and the salt.
 
-**A recorded exception to the label rule.** The marker changed the text
-and bytes encodings in vitaminc-ore 0.7 without a new domain label
-([cipherstash/vitaminc#471](https://github.com/cipherstash/vitaminc/issues/471)).
-That is allowed here, and only here, for two reasons. No released term
-was ever made from the old encodings: cllw-ore `0.5.2-rc.1`, the only
-release with its `vitaminc` feature, shipped with the marker already in
-front of what this crate handed it, and ore-rs's `vitaminc` feature was
-unreleased, so every stored term always had the marker. And after the
-change the labels describe what was actually stored all along. Moving
-the marker into this crate changes no stored byte: each scheme crate
-drops its own marker in the same release that moves it to vitaminc-ore
-0.7, and pins its stored format with literal bytes so a doubled or
-missing marker fails its tests. This is not a precedent for changing an
-encoding that has stored data. The rule itself is set in ADR 0002
-([cipherstash/stack#1139](https://github.com/cipherstash/stack/pull/1139)),
-which records the same exception.
+In vitaminc-ore 0.7, the text and bytes marker moved from scheme adapters
+into this crate without changing the domain labels or stored terms.
+Adapters upgrading to 0.7 or later must not prepend a second marker.
 
-The integer and float encodings are the ones the frozen
-`orderable-bytes` 0.2.0 produces, checked against it byte for byte in
-the tests. Text is folded by Unicode's canonical caseless matching (NFD,
+The integer and float encodings match `orderable-bytes` 0.2.1 byte for byte. Text is folded by Unicode's canonical caseless matching (NFD,
 full default case folding, NFD), then every accent is dropped and the
 result put back into NFC: `École` and `ecole` are one term, as are
 `Straße` and `strasse`. An accent is a mark with a non-zero canonical
@@ -532,9 +514,7 @@ arithmetic.
 
 MIT, except the case-folding table, which is derived from Unicode's
 data files and is under the Unicode License v3
-(`UNICODE-LICENSE.txt`). The script that generates it,
-`tools/generate_casefold.py`, is in the repository and not in the
-published crate.
+(`UNICODE-LICENSE.txt`).
 
 ## Known exceptions
 
@@ -573,10 +553,18 @@ No optional features are enabled by default.
 | `chrono` | Adds order targets for date and timestamp types and enables AEAD date support. |
 | `rust_decimal` | Adds decimal order targets and enables AEAD decimal support. |
 | `uuid` | Adds UUID order targets and enables AEAD UUID support. |
-| `test-support` | Internal scheme-testing helpers; not a supported application API. |
 
 ## Compatibility
 
 Requires Rust <!-- msrv:vitaminc-ore -->**1.88.0**<!-- /msrv --> and the Rust standard library (`std`).
 MSRV increases require a minor release; patch releases retain the existing
 floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[`NullOrder`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/enum.NullOrder.html
+[`OrderEncrypt`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/trait.OrderEncrypt.html
+[`OrderError::Unsupported`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/enum.OrderError.html#variant.Unsupported
+[`OrderKeyInit`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/trait.OrderKeyInit.html
+[`OrderPlaintext`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/struct.OrderPlaintext.html
+[`OrderScheme::compare`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/trait.OrderScheme.html#tymethod.compare
+[`OrderScheme`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/trait.OrderScheme.html

@@ -1,3 +1,12 @@
+// These definitions precede the README so rustdoc links to the version being built.
+// The README supplies published-API URLs for GitHub. See docs/documentation.md.
+//! [`NormalizeError::NoDomain`]: crate::NormalizeError::NoDomain
+//! [`Normalized`]: crate::Normalized
+//! [`Term`]: crate::Term
+//! [`Terms`]: crate::Terms
+//! [`decimal`]: crate::decimal
+//! [`domain::NULL`]: crate::domain::NULL
+//!
 #![deny(clippy::unwrap_used, clippy::todo, unsafe_code, unused_imports)]
 #![doc = include_str!("../README.md")]
 

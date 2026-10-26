@@ -78,3 +78,6 @@ Shoutout to Tony Arcieri, Artyom Pavlov and all the contributors to the Rust Cry
 Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
 
 License: MIT
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[Controlled]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/trait.Controlled.html

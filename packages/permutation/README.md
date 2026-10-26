@@ -120,3 +120,6 @@ floor. See the [workspace compatibility policy](https://github.com/cipherstash/v
 Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
 
 License: MIT
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[`PermutationKey::from_seed`]: https://docs.rs/vitaminc-permutation/latest/vitaminc_permutation/struct.PermutationKey.html#method.from_seed
