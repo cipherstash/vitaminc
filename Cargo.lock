@@ -2846,10 +2846,12 @@ dependencies = [
 name = "vitaminc-aead-frame"
 version = "0.8.1"
 dependencies = [
+ "borsh",
  "chrono",
  "criterion",
  "quickcheck",
  "quickcheck_macros",
+ "rmp-serde",
  "rust_decimal",
  "serde",
  "serde_bytes",
