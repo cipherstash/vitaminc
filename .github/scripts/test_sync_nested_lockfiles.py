@@ -9,6 +9,7 @@ import contextlib
 import io
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -16,6 +17,12 @@ from sync_nested_lockfiles import NESTED as NESTED_PATHS
 from sync_nested_lockfiles import check_unqualified, main, sync, workspace_versions
 
 REPO = Path(__file__).resolve().parents[2]
+
+# This bundled skill example is a standalone, unpublished crate with no
+# Vitamin C dependencies. Its lockfile does not follow workspace releases.
+INDEPENDENT_LOCKFILES = {
+    ".agents/skills/rust-documentation/examples/golden-docs/Cargo.lock",
+}
 
 ROOT = """\
 version = 4
@@ -123,9 +130,9 @@ class SyncNestedLockfilesTest(unittest.TestCase):
 
 
 class NestedPathsTest(unittest.TestCase):
-    def test_nested_names_every_lockfile_except_the_root(self):
-        # A new workspace with its own lockfile must be added to NESTED, or
-        # the release PR fails CI again for the reason this script exists.
+    def test_every_non_root_lockfile_is_synced_or_explicitly_independent(self):
+        # New lockfiles must be classified explicitly; do not ignore a whole
+        # directory and silently miss a future workspace dependency.
         tracked = subprocess.run(
             ["git", "ls-files", "*Cargo.lock"],
             cwd=REPO,
@@ -133,7 +140,20 @@ class NestedPathsTest(unittest.TestCase):
             text=True,
             check=True,
         ).stdout.split()
-        self.assertEqual(sorted(set(tracked) - {"Cargo.lock"}), sorted(NESTED_PATHS))
+        self.assertTrue(INDEPENDENT_LOCKFILES.isdisjoint(NESTED_PATHS))
+        self.assertEqual(
+            set(tracked) - {"Cargo.lock"}, set(NESTED_PATHS) | INDEPENDENT_LOCKFILES
+        )
+
+    def test_independent_lockfiles_do_not_depend_on_workspace_crates(self):
+        workspace_names = set(workspace_versions((REPO / "Cargo.lock").read_text()))
+        for path in INDEPENDENT_LOCKFILES:
+            with self.subTest(path=path):
+                packages = tomllib.loads((REPO / path).read_text())["package"]
+                self.assertFalse(
+                    workspace_names & {package["name"] for package in packages},
+                    "A fixture using workspace crates must be added to NESTED_PATHS",
+                )
 
 
 class MainTest(unittest.TestCase):
