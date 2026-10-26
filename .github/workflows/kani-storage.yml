@@ -27,9 +27,9 @@ on:
   # gate too; see go.yml.
   pull_request:
     paths:
-      # The reader and its proofs.
-      - "packages/aead-frame/src/storage.rs"
-      - "packages/aead-frame/src/storage/**"
+      # The reader, its proofs, and the module it shares with the
+      # transport, which defines the storage tags and builds its errors.
+      - "packages/aead-frame/src/**"
       # The leaf codec, tags and integers the reader calls.
       - "packages/aead/src/**"
       # Anything that changes how those compile.
