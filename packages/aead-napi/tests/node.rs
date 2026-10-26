@@ -29,20 +29,34 @@ fn node_value_conformance() {
     ));
     let module = target.join("addon.node");
     std::fs::copy(library, &module).expect("copy Node module");
+    let example = include_str!("../README.md")
+        .split_once("```javascript\n")
+        .expect("README JavaScript example")
+        .1
+        .split_once("\n```")
+        .expect("end of README JavaScript example")
+        .0;
+    let example_path = target.join("readme-example.cjs");
+    std::fs::write(&example_path, example).expect("write README example");
     for suite in [
         "tests/value-conformance.cjs",
         "tests/object-safety.cjs",
         "tests/kind_inventory.cjs",
         "tests/encrypt.cjs",
-    ] {
+    ]
+    .map(|suite| package.join(suite))
+    .into_iter()
+    .chain([example_path])
+    {
         let result = Command::new("node")
-            .arg(package.join(suite))
+            .arg(&suite)
             .arg(&module)
             .output()
             .expect("Node.js is required for binding tests");
         assert!(
             result.status.success(),
-            "{suite}:\n{}\n{}",
+            "{}:\n{}\n{}",
+            suite.display(),
             String::from_utf8_lossy(&result.stdout),
             String::from_utf8_lossy(&result.stderr)
         );

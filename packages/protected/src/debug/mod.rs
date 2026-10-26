@@ -23,9 +23,15 @@ use zeroize::Zeroize;
 ///
 /// `#[derive(OpaqueDebug)]` generates:
 ///
-/// 1. An impl of the marker trait:
-///    ```ignore
-///    impl OpaqueDebug for YourType {}
+/// 1. An impl of the marker trait. This example checks that deriving it
+///    satisfies an `OpaqueDebug` bound:
+///
+///    ```rust
+///    use vitaminc_protected::OpaqueDebug;
+///    #[derive(OpaqueDebug)]
+///    struct ApiToken([u8; 32]);
+///    fn accepts_opaque<T: OpaqueDebug>(_: &T) {}
+///    accepts_opaque(&ApiToken([7; 32]));
 ///    ```
 /// 2. An impl of `core::fmt::Debug` that **never** formats internal fields.
 ///

@@ -2688,6 +2688,9 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+ "vitaminc",
+ "vitaminc-aead",
+ "zeroize",
 ]
 
 [[package]]
@@ -2927,6 +2930,7 @@ dependencies = [
  "bytes",
  "rmp-serde",
  "serde",
+ "sha2",
  "thiserror",
  "vitaminc-protected",
  "vitaminc-random",

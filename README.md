@@ -34,6 +34,20 @@ Or, if you only need a specific capability, you can install a crate directly:
 cargo add vitaminc-protected
 ```
 
+With the `protected` feature enabled, keep a value in a `Protected` wrapper
+to redact its debug output and wipe its contents when it is dropped:
+
+```rust
+use vitaminc::protected::{Controlled, Protected};
+
+let mut token = Protected::new(String::from("example-token"));
+token.update(|value| value.push_str("-updated"));
+
+let debug = format!("{token:?}");
+assert!(debug.contains("***"));
+assert!(!debug.contains("example-token"));
+```
+
 ## Testing
 
 Prerequisites:

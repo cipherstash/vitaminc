@@ -29,6 +29,42 @@ nothing sits in between. This crate supplies the JavaScript side of both:
   keyed by the environment and released by an environment cleanup hook; the
   addon's instance data is untouched.
 
+## Run a Node example
+
+This crate supplies Rust building blocks for a Node addon. The repository's
+[test addon](https://github.com/cipherstash/vitaminc/blob/main/packages/aead-napi/tests/addon/src/lib.rs)
+exports `encryptValue` and `decryptValue` using `JsRef`, `JsCipherText`, and
+`JsBuilder` with AES-256-GCM. It uses a fixed, public test key; use it only
+with sample data.
+
+From the repository root, with Rust and Node.js installed, run:
+
+```sh
+cargo test -p vitaminc-aead-napi --test node
+```
+
+This builds the addon and runs the following example, along with the binding
+tests. To run the example separately, save it as `example.cjs` in the repository
+root and run `node example.cjs target/napi-test-addon/addon.node`.
+
+```javascript
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const addon = require(path.resolve(process.argv[2]));
+
+const value = { name: 'Ada', count: 42n, tags: ['example'] };
+const aad = 'tenant:example';
+const ciphertext = addon.encryptValue(value, aad);
+const recovered = addon.decryptValue(ciphertext, aad);
+
+assert.deepEqual(recovered, value);
+assert.throws(() => addon.decryptValue(ciphertext, 'tenant:other'));
+```
+
+The associated data (`aad`) must match on encryption and decryption. It can
+bind ciphertext to a tenant or another application context. Use `bigint`
+for integer values, as shown by `42n`; JavaScript `number` values are floats.
+
 ## The mapping
 
 | JavaScript                          | Scalar                                   |
@@ -108,7 +144,7 @@ it is not itself loadable from Node.
 ## Testing the conversion layer
 
 `cargo test -p vitaminc-aead-napi` runs pure Rust boundary tests and builds a
-small standalone addon to run four suites inside Node:
+small standalone addon to run the README example and four suites inside Node:
 `tests/value-conformance.cjs` for scalar conversions against the shared
 corpus, `tests/object-safety.cjs` for which object keys are read, how
 output properties are written, and the ciphertext node projection,

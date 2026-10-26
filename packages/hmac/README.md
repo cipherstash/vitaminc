@@ -30,7 +30,7 @@ an `Arc` so the sharing is visible at every call site (see the
 `HmacSha256Prf` docs).
 
 ```rust
-use vitaminc_hmac::{HmacSha256Prf, WeakKeyError};
+use vitaminc_hmac::HmacSha256Prf;
 use vitaminc_prf::PrfKeyInit;
 use vitaminc_protected::Protected;
 
@@ -42,6 +42,7 @@ let too_short = HmacSha256Prf::try_from_bytes(Protected::new(vec![7; 16]));
 assert!(too_short.is_err());
 # Ok(())
 # }
+# fn main() -> Result<(), Box<dyn std::error::Error>> { example() }
 ```
 
 ## Deriving a block
@@ -61,13 +62,14 @@ let term = "alice@example.com"
     .await?;
 assert_eq!(term.len(), 32);
 
-// The same instance keeps serving; nothing was consumed.
+// Reuse the same backend for another input.
 let again = "bob@example.com"
     .prf_with_context(&prf, "users/email/exact/v1")
     .await?;
 assert_ne!(term, again);
 # Ok(())
 # }
+# fn main() -> Result<(), Box<dyn std::error::Error>> { futures::executor::block_on(example()) }
 ```
 
 ## Producing application-specific output
@@ -112,8 +114,10 @@ let positions = "alice@example.com"
     .await?;
 
 assert_eq!(positions.len(), 4);
+assert!(positions.iter().all(|&position| (0..2048).contains(&position)));
 # Ok(())
 # }
+# fn main() -> Result<(), Box<dyn std::error::Error>> { futures::executor::block_on(example()) }
 ```
 
 ## Implementing `PrfValue` for a struct
@@ -156,7 +160,6 @@ impl PrfValue for User {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
 struct UserTerms {
     email: [u8; 32],
     aliases: Vec<[u8; 32]>,
@@ -205,7 +208,9 @@ let terms = user
     .prf_visit_with_context(&prf, "tenant/acme/users/v1", UserTermsVisitor)
     .await?;
 
+assert_eq!(terms.email.len(), 32);
 assert_eq!(terms.aliases.len(), 2);
 # Ok(())
 # }
+# fn main() -> Result<(), Box<dyn std::error::Error>> { futures::executor::block_on(example()) }
 ```
