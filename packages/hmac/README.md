@@ -10,6 +10,12 @@ buffer in a wiped allocation, so no unwiped copy of the key material is left
 behind by construction. Each leaf derives
 `HMAC-SHA256(key, PAE(encoding, context, input))`.
 
+## Installation
+
+```sh
+cargo add vitaminc-hmac vitaminc-prf vitaminc-protected
+```
+
 ## Keying and ownership
 
 Construction goes through `vitaminc_prf::PrfKeyInit`. `new` takes a
@@ -214,3 +220,15 @@ assert_eq!(terms.aliases.len(), 2);
 # }
 # fn main() -> Result<(), Box<dyn std::error::Error>> { futures::executor::block_on(example()) }
 ```
+
+## Cargo features
+
+This crate defines no Cargo feature flags.
+
+## Compatibility
+
+Requires Rust **1.88.0** and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
+
+License: MIT.

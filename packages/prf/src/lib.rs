@@ -1,3 +1,4 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 #![doc = include_str!("../README.md")]
 
@@ -6,14 +7,17 @@ mod encoding;
 mod error;
 mod impls;
 #[cfg(feature = "normalize")]
+#[cfg_attr(docsrs, doc(cfg(feature = "normalize")))]
 mod normalize;
 mod ready;
 mod traits;
 mod visitor;
 
 #[cfg(feature = "normalize")]
+#[cfg_attr(docsrs, doc(cfg(feature = "normalize")))]
 pub use normalize::EqualityTerm;
 #[cfg(feature = "normalize")]
+#[cfg_attr(docsrs, doc(cfg(feature = "normalize")))]
 pub use vitaminc_normalize::{NormalizeError, Normalized};
 
 #[cfg(test)]

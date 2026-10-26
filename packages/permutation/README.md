@@ -7,6 +7,12 @@ A library for permuting data in a secure and efficient manner.
 
 This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) framework to make cryptography code healthy.
 
+## Installation
+
+```sh
+cargo add vitaminc-permutation
+```
+
 ## Warning
 
 This library is a low-level primitive designed to be used in cryptographic applications.
@@ -98,6 +104,16 @@ secret XOR key or a secret position permutation does not provide that guarantee.
 Use these permutations as building blocks in a cryptographic construction whose
 security analysis accounts for the input domain, the information preserved by
 permutation, and key reuse. They are not a standalone cipher for arbitrary values.
+
+## Cargo features
+
+This crate defines no Cargo feature flags.
+
+## Compatibility
+
+Requires Rust **1.88.0** and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
 
 ## CipherStash
 

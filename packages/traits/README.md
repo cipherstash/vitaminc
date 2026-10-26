@@ -16,6 +16,12 @@ with some key differences:
 
 Async versions of some of these traits are provided in the `async-traits` crate.
 
+## Installation
+
+```sh
+cargo add vitaminc-traits vitaminc-protected
+```
+
 ## Adapting a digest
 
 This example adapts SHA-256 to `Update` and `FixedOutput`. Inputs and outputs
@@ -52,6 +58,16 @@ assert_eq!(digest.risky_ref(), &[
     0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
 ]);
 ```
+
+## Cargo features
+
+This crate defines no Cargo feature flags.
+
+## Compatibility
+
+Requires Rust **1.88.0** and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
 
 ## Acknowledgements
 

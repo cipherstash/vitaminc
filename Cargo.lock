@@ -2898,6 +2898,7 @@ dependencies = [
  "quote",
  "syn 3.0.9",
  "trybuild",
+ "vitaminc-protected",
 ]
 
 [[package]]
@@ -2920,6 +2921,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+ "vitaminc-random",
 ]
 
 [[package]]

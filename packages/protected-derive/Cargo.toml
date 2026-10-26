@@ -1,7 +1,7 @@
 [package]
 name = "vitaminc-protected-derive"
 description = "Derive macros for vitaminc-protected. Part of the VitaminC cryptographic suite."
-documentation.workspace = true
+documentation = "https://docs.rs/vitaminc-protected-derive"
 version.workspace = true
 repository.workspace = true
 authors.workspace = true
@@ -23,3 +23,5 @@ syn = { version = "3", features = ["full", "extra-traits"] }
 
 [dev-dependencies]
 trybuild = "1.0.118"
+# Path-only consumer dependency for runnable macro documentation.
+vitaminc-protected = { path = "../protected" }

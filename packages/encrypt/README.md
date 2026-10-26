@@ -45,7 +45,10 @@ own types must depend on `vitaminc-aead` too.
 
 ### Feature flags
 
+No optional features are enabled by default.
+
 - `hlist` — static heterogeneous-list encryption support (enables `vitaminc-aead`'s `hlist` feature)
+- `_test-rust-crypto-backend` — internal CI switch that selects RustCrypto on native targets; do not enable it in application dependencies. WASM selects RustCrypto automatically.
 
 The examples in this guide use the default features. To encrypt `chrono`,
 `rust_decimal`, or `uuid` values, enable the corresponding feature on your
@@ -437,6 +440,12 @@ match encrypt_with_key(&key, "message") {
     Err(other) => eprintln!("The value could not be encrypted: {other}"),
 }
 ```
+
+## Compatibility
+
+Requires Rust **1.88.0** and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
 
 ## CipherStash
 

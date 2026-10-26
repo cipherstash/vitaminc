@@ -1,3 +1,4 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 #![warn(unused_results)]
 #![cfg_attr(test, allow(unused_results))]
@@ -25,6 +26,7 @@ mod zeroed;
 use zeroize::Zeroize;
 
 #[cfg(feature = "bitvec")]
+#[cfg_attr(docsrs, doc(cfg(feature = "bitvec")))]
 /// Indexing bit slices with protected indices (`bitvec` feature).
 /// These adapters perform ordinary indexed accesses; they do not hide the index
 /// through a constant-time scan.

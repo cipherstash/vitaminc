@@ -29,6 +29,12 @@ implementations live in other crates, such as
 [`vitaminc-hmac`](https://docs.rs/vitaminc-hmac), which implements `Prf` using
 HMAC-SHA256. Its documentation includes complete usage examples.
 
+## Installation
+
+```sh
+cargo add vitaminc-prf
+```
+
 ## Keys, context, and input types
 
 [`PrfKeyInit`](https://docs.rs/vitaminc-prf/latest/vitaminc_prf/trait.PrfKeyInit.html)
@@ -199,3 +205,19 @@ Without the `normalize` feature, this crate does not depend on
 `vitaminc-normalize`, `vitaminc-aead`, or the Unicode tables. Each normalization
 domain has an independently calculated HMAC test vector in
 `vitaminc-hmac/tests/normalized_equality.rs`.
+
+## Cargo features
+
+No optional features are enabled by default.
+
+| Feature | Effect |
+| --- | --- |
+| `normalize` | Adds `Normalized`, `EqualityTerm`, and their `PrfValue` implementations. Pulls in `vitaminc-normalize`, AEAD, and Unicode tables. |
+
+## Compatibility
+
+Requires Rust **1.88.0** and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
+
+License: MIT.

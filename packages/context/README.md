@@ -31,6 +31,12 @@ assert_eq!(piece.to_string(), "(\"tenant\", 7u64)");
 assert_eq!(piece.encode(), ("tenant", 7u64).into_context().encode());
 ```
 
+## Installation
+
+```sh
+cargo add vitaminc-context
+```
+
 ## The encoding
 
 A typed leaf (text, bytes, an integer) is framed with what it is, so values
@@ -87,3 +93,19 @@ Encoded bytes prove nothing about emptiness. Framing gives an empty value a
 non-empty encoding — `None` encodes to an eight-byte count word — so an
 `Encoded` leaf counts as empty and `NonEmpty` will not certify it. Prove a
 context non-empty on the value, before it is encoded.
+
+## Cargo features
+
+No optional features are enabled by default.
+
+| Feature | Effect |
+| --- | --- |
+| `arbitrary` | Implements `quickcheck::Arbitrary` for `ContextPiece` for property tests. |
+
+## Compatibility
+
+Requires Rust **1.88.0** and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
+
+License: MIT.

@@ -29,6 +29,14 @@ nothing sits in between. This crate supplies the JavaScript side of both:
   keyed by the environment and released by an environment cleanup hook; the
   addon's instance data is untouched.
 
+## Installation
+
+```sh
+cargo add vitaminc-aead-napi
+```
+
+Add this dependency to a Rust Node addon (`cdylib`). It is not an npm package.
+
 ## Run a Node example
 
 This crate supplies Rust building blocks for a Node addon. The repository's
@@ -241,3 +249,16 @@ coverage; the pure functions beside them stay scored.
 [`Encrypt`]: vitaminc_aead::Encrypt
 [`Sink`]: vitaminc_aead::Sink
 [`JsFault`]: crate::JsFault
+
+## Cargo features
+
+This crate defines no Cargo feature flags.
+
+## Compatibility
+
+Requires Rust **1.88.0** and the Rust standard library (`std`).
+This crate targets native Node.js addons; it is not a WebAssembly binding.
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
+
+License: MIT.

@@ -12,6 +12,10 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 
+[package.metadata.docs.rs]
+features = ["normalize"]
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
 default = []
 # `PrfValue` for `vitaminc_normalize::Normalized` and `EqualityTerm`: equality

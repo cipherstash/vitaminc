@@ -25,6 +25,12 @@ values are equal. They differ where ordering needs it: an order term
 keeps an integer at the width its column declares, and folds accents
 and case out of text, which an equality term must not.
 
+## Installation
+
+```sh
+cargo add vitaminc-ore
+```
+
 ## One space
 
 An order index declares the type of what it holds: its **target**. An
@@ -557,3 +563,20 @@ uuid terms have no fixed-width block ORE, and nor do text and bytes,
 whose terms vary in length; `ore-rs`'s chained block ORE scheme and the
 CLWW schemes take every domain. A scheme reports such a refusal as
 [`OrderError::Unsupported`].
+
+## Cargo features
+
+No optional features are enabled by default.
+
+| Feature | Effect |
+| --- | --- |
+| `chrono` | Adds order targets for date and timestamp types and enables AEAD date support. |
+| `rust_decimal` | Adds decimal order targets and enables AEAD decimal support. |
+| `uuid` | Adds UUID order targets and enables AEAD UUID support. |
+| `test-support` | Internal scheme-testing helpers; not a supported application API. |
+
+## Compatibility
+
+Requires Rust **1.88.0** and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).

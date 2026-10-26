@@ -12,6 +12,10 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 
+[package.metadata.docs.rs]
+features = ["arbitrary"]
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 mutants = "0.0.4"
 vitaminc-protected = { version = "0.8.1", path = "../protected" }

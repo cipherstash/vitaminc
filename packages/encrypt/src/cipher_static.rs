@@ -52,6 +52,7 @@ fn untagged_bytes(leaf: Protected<Vec<u8>>) -> Result<Protected<Vec<u8>>, Unspec
     }))
 }
 
+#[cfg_attr(docsrs, doc(cfg(feature = "hlist")))]
 impl StaticCipher for &Aes256Cipher {
     type Error = Unspecified;
 

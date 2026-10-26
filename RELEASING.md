@@ -175,3 +175,12 @@ Nothing bad. The next push to main updates the existing release PR with the addi
 **Can I edit the release PR by hand?**
 
 Yes — steps 3 and 4 both require it. But the branch is regenerated on the next push to `main`, and your edits go with it. Do the rewrite when you're ready to merge, not as changes land.
+
+## Minimum supported Rust version
+
+Raise a crate's MSRV only in a minor release, never in a patch release.
+Record the new requirement in the release notes. Update `rust-version`, the
+crate's compatibility documentation, and the MSRV CI matrix together. If the
+KMS floor changes, update the facade's `aws-kms` requirement in its docs too.
+Dependency updates in patch releases must continue to build at the existing
+MSRV; constrain or defer updates that raise it.

@@ -44,6 +44,7 @@ pub enum PrfError<E> {
     /// A scalar with no equality term, or one that could not be normalized
     /// (requires the `normalize` feature).
     #[cfg(feature = "normalize")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "normalize")))]
     #[error("cannot derive an equality term: {0}")]
     Normalize(#[from] vitaminc_normalize::NormalizeError),
     /// Invalid driver call order, duplicate key, or unsupported passthrough.

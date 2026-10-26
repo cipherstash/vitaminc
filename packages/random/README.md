@@ -120,6 +120,16 @@ All three are the `BoundedRng::next_below` trait method. The older **inclusive**
 trait and on `SafeRand::next_bounded_u32`; both are deprecated in favour of
 `next_below(max + 1)`.
 
+## Cargo features
+
+This crate defines no Cargo feature flags.
+
+## Compatibility
+
+Requires Rust **1.88.0** and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
+
 ## CipherStash
 
 Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).

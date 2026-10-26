@@ -46,7 +46,8 @@ version = "=1.1.0"
 
 # docs.rs shows the typed rows of the `FitsIn` and `OwnTarget` tables.
 [package.metadata.docs.rs]
-all-features = true
+features = ["chrono", "rust_decimal", "uuid"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 chrono = ["dep:chrono", "vitaminc-aead/chrono"]

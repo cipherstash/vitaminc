@@ -104,6 +104,18 @@ Run the modified program with `cargo run`. The local key ID and endpoint must
 belong to the same LocalStack instance. Documentation tests check the
 configuration block without contacting LocalStack.
 
+## Cargo features
+
+This crate defines no Cargo feature flags.
+
+## Compatibility
+
+Requires Rust **1.94.1** and the Rust standard library (`std`).
+The AWS SDK gives this crate a higher Rust requirement than the rest of the
+workspace. This adapter targets native applications.
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
+
 ## CipherStash
 
 Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).

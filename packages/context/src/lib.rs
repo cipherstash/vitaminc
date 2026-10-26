@@ -1,3 +1,4 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::todo, unused_imports)]
 #![doc = include_str!("../README.md")]

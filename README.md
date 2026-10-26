@@ -16,7 +16,8 @@ Vitamin C is in active development and aims to address the following:
 
 * **Consistent**: have a consistent interface with everything in one place.
 
-* **Compatible**: support embedded (`no_std`) and WASM targets.
+* **Compatible**: support native and WebAssembly applications, with embedded
+  (`no_std`) support as a future goal. All crates currently require `std`.
 
 * **Fast**: speed and security _can_ be friends!
 
@@ -48,6 +49,28 @@ assert!(debug.contains("***"));
 assert!(!debug.contains("example-token"));
 ```
 
+## Compatibility
+
+The minimum supported Rust version (MSRV) is **1.88.0**, except for
+`vitaminc-kms`, which requires **1.94.1**. Enabling the facade's `aws-kms`
+feature raises its requirement to **1.94.1** too.
+
+MSRV increases require a minor release (for example, 0.8 to 0.9) and must be
+called out in release notes. Patch releases retain the existing floor.
+Dependency updates must respect each crate's declared `rust-version`.
+CI checks the locked dependency graph at these Rust versions; the manifest's
+`rust-version` is the source of truth for each crate.
+
+All crates require `std`; there is no `no_std` configuration yet. CI checks
+native builds, `vitaminc-encrypt` on `wasm32-unknown-unknown` in Node, and the
+separate encryption guest on `wasm32-wasip1`. JavaScript WASM hosts need Web
+Crypto and the generated bindings described in the
+[encryption setup guide](https://github.com/cipherstash/vitaminc/tree/main/packages/encrypt#webassembly-setup).
+The KMS adapter and Node addon bindings target native applications.
+
+License: MIT. `vitaminc-ore` also includes Unicode-licensed data and declares
+`MIT AND Unicode-3.0`; see its license files.
+
 ## Testing
 
 Prerequisites:
@@ -61,6 +84,24 @@ To run the tests:
 
 
 # Features and sub-crates
+
+The facade enables no features by default. Each feature exposes the named
+crate. Some also enable supporting facade features:
+
+| Feature | Also enables |
+| --- | --- |
+| `context`, `permutation` | `protected` |
+| `prf` | `context` |
+| `hmac` | `prf` |
+| `async-traits`, `aws-kms` | `traits` |
+| `aead` | `context` |
+| `encrypt` | `traits`, `aead` |
+| `normalize` | `aead`; also PRF normalization if `prf` is enabled |
+| `ore` | `normalize` |
+
+These dependencies apply transitively. `normalize` alone does not enable
+`prf`. For options such as `hlist`, `chrono`, or `bitvec`, add the relevant
+crate directly and enable its feature; the facade does not forward them.
 
 | Feature      | Source            | Crates.io                                                                                              | Documentation |
 |--------------|------------------|--------------------------------------------------------------------------------------------------------|---------------|

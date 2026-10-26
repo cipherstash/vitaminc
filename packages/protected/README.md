@@ -5,6 +5,12 @@
 
 This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) framework to make cryptography code healthy.
 
+## Installation
+
+```sh
+cargo add vitaminc-protected
+```
+
 ## Safe wrappers for sensitive data
 
 `Protected` is a set of types that remove some of the sharp edges of working with sensitive data in Rust.
@@ -230,6 +236,24 @@ let input: Result<Protected<String>, FromUtf8Error> = Protected::generate_ok(|| 
   String::from_utf8(vec![1, 2, 3, 4, 5, 6, 7, 8])
 });
 ```
+
+## Cargo features
+
+No optional features are enabled by default.
+
+| Feature | Effect |
+| --- | --- |
+| `bitvec` | Exposes bit-slice indexing adapters. Accesses use ordinary indexing, so they do not hide the index. |
+| `arbitrary` | Implements `quickcheck::Arbitrary` for `Protected<T>` when `T` supports it, for property tests. |
+
+The `bitvec` dependency is present even without the feature; the flag exposes
+the adapters. `arbitrary` is for test data, not cryptographic randomness.
+
+## Compatibility
+
+Requires Rust **1.88.0** and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
 
 ## CipherStash
 

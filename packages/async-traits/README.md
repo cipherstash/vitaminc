@@ -19,6 +19,22 @@ checks the returned bytes. For an AWS-backed example, see the
 
 This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) framework to make cryptography code healthy.
 
+## Installation
+
+```sh
+cargo add vitaminc-async-traits
+```
+
+## Cargo features
+
+This crate defines no Cargo feature flags.
+
+## Compatibility
+
+Requires Rust **1.88.0** and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
+
 ## Acknowledgements
 
 Shoutout to [Tony Arcieri](https://github.com/tarcieri), [Artyom Pavlov](https://github.com/newpavlov) and all the contributors to the [Rust Crypto](https://github.com/RustCrypto) project which was the inspiration for this crate.
