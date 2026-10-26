@@ -132,32 +132,48 @@ var (
 )
 
 func (w *storageWriter) any(v any, depth int) error {
-	if depth > maxDepth {
-		return fmt.Errorf("%w: %w", ErrUnwritable, ErrTooDeep)
-	}
-	switch x := v.(type) {
-	case nil:
-		w.buf = append(w.buf, tagNull)
-		return nil
-	case Some:
-		w.buf = append(w.buf, StorageSome)
-		return w.any(x.V, depth+1)
-	case vcvalue.Object:
-		return w.object(x, depth)
-	case StorageEntries:
-		return w.entries(x, depth)
-	case vcvalue.Int128:
-		w.buf = append(append(w.buf, tagInt128), x[:]...)
-		return nil
-	case vcvalue.Uint128:
-		w.buf = append(append(w.buf, tagUint128), x[:]...)
-		return nil
-	case []byte:
-		return w.bytes(x)
-	case vcvalue.Plain, vcvalue.Date, vcvalue.Timestamp, vcvalue.Decimal, vcvalue.Tagged, vcvalue.TypedNull:
-		return unwritable("%T has no storage form", v)
-	}
 	return w.reflect(reflect.ValueOf(v), depth)
+}
+
+var (
+	someType      = reflect.TypeOf(Some{})
+	objectType    = reflect.TypeOf(vcvalue.Object{})
+	entriesType   = reflect.TypeOf(StorageEntries{})
+	plainType     = reflect.TypeOf(vcvalue.Plain{})
+	dateType      = reflect.TypeOf(vcvalue.Date{})
+	timestampType = reflect.TypeOf(vcvalue.Timestamp{})
+	decimalType   = reflect.TypeOf(vcvalue.Decimal{})
+	taggedType    = reflect.TypeOf(vcvalue.Tagged{})
+	typedNullType = reflect.TypeOf(vcvalue.TypedNull{})
+)
+
+// model writes rv if its type is one of the model's own, which have a form
+// of their own rather than the one reflection would give them, and reports
+// whether it was. Only those types are boxed to be written.
+func (w *storageWriter) model(rv reflect.Value, depth int) (bool, error) {
+	if !rv.CanInterface() {
+		return false, nil
+	}
+	switch rv.Type() {
+	case someType:
+		w.buf = append(w.buf, StorageSome)
+		return true, w.any(rv.Interface().(Some).V, depth+1)
+	case objectType:
+		return true, w.object(rv.Interface().(vcvalue.Object), depth)
+	case entriesType:
+		return true, w.entries(rv.Interface().(StorageEntries), depth)
+	case int128Type:
+		x := rv.Interface().(vcvalue.Int128)
+		w.buf = append(append(w.buf, tagInt128), x[:]...)
+		return true, nil
+	case uint128Type:
+		x := rv.Interface().(vcvalue.Uint128)
+		w.buf = append(append(w.buf, tagUint128), x[:]...)
+		return true, nil
+	case plainType, dateType, timestampType, decimalType, taggedType, typedNullType:
+		return true, unwritable("%s has no storage form", rv.Type())
+	}
+	return false, nil
 }
 
 func (w *storageWriter) reflect(rv reflect.Value, depth int) error {
@@ -177,14 +193,8 @@ func (w *storageWriter) reflect(rv reflect.Value, depth int) error {
 	case reflect.Pointer, reflect.Interface:
 		return w.indirect(rv, depth)
 	}
-	if rv.CanInterface() {
-		switch rv.Type() {
-		case reflect.TypeOf(Some{}), reflect.TypeOf(vcvalue.Object{}), reflect.TypeOf(StorageEntries{}),
-			int128Type, uint128Type, reflect.TypeOf(vcvalue.Plain{}), reflect.TypeOf(vcvalue.Date{}),
-			reflect.TypeOf(vcvalue.Timestamp{}), reflect.TypeOf(vcvalue.Decimal{}),
-			reflect.TypeOf(vcvalue.Tagged{}), reflect.TypeOf(vcvalue.TypedNull{}):
-			return w.any(rv.Interface(), depth)
-		}
+	if handled, err := w.model(rv, depth); handled {
+		return err
 	}
 	if byteArray(rv.Type()) {
 		return w.bytes(arrayBytes(rv))
@@ -275,7 +285,7 @@ func startsOptional(rv reflect.Value) bool {
 			}
 			rv = rv.Elem()
 		default:
-			return rv.Type() == reflect.TypeOf(Some{})
+			return rv.Type() == someType
 		}
 	}
 	return false
@@ -483,9 +493,18 @@ type mapKey struct {
 	id   keyID
 }
 
+// keyKind is a map key's kind, in the order keys of different kinds are
+// written in.
+type keyKind byte
+
+const (
+	keyInteger keyKind = iota
+	keyText
+	keyBytes
+)
+
 type keyID struct {
-	// kind is 0 for an integer, 1 for text, 2 for bytes.
-	kind byte
+	kind keyKind
 	// An integer as its sign and its two's-complement 128-bit word.
 	negative bool
 	hi, lo   uint64
@@ -540,9 +559,9 @@ func decodedKeyID(k any) (keyID, bool) {
 	case vcvalue.Uint128:
 		return wideKey(x[:], false), true
 	case string:
-		return keyID{kind: 1, s: x}, true
+		return keyID{kind: keyText, s: x}, true
 	case []byte:
-		return keyID{kind: 2, s: string(x)}, true
+		return keyID{kind: keyBytes, s: string(x)}, true
 	}
 	return keyID{}, false
 }
@@ -574,17 +593,17 @@ func keyOf(k any) (mapKey, error) {
 		_ = w.any(rv.Interface(), 0)
 	case byteArray(t):
 		b := arrayBytes(rv)
-		id = keyID{kind: 2, s: string(b)}
+		id = keyID{kind: keyBytes, s: string(b)}
 		_ = w.bytes(b)
 	case t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.Uint8:
-		id = keyID{kind: 2, s: string(rv.Bytes())}
+		id = keyID{kind: keyBytes, s: string(rv.Bytes())}
 		_ = w.bytes(rv.Bytes())
 	default:
 		if text, ok, err := marshalText(rv); ok {
 			if err != nil {
 				return mapKey{}, unwritable("a map key of type %s refused to write itself as text", t)
 			}
-			id = keyID{kind: 1, s: string(text)}
+			id = keyID{kind: keyText, s: string(text)}
 			if err := w.text(text); err != nil {
 				return mapKey{}, err
 			}
@@ -596,7 +615,7 @@ func keyOf(k any) (mapKey, error) {
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 			id = keyID{lo: rv.Uint()}
 		case reflect.String:
-			id = keyID{kind: 1, s: rv.String()}
+			id = keyID{kind: keyText, s: rv.String()}
 			if err := w.text([]byte(rv.String())); err != nil {
 				return mapKey{}, err
 			}
