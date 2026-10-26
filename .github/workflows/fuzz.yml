@@ -31,6 +31,7 @@ jobs:
         include:
           - { target: FuzzUnmarshal, dir: bindings/go/vcffi }
           - { target: FuzzUnmarshalCipherText, dir: bindings/go/vcffi }
+          - { target: FuzzUnmarshalStorage, dir: bindings/go/vcffi }
           - { target: FuzzDifferentialValue, dir: bindings/go/vcencrypt }
           - { target: FuzzDifferentialCipherText, dir: bindings/go/vcencrypt }
 
