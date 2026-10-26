@@ -39,8 +39,8 @@ jobs:
       # Two test workspaces keep their own lockfiles, which pin the workspace
       # crates by version and which release-plz does not update: the Node
       # addon (built with --locked, so a stale pin fails CI) and the Go
-      # bindings' wasm guest. Re-sync both and the managed README dependency
-      # versions on the release branch after every regeneration.
+      # bindings' wasm guest. Re-sync both, managed README dependency versions,
+      # and documented MSRVs on the release branch after every regeneration.
       #
       # The PR comes from release-plz's own output (set whether it opened
       # the PR or updated it), not from a search: GitHub's search index lags
@@ -51,9 +51,9 @@ jobs:
       # checks the PR is open against main, from this repository, and by the
       # release-plz app, never a fork's or anyone else's `release-plz-*`
       # branch. And it runs no cargo there, which would honour the branch's
-      # .cargo/config.toml: main's scripts edit lockfiles and READMEs as data, in a
-      # separate worktree, so nothing from the branch executes.
-      - name: Re-sync lockfiles and README versions on the release branch
+      # .cargo/config.toml: main's scripts edit lockfiles and documentation as
+      # data in a separate worktree, so nothing from the branch executes.
+      - name: Re-sync lockfiles and documentation on the release branch
         if: steps.release-plz.outputs.prs_created == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -74,6 +74,7 @@ jobs:
           git worktree add "$release" FETCH_HEAD
           python3 .github/scripts/sync_nested_lockfiles.py "$release"
           python3 .github/scripts/sync_readme_versions.py "$release"
+          python3 .github/scripts/sync_msrv.py "$release"
           if git -C "$release" diff --quiet; then exit 0; fi
           # main requires signed commits, and a commit made here with git and
           # pushed is unsigned. GitHub signs a commit it creates through the
@@ -83,7 +84,7 @@ jobs:
           # parent is the head fetched above, so a branch that moved since is
           # refused rather than overwritten.
           python3 .github/scripts/commit_on_branch.py "$release" "$GITHUB_REPOSITORY" "$branch" \
-            "chore: sync lockfiles and README release versions" \
+            "chore: sync lockfiles and documentation versions" \
             | gh api graphql --input - --jq '.data.createCommitOnBranch.commit.url'
 
   release-plz-release:

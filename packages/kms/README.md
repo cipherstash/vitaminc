@@ -110,7 +110,7 @@ This crate defines no Cargo feature flags.
 
 ## Compatibility
 
-Requires Rust **1.94.1** and the Rust standard library (`std`).
+Requires Rust <!-- msrv:vitaminc-kms -->**1.94.1**<!-- /msrv --> and the Rust standard library (`std`).
 The AWS SDK gives this crate a higher Rust requirement than the rest of the
 workspace. This adapter targets native applications.
 MSRV increases require a minor release; patch releases retain the existing

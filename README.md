@@ -51,9 +51,9 @@ assert!(!debug.contains("example-token"));
 
 ## Compatibility
 
-The minimum supported Rust version (MSRV) is **1.88.0**, except for
-`vitaminc-kms`, which requires **1.94.1**. Enabling the facade's `aws-kms`
-feature raises its requirement to **1.94.1** too.
+The minimum supported Rust version (MSRV) is <!-- msrv:workspace -->**1.88.0**<!-- /msrv -->, except for
+`vitaminc-kms`, which requires <!-- msrv:vitaminc-kms -->**1.94.1**<!-- /msrv -->. Enabling the facade's `aws-kms`
+feature raises its requirement to <!-- msrv:vitaminc/aws-kms -->**1.94.1**<!-- /msrv --> too.
 
 MSRV increases require a minor release (for example, 0.8 to 0.9) and must be
 called out in release notes. Patch releases retain the existing floor.

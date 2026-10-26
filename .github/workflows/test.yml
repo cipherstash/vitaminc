@@ -14,26 +14,38 @@ defaults:
     shell: bash -l {0}
 
 jobs:
-  # Enforces the declared rust-version: the workspace MSRV (root Cargo.toml)
-  # and vitaminc-kms's own, higher floor (the AWS SDK moves faster than the
-  # rest, so kms declares its own rust-version and is checked separately).
+  msrv-matrix:
+    runs-on: ubuntu-latest
+    name: "Read MSRVs from manifests"
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.msrv.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check MSRV synchronization
+        run: |
+          python3 -m unittest discover -s .github/scripts -p 'test_sync_msrv.py'
+          python3 .github/scripts/sync_msrv.py . --check
+      - name: Generate matrix
+        id: msrv
+        run: |
+          matrix=$(python3 .github/scripts/sync_msrv.py . --matrix)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  # Enforces every member's declared rust-version, plus explicit feature
+  # scenarios such as the facade's aws-kms feature. Versions come from TOML.
   # This job only runs `cargo check`. Tests stay on the pinned release in the
   # `test` job below, because the trybuild `.stderr` snapshots match one
   # compiler's diagnostics verbatim and would fail on any other.
   # `--locked` makes it check the dependency graph we actually ship.
   msrv:
+    needs: msrv-matrix
     runs-on: ubuntu-latest
     name: "🦀 MSRV (${{ matrix.toolchain }}, ${{ matrix.name }})"
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: workspace
-            toolchain: 1.88.0
-            args: --workspace --all-targets --exclude vitaminc-kms
-          - name: vitaminc-kms
-            toolchain: 1.94.1
-            args: -p vitaminc-kms --all-targets
+      matrix: ${{ fromJSON(needs.msrv-matrix.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v7

@@ -21,6 +21,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from workspace_metadata import readmes, workspace
+
 MARKER = re.compile(r"^<!-- workspace-deps:(start|keep|end) -->[ \t]*$", re.MULTILINE)
 DECLARATION = re.compile(
     r"(?:^[ \t]*|(?<=`))(?P<name>[A-Za-z0-9_-]+)[ \t]*=[ \t]*(?P<value>[^\n`]+)",
@@ -29,59 +31,18 @@ DECLARATION = re.compile(
 VERSION = re.compile(r"\bversion\s*=\s*([\"'])(?P<version>[^\"']*)\1")
 
 
-def inside(root: Path, path: Path) -> Path:
-    """Do not let release-branch paths or symlinks escape the worktree."""
-    resolved = path.resolve()
-    if not resolved.is_relative_to(root):
-        raise ValueError(f"path outside the worktree: {path}")
-    return resolved
-
-
 def inventory(root: Path) -> tuple[dict[str, str], list[Path]]:
-    manifest = tomllib.loads(inside(root, root / "Cargo.toml").read_text())
-    workspace = manifest["workspace"]
-    defaults = workspace.get("package", {})
-    excluded = {
-        path.resolve()
-        for pattern in workspace.get("exclude", [])
-        for path in root.glob(pattern)
-    }
-    members = set()
-    for pattern in workspace["members"]:
-        matches = list(root.glob(pattern))
-        if not matches:
-            raise ValueError(f"workspace member pattern matches nothing: {pattern}")
-        members.update(inside(root, path) for path in matches if path.resolve() not in excluded)
-    if "package" in manifest:
-        members.add(root)
-
+    defaults, members = workspace(root)
     versions = {}
-    readmes = set()
-    if (root / "README.md").exists():
-        readmes.add(inside(root, root / "README.md"))
-    for member in sorted(members):
-        package = tomllib.loads(inside(root, member / "Cargo.toml").read_text())["package"]
+    for member, manifest in members.items():
+        package = manifest["package"]
         version = package["version"]
         if version == {"workspace": True}:
             version = defaults["version"]
         if not isinstance(version, str):
             raise ValueError(f"unsupported version in {member / 'Cargo.toml'}")
         versions[package["name"]] = version
-        readme = package.get("readme", "README.md")
-        base = member
-        if readme == {"workspace": True}:
-            readme = defaults["readme"]
-            base = root
-        if readme is False:
-            continue
-        if readme is True:
-            readme = "README.md"
-        path = inside(root, base / readme)
-        if path.is_file():
-            readmes.add(path)
-        elif "readme" in package:
-            raise ValueError(f"configured README does not exist: {path}")
-    return versions, sorted(readmes)
+    return versions, sorted(readmes(root, defaults, members))
 
 
 def sync(text: str, versions: dict[str, str]) -> str:
