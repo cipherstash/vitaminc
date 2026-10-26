@@ -8,6 +8,7 @@
 //! [`OrderScheme::compare`]: crate::OrderScheme::compare
 //! [`OrderScheme`]: crate::OrderScheme
 //!
+#![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(clippy::unwrap_used, clippy::todo, unsafe_code, unused_imports)]
 #![doc = include_str!("../README.md")]

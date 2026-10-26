@@ -2,6 +2,7 @@
 // The README supplies published-API URLs for GitHub. See docs/documentation.md.
 //! [`PermutationKey::from_seed`]: crate::PermutationKey::from_seed
 //!
+#![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 mod bitwise;
 mod elementwise;

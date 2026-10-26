@@ -1,5 +1,5 @@
 //! A trait for types that can be generated randomly.
-//! The random number generator is passed as an argument to the `generate` method
+//! The random number generator is passed as an argument to the `random` method
 //! and must be a [SafeRand].
 //!
 //! ## Example
@@ -19,9 +19,15 @@ use vitaminc_protected::{Controlled, Equatable, Exportable, Protected, Usage};
 use zeroize::Zeroize;
 
 /// A trait for types that can be generated randomly.
-/// The random number generator is passed as an argument to the `generate` method
-/// and must implement the `SafeRand` trait.
+/// Generation consumes randomness from the supplied [`SafeRand`].
 pub trait Generatable: Sized {
+    /// Generate a value, advancing the generator's state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RandomError`] if this type cannot be generated from the draw.
+    /// A [`RandomError::SeedRejected`] requires a fresh seed and generator;
+    /// do not retry with the same generator.
     fn random(rng: &mut SafeRand) -> Result<Self, RandomError>;
 }
 

@@ -3,6 +3,7 @@
 //! [`Generatable`]: trait@crate::Generatable
 //! [`SafeRand`]: crate::SafeRand
 //!
+#![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 use thiserror::Error;
 mod bounded;
@@ -22,10 +23,13 @@ pub use rand::{Fill, Rng, SeedableRng};
 /// Derive macro for `Generatable`
 pub use vitaminc_random_derives::Generatable;
 
+/// Failure to seed a random generator or generate a value.
 #[derive(Error, Debug)]
 pub enum RandomError {
+    /// A value could not be generated.
     #[error("Generation failed")]
     GenerationFailed,
+    /// The operating system could not supply entropy for seeding.
     #[error("Seeding from OS RNG failed: {0}")]
     SeedingFailed(#[from] rand::rngs::SysError),
     /// The seed produced an unusable batch of randomness (e.g. colliding

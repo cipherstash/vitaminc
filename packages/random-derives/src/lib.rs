@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! Derive field-by-field random generation for structs.
 //!
 //! Use [`Generatable`] through `vitaminc-random`, which re-exports both the

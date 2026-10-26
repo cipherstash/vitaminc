@@ -19,6 +19,7 @@
 //! [`encrypt_with_key`]: crate::encrypt_with_key
 //! [`encrypt`]: crate::encrypt
 //!
+#![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(clippy::unwrap_used, clippy::todo, unsafe_code, unused_imports)]
 #![doc = include_str!("../README.md")]

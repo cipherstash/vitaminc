@@ -5,6 +5,7 @@
 //! [`PrfValue`]: crate::PrfValue
 //! [`Prf`]: crate::Prf
 //!
+#![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 #![doc = include_str!("../README.md")]

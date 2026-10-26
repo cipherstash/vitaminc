@@ -76,16 +76,57 @@ where they help readers use an API. Keep ADR links in contributor documents.
 
 ## Checks
 
-Build both default and relevant optional-feature documentation with warnings
-denied, and inspect the generated links:
+The documentation CI job builds default and all-feature docs, checks links,
+runs all-feature doctests, and checks examples as standalone consumers.
+Run its checks locally with:
 
 ```sh
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+python3 -m unittest discover -s .github/scripts -p 'test_doc_*.py'
+cargo clean --doc
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --locked --no-deps
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --locked --all-features --no-deps
+python3 .github/scripts/check_doc_links.py .
+cargo test --workspace --locked --doc --all-features
+cargo fetch --locked
+python3 .github/scripts/check_doc_examples.py .
+python3 .github/scripts/check_doc_examples.py . --target wasm32-unknown-unknown
 ```
 
-Also render the README as ordinary Markdown, which has no Rust name resolver.
-Check reference definitions, repository paths and anchors, and API destination
-paths. Preserve the existing doctests when changing shared examples.
+The link check renders shared guides as ordinary Markdown and inspects crate
+landing pages. It checks repository paths and anchors, current workspace API
+destinations against the local build, and unresolved Rust paths used as URLs.
+It rejects `/latest/` API links in rustdoc. It does not crawl every item page:
+rustdoc's warning gate still checks intra-doc references, but links rendered
+on cross-crate re-exports can need manual inspection. CI removes cached HTML
+before building so stale pages cannot hide a removed destination. `--doc-dir`
+supports a separate Cargo target directory.
+
+Add `--external` to check live URLs outside the repository and workspace API
+mapping. This is opt-in: external availability does not block pull requests,
+and current-branch API destinations need not be published yet. Website access
+restrictions or client-generated anchors may need manual verification.
+
+The consumer checker extracts the visible code from selected README sections.
+It removes hidden doctest setup, creates one standalone package per example,
+and enables only the direct dependencies and features listed in its `EXAMPLES`
+table. It copies the workspace lockfile and rejects any new dependency version
+or source before building. Add new scenarios there when documenting another
+important installation path. Keep each scenario's dependency list consistent
+with its installation instructions. No temporary package is published or added
+to the workspace.
+
+Native consumers run at the pinned CI compiler and at the workspace MSRV from
+the existing generated matrix. WASM consumers are compile-checked; the existing
+Node/wasm-pack tests cover execution. The separate WASI guest retains its own
+strict rustdoc gate in `go.yml`.
+
+## Missing API documentation
+
+All published crates except `vitaminc-password` enforce `deny(missing_docs)`.
+The password crate remains deferred with eight missing-doc warnings. It needs
+its readiness work before adopting the lint. Do not add broad exemptions to
+make a build pass; document public contracts or keep genuinely internal items
+out of the public API. This lint checks presence, not accuracy or usefulness.
 
 Installation versions and MSRV numbers have their own synchronizers; see
 [RELEASING.md](../RELEASING.md) for their markers and commands.

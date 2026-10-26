@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! Derives for redacted debug output and timing-safe field comparisons.
 //!
 //! Use these macros through `vitaminc-protected`, which re-exports them with

@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 use crate::private::ValidMacSize;
 use aws_sdk_kms::{primitives::Blob, Client, Config};

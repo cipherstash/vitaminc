@@ -4,6 +4,7 @@
 //! [`ContextPiece`]: crate::ContextPiece
 //! [`IntoContext`]: crate::IntoContext
 //!
+#![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::todo, unused_imports)]

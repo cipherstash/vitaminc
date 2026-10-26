@@ -3,6 +3,7 @@
 //! [`JsFault`]: crate::JsFault
 //!
 // Workspace crates release together; keep cross-crate links on that version.
+#![deny(missing_docs)]
 #![doc = concat!(
     "\n[`Encrypt`]: https://docs.rs/vitaminc-aead/", env!("CARGO_PKG_VERSION"),
     "/vitaminc_aead/trait.Encrypt.html\n",
