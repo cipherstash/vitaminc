@@ -25,8 +25,14 @@ mod zeroed;
 use zeroize::Zeroize;
 
 #[cfg(feature = "bitvec")]
+/// Indexing bit slices with protected indices (`bitvec` feature).
+/// These adapters perform ordinary indexed accesses; they do not hide the index
+/// through a constant-time scan.
 pub mod bitvec;
 
+/// Array indexing using a protected index.
+/// Indexing exposes the selected memory access and panics on an out-of-bounds
+/// index, just as ordinary indexing does.
 pub mod slice_index;
 
 pub use as_protected_ref::{AsProtectedRef, ProtectedRef};
@@ -110,6 +116,8 @@ pub(crate) fn move_inner_out<W: MoveInner>(wrapper: W) -> W::Inner {
 /// ReplaceT is a sealed trait that is used to replace the inner value of a type.
 /// It is only implemented for types that are Controlled.
 pub trait ReplaceT<K>: private::Sealed {
+    /// Wrapper holding the replacement value. Capability adapters may be retained,
+    /// but `Usage<Protected<T>, S>` maps to an unscoped `Protected<K>`.
     type Output: Controlled;
 }
 

@@ -31,6 +31,8 @@ use std::borrow::Cow;
 /// ```
 ///
 pub trait AsProtectedRef<'a, A: ?Sized> {
+    /// Borrow the value behind the protected-reference interface for lifetime `'a`.
+    /// This does not allocate, wipe the source, or extend its lifetime.
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, A>;
 }
 

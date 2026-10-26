@@ -3,9 +3,11 @@ use std::marker::PhantomData;
 use crate::{Equatable, Exportable, Protected, Usage};
 use zeroize::Zeroize;
 
-/// Similar to `Default`, but doesn't rely on the standard library,
-/// is only implemented for Paranoid types, and covers array sizes up to 1024.
+/// Construct a zero or empty value for supported primitives, arrays, and wrappers.
+/// Unlike `Default`, the intended initial state is explicitly zero/empty.
 pub trait Zeroed {
+    /// Construct a value in its zero or empty state. This does not by itself
+    /// guarantee wiping on drop; use a wrapper such as [`Protected`] for that.
     fn zeroed() -> Self;
 }
 

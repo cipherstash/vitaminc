@@ -4,10 +4,38 @@ use crate::{exportable::SafeSerialize, private::ControlledPrivate, Controlled, P
 use std::marker::PhantomData;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-// TODO: Docs, explain compile time
+/// Attach a compile-time usage scope to a controlled value.
+///
+/// APIs opt into the restriction with [`Acceptable<S>`]. A `Usage<T, S>` is
+/// acceptable in `S`; it does not establish a runtime access-control policy.
+/// Dropping it runs `T`'s drop behavior, and explicit zeroization delegates to
+/// `T`. The scope marker contains no secret material.
+///
+/// # Current limitations
+///
+/// Scope propagation is incomplete: mapping `Usage<Protected<T>, S>` returns
+/// an unscoped `Protected`, as does [`Controlled::zip`], and `update_with` does
+/// not check scope compatibility. The `Controlled` escape hatches also remain
+/// available. Serialization is allowed
+/// whenever `T::Inner` implements [`SafeSerialize`], even when `T` is not an
+/// `Exportable` adapter; adding a usage scope is not an export restriction.
+///
+/// # Examples
+///
+/// ```
+/// use vitaminc_protected::{Controlled, Protected};
+/// use vitaminc_protected::{Acceptable, Scope, Usage};
+/// struct Signing;
+/// impl Scope for Signing {}
+/// fn accept_signing_key<T: Acceptable<Signing>>(_: &T) {}
+/// let key = Usage::<Protected<[u8; 32]>, Signing>::new([7; 32]);
+/// accept_signing_key(&key);
+/// assert_eq!(key.risky_ref().len(), 32);
+/// ```
 pub struct Usage<T, Scope = DefaultScope>(pub(crate) T, pub(crate) PhantomData<Scope>);
 
 impl<T, S> Usage<T, S> {
+    /// Wrap `x` in `T` and associate it with scope `S` without a runtime check.
     pub fn new(x: <Usage<T, S> as Controlled>::Inner) -> Self
     where
         Self: Controlled,
@@ -75,7 +103,10 @@ where
 /// Marker trait for a type that defines a usage scope
 pub trait Scope {}
 
-/// Marker trait for types that are acceptable in a certain scope.
+/// Marker trait for types accepted by an API that explicitly requires scope `S`.
+///
+/// This trait is public and unsealed; it is a type-level convention, not proof
+/// of authorization. Ordinary [`Protected`] values implement it for [`DefaultScope`].
 pub trait Acceptable<S>
 where
     S: Scope,
@@ -84,7 +115,7 @@ where
 
 impl<T, S> Acceptable<S> for Usage<T, S> where S: Scope {}
 
-// TODO: Move this to all of the other modules
+/// Default usage scope, also accepted by ordinary unscoped [`Protected`] values.
 pub struct DefaultScope;
 impl Scope for DefaultScope {}
 impl<T: Zeroize> Acceptable<DefaultScope> for Protected<T> {}

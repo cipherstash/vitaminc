@@ -17,10 +17,12 @@ use crate::{IntoPrfContext, MapPrf, Prf, PrfEncoding, PrfValue, PrfVisitor, SeqP
 pub struct Passthrough<T>(pub T);
 
 impl<T> Passthrough<T> {
+    /// Mark an owned value as non-secret passthrough data.
     pub fn new(value: T) -> Self {
         Self(value)
     }
 
+    /// Recover the original non-secret value without processing it.
     pub fn into_inner(self) -> T {
         self.0
     }

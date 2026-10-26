@@ -9,10 +9,13 @@ pub struct ReadyPrf<T, E> {
 }
 
 impl<T, E> ReadyPrf<T, E> {
+    /// Wrap an already computed success or failure; this performs no derivation.
     pub fn new(result: Result<T, PrfError<E>>) -> Self {
         Self { result }
     }
 
+    /// Consume the wrapper and obtain its result without an executor.
+    /// Returns the stored error unchanged if derivation or visiting failed.
     pub fn into_result(self) -> Result<T, PrfError<E>> {
         self.result
     }
