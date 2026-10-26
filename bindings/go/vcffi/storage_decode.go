@@ -73,11 +73,10 @@ func decodeStorage(blob []byte) (any, error) {
 // storageScalar reports whether tag starts a version 1 scalar.
 func storageScalar(tag byte) bool {
 	switch tag {
-	case tagNull, tagFalse, tagTrue, tagInt8, tagInt16, tagInt32, tagInt64, tagInt128,
-		tagUint8, tagUint16, tagUint32, tagUint64, tagUint128, tagFloat32, tagFloat64, tagString, tagBytes:
+	case tagNull, tagFalse, tagTrue, tagFloat32, tagFloat64:
 		return true
 	}
-	return false
+	return storageKeyTag(tag)
 }
 
 // storageKeyTag reports whether tag may start a map's key.
@@ -213,17 +212,7 @@ func kindOf(m any) string {
 }
 
 func mismatch(path, want string, found any) error {
-	if path == "" {
-		path = "the value"
-	}
-	return fmt.Errorf("%w: %s: expected %s, found %s", ErrMismatch, path, want, kindOf(found))
-}
-
-func joinPath(path, step string) string {
-	if path == "" {
-		return step
-	}
-	return path + step
+	return fmt.Errorf("%w: %s: expected %s, found %s", ErrMismatch, orRoot(path), want, kindOf(found))
 }
 
 // integerOf is a model integer's value.
@@ -337,7 +326,7 @@ func assign(m any, rv reflect.Value, path string) error {
 		}
 		s := reflect.MakeSlice(rv.Type(), len(items), len(items))
 		for i, item := range items {
-			if err := assign(item, s.Index(i), joinPath(path, "["+strconv.Itoa(i)+"]")); err != nil {
+			if err := assign(item, s.Index(i), path+"["+strconv.Itoa(i)+"]"); err != nil {
 				return err
 			}
 		}
@@ -348,7 +337,7 @@ func assign(m any, rv reflect.Value, path string) error {
 			return mismatch(path, fmt.Sprintf("an array of %d", rv.Len()), m)
 		}
 		for i, item := range items {
-			if err := assign(item, rv.Index(i), joinPath(path, "["+strconv.Itoa(i)+"]")); err != nil {
+			if err := assign(item, rv.Index(i), path+"["+strconv.Itoa(i)+"]"); err != nil {
 				return err
 			}
 		}
@@ -447,7 +436,7 @@ func assignMap(m any, rv reflect.Value, path string) error {
 	}
 	out := reflect.MakeMapWithSize(rv.Type(), len(entries))
 	for i, e := range entries {
-		at := joinPath(path, "{"+strconv.Itoa(i)+"}")
+		at := path + "{" + strconv.Itoa(i) + "}"
 		key := reflect.New(rv.Type().Key()).Elem()
 		if err := assign(e.Key, key, at); err != nil {
 			return err
@@ -493,7 +482,7 @@ func assignStruct(m any, rv reflect.Value, path string) error {
 			continue
 		}
 		set[i] = true
-		if err := assign(e.Value, rv.Field(fields[i].index), joinPath(path, "."+name)); err != nil {
+		if err := assign(e.Value, rv.Field(fields[i].index), path+"."+name); err != nil {
 			return err
 		}
 	}
