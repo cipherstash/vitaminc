@@ -652,20 +652,69 @@ impl<T: Zeroize> Locked<T> {
     }
 }
 
+/// The width of one store in [`wipe_raw`]'s middle run: a `u128`, which
+/// every target stores in one or two instructions.
+const WIPE_WORD: usize = mem::size_of::<u128>();
+
 /// Overwrite `len` bytes at `ptr` with volatile zero stores and a compiler
 /// fence, so the wipe cannot be elided as a dead store. The bytes are
-/// written as `MaybeUninit<u8>`, never read, so storage that holds padding
-/// or a dropped value is fine.
+/// written as `MaybeUninit`, never read, so storage that holds padding or
+/// a dropped value is fine.
+///
+/// Bytes up to the first [`WIPE_WORD`] boundary and after the last are
+/// stored one at a time; those between are stored a word at a time, so a
+/// large buffer is wiped at close to memory speed rather than a byte a
+/// store. If the pointer cannot be brought to a word boundary, which
+/// `align_offset` reports as `usize::MAX`, every byte is stored on its own.
 ///
 /// # Safety
 ///
 /// `ptr` must be valid for writes of `len` bytes.
 pub(super) unsafe fn wipe_raw(ptr: *mut u8, len: usize) {
-    let bytes = core::slice::from_raw_parts_mut(ptr.cast::<MaybeUninit<u8>>(), len);
-    for b in bytes {
-        ptr::write_volatile(b, MaybeUninit::new(0));
+    let head = ptr.align_offset(WIPE_WORD).min(len);
+    let words = (len - head) / WIPE_WORD;
+    let tail = len - head - words * WIPE_WORD;
+    // SAFETY: each store below lies within the `len` bytes the caller
+    // vouches for: `head` bytes from `ptr`, then `words` whole words from
+    // `ptr + head`, which `align_offset` made word-aligned when `head` is
+    // less than `len`, then `tail` bytes after those.
+    unsafe {
+        for i in 0..head {
+            ptr::write_volatile(ptr.add(i).cast::<MaybeUninit<u8>>(), MaybeUninit::new(0));
+        }
+        let body = ptr.add(head).cast::<MaybeUninit<u128>>();
+        for i in 0..words {
+            ptr::write_volatile(body.add(i), MaybeUninit::new(0));
+        }
+        let rest = ptr.add(head + words * WIPE_WORD);
+        for i in 0..tail {
+            ptr::write_volatile(rest.add(i).cast::<MaybeUninit<u8>>(), MaybeUninit::new(0));
+        }
     }
     core::sync::atomic::compiler_fence(Ordering::SeqCst);
+}
+
+/// Wipe every byte `out` holds or has room for, and leave it empty.
+///
+/// This does what `out.zeroize()` does, but with sixteen bytes in each
+/// volatile store rather than one, so a buffer of secret bytes that is
+/// grown or dropped often (a frame, a blob) is wiped at close to memory
+/// speed. The allocation is kept; only its contents go.
+///
+/// # Examples
+///
+/// ```
+/// let mut buffer = Vec::with_capacity(64);
+/// buffer.extend_from_slice(b"a secret that must not outlive its use");
+/// vitaminc_protected::wipe_vec(&mut buffer);
+/// assert!(buffer.is_empty());
+/// assert!(buffer.capacity() >= 64);
+/// ```
+pub fn wipe_vec(out: &mut Vec<u8>) {
+    out.clear();
+    // SAFETY: a `Vec`'s pointer is valid for writes of `capacity()` bytes,
+    // and after `clear` none of them is a live element.
+    unsafe { wipe_raw(out.as_mut_ptr(), out.capacity()) };
 }
 
 /// [`wipe_raw`] over the bytes of a `T`, without any semantic effect on
@@ -745,6 +794,51 @@ impl<'a, T: Zeroize> AsProtectedRef<'a, T> for Locked<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every byte of the allocation is wiped, held or spare, whatever the
+    /// buffer's length: a byte-wise head and tail around whole words, or
+    /// no words at all.
+    #[test]
+    fn wipe_vec_wipes_the_whole_allocation_and_empties_it() {
+        for len in [0usize, 1, 15, 16, 17, 31, 33, 64, 100] {
+            let mut out: Vec<u8> = vec![0xFF; len];
+            out.reserve(37);
+            let capacity = out.capacity();
+            let ptr = out.as_ptr();
+            // Fill the spare room too, so a wipe that stops at `len` shows.
+            out.resize(capacity, 0xEE);
+            out.truncate(len);
+            wipe_vec(&mut out);
+            assert!(out.is_empty(), "wiped buffer of {len} is empty");
+            assert_eq!(out.capacity(), capacity, "the allocation is kept");
+            assert!(std::ptr::eq(out.as_ptr(), ptr), "the allocation is kept");
+            let spare = out.spare_capacity_mut();
+            // SAFETY: `wipe_vec` stored zero to every one of these bytes.
+            let bytes =
+                unsafe { std::slice::from_raw_parts(spare.as_ptr().cast::<u8>(), spare.len()) };
+            assert!(
+                bytes.iter().all(|&b| b == 0),
+                "every byte of the {capacity}-byte allocation is zero after wiping {len}"
+            );
+        }
+    }
+
+    /// A range that starts off a word boundary is wiped exactly, and the
+    /// bytes either side of it are left alone.
+    #[test]
+    fn wipe_raw_stops_at_both_ends_from_any_alignment() {
+        for start in 0..17usize {
+            for len in [0usize, 1, 7, 16, 17, 40] {
+                let mut buf = [0xA5u8; 80];
+                // SAFETY: `start + len <= 57 < 80`, inside `buf`.
+                unsafe { wipe_raw(buf.as_mut_ptr().add(start), len) };
+                for (i, &b) in buf.iter().enumerate() {
+                    let inside = (start..start + len).contains(&i);
+                    assert_eq!(b == 0, inside, "byte {i} for start {start}, len {len}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn a_value_moved_in_reads_back() {
