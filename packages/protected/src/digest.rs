@@ -32,6 +32,7 @@ where
     D: FixedOutput + ZeroizeOnDrop,
     InputScope: Scope,
 {
+    /// Initialize an unkeyed digest with an empty message.
     pub fn new() -> Self
     where
         D: Digest + FixedOutput,
@@ -39,6 +40,8 @@ where
         Self(<D as Digest>::new(), PhantomData)
     }
 
+    /// Initialize an unkeyed digest and absorb `data`, borrowing its protected
+    /// bytes. The input must be acceptable in this digest's scope.
     pub fn new_with_prefix<T>(data: &T) -> Self
     where
         D: Digest + FixedOutput,
@@ -52,6 +55,11 @@ where
     }
 
     /// Initialize a keyed fixed-output function from protected key material.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidLength`] if `D` rejects the key length. The caller keeps
+    /// ownership of the key wrapper; initialization borrows its bytes.
     pub fn new_with_key<T>(key: &T) -> Result<Self, InvalidLength>
     where
         D: KeyInit,
@@ -61,6 +69,8 @@ where
         D::new_from_slice(key.risky_ref().as_ref()).map(|digest| Self(digest, PhantomData))
     }
 
+    /// Append protected bytes to the message without consuming their wrapper.
+    /// The `Acceptable<InputScope>` bound enforces the declared input scope here.
     pub fn update<T>(&mut self, data: &T)
     where
         T: Controlled + Acceptable<InputScope>,
@@ -119,6 +129,8 @@ where
         FixedOutputReset::finalize_into_reset(&mut self.0, target);
     }
 
+    /// Discard the current message state through the underlying algorithm's
+    /// `Reset` implementation, retaining its configuration for reuse.
     pub fn reset(&mut self)
     where
         D: Reset,
@@ -126,6 +138,7 @@ where
         Reset::reset(&mut self.0);
     }
 
+    /// Digest or MAC output length in bytes.
     pub fn output_size() -> usize {
         <D as OutputSizeUser>::output_size()
     }

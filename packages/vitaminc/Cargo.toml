@@ -39,7 +39,7 @@ prf = ["dep:vitaminc-prf", "context"]
 hmac = ["dep:vitaminc-hmac", "prf"]
 traits = ["dep:vitaminc-traits"]
 async-traits = ["dep:vitaminc-async-traits", "traits"]
-# Needs Rust 1.94.1, above the workspace MSRV: vitaminc-kms carries the AWS SDK floor.
+# Uses the KMS crate's higher MSRV; see the feature scenario below.
 aws-kms = ["traits", "dep:vitaminc-kms"]
 aead = ["dep:vitaminc-aead", "context"]
 encrypt = ["traits", "aead", "dep:vitaminc-encrypt"]
@@ -65,3 +65,8 @@ required-features = ["prf", "normalize"]
 path = "./"
 features = ["protected"]
 default-features = false
+
+# Workspace dependencies whose declared MSRVs apply to this feature scenario.
+# sync_msrv.py uses these for documentation and an additional CI build.
+[package.metadata.msrv.features]
+aws-kms = ["vitaminc-kms"]

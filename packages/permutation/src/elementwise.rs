@@ -5,11 +5,16 @@ use zeroize::{Zeroize, Zeroizing};
 
 // TODO: Make this a private trait
 // FIXME: This trait is backwards - self should be T and the argument should be a key
+/// Rearrange a value's elements without changing the elements themselves.
+/// A position permutation alone does not provide confidentiality.
 pub trait Permute<T> {
+    /// Apply this permutation to `input`.
     fn permute(&self, input: T) -> T;
 }
 
+/// Reverse an element permutation.
 pub trait Depermute<T> {
+    /// Undo the permutation applied by [`Permute::permute`] with the same key.
     fn depermute(&self, input: T) -> T;
 }
 

@@ -65,12 +65,9 @@ fn no_domain<P: Prf, T: Send + 'static>(prf: &P) -> P::Ok<T> {
 /// One scalar to derive an equality term for: a physical value and the
 /// logical type it represents, normalized on the way in.
 ///
-/// This is the one place the PRF crate normalizes. The ADR has the index
-/// sink do that over a whole document, and the PRF only see the result;
-/// `EqualityTerm` is for the other shape of caller, one that holds a
-/// single scalar and its type (a query parameter, say) rather than a
-/// value to walk, and is the direct replacement for deriving from a
-/// `&Value`. It refuses what [`normalize`] refuses: a scalar with no
+/// Use `EqualityTerm` to derive a term for a single scalar, such as a query
+/// parameter. It normalizes the scalar before deriving the term, and
+/// refuses what [`normalize`] refuses: a scalar with no
 /// equality domain (a boolean, an `undefined`, a logical type outside the
 /// opt-in table), text with a code point unassigned in Unicode 16, or a
 /// value that is not valid for its logical type fails with

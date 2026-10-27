@@ -8,6 +8,7 @@ members = [
     "packages/async-traits",
     "packages/context",
     "packages/derive-tests/direct",
+    "packages/derive-tests/no-dependency",
     "packages/derive-tests/override",
     "packages/derive-tests/renamed",
     "packages/derive-tests/umbrella-only",

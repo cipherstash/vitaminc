@@ -3,9 +3,8 @@
 NAPI (Node-API) bindings layer for the Vitamin-C AEAD encryption — the
 JS-specific piece of exposing `vitaminc` encryption to Node.js.
 
-The data model is the FFI boundary (ADR 0001): a value coming in is a
-[`Encrypt`] source and a value going out is built by a [`Sink`], and
-nothing sits in between. This crate supplies the JavaScript side of both:
+An incoming JavaScript value implements [`Encrypt`]; a [`Sink`] builds
+the outgoing value. This crate supplies both sides of that conversion:
 
 - **`JsRef<'e>`** — a live JavaScript value as an `Encrypt`. The walk runs
   on the JavaScript thread, reading each value as it goes, so no value tree
@@ -28,6 +27,50 @@ nothing sits in between. This crate supplies the JavaScript side of both:
   addon with `Wrappers::exports`. The crate keeps them in its own registry,
   keyed by the environment and released by an environment cleanup hook; the
   addon's instance data is untouched.
+
+## Installation
+
+```sh
+cargo add vitaminc-aead-napi
+```
+
+Add this dependency to a Rust Node addon (`cdylib`). It is not an npm package.
+
+## Run a Node example
+
+This crate supplies Rust building blocks for a Node addon. The repository's
+[test addon](https://github.com/cipherstash/vitaminc/blob/main/packages/aead-napi/tests/addon/src/lib.rs)
+exports `encryptValue` and `decryptValue` using `JsRef`, `JsCipherText`, and
+`JsBuilder` with AES-256-GCM. It uses a fixed, public test key; use it only
+with sample data.
+
+From the repository root, with Rust and Node.js installed, run:
+
+```sh
+cargo test -p vitaminc-aead-napi --test node
+```
+
+This builds the addon and runs the following example, along with the binding
+tests. To run the example separately, save it as `example.cjs` in the repository
+root and run `node example.cjs target/napi-test-addon/addon.node`.
+
+```javascript
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const addon = require(path.resolve(process.argv[2]));
+
+const value = { name: 'Ada', count: 42n, tags: ['example'] };
+const aad = 'tenant:example';
+const ciphertext = addon.encryptValue(value, aad);
+const recovered = addon.decryptValue(ciphertext, aad);
+
+assert.deepEqual(recovered, value);
+assert.throws(() => addon.decryptValue(ciphertext, 'tenant:other'));
+```
+
+The associated data (`aad`) must match on encryption and decryption. It can
+bind ciphertext to a tenant or another application context. Use `bigint`
+for integer values, as shown by `42n`; JavaScript `number` values are floats.
 
 ## The mapping
 
@@ -83,9 +126,9 @@ turn a plain `{ value }` object back into a wrapper.
 An instance is not a plain object, so it is never confused with data
 another language wrote as an ordinary one-key object: Go's
 `{"date": "2024-01-01"}` decrypts in JS as that object and encrypts again
-unchanged (#382). Decimal text is exact fixed-point, not a JS number or an
+unchanged. Decimal text is exact fixed-point, not a JS number or an
 arbitrary decimal-library instance; a negative zero reads back as zero
-with its scale kept (ADR 0001). A leap second has no count since the epoch
+with its scale kept. A leap second has no count since the epoch
 and is refused. Timestamps outside years 0000–9999 use an ISO 8601
 expanded year (`+12000-01-01T00:00:00.000000001Z`), on both sides.
 
@@ -105,46 +148,8 @@ application sees the error its getter threw.
 This crate is a library consumed by the Node addon (cdylib/npm package);
 it is not itself loadable from Node.
 
-## Testing the conversion layer
-
-`cargo test -p vitaminc-aead-napi` runs pure Rust boundary tests and builds a
-small standalone addon to run four suites inside Node:
-`tests/value-conformance.cjs` for scalar conversions against the shared
-corpus, `tests/object-safety.cjs` for which object keys are read, how
-output properties are written, and the ciphertext node projection,
-`tests/kind_inventory.cjs` for every scalar kind the build can produce,
-and `tests/encrypt.cjs` for every row of the mapping encrypted and
-decrypted through real AES-256-GCM, with the error, depth and async
-guarantees above. Node.js must be available on PATH. The addon is a
-separate Cargo workspace so the library's `napi/noop` dev feature cannot
-stub the real Node symbols.
-
-Rust, Node, Go's codec, and the embedded WASM guest consume the same
-`testdata/value-conformance.json` vectors. They pin all scalar tags, numeric
-boundaries, calendar/decimal payloads and hostile-input refusals. JS integer
-host values round-trip as BigInt; Float32 becomes a JS number and re-encodes
-as Float64; a whole-millisecond timestamp becomes a `Date` and re-encodes as
-`Timestamp(Millis)` in the `0xF3` envelope. Go retains its established
-undefined-to-nil projection. These host projections are explicit fields in
-the corpus; Rust codec vectors always round-trip byte-for-byte.
-
-The functions that walk and build live JavaScript values take a
-`napi_env`, `Unknown` or `Object`, which only exists inside a running V8
-isolate, so Rust unit tests cannot reach them. The Node suites do:
-`tests/node.rs` rebuilds the test addon from the crate's source, so the
-mutation gate tests these functions like any other code. Only the CRAP gate
-still exempts them, by name in `.cargo-crap.toml`, because they run inside
-the separately built addon, where `cargo llvm-cov` cannot measure their
-coverage; the pure functions beside them stay scored.
-
 ## Safety notes
 
-- Unsafe code is limited to the conversion trait methods napi-rs requires
-  (`FromNapiValue`/`ToNapiValue` for `JsCipherText`) and the one Node-API
-  call that reads a string's code units into a buffer the crate owns.
-  Everything else uses napi-rs's safe API. The crate denies
-  `unsafe_op_in_unsafe_fn` and `clippy::undocumented_unsafe_blocks`, so
-  each unsafe block states why it is sound.
 - The original copies of encrypted values in the V8 heap are owned by the
   JS engine and cannot be wiped from Rust. On the way in, every copy Rust
   makes of a string is wiped on drop: the UTF-16 code units and the UTF-8
@@ -202,6 +207,21 @@ coverage; the pure functions beside them stay scored.
   would otherwise take `t` and `v` from `String.prototype`.
 - Errors carry no cryptographic detail (`Unspecified` at the trait layer).
 
-[`Encrypt`]: vitaminc_aead::Encrypt
-[`Sink`]: vitaminc_aead::Sink
-[`JsFault`]: crate::JsFault
+
+## Cargo features
+
+This crate defines no Cargo feature flags.
+
+## Compatibility
+
+Requires Rust <!-- msrv:vitaminc-aead-napi -->**1.88.0**<!-- /msrv --> and the Rust standard library (`std`).
+This crate targets native Node.js addons; it is not a WebAssembly binding.
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
+
+License: MIT.
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[`Encrypt`]: https://docs.rs/vitaminc-aead/latest/vitaminc_aead/trait.Encrypt.html
+[`JsFault`]: https://docs.rs/vitaminc-aead-napi/latest/vitaminc_aead_napi/struct.JsFault.html
+[`Sink`]: https://docs.rs/vitaminc-aead/latest/vitaminc_aead/trait.Sink.html

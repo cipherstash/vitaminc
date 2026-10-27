@@ -138,6 +138,7 @@ where
 }
 
 #[cfg(feature = "arbitrary")]
+#[cfg_attr(docsrs, doc(cfg(feature = "arbitrary")))]
 impl<T> quickcheck::Arbitrary for Protected<T>
 where
     T: quickcheck::Arbitrary + Zeroize,

@@ -30,9 +30,9 @@ chacha20 = { version = "0.10", default-features = false, features = ["zeroize"] 
 vitaminc-random-derives = { version = "0.8.1", path = "../random-derives" }
 vitaminc-protected = { version = "0.8.1", path = "../protected" }
 
-# Wasm32: route `getrandom` to the browser/Deno crypto API. Pulled in
-# transitively via `rand` -> `getrandom 0.4`. Must be paired with the
-# `--cfg getrandom_backend="wasm_js"` rustflag (set via `.cargo/config.toml`
-# in any workspace consuming this crate for wasm32 builds).
+# Wasm32: enable the JavaScript entropy backend for unknown targets. Pulled
+# in transitively via `rand` -> `getrandom 0.4`, which selects this backend
+# from the feature alone; no `getrandom_backend` rustflag is needed.
+# WASI targets still use their native host randomness interface.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }

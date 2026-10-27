@@ -19,6 +19,14 @@ Vitamin C is a suite of crates for cryptography and handling sensitive data. The
 - Scope commits to the affected crate when possible (e.g. `feat(aead): add streaming encryption support`)
 - These messages feed into automated changelog generation via git-cliff, so clarity matters
 
+## Documentation
+
+Use the repository-local [rust-documentation skill](.agents/skills/rust-documentation/SKILL.md)
+for Rust documentation work. Follow [the documentation conventions](docs/documentation.md)
+for this repository's checks, README links, and separation of user-facing docs
+from contributor workflows. Repository requirements take precedence over the
+skill's general guidance.
+
 ## Releases
 
 Releases are automated with release-plz. See `RELEASING.md` for the full process.

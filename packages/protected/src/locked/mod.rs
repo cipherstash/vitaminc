@@ -180,10 +180,9 @@ impl std::error::Error for LockError {
 /// dumps on Linux, still holds. A refused dump exclusion, which is rare and
 /// takes a seccomp filter to provoke, is treated the same way.
 ///
-/// `BestEffort` is the default because a strict default fails in development
-/// and CI, where swap exposure is irrelevant, and teaches people to turn it
-/// off. A service that needs the guarantee sets `Strict` once at startup, or
-/// checks [`Locked::locked`] on the values it cares about.
+/// `BestEffort` allows construction even if the operating system refuses
+/// these protections. If your application requires them, set `Strict` once
+/// at startup, or check [`Locked::locked`] on each value before using it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LockPolicy {
     /// Create the value anyway and record the refusal, readable from

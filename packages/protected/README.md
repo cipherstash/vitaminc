@@ -5,6 +5,12 @@
 
 This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) framework to make cryptography code healthy.
 
+## Installation
+
+```sh
+cargo add vitaminc-protected
+```
+
 ## Safe wrappers for sensitive data
 
 `Protected` is a set of types that remove some of the sharp edges of working with sensitive data in Rust.
@@ -231,8 +237,31 @@ let input: Result<Protected<String>, FromUtf8Error> = Protected::generate_ok(|| 
 });
 ```
 
+## Cargo features
+
+No optional features are enabled by default.
+
+| Feature | Effect |
+| --- | --- |
+| `bitvec` | Exposes bit-slice indexing adapters. Accesses use ordinary indexing, so they do not hide the index. |
+| `arbitrary` | Implements `quickcheck::Arbitrary` for `Protected<T>` when `T` supports it, for property tests. |
+
+The `bitvec` dependency is present even without the feature; the flag exposes
+the adapters. `arbitrary` is for test data, not cryptographic randomness.
+
+## Compatibility
+
+Requires Rust <!-- msrv:vitaminc-protected -->**1.88.0**<!-- /msrv --> and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
+
 ## CipherStash
 
 Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
 
 License: MIT
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[ConstantTimeEq]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/trait.ConstantTimeEq.html
+[Controlled]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/trait.Controlled.html
+[Equatable]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/struct.Equatable.html

@@ -1,3 +1,15 @@
+// These definitions precede the README so rustdoc links to the version being built.
+// The README supplies published-API URLs for GitHub. See docs/documentation.md.
+//! [`JsFault`]: crate::JsFault
+//!
+// Workspace crates release together; keep cross-crate links on that version.
+#![deny(missing_docs)]
+#![doc = concat!(
+    "\n[`Encrypt`]: https://docs.rs/vitaminc-aead/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_aead/trait.Encrypt.html\n",
+    "\n[`Sink`]: https://docs.rs/vitaminc-aead/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_aead/trait.Sink.html\n",
+)]
 #![deny(clippy::unwrap_used, clippy::todo, unused_imports)]
 // The only unsafe left is where napi-rs's conversion traits require it.
 // Each block has to say why it is sound, and unsafe calls inside those trait

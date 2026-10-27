@@ -7,6 +7,12 @@ A library for permuting data in a secure and efficient manner.
 
 This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) framework to make cryptography code healthy.
 
+## Installation
+
+```sh
+cargo add vitaminc-permutation
+```
+
 ## Warning
 
 This library is a low-level primitive designed to be used in cryptographic applications.
@@ -65,52 +71,55 @@ The next element, 6, comes from the 0th position and so on.
 
 This operation is often written as Y=P(X).
 
-Permutations like this are useful because there is a _super-exponential_ relationship between the size of the
-permutation and the number of possible inputs that could have been processed by a given key.
+There are `N!` possible permutations of `N` positions. A **uniformly random
+permutation** selects each with probability `1 / N!`. This describes the
+distribution of the shuffle, not the secrecy of the shuffled data.
 
-For example, a 3-element input X was permuted by a permutation P.
-We don’t know X or P but we do know the output.
+This crate generates permutations by assigning random sort keys to positions and
+sorting them through a fixed sorting network. If any sort keys collide, generation
+fails with `RandomError::SeedRejected`; see [`PermutationKey::from_seed`] for
+recovery. With independent, uniformly random sort keys, every position ordering is
+equally likely conditional on no collision. In practice the randomness comes from
+`SafeRand`, a seeded cryptographic pseudorandom generator, so its security also
+depends on the seed and generator.
 
-Let’s say `Y=[2, 1, 0]`, the input could have been:
+A position permutation preserves every element's value and the number of times it
+appears. A bitwise permutation preserves the number of set bits (Hamming weight).
+For example, every permutation of `[0, 0, 0, 0]` is unchanged, whereas every
+permutation of `[0, 0, 0, 1]` still contains one `1`. An observer can distinguish
+these inputs without knowing the permutation. Even a uniformly random shuffle
+therefore does not provide perfect secrecy for arbitrary data.
 
-```plaintext
-[0, 1, 2]
-[0, 2, 1]
-[1, 0, 2]
-[1, 2, 0]
-[2, 0, 1]
-[2, 1, 0] // A permutation that does nothing
-```
+If all inputs are rearrangements of one fixed, known collection, a fresh,
+independent, uniformly random permutation can hide their original ordering. That
+restricted guarantee does not extend to arbitrary inputs or reuse of a secret
+permutation. When all input elements are distinct, a known input and its output
+reveal the permutation; repeated elements leave ambiguity.
 
-A permutation of N elements will have `N!` (factorial) possible values.
-For N=16, the number of permutations is ~20 trillion.
-For N=32, about 2x10^35. This number can be represented by about 117 bits (compare that to AES-128 which is 128-bits).
+XOR changes bit values rather than moving bit positions. XOR encryption provides
+perfect secrecy under the one-time-pad assumptions: a uniformly random,
+independent secret pad as long as the message, used only once. Merely using a
+secret XOR key or a secret position permutation does not provide that guarantee.
 
-A permutation is loosely analogous to an XOR operation.
-In fact, XOR can be thought of a 1-bit (2-element) permutation operating on a 1-bit (2-element) input.
-If the key is 1, the input bit is flipped, otherwise it isn’t.
+Use these permutations as building blocks in a cryptographic construction whose
+security analysis accounts for the input domain, the information preserved by
+permutation, and key reuse. They are not a standalone cipher for arbitrary values.
 
-```plaintext
-Input | Key | Out
-0     |  0  | 0
-0     |  1  | 1
-1     |  0  | 1
-1     |  1  | 0
-```
+## Cargo features
 
-The XOR of a key with a plaintext has perfect security but if an attacker knows both the input and the output,
-the key is trivial to recover (k=input^output).
+This crate defines no Cargo feature flags.
 
-Despite this, XOR features heavily in modern cryptography and forms the basis of virtually all block-cipher modes.
-These modes are designed to take advantage of the secret properties of XOR without creating a situation where
-an input and output to an XOR is accessible to an attacker without a key.
+## Compatibility
 
-In a sense, permutations are the generalised version of XOR.
-They too have perfect secrecy but, like XOR, if an attacker knows the input and output to a permutation,
-the permutation itself is trivially recoverable.
+Requires Rust <!-- msrv:vitaminc-permutation -->**1.88.0**<!-- /msrv --> and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
 
 ## CipherStash
 
 Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
 
 License: MIT
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[`PermutationKey::from_seed`]: https://docs.rs/vitaminc-permutation/latest/vitaminc_permutation/struct.PermutationKey.html#method.from_seed

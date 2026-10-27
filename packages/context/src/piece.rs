@@ -393,6 +393,7 @@ impl fmt::Display for ContextPiece<'_> {
 /// downstream crate can state a property over every tree this crate can
 /// encode.
 #[cfg(any(test, feature = "arbitrary"))]
+#[cfg_attr(docsrs, doc(cfg(feature = "arbitrary")))]
 impl quickcheck::Arbitrary for ContextPiece<'static> {
     fn arbitrary(g: &mut quickcheck::Gen) -> Self {
         arbitrary_piece(g, 3)

@@ -19,11 +19,13 @@ This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) f
 
 Add this to your `Cargo.toml`:
 
+<!-- workspace-deps:start -->
 ```toml
 [dependencies]
-vitaminc-password = "0.2.0-pre.1"
-vitaminc-random = "0.2.0-pre.1"
+vitaminc-password = "0.8.1"
+vitaminc-random = "0.8.1"
 ```
+<!-- workspace-deps:end -->
 
 ## Quick Start
 

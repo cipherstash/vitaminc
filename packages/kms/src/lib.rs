@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 use crate::private::ValidMacSize;
 use aws_sdk_kms::{primitives::Blob, Client, Config};
@@ -10,12 +11,31 @@ use zeroize::Zeroize;
 /// A `Mac` implementation that uses AWS KMS to generate HMACs of `N` bytes.
 /// Valid sizes are 28, 32, 48, and 64 bytes.
 ///
-/// These corespond to the following algorithms:
+/// These correspond to the following algorithms:
 /// - 28 bytes: HMAC-SHA224
 /// - 32 bytes: HMAC-SHA256
 /// - 48 bytes: HMAC-SHA384
 /// - 64 bytes: HMAC-SHA512
 ///
+/// Updates append bytes to a local protected buffer. Finalization sends the
+/// entire message to KMS; it is not a streaming network operation. Key material
+/// remains in KMS. SDK request/response buffers are not `Protected` wrappers.
+///
+/// # Failure, reset, and cancellation
+///
+/// SDK errors leave the caller's output untouched. Reset finalization retains
+/// the buffered input on SDK error or cancellation while awaiting KMS, allowing
+/// retry. On success it copies the MAC to the output, then clears the input's
+/// length. This clear retains capacity and does not immediately wipe the old
+/// message bytes; the protected buffer is wiped when dropped. Consuming
+/// finalization drops the instance on success, failure, or cancellation.
+/// A cancelled request may still complete remotely.
+///
+/// # Panics
+///
+/// Finalization currently panics if a successful KMS response omits its MAC
+/// or returns a MAC whose length is not `N`. These malformed-response cases
+/// are not represented by [`enum@Error`].
 pub struct AwsKmsHmac<const N: usize> {
     client: Client,
     key_id: String,
@@ -23,8 +43,10 @@ pub struct AwsKmsHmac<const N: usize> {
     input: Protected<Vec<u8>>,
 }
 
+/// Failure returned by an AWS KMS operation.
 #[derive(Debug, Error)]
 pub enum Error {
+    /// An SDK/service error, including failed requests or rejected key parameters.
     #[error(transparent)]
     AwsSdk(#[from] aws_sdk_kms::Error),
 }
@@ -33,6 +55,16 @@ impl<const N: usize> AwsKmsHmac<N>
 where
     Self: private::ValidMacSize<N>,
 {
+    /// Create an empty message accumulator for an existing KMS HMAC key.
+    ///
+    /// `key_id` is passed unchanged to KMS. The key must support the HMAC
+    /// algorithm selected by `N`, and the configured credentials must permit
+    /// `GenerateMac`. Construction makes no request and does not validate key
+    /// access; failures are reported when finalizing.
+    ///
+    /// # Panics
+    ///
+    /// Inherits the configuration requirements and panics of [`Client::from_conf`].
     pub fn new(config: Config, key_id: impl Into<String>) -> Self {
         Self {
             client: Client::from_conf(config),
@@ -112,6 +144,10 @@ where
 {
     type Error = Error;
 
+    /// Send the buffered message to KMS and copy its MAC into `out`.
+    /// SDK errors and cancellation during the request leave `out` unchanged;
+    /// the consumed instance is dropped. See [`AwsKmsHmac`] for malformed-
+    /// response panics and remote cancellation limitations.
     async fn try_finalize_into(self, out: &mut Protected<[u8; N]>) -> Result<(), Self::Error> {
         let output = self.generate_mac().await?;
         let response = Protected::new(output.into_inner());
@@ -131,6 +167,10 @@ where
 {
     type Error = Error;
 
+    /// Send the buffered message to KMS, write the MAC, and clear the input length.
+    /// SDK errors and cancellation during the request retain the input and
+    /// leave `out` unchanged. Success retains input capacity without immediately
+    /// wiping the previous message. See [`AwsKmsHmac`] for panic behavior.
     async fn try_finalize_into_reset(&mut self, out: &mut C) -> Result<(), Self::Error> {
         let output = self.generate_mac().await?;
         let response = Protected::new(output.into_inner());

@@ -102,6 +102,11 @@ release = false
 publish = false
 
 [[package]]
+name = "derive-tests-no-dependency"
+release = false
+publish = false
+
+[[package]]
 name = "derive-tests-override"
 release = false
 publish = false

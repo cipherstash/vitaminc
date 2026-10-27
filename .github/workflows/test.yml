@@ -14,26 +14,38 @@ defaults:
     shell: bash -l {0}
 
 jobs:
-  # Enforces the declared rust-version: the workspace MSRV (root Cargo.toml)
-  # and vitaminc-kms's own, higher floor (the AWS SDK moves faster than the
-  # rest, so kms declares its own rust-version and is checked separately).
+  msrv-matrix:
+    runs-on: ubuntu-latest
+    name: "Read MSRVs from manifests"
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.msrv.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check MSRV synchronization
+        run: |
+          python3 -m unittest discover -s .github/scripts -p 'test_sync_msrv.py'
+          python3 .github/scripts/sync_msrv.py . --check
+      - name: Generate matrix
+        id: msrv
+        run: |
+          matrix=$(python3 .github/scripts/sync_msrv.py . --matrix)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  # Enforces every member's declared rust-version, plus explicit feature
+  # scenarios such as the facade's aws-kms feature. Versions come from TOML.
   # This job only runs `cargo check`. Tests stay on the pinned release in the
   # `test` job below, because the trybuild `.stderr` snapshots match one
   # compiler's diagnostics verbatim and would fail on any other.
   # `--locked` makes it check the dependency graph we actually ship.
   msrv:
+    needs: msrv-matrix
     runs-on: ubuntu-latest
     name: "🦀 MSRV (${{ matrix.toolchain }}, ${{ matrix.name }})"
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: workspace
-            toolchain: 1.88.0
-            args: --workspace --all-targets --exclude vitaminc-kms
-          - name: vitaminc-kms
-            toolchain: 1.94.1
-            args: -p vitaminc-kms --all-targets
+      matrix: ${{ fromJSON(needs.msrv-matrix.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v7
@@ -55,6 +67,55 @@ jobs:
 
       - name: cargo check
         run: cargo check --locked ${{ matrix.args }}
+
+      - name: README consumers at the workspace MSRV
+        if: matrix.name == 'workspace'
+        run: |
+          cargo fetch --locked
+          python3 .github/scripts/check_doc_examples.py .
+
+  documentation:
+    runs-on: ubuntu-latest
+    name: "📚 Documentation"
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+          targets: wasm32-unknown-unknown
+      - name: Documentation check script tests
+        run: python3 -m unittest discover -s .github/scripts -p 'test_doc_*.py'
+      - name: Remove cached documentation pages
+        # Otherwise an obsolete HTML page could hide a broken API URL.
+        run: cargo clean --doc
+      - name: docs (default features)
+        run: cargo doc --workspace --locked --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: docs (all features)
+        run: cargo doc --workspace --locked --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: README and crate landing-page links (offline)
+        run: python3 .github/scripts/check_doc_links.py .
+      - name: doctests (all features)
+        run: cargo test --workspace --locked --doc --all-features
+      - name: README consumers (native)
+        run: |
+          cargo fetch --locked
+          python3 .github/scripts/check_doc_examples.py .
+      - name: README consumers (WebAssembly compilation)
+        # Execution in Node remains covered by the wasm-pack step in test.
+        run: python3 .github/scripts/check_doc_examples.py . --target wasm32-unknown-unknown
 
   # The storage profile's golden corpus pins bytes customers keep, so a row
   # it had is never edited or removed; rows may be added. The Rust test
@@ -144,19 +205,15 @@ jobs:
       # catches a workspace member that release-plz.toml would try to
       # publish although the crate is not publishable, which fails every
       # Release run and nothing else checks.
-      - name: release lockfile re-sync and release-plz config (script tests)
+      - name: release synchronization and release-plz config (script tests)
         run: |
           python3 -m unittest discover -s .github/scripts -p 'test_sync_nested_lockfiles.py'
           python3 -m unittest discover -s .github/scripts -p 'test_commit_on_branch.py'
           python3 -m unittest discover -s .github/scripts -p 'test_release_plz_config.py'
+          python3 -m unittest discover -s .github/scripts -p 'test_sync_readme_versions.py'
 
-      # Broken intra-doc links are invisible without this: rustdoc warns and
-      # exits 0, so a link to a renamed or newly-private item rots silently and
-      # ships to docs.rs. `--no-deps` keeps the gate to our own crates.
-      - name: docs (intra-doc links)
-        run: cargo doc --workspace --all-features --no-deps
-        env:
-          RUSTDOCFLAGS: -D warnings
+      - name: README dependency versions
+        run: python3 .github/scripts/sync_readme_versions.py . --check
 
       - name: test (default — aws-lc-rs backend)
         # This host locks memory for real (no sanitizer, not root), so the

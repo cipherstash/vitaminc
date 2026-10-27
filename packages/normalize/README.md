@@ -22,6 +22,12 @@ own, including the decimal one, which is ported from the frozen
 [`vitaminc-prf`](https://docs.rs/vitaminc-prf) takes a [`Normalized`]
 and derives under its domain.
 
+## Installation
+
+```sh
+cargo add vitaminc-normalize
+```
+
 ## One scalar
 
 ```rust
@@ -152,3 +158,23 @@ new label.
 
 Text normalization is variable-time. The integer and float paths use no
 floating-point arithmetic.
+
+## Cargo features
+
+This crate defines no Cargo feature flags.
+
+## Compatibility
+
+Requires Rust <!-- msrv:vitaminc-normalize -->**1.88.0**<!-- /msrv --> and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
+
+License: MIT.
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[`NormalizeError::NoDomain`]: https://docs.rs/vitaminc-normalize/latest/vitaminc_normalize/enum.NormalizeError.html#variant.NoDomain
+[`Normalized`]: https://docs.rs/vitaminc-normalize/latest/vitaminc_normalize/struct.Normalized.html
+[`Term`]: https://docs.rs/vitaminc-normalize/latest/vitaminc_normalize/struct.Term.html
+[`Terms`]: https://docs.rs/vitaminc-normalize/latest/vitaminc_normalize/struct.Terms.html
+[`decimal`]: https://docs.rs/vitaminc-normalize/latest/vitaminc_normalize/fn.decimal.html
+[`domain::NULL`]: https://docs.rs/vitaminc-normalize/latest/vitaminc_normalize/domain/constant.NULL.html

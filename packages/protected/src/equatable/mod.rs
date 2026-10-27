@@ -137,6 +137,8 @@ impl<T: Controlled> Equatable<T>
 where
     T::Inner: ConstantTimeEq,
 {
+    /// Compare the inner values through [`ConstantTimeEq`], exposing the result
+    /// as a `bool`. Variable-length inputs may reveal their lengths.
     pub fn constant_time_eq(&self, other: &Self) -> bool {
         self.risky_ref().constant_time_eq(other.risky_ref())
     }
@@ -213,6 +215,12 @@ where
     }
 }
 
+/// Sealed equality interface returning an ordinary Boolean result.
+///
+/// Implementations compare contents using timing-aware primitives, but lengths
+/// and public shape need not be hidden. For a composable [`crate::Choice`] result,
+/// use [`crate::TimingSafeEq`] instead. This trait does not make subsequent
+/// branches on the returned `bool` constant-time.
 pub trait ConstantTimeEq<Rhs: ?Sized = Self>: private::SupportsConstantTimeEq {
     /// This method tests for `self` and `other` values to be equal, using constant time operations.
     /// Implementations will mostly use `ConstantTimeEq::ct_eq` to achieve this but because

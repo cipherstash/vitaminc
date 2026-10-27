@@ -2,10 +2,34 @@ pub use crate::Protected;
 use crate::{private::ControlledPrivate, AsProtectedRef, ProtectedRef, ReplaceT};
 use zeroize::Zeroize;
 
+/// Common access and transformation operations for this crate's secret wrappers.
+///
+/// This trait is sealed: downstream crates use its implementations rather than
+/// implementing it. [`Protected`] and the capability adapters implement it.
+/// Wrappers retain their own drop/zeroization behavior until their inner value
+/// is extracted. It is not a sandbox: closures and `risky_*` methods can copy,
+/// expose, or retain secrets.
+///
+/// # Ownership and cleanup
+///
+/// `map`, `map_ok`, `zip`, and `update_with` hand bare owned values to closures.
+/// Those values no longer have the original wrapper's drop protection. The
+/// closure must wipe any secret it discards, including on error or panic, or
+/// immediately put it in a wrapper with zeroizing drop behavior. `Zeroize`
+/// alone does not mean a value is wiped automatically when dropped.
+/// Borrowing operations keep the wrapper, but do not prevent copies or roll
+/// back mutations on panic. Scope restrictions are only enforced where an API
+/// explicitly requires them; see [`crate::Usage`].
 pub trait Controlled: ControlledPrivate + Zeroize {
+    /// The bare value held by the wrapper, without its access restrictions.
     type Inner;
 
+    /// Wrap an owned value. Equivalent to [`new`](Self::new); moving a value
+    /// here does not wipe copies or earlier stack locations held by the caller.
     fn init_from_inner(x: Self::Inner) -> Self;
+    /// Borrow the bare value mutably, with the same exposure as
+    /// [`risky_inner_mut`](Self::risky_inner_mut). Replacing or copying its
+    /// contents makes the caller responsible for the displaced/copy values.
     fn inner_mut(&mut self) -> &mut Self::Inner;
 
     /// Initialize a new instance of the [Controlled] type from the inner value.
@@ -68,8 +92,10 @@ pub trait Controlled: ControlledPrivate + Zeroize {
         f().map(Self::init_from_inner)
     }
 
-    /// Map the inner value of this [Controlled] type`.
+    /// Map the inner value of this [Controlled] type.
     /// Conceptually similar to `Option::map`.
+    /// The closure owns the unwrapped input and must handle its cleanup; see
+    /// the trait's ownership contract. The output uses the [`ReplaceT`] adapter.
     ///
     /// # Example
     ///
@@ -94,6 +120,12 @@ pub trait Controlled: ControlledPrivate + Zeroize {
 
     /// Similar to `map` but the closure returns a `Result` with the new inner value.
     /// The result is a `Result` with the new [Controlled] type.
+    ///
+    /// # Errors
+    ///
+    /// Returns the closure's error unchanged. The input is consumed, and neither
+    /// the error nor secrets discarded by the closure are automatically wrapped
+    /// or wiped. See the trait's ownership contract.
     ///
     /// # Example
     ///
@@ -132,8 +164,9 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// assert_eq!(z.risky_unwrap(), 3);
     /// ```
     ///
-    /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
-    /// e.g. `other` must have the same, or broader scope as `self`
+    /// The result is a plain `Protected<Out>`: adapter capabilities and usage
+    /// scopes are not propagated or checked. The closure owns both bare inputs
+    /// and is responsible for their cleanup.
     fn zip<Other, Out, F>(self, b: Other, f: F) -> Protected<Out>
     where
         Self: Sized,
@@ -175,7 +208,8 @@ pub trait Controlled: ControlledPrivate + Zeroize {
         <Self as ReplaceT<Out>>::Output::init_from_inner(f(self.risky_unwrap(), arg.inner_ref()))
     }
 
-    /// Similar to `map` but using references to that the inner value is updated in place.
+    /// Update the inner value in place through a mutable borrow.
+    /// If the closure panics, mutations already made remain; there is no rollback.
     ///
     /// # Example
     ///
@@ -214,8 +248,9 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// assert_eq!(x.risky_unwrap(), [1u8; 32]);
     /// ```
     ///
-    /// TODO: Apply Usage trait bounds to prevent accidental broadening of scope
-    /// e.g. `other` must have the same, or broader scope as `self`
+    /// No usage-scope compatibility is checked. The closure receives `other`'s
+    /// bare inner value and must wipe discarded secrets. Mutations to `self`
+    /// are not rolled back if the closure panics.
     fn update_with<Other, F>(&mut self, other: Other, mut f: F)
     where
         F: FnMut(&mut Self::Inner, Other::Inner),
@@ -268,7 +303,8 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     }
 
     /// Replace the inner value with a new one.
-    /// The new value must be `Self`.
+    /// Return the old value in the same wrapper type. It is wiped according to
+    /// that wrapper's drop behavior when the returned value is dropped.
     ///
     /// # Example
     ///

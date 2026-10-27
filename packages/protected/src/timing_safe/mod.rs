@@ -102,6 +102,8 @@ pub trait TimingSafeEq {
     /// Must be constant-time with respect to secret data.
     fn ts_eq(&self, other: &Self) -> Choice;
 
+    /// Return the complement of [`ts_eq`](Self::ts_eq) as a [`Choice`], with
+    /// the same timing and public-shape behavior as that comparison.
     fn ts_ne(&self, other: &Self) -> Choice {
         !self.ts_eq(other)
     }
