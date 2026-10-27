@@ -1,8 +1,6 @@
-use core::ops::{Deref, DerefMut};
-
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::locked::wipe_vec;
+use crate::{locked::wipe_vec, private::ControlledPrivate, Controlled, OpaqueDebug};
 
 /// Secret bytes on the heap, written a few at a time: a frame, a blob, a
 /// serialisation of a value.
@@ -12,34 +10,39 @@ use crate::locked::wipe_vec;
 /// `Buffer` does neither. It grows into a fresh allocation and wipes the
 /// old one before it is freed; and it is wiped sixteen bytes a store, when
 /// it is dropped, when it is [`zeroize`]d, and when it is [`clear`]ed. So
-/// [`Protected<Buffer>`](crate::Protected) is what a writer of secret bytes
-/// returns, and `&mut Buffer` is what it writes into.
+/// a `Buffer` is what a writer of secret bytes returns, and `&mut Buffer`
+/// is what it writes into.
 ///
-/// It is a slice for reading and for patching bytes in place, through
-/// `Deref`. Every way to add bytes goes through [`reserve`], so there is no
-/// way to grow it that leaves a copy behind. It is not `Clone` and has no
-/// `PartialEq`: its bytes are secret, so a copy or a comparison is a
-/// decision to make at the use, through the slice.
+/// It is a [`Controlled`] type, like [`Protected`](crate::Protected): its
+/// bytes are read through [`risky_ref`](Controlled::risky_ref) and taken
+/// through [`risky_unwrap`](Controlled::risky_unwrap), so every read of
+/// what it holds is named at the use. Writing needs no such name: every
+/// way to add bytes goes through [`reserve`], so there is no way to grow
+/// it that leaves a copy behind, and [`overwrite`] patches bytes already
+/// written without handing out a slice. It is not `Clone` and has no
+/// `PartialEq`: a copy or a comparison of secret bytes is a decision to
+/// make at the use, through `risky_ref`. Its `Debug` shows nothing.
 ///
 /// [`zeroize`]: Zeroize::zeroize
 /// [`clear`]: Buffer::clear
 /// [`reserve`]: Buffer::reserve
+/// [`overwrite`]: Buffer::overwrite
 ///
 /// # Examples
 ///
 /// ```
-/// use vitaminc_protected::{Buffer, Controlled, Protected};
+/// use vitaminc_protected::{Buffer, Controlled};
 ///
 /// let mut out = Buffer::new();
-/// out.push(0x01);
+/// out.push(0x00);
 /// out.extend_from_slice(b"secret");
-/// assert_eq!(&out[1..], b"secret");
+/// out.overwrite(0, &[0x01]);
+/// assert_eq!(out.len(), 7);
 ///
-/// // Returned under `Protected`, so it is wiped when the caller drops it.
-/// let kept = Protected::new(out);
-/// assert_eq!(kept.risky_ref().len(), 7);
+/// // Reading the bytes is named: anything copied out is yours to wipe.
+/// assert_eq!(&out.risky_ref()[1..], b"secret");
 /// ```
-#[derive(Default)]
+#[derive(Default, OpaqueDebug)]
 pub struct Buffer(Vec<u8>);
 
 /// The smallest allocation a growing `Buffer` makes.
@@ -56,10 +59,16 @@ impl Buffer {
         Self(Vec::with_capacity(capacity))
     }
 
-    /// The bytes written so far.
+    /// How many bytes have been written.
     #[inline]
-    pub fn as_slice(&self) -> &[u8] {
-        &self.0
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Whether no byte has been written.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     /// How many bytes fit before the buffer grows.
@@ -114,46 +123,47 @@ impl Buffer {
         self.0.extend_from_slice(bytes);
     }
 
+    /// Replace the bytes from `at` with `bytes`, which must already have
+    /// been written: for a length filled in once its container is done.
+    ///
+    /// # Panics
+    ///
+    /// If `at + bytes.len()` is past the end of what has been written.
+    #[inline]
+    pub fn overwrite(&mut self, at: usize, bytes: &[u8]) {
+        self.0[at..][..bytes.len()].copy_from_slice(bytes);
+    }
+
     /// Wipe every byte and keep the allocation, for writing into again.
     pub fn clear(&mut self) {
         wipe_vec(&mut self.0);
+    }
+}
+
+impl ControlledPrivate for Buffer {}
+
+impl Controlled for Buffer {
+    type Inner = Vec<u8>;
+
+    /// Take over `bytes`. Any allocation the `Vec` outgrew before this is
+    /// already gone, unwiped; from here on the buffer's rules apply.
+    fn init_from_inner(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
+    fn inner_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.0
     }
 
     /// Take the bytes as a `Vec<u8>`, and with them the duty to wipe it:
     /// the `Vec` is freed unwiped unless its new owner wipes it, and if it
     /// grows it leaves its old bytes behind. For handing bytes to an API
     /// that takes a `Vec`, right before they are used.
-    pub fn risky_into_vec(mut self) -> Vec<u8> {
+    fn risky_unwrap(mut self) -> Vec<u8> {
         core::mem::take(&mut self.0)
     }
-}
 
-impl From<Vec<u8>> for Buffer {
-    /// Take over `bytes`. Any allocation the `Vec` outgrew before this is
-    /// already gone, unwiped; from here on the buffer's rules apply.
-    fn from(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-}
-
-impl Deref for Buffer {
-    type Target = [u8];
-    #[inline]
-    fn deref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl DerefMut for Buffer {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut [u8] {
-        &mut self.0
-    }
-}
-
-impl AsRef<[u8]> for Buffer {
-    #[inline]
-    fn as_ref(&self) -> &[u8] {
+    fn risky_ref(&self) -> &Vec<u8> {
         &self.0
     }
 }
@@ -180,28 +190,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bytes_read_back_through_the_slice() {
+    fn bytes_read_back_through_risky_ref() {
         let mut out = Buffer::new();
         out.push(1);
         out.extend_from_slice(&[2, 3]);
-        assert_eq!(&*out, &[1, 2, 3]);
-        assert_eq!(out.as_slice(), &[1, 2, 3]);
+        assert_eq!(out.risky_ref(), &[1, 2, 3]);
         assert_eq!(out.len(), 3);
-        out[0] = 9;
-        assert_eq!(&*out, &[9, 2, 3], "bytes are patched in place");
+        assert!(!out.is_empty());
+        out.overwrite(0, &[9]);
+        assert_eq!(out.risky_ref(), &[9, 2, 3], "bytes are patched in place");
+    }
+
+    #[test]
+    #[should_panic(expected = "out of range")]
+    fn overwrite_refuses_to_write_past_the_end() {
+        let mut out = Buffer::new();
+        out.extend_from_slice(&[1, 2, 3]);
+        out.overwrite(2, &[8, 9]);
     }
 
     #[test]
     fn growth_moves_to_a_bigger_allocation_and_keeps_the_bytes() {
         let mut out = Buffer::with_capacity(4);
         out.extend_from_slice(&[1, 2, 3, 4]);
-        let before = out.as_slice().as_ptr();
+        let before = out.risky_ref().as_ptr();
         out.push(5);
         assert!(
-            !core::ptr::eq(out.as_slice().as_ptr(), before),
+            !core::ptr::eq(out.risky_ref().as_ptr(), before),
             "a full buffer grows into a fresh allocation"
         );
-        assert_eq!(&*out, &[1, 2, 3, 4, 5]);
+        assert_eq!(out.risky_ref(), &[1, 2, 3, 4, 5]);
         assert!(
             out.capacity() >= LEAST,
             "the first growth is at least {LEAST}"
@@ -212,10 +230,10 @@ mod tests {
         big.reserve(1);
         assert!(big.capacity() >= 200, "a buffer doubles its length");
 
-        let before = big.as_slice().as_ptr();
+        let before = big.risky_ref().as_ptr();
         big.reserve(10);
         assert!(
-            core::ptr::eq(big.as_slice().as_ptr(), before),
+            core::ptr::eq(big.risky_ref().as_ptr(), before),
             "a buffer with room does not move"
         );
     }
@@ -224,10 +242,10 @@ mod tests {
     fn clear_wipes_and_keeps_the_allocation() {
         let mut out = Buffer::with_capacity(16);
         out.extend_from_slice(b"secret");
-        let before = out.as_slice().as_ptr();
+        let before = out.risky_ref().as_ptr();
         out.clear();
         assert!(out.is_empty());
-        assert!(core::ptr::eq(out.as_slice().as_ptr(), before));
+        assert!(core::ptr::eq(out.risky_ref().as_ptr(), before));
         assert_eq!(out.capacity(), 16);
     }
 
@@ -242,8 +260,8 @@ mod tests {
 
     #[test]
     fn a_vec_moves_in_and_out() {
-        let out = Buffer::from(vec![1u8, 2]);
-        assert_eq!(&*out, &[1, 2]);
-        assert_eq!(out.risky_into_vec(), vec![1, 2]);
+        let out: Buffer = Controlled::new(vec![1u8, 2]);
+        assert_eq!(out.risky_ref(), &[1, 2]);
+        assert_eq!(out.risky_unwrap(), vec![1, 2]);
     }
 }

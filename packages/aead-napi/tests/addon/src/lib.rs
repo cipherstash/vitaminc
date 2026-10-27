@@ -126,7 +126,7 @@ pub fn decrypts_as_none(#[napi(ts_arg_type = "unknown")] ct: Ct, aad: String) ->
 /// here, on the JavaScript thread, and the worker seals the frame with no
 /// JavaScript access at all.
 pub struct EncryptFrame {
-    frame: Option<Protected<vitaminc_protected::Buffer>>,
+    frame: Option<vitaminc_protected::Buffer>,
     aad: String,
 }
 
