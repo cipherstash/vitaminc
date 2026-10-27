@@ -19,7 +19,7 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
-use vitaminc_protected::{Controlled, OpaqueDebug, Protected, TimingSafeEq};
+use vitaminc_protected::{Buffer, Controlled, OpaqueDebug, Protected, TimingSafeEq};
 
 use crate::leaf::{self, Form, Item, ScalarError};
 use crate::plaintext::{
@@ -297,13 +297,14 @@ impl Error for FrameWriteError {
     }
 }
 
-/// Write any source as a frame. The buffer is `Protected`, since a frame
-/// of plaintext is plaintext, and it grows without leaving copies behind.
+/// Write any source as a frame. The result is a [`Buffer`] under
+/// `Protected`, since a frame of plaintext is plaintext: it grows without
+/// leaving copies behind, and is wiped when it is dropped.
 ///
 /// The result is checked with [`Frame::parse`] before it is returned, so a
 /// source that opens a container and never ends it is refused here, not by
 /// every later reader of the frame.
-pub fn to_frame<P: Encrypt>(p: P) -> Result<Protected<Vec<u8>>, FrameWriteError> {
+pub fn to_frame<P: Encrypt>(p: P) -> Result<Protected<Buffer>, FrameWriteError> {
     to_frame_at(p, 0)
 }
 
@@ -313,8 +314,8 @@ pub fn to_frame<P: Encrypt>(p: P) -> Result<Protected<Vec<u8>>, FrameWriteError>
 pub(crate) fn to_frame_at<P: Encrypt>(
     p: P,
     depth: usize,
-) -> Result<Protected<Vec<u8>>, FrameWriteError> {
-    let mut out = Protected::new(Vec::new());
+) -> Result<Protected<Buffer>, FrameWriteError> {
+    let mut out = Protected::new(Buffer::new());
     p.visit(FrameWriter {
         out: out.risky_inner_mut(),
         depth,
@@ -326,19 +327,19 @@ pub(crate) fn to_frame_at<P: Encrypt>(
 /// A sink that writes one value node onto the end of a buffer. Unknown
 /// container lengths are patched in at `end`.
 pub struct FrameWriter<'o> {
-    out: &'o mut Vec<u8>,
+    out: &'o mut Buffer,
     depth: usize,
 }
 
 impl<'o> FrameWriter<'o> {
-    pub fn new(out: &'o mut Vec<u8>) -> Self {
+    pub fn new(out: &'o mut Buffer) -> Self {
         Self { out, depth: 0 }
     }
 
     /// A writer for a node that sits `depth` levels below the top of a
     /// document, so [`MAX_DEPTH`] counts from the top: for a subtree
     /// written to a buffer of its own and copied into the document later.
-    pub fn at_depth(out: &'o mut Vec<u8>, depth: usize) -> Self {
+    pub fn at_depth(out: &'o mut Buffer, depth: usize) -> Self {
         Self { out, depth }
     }
 
@@ -348,18 +349,17 @@ impl<'o> FrameWriter<'o> {
         self.depth
     }
 
-    fn node(self, tag: u8) -> Result<&'o mut Vec<u8>, FrameWriteError> {
+    fn node(self, tag: u8) -> Result<&'o mut Buffer, FrameWriteError> {
         if self.depth > MAX_DEPTH {
             return Err(FrameWriteError::TooDeep);
         }
-        reserve(self.out, 1);
         self.out.push(tag);
         Ok(self.out)
     }
 
     fn container(self, tag: u8) -> Result<Count<'o>, FrameWriteError> {
         let depth = self.depth;
-        reserve(self.out, 5);
+        self.out.reserve(5);
         let out = self.node(tag)?;
         let at = out.len();
         out.extend_from_slice(&[0; 4]);
@@ -373,27 +373,7 @@ impl<'o> FrameWriter<'o> {
     }
 }
 
-/// Make room for `additional` more bytes. A `Vec` that regrows frees its
-/// old allocation without wiping it, and a frame is plaintext, so grow into
-/// a fresh allocation and wipe the old one instead.
-pub(crate) fn reserve(out: &mut Vec<u8>, additional: usize) {
-    if out.capacity() - out.len() >= additional {
-        return;
-    }
-    // Doubling the length, not the capacity, still amortises a full
-    // buffer's growth, and never balloons a buffer that had room.
-    let capacity = out
-        .len()
-        .saturating_add(additional)
-        .max(out.len().saturating_mul(2))
-        .max(64);
-    let mut grown = Vec::with_capacity(capacity);
-    grown.extend_from_slice(out);
-    vitaminc_protected::wipe_vec(out);
-    *out = grown;
-}
-
-fn write_len(out: &mut Vec<u8>, len: usize) -> Result<(), FrameWriteError> {
+fn write_len(out: &mut Buffer, len: usize) -> Result<(), FrameWriteError> {
     let len = u32::try_from(len).map_err(|_| FrameWriteError::TooLong)?;
     out.extend_from_slice(&len.to_le_bytes());
     Ok(())
@@ -401,7 +381,7 @@ fn write_len(out: &mut Vec<u8>, len: usize) -> Result<(), FrameWriteError> {
 
 /// A container whose count is written once the children are known.
 struct Count<'o> {
-    out: &'o mut Vec<u8>,
+    out: &'o mut Buffer,
     depth: usize,
     at: usize,
     n: usize,
@@ -449,7 +429,7 @@ impl<'o> Sink for FrameWriter<'o> {
         if self.depth > MAX_DEPTH {
             return Err(FrameWriteError::TooDeep);
         }
-        reserve(self.out, leaf::max_len(&v));
+        self.out.reserve(leaf::max_len(&v));
         leaf::write(ty, v, Form::Frame, self.out).map_err(|e| match e {
             ScalarError::Invalid => FrameWriteError::Invalid,
             ScalarError::TooLong | ScalarError::Malformed => FrameWriteError::TooLong,
@@ -534,7 +514,7 @@ impl MapSink for FrameMap<'_> {
 
     fn entry(&mut self, key: &str) -> Result<FrameWriter<'_>, FrameWriteError> {
         self.count.settle()?;
-        reserve(self.count.out, key.len().saturating_add(4));
+        self.count.out.reserve(key.len().saturating_add(4));
         write_len(self.count.out, key.len())?;
         let start = self.count.out.len();
         self.count.out.extend_from_slice(key.as_bytes());
@@ -567,7 +547,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn frame_of<P: Encrypt>(p: P) -> Vec<u8> {
-        to_frame(p).expect("frames").risky_ref().clone()
+        to_frame(p).expect("frames").risky_ref().to_vec()
     }
 
     #[test]
@@ -644,25 +624,6 @@ mod tests {
             crate::plan::<_, (), _>(Doc, "ctx"),
             Err(crate::EncryptError::Shape(_))
         ));
-    }
-
-    #[test]
-    fn reserve_moves_to_a_bigger_buffer_and_keeps_the_bytes() {
-        let mut out = vec![1u8, 2, 3];
-        out.shrink_to_fit();
-        reserve(&mut out, 10);
-        assert_eq!(out, [1, 2, 3]);
-        assert!(out.capacity() >= 13);
-        let before = out.as_ptr();
-        reserve(&mut out, 10);
-        assert_eq!(out.as_ptr(), before, "enough room already: no move");
-
-        // A full buffer grows, even by one byte.
-        let mut full = vec![7u8; 100];
-        full.shrink_to_fit();
-        reserve(&mut full, 1);
-        assert!(full.capacity() >= 101);
-        assert_eq!(full, [7u8; 100]);
     }
 
     #[test]
@@ -910,14 +871,14 @@ mod tests {
 
     #[test]
     fn a_writer_at_depth_counts_from_the_top() {
-        let mut out = Vec::new();
+        let mut out = Buffer::new();
         let writer = FrameWriter::at_depth(&mut out, 7);
         assert_eq!(writer.depth(), 7);
         let mut seq = writer.seq(Some(1)).expect("seq");
         assert_eq!(seq.element().expect("element").depth(), 8);
 
         // A scalar fits at the bound, and not below it.
-        let mut out = Vec::new();
+        let mut out = Buffer::new();
         assert!(FrameWriter::at_depth(&mut out, MAX_DEPTH)
             .scalar(None, Physical::Bool(true))
             .is_ok());
