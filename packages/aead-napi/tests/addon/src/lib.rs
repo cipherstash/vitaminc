@@ -126,7 +126,7 @@ pub fn decrypts_as_none(#[napi(ts_arg_type = "unknown")] ct: Ct, aad: String) ->
 /// here, on the JavaScript thread, and the worker seals the frame with no
 /// JavaScript access at all.
 pub struct EncryptFrame {
-    frame: Option<Protected<Vec<u8>>>,
+    frame: Option<Protected<vitaminc_protected::Buffer>>,
     aad: String,
 }
 
@@ -246,7 +246,7 @@ pub fn ciphertext_with_payload(ct_levels: u32, value_levels: u32) -> Result<Ct> 
         wrap: "array".into(),
     });
     let payload = match payload {
-        Ok(frame) => frame.risky_ref().clone(),
+        Ok(frame) => frame.risky_ref().to_vec(),
         // Past the frame writer's bound: hand-write the frame bytes.
         Err(_) => {
             let mut bytes = Vec::new();
