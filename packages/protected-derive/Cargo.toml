@@ -22,6 +22,5 @@ quote = "1"
 syn = { version = "3", features = ["full", "extra-traits"] }
 
 [dev-dependencies]
-trybuild = "1.0.118"
 # Path-only consumer dependency for runnable macro documentation.
 vitaminc-protected = { path = "../protected" }

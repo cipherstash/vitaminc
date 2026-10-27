@@ -799,6 +799,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive-tests-no-dependency"
+version = "0.0.0"
+dependencies = [
+ "trybuild",
+ "vitaminc-protected-derive",
+]
+
+[[package]]
 name = "derive-tests-override"
 version = "0.0.0"
 dependencies = [
@@ -2897,7 +2905,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
- "trybuild",
  "vitaminc-protected",
 ]
 
