@@ -95,6 +95,17 @@ impl Buffer {
         if self.0.capacity() - self.0.len() < additional {
             self.grow(additional);
         }
+        // `grow` is a call the compiler does not look into, so without
+        // this it cannot tell that there is room now, and it keeps `Vec`'s
+        // own growth in `push` and `extend_from_slice`. That growth would
+        // free the old allocation without wiping it, if it ever ran.
+        // Telling the compiler there is room lets it drop that code.
+        debug_assert!(self.0.len() + additional <= self.0.capacity());
+        // SAFETY: either the check above found the room, or `grow` made a
+        // new allocation of at least `len + additional` bytes (its
+        // capacity is the largest of that, twice the length and `LEAST`,
+        // and `Vec::with_capacity` panics rather than allocate less).
+        unsafe { core::hint::assert_unchecked(self.0.len() + additional <= self.0.capacity()) }
     }
 
     #[cold]
