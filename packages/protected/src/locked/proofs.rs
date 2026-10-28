@@ -62,7 +62,7 @@ fn the_value_is_inside_the_interior_aligned_and_against_the_end() {
 }
 
 #[kani::proof]
-#[kani::unwind(33)]
+#[kani::unwind(65)]
 fn wipe_raw_zeroes_exactly_the_bytes_it_is_given() {
     // Wide enough to hold a byte-wise head, whole words and a tail,
     // whatever the buffer's alignment.
