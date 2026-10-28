@@ -42,7 +42,7 @@ pub use digest::ProtectedDigest;
 pub use ::digest::InvalidLength;
 pub use equatable::{ConstantTimeEq, Equatable};
 pub use exportable::{Exportable, SafeDeserialize, SafeSerialize};
-pub use locked::{wipe_vec, LockError, LockPolicy, LockPolicyError, Locked};
+pub use locked::{LockError, LockPolicy, LockPolicyError, Locked};
 /// The name `MaybeEmpty` had before it was renamed: it read as a marker
 /// ("values of this type are empty") when it is a capability ("this value
 /// can be asked whether it is empty"). Bounds and impls written against

@@ -699,18 +699,11 @@ pub(super) unsafe fn wipe_raw(ptr: *mut u8, len: usize) {
 /// This does what `out.zeroize()` does, but with sixteen bytes in each
 /// volatile store rather than one, so a buffer of secret bytes that is
 /// grown or dropped often (a frame, a blob) is wiped at close to memory
-/// speed. The allocation is kept; only its contents go.
+/// speed. The allocation is kept; only its contents go. [`Buffer`] wipes
+/// itself with this.
 ///
-/// # Examples
-///
-/// ```
-/// let mut buffer = Vec::with_capacity(64);
-/// buffer.extend_from_slice(b"a secret that must not outlive its use");
-/// vitaminc_protected::wipe_vec(&mut buffer);
-/// assert!(buffer.is_empty());
-/// assert!(buffer.capacity() >= 64);
-/// ```
-pub fn wipe_vec(out: &mut Vec<u8>) {
+/// [`Buffer`]: crate::Buffer
+pub(crate) fn wipe_vec(out: &mut Vec<u8>) {
     out.clear();
     // SAFETY: a `Vec`'s pointer is valid for writes of `capacity()` bytes,
     // and after `clear` none of them is a live element.
