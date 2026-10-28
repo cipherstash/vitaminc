@@ -113,10 +113,10 @@
 //! into a fresh allocation and wipes the old one. A `Display` value is
 //! formatted into a buffer that is wiped. A map's keys are checked for a
 //! repeat where they lie in the frame, rather than copied. The frame is
-//! returned [`Protected`]. `tests/transport_wipe.rs` checks this. Copies
-//! on the stack and in registers are not wiped, as for the storage
-//! profile (STORAGE.md, *Memory and timing*). The reader borrows text and
-//! bytes from its input.
+//! returned in a [`Buffer`], whose bytes are read through `risky_ref`.
+//! `tests/transport_wipe.rs` checks this. Copies on the stack and in
+//! registers are not wiped, as for the storage profile (STORAGE.md,
+//! *Memory and timing*). The reader borrows text and bytes from its input.
 
 use std::fmt;
 
@@ -130,8 +130,8 @@ use vitaminc_aead::frame::{FrameWriteError, ARRAY, MAX_DEPTH, OBJECT, PASSTHROUG
 use vitaminc_aead::leaf::{self, Form};
 use vitaminc_aead::plaintext::{Float, Int, Logical, MapSink, Physical, SeqSink, Sink};
 use vitaminc_aead::{tags, Encrypt, Frame, FrameWriter};
-use vitaminc_protected::Protected;
-use zeroize::{Zeroize, Zeroizing};
+use vitaminc_protected::{Buffer, Controlled};
+use zeroize::Zeroizing;
 
 // =============================================================================
 // Errors
@@ -192,9 +192,30 @@ impl Error {
         })
     }
 
-    pub(crate) fn at(mut self, segment: PathSegment) -> Self {
-        self.path.insert(0, segment);
+    pub(crate) fn at(mut self, segment: impl Into<PathSegment>) -> Self {
+        self.path.insert(0, segment.into());
         self
+    }
+}
+
+/// Where an entry sits on the path, held while its value is read or
+/// written. It names a key by the type's own `&'static str`, and becomes a
+/// [`PathSegment`] only when an error is placed at it, so an entry read or
+/// written without one allocates nothing for its path.
+#[derive(Clone, Copy)]
+enum At {
+    Key(&'static str),
+    Index(usize),
+    Entry(usize),
+}
+
+impl From<At> for PathSegment {
+    fn from(at: At) -> Self {
+        match at {
+            At::Key(key) => PathSegment::Key(key.to_owned()),
+            At::Index(index) => PathSegment::Index(index),
+            At::Entry(index) => PathSegment::Entry(index),
+        }
     }
 }
 
@@ -468,14 +489,12 @@ impl<'de> Deserializer<'de> {
         Ok(())
     }
 
-    /// Whether the next node is a null scalar.
+    /// Whether the next node is a null scalar: plain null, or `undefined`,
+    /// which reads as null ([`is_plain`]). Told from the tag alone, so a
+    /// node that is not null is not decoded here and then again by the
+    /// read that follows.
     fn next_is_null(&self) -> Result<bool, Error> {
-        if matches!(self.peek()?, ARRAY | OBJECT | MAP | PASSTHROUGH | SOME) {
-            return Ok(false);
-        }
-        let rest = self.buf.get(self.pos..).ok_or_else(malformed)?;
-        let ((ty, value), _) = leaf::read(rest, Form::Frame).map_err(|_| malformed())?;
-        Ok(is_plain(ty) && matches!(value, Physical::Null))
+        Ok(matches!(self.peek()?, tags::NULL | tags::UNDEFINED))
     }
 
     /// A storage map's next key, consumed, if it is text; otherwise
@@ -493,26 +512,35 @@ impl<'de> Deserializer<'de> {
     }
 
     /// The kind of the next node, for a refusal. It carries no value, so a
-    /// message built from it cannot repeat one.
+    /// message built from it cannot repeat one. The kind is told from the
+    /// tag alone: a scalar is not decoded here and then again by the read
+    /// that follows, and a tag the validator would not have passed is
+    /// reported as malformed, as that read would report it.
     fn found(&self) -> Result<Unexpected<'static>, Error> {
         Ok(match self.peek()? {
             ARRAY => Unexpected::Seq,
             OBJECT | MAP => Unexpected::Map,
             PASSTHROUGH => Unexpected::Other("a passthrough"),
             SOME => Unexpected::Option,
-            _ => {
-                let rest = self.buf.get(self.pos..).ok_or_else(malformed)?;
-                let ((ty, value), _) = leaf::read(rest, Form::Frame).map_err(|_| malformed())?;
-                match (ty, value) {
-                    (Some(_), _) => Unexpected::Other("a value with a logical type"),
-                    (None, Physical::Null) => Unexpected::Unit,
-                    (None, Physical::Bool(_)) => Unexpected::Bool(false),
-                    (None, Physical::Int(_)) => Unexpected::Unsigned(0),
-                    (None, Physical::Float(_)) => Unexpected::Float(0.0),
-                    (None, Physical::Text(_)) => Unexpected::Str(""),
-                    (None, Physical::Bytes(_)) => Unexpected::Bytes(&[]),
-                }
+            tags::NULL => Unexpected::Unit,
+            tags::BOOL_FALSE | tags::BOOL_TRUE => Unexpected::Bool(false),
+            tags::INT8
+            | tags::INT16
+            | tags::INT32
+            | tags::INT64
+            | tags::INT128
+            | tags::UINT8
+            | tags::UINT16
+            | tags::UINT32
+            | tags::UINT64
+            | tags::UINT128 => Unexpected::Unsigned(0),
+            tags::FLOAT32 | tags::FLOAT64 => Unexpected::Float(0.0),
+            tags::STRING => Unexpected::Str(""),
+            tags::BYTES => Unexpected::Bytes(&[]),
+            tags::UNDEFINED | tags::DATE | tags::TIMESTAMP | tags::DECIMAL | tags::LOGICAL => {
+                Unexpected::Other("a value with a logical type")
             }
+            _ => return Err(malformed()),
         })
     }
 
@@ -617,10 +645,10 @@ fn is_plain(ty: Option<Logical>) -> bool {
 /// The path segment for an object's entry: its key when that is one of the
 /// names the type declares, and otherwise only its position, so a key a
 /// host chose is never printed.
-fn entry_at(names: &'static [&'static str], key: &str, index: usize) -> PathSegment {
+fn entry_at(names: &'static [&'static str], key: &str, index: usize) -> At {
     match names.iter().find(|name| **name == key) {
-        Some(name) => PathSegment::Key((*name).to_owned()),
-        None => PathSegment::Entry(index),
+        Some(name) => At::Key(name),
+        None => At::Entry(index),
     }
 }
 
@@ -833,7 +861,7 @@ struct Map<'a, 'de> {
     /// The position of the next entry.
     index: usize,
     /// Where the entry whose value is next sits on the path.
-    at: Option<PathSegment>,
+    at: Option<At>,
 }
 
 impl<'de> MapAccess<'de> for Map<'_, 'de> {
@@ -870,7 +898,7 @@ impl<'de> MapAccess<'de> for Map<'_, 'de> {
         if self.keys == Keys::Names {
             return Err(de::Error::invalid_type(self.de.found()?, &"a field name"));
         }
-        self.at = Some(PathSegment::Entry(index));
+        self.at = Some(At::Entry(index));
         let start = self.de.pos;
         let key = seed.deserialize(&mut *self.de)?;
         if self.de.pos == start {
@@ -886,9 +914,7 @@ impl<'de> MapAccess<'de> for Map<'_, 'de> {
             .take()
             .ok_or_else(|| Error::new("a map value was read before its key"))?;
         let start = self.de.pos;
-        let value = seed
-            .deserialize(&mut *self.de)
-            .map_err(|e| e.at(at.clone()))?;
+        let value = seed.deserialize(&mut *self.de).map_err(|e| e.at(at))?;
         if self.de.pos == start {
             return Err(unread().at(at));
         }
@@ -995,7 +1021,7 @@ impl Enum<'_, '_> {
     /// once the variant is accepted, and names it only if it is one the
     /// type declares: a variant read through `#[serde(other)]` accepts a
     /// name the type does not know, which is never printed.
-    fn at(&self) -> PathSegment {
+    fn at(&self) -> At {
         entry_at(self.variants, self.variant, 0)
     }
 }
@@ -1058,11 +1084,11 @@ impl<'de> VariantAccess<'de> for BareVariant<'de> {
 ///
 /// What a host and Rust exchange this way is not plaintext to seal, but may
 /// still be secret (a credential in a configuration, say). So the frame is
-/// returned [`Protected`], and wiped when it is dropped. The buffer grows
-/// without leaving copies of what it held behind, as every frame vitaminc
-/// writes does, and is wiped if writing fails part way. A value written
-/// through `Display` (`collect_str`) is formatted into a buffer that is
-/// wiped too.
+/// returned as a [`Buffer`], and wiped when it is dropped. The buffer
+/// grows without leaving copies of what it held behind, as every frame
+/// vitaminc writes does, and is wiped if writing fails part way. A value
+/// written through `Display` (`collect_str`) is formatted into a buffer
+/// that is wiped too.
 ///
 /// # Errors
 ///
@@ -1077,17 +1103,17 @@ impl<'de> VariantAccess<'de> for BareVariant<'de> {
 /// refused ("container length does not match its children"). `serde_json`
 /// ignores a wrong length, so a hand-written impl that works there can fail
 /// here. Pass `None` when the count is not known up front.
-pub fn to_vec<T: Serialize + ?Sized>(value: &T) -> Result<Protected<Vec<u8>>, Error> {
-    let mut out = Zeroizing::new(Vec::new());
+pub fn to_vec<T: Serialize + ?Sized>(value: &T) -> Result<Buffer, Error> {
+    let mut out = Buffer::new();
     value.serialize(Serializer(FrameWriter::new(&mut out)))?;
-    Ok(Protected::new(core::mem::take(&mut *out)))
+    Ok(out)
 }
 
 /// Write `value` as a frame of its own, for a node `depth` levels below
 /// the top of a document. The buffer is wiped when it is dropped, whether
 /// or not it was copied into the document.
-fn to_part<T: Serialize + ?Sized>(value: &T, depth: usize) -> Result<Zeroizing<Vec<u8>>, Error> {
-    let mut out = Zeroizing::new(Vec::new());
+fn to_part<T: Serialize + ?Sized>(value: &T, depth: usize) -> Result<Buffer, Error> {
+    let mut out = Buffer::new();
     value.serialize(Serializer(FrameWriter::at_depth(&mut out, depth)))?;
     Ok(out)
 }
@@ -1097,43 +1123,21 @@ pub(crate) fn written(error: FrameWriteError) -> Error {
 }
 
 /// Writes one node into a [`FrameWriter`].
-/// Make room for `additional` more bytes. A `Vec` that regrows frees its
-/// old allocation without wiping it, so grow into a fresh allocation and
-/// wipe the old one instead.
-///
-/// The same as `reserve` in `vitaminc_aead::frame`, which the frame writer
-/// uses; that one is private to its crate. A fix to either belongs in both.
-pub(crate) fn reserve(out: &mut Vec<u8>, additional: usize) {
-    if out.capacity() - out.len() >= additional {
-        return;
-    }
-    let capacity = out
-        .len()
-        .saturating_add(additional)
-        .max(out.len().saturating_mul(2))
-        .max(64);
-    let mut grown = Vec::with_capacity(capacity);
-    grown.extend_from_slice(out);
-    out.zeroize();
-    *out = grown;
-}
-
-/// Appends formatted text to a buffer, growing it as [`reserve`] does.
-pub(crate) struct Appender<'o>(pub(crate) &'o mut Vec<u8>);
+/// Appends formatted text to a buffer.
+pub(crate) struct Appender<'o>(pub(crate) &'o mut Buffer);
 
 impl fmt::Write for Appender<'_> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        reserve(self.0, s.len());
         self.0.extend_from_slice(s.as_bytes());
         Ok(())
     }
 }
 
-/// `value`'s `Display`, in a buffer that grows as [`reserve`] does and is
-/// wiped when it is dropped. serde's default `collect_str` formats into a
-/// `String` of its own and frees it unwiped.
-fn displayed<T: fmt::Display + ?Sized>(value: &T) -> Result<Zeroizing<Vec<u8>>, Error> {
-    let mut out = Zeroizing::new(Vec::new());
+/// `value`'s `Display`, in a [`Buffer`], so it is wiped when it is dropped.
+/// serde's default `collect_str` formats into a `String` of its own and
+/// frees it unwiped.
+fn displayed<T: fmt::Display + ?Sized>(value: &T) -> Result<Buffer, Error> {
+    let mut out = Buffer::new();
     fmt::write(&mut Appender(&mut out), format_args!("{value}"))
         .map_err(|_| <Error as ser::Error>::custom(""))?;
     Ok(out)
@@ -1156,11 +1160,15 @@ impl<'o> Serializer<'o> {
     }
 
     /// An object of one entry: an enum variant with a payload.
-    fn variant<T: Serialize + ?Sized>(self, variant: &str, payload: &T) -> Result<(), Error> {
+    fn variant<T: Serialize + ?Sized>(
+        self,
+        variant: &'static str,
+        payload: &T,
+    ) -> Result<(), Error> {
         let mut map = self.0.map(Some(1)).map_err(written)?;
         payload
             .serialize(Serializer(map.entry(variant).map_err(written)?))
-            .map_err(|e| e.at(PathSegment::Key(variant.to_owned())))?;
+            .map_err(|e| e.at(At::Key(variant)))?;
         map.end().map_err(written)
     }
 }
@@ -1224,7 +1232,7 @@ impl<'o> ser::Serializer for Serializer<'o> {
     }
     fn collect_str<T: fmt::Display + ?Sized>(self, value: &T) -> Result<(), Error> {
         let shown = displayed(value)?;
-        self.serialize_str(text(&shown)?)
+        self.serialize_str(text(shown.risky_ref())?)
     }
     fn serialize_bytes(self, v: &[u8]) -> Result<(), Error> {
         self.scalar(Physical::Bytes(v))
@@ -1371,12 +1379,7 @@ impl SerMap<'_> {
     /// Write one entry. `at` is where an error inside it is placed: a
     /// struct's field by name, a map's entry by position only, as in
     /// reading.
-    fn entry<T: Serialize + ?Sized>(
-        &mut self,
-        key: &str,
-        at: PathSegment,
-        value: &T,
-    ) -> Result<(), Error> {
+    fn entry<T: Serialize + ?Sized>(&mut self, key: &str, at: At, value: &T) -> Result<(), Error> {
         self.index += 1;
         value
             .serialize(Serializer(self.map.entry(key).map_err(written)?))
@@ -1402,8 +1405,7 @@ impl ser::SerializeMap for SerMap<'_> {
             .key
             .take()
             .ok_or_else(|| Error::new("a map value was written before its key"))?;
-        let at = PathSegment::Entry(self.index);
-        self.entry(&key, at, value)
+        self.entry(&key, At::Entry(self.index), value)
     }
     fn end(self) -> Result<(), Error> {
         if self.key.is_some() {
@@ -1421,7 +1423,7 @@ impl ser::SerializeStruct for SerMap<'_> {
         key: &'static str,
         value: &T,
     ) -> Result<(), Error> {
-        self.entry(key, PathSegment::Key(key.to_owned()), value)
+        self.entry(key, At::Key(key), value)
     }
     fn end(self) -> Result<(), Error> {
         self.map.end().map_err(written)
@@ -1443,7 +1445,7 @@ struct SerVariant<'o> {
     variant: &'static str,
     /// Each part's key (a struct variant's field; `None` in a tuple
     /// variant) and frame.
-    parts: Vec<(Option<&'static str>, Zeroizing<Vec<u8>>)>,
+    parts: Vec<(Option<&'static str>, Buffer)>,
 }
 
 impl<'o> SerVariant<'o> {
@@ -1468,14 +1470,13 @@ impl<'o> SerVariant<'o> {
         value: &T,
     ) -> Result<(), Error> {
         let at = match key {
-            Some(key) => PathSegment::Key(key.to_owned()),
-            None => PathSegment::Index(self.parts.len()),
+            Some(key) => At::Key(key),
+            None => At::Index(self.parts.len()),
         };
         // A part is an element of the payload container, two levels below
         // the outer object.
         let depth = self.writer.depth() + 2;
-        let frame = to_part(value, depth)
-            .map_err(|e| e.at(at).at(PathSegment::Key(self.variant.to_owned())))?;
+        let frame = to_part(value, depth).map_err(|e| e.at(at).at(At::Key(self.variant)))?;
         self.parts.push((key, frame));
         Ok(())
     }
@@ -1488,7 +1489,7 @@ impl<'o> SerVariant<'o> {
 fn write_variant(
     writer: FrameWriter<'_>,
     variant: &str,
-    parts: &[(Option<&'static str>, Zeroizing<Vec<u8>>)],
+    parts: &[(Option<&'static str>, Buffer)],
     is_struct: bool,
 ) -> Result<(), Error> {
     let mut outer = writer.map(Some(1)).map_err(written)?;
@@ -1496,7 +1497,7 @@ fn write_variant(
     if is_struct {
         let mut map = entry.map(Some(parts.len())).map_err(written)?;
         for (key, frame) in parts {
-            let frame = Frame::parse(frame).map_err(|_| malformed())?;
+            let frame = Frame::parse(frame.risky_ref()).map_err(|_| malformed())?;
             frame
                 .visit(map.entry(key.unwrap_or_default()).map_err(written)?)
                 .map_err(written)?;
@@ -1505,7 +1506,7 @@ fn write_variant(
     } else {
         let mut seq = entry.seq(Some(parts.len())).map_err(written)?;
         for (_, frame) in parts {
-            let frame = Frame::parse(frame).map_err(|_| malformed())?;
+            let frame = Frame::parse(frame.risky_ref()).map_err(|_| malformed())?;
             frame
                 .visit(seq.element().map_err(written)?)
                 .map_err(written)?;
@@ -1566,7 +1567,7 @@ impl ser::Serializer for KeySerializer {
         // The key itself is kept `Zeroizing` by the map; only the text it
         // is copied from is this function's to wipe.
         let shown = displayed(value)?;
-        self.serialize_str(text(&shown)?)
+        self.serialize_str(text(shown.risky_ref())?)
     }
     fn serialize_char(self, v: char) -> Result<String, Error> {
         Ok(v.to_string())

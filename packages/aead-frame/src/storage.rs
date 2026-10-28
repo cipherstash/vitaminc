@@ -19,8 +19,8 @@
 //! }
 //!
 //! let note = Note { title: "hi".into(), pinned: Some(()) };
-//! // The blob is plaintext, so it comes back `Protected`, and is wiped
-//! // when it is dropped.
+//! // The blob is plaintext, so it comes back in a `Buffer`: read through
+//! // `risky_ref`, and wiped when it is dropped.
 //! let blob = storage::to_vec(&note)?;
 //! assert_eq!(blob.risky_ref()[..4], HEADER);
 //! let back: Note = storage::from_slice(blob.risky_ref())?;
@@ -35,21 +35,18 @@
 //!
 #![doc = include_str!("../STORAGE.md")]
 
-use std::collections::HashSet;
 use std::fmt;
+use std::ops::Range;
 
 use ::serde::ser::{self, Serialize};
 use ::serde::Deserialize;
-use vitaminc_aead::frame::{FrameWriteError, ARRAY, MAX_DEPTH, OBJECT};
+use vitaminc_aead::frame::{FrameWriteError, SeenKeys, ARRAY, MAX_DEPTH, OBJECT};
 use vitaminc_aead::leaf::{self, Form, ScalarError};
 use vitaminc_aead::plaintext::{Float, Int, Physical};
 use vitaminc_aead::tags;
-use vitaminc_protected::Protected;
-use zeroize::Zeroizing;
+use vitaminc_protected::{Buffer, Controlled};
 
-use crate::serde::{
-    self as transport, from_validated, reserve, written, Appender, PathSegment, Profile,
-};
+use crate::serde::{self as transport, from_validated, written, Appender, PathSegment, Profile};
 
 /// The first three bytes of every blob: `"VCS"`.
 pub const MAGIC: [u8; 3] = *b"VCS";
@@ -341,7 +338,7 @@ fn node(c: &mut Cursor<'_>, depth: usize) -> Result<(), Invalid> {
         OBJECT => {
             c.pos += 1;
             let count = c.count()?;
-            let mut seen = HashSet::new();
+            let mut seen = SeenKeys::default();
             for _ in 0..count {
                 if !seen.insert(c.key()?) {
                     return Err(Invalid::DuplicateKey);
@@ -357,7 +354,7 @@ fn node(c: &mut Cursor<'_>, depth: usize) -> Result<(), Invalid> {
                 keys.push(c.map_key()?);
                 node(c, depth + 1)?;
             }
-            distinct(keys)?;
+            distinct(keys.into_iter())?;
         }
         SOME => {
             c.pos += 1;
@@ -398,26 +395,30 @@ impl<'a> MapKey<'a> {
     }
 }
 
+/// The bytes an integer key's identity takes in [`distinct`]'s scratch:
+/// its sign, then its magnitude as a little-endian `u128`.
+const INT_IDENTITY: usize = 1 + 16;
+
 /// Refuse a map whose keys repeat one.
 ///
 /// Each key's identity is worked out once, not at every comparison of a
 /// sort. An integer's identity is its value, a copy of the key, so those
-/// are kept in a buffer sized up front, which never regrows and is wiped
-/// when dropped. Any other key is compared where it lies in the blob.
-fn distinct(keys: Vec<MapKey<'_>>) -> Result<(), Invalid> {
-    let mut integers: Zeroizing<Vec<[u8; 17]>> = Zeroizing::new(Vec::with_capacity(keys.len()));
+/// are kept in a [`Buffer`] sized up front, which never regrows and is
+/// wiped when dropped. Any other key is compared where it lies in the blob.
+fn distinct<'a>(keys: impl ExactSizeIterator<Item = MapKey<'a>>) -> Result<(), Invalid> {
+    let mut integers = Buffer::with_capacity(keys.len().saturating_mul(INT_IDENTITY));
     let mut nodes = Vec::new();
     for key in keys {
         match key.identity() {
             Identity::Int(negative, word) => {
-                let mut value = [0; 17];
-                value[0] = u8::from(negative);
-                value[1..].copy_from_slice(&word.to_le_bytes());
-                integers.push(value);
+                integers.push(u8::from(negative));
+                integers.extend_from_slice(&word.to_le_bytes());
             }
             Identity::Node(node) => nodes.push(node),
         }
     }
+    let (integers, rest) = integers.risky_inner_mut().as_chunks_mut::<INT_IDENTITY>();
+    debug_assert!(rest.is_empty(), "every identity is whole");
     integers.sort_unstable();
     nodes.sort_unstable();
     if integers.windows(2).any(|pair| pair[0] == pair[1])
@@ -434,11 +435,11 @@ fn distinct(keys: Vec<MapKey<'_>>) -> Result<(), Invalid> {
 
 /// Write `value` as a blob: [`HEADER`], then its node.
 ///
-/// The blob is the value's plaintext, so it is returned [`Protected`], and
-/// wiped when it is dropped. The buffer grows without leaving copies of what
-/// it held behind, and is wiped if writing fails part way. What is written
-/// is validated as a reader would before it is returned, so a blob this
-/// returns always reads.
+/// The blob is the value's plaintext, so it is returned as a [`Buffer`],
+/// and wiped when it is dropped. It grows without leaving copies of what
+/// it held behind, and is wiped if writing fails part way. The writer
+/// checks each rule a reader checks as it writes, so a blob this returns
+/// always reads; a debug build reads it back to make sure.
 ///
 /// # Errors
 ///
@@ -448,9 +449,8 @@ fn distinct(keys: Vec<MapKey<'_>>) -> Result<(), Invalid> {
 /// length other than the number of children it wrote, a map key written
 /// without its value (or a value without its key), or a value its own
 /// `Serialize` refused.
-pub fn to_vec<T: Serialize + ?Sized>(value: &T) -> Result<Protected<Vec<u8>>, Error> {
-    let mut out = Zeroizing::new(Vec::new());
-    reserve(&mut out, HEADER.len());
+pub fn to_vec<T: Serialize + ?Sized>(value: &T) -> Result<Buffer, Error> {
+    let mut out = Buffer::new();
     out.extend_from_slice(&HEADER);
     value
         .serialize(Writer {
@@ -458,42 +458,33 @@ pub fn to_vec<T: Serialize + ?Sized>(value: &T) -> Result<Protected<Vec<u8>>, Er
             depth: 0,
         })
         .map_err(unwritable)?;
-    // The writer checks depth, lengths and counts as it goes. A repeated
-    // key is found here, as a reader would find it, so the writer keeps no
-    // copy of the keys it wrote.
-    validate(&out[HEADER.len()..]).map_err(refused_own)?;
-    Ok(Protected::new(core::mem::take(&mut *out)))
+    // The writer checks depth, lengths, counts and repeated keys as it
+    // goes, so reading the blob back finds nothing. A debug build does so
+    // anyway, since a blob that disagrees with the reader is a bug.
+    debug_assert_eq!(
+        validate(&out.risky_ref()[HEADER.len()..]),
+        Ok(()),
+        "the writer wrote a blob the reader refuses"
+    );
+    Ok(out)
 }
 
-/// What [`to_vec`] says of a blob it wrote but would not read.
-fn refused_own(invalid: Invalid) -> Error {
-    match invalid {
-        Invalid::DuplicateKey => unwritable(written(FrameWriteError::DuplicateKey)),
-        // The writer checks everything else as it writes, so this is a bug
-        // in it, reported rather than returned as a blob no reader reads.
-        Invalid::Malformed => Error::of(
-            ErrorKind::Unwritable,
-            "the writer wrote a malformed storage blob",
-        ),
-    }
-}
-
-fn write_len(out: &mut Vec<u8>, len: usize) -> Result<(), transport::Error> {
+fn write_len(out: &mut Buffer, len: usize) -> Result<(), transport::Error> {
     let len = u32::try_from(len).map_err(|_| written(FrameWriteError::TooLong))?;
     out.extend_from_slice(&len.to_le_bytes());
     Ok(())
 }
 
 /// An object's key: a length, then UTF-8.
-fn write_key(out: &mut Vec<u8>, key: &str) -> Result<(), transport::Error> {
-    reserve(out, key.len().saturating_add(4));
+fn write_key(out: &mut Buffer, key: &str) -> Result<(), transport::Error> {
+    out.reserve(key.len().saturating_add(4));
     write_len(out, key.len())?;
     out.extend_from_slice(key.as_bytes());
     Ok(())
 }
 
-fn write_scalar(out: &mut Vec<u8>, value: Physical<'_>) -> Result<(), transport::Error> {
-    reserve(out, leaf::max_len(&value));
+fn write_scalar(out: &mut Buffer, value: Physical<'_>) -> Result<(), transport::Error> {
+    out.reserve(leaf::max_len(&value));
     leaf::write(None, value, Form::Frame, out).map_err(|e| {
         written(match e {
             ScalarError::Invalid => FrameWriteError::Invalid,
@@ -508,10 +499,10 @@ fn write_scalar(out: &mut Vec<u8>, value: Physical<'_>) -> Result<(), transport:
 /// into the blob, as serde's default would format it into a `String` of its
 /// own and free it unwiped.
 fn write_display<T: fmt::Display + ?Sized>(
-    out: &mut Vec<u8>,
+    out: &mut Buffer,
     value: &T,
 ) -> Result<(), transport::Error> {
-    reserve(out, 5);
+    out.reserve(5);
     out.push(tags::STRING);
     let at = out.len();
     out.extend_from_slice(&[0; 4]);
@@ -519,13 +510,13 @@ fn write_display<T: fmt::Display + ?Sized>(
         .map_err(|_| <transport::Error as ser::Error>::custom(""))?;
     let len = out.len() - at - 4;
     let len = u32::try_from(len).map_err(|_| written(FrameWriteError::TooLong))?;
-    out[at..at + 4].copy_from_slice(&len.to_le_bytes());
+    out.overwrite(at, &len.to_le_bytes());
     Ok(())
 }
 
 /// Writes one node onto the end of a blob, `depth` levels below its root.
 struct Writer<'o> {
-    out: &'o mut Vec<u8>,
+    out: &'o mut Buffer,
     depth: usize,
 }
 
@@ -556,7 +547,7 @@ impl<'o> Writer<'o> {
         variant: Option<&'static str>,
     ) -> Result<Container<'o>, transport::Error> {
         self.check_depth()?;
-        reserve(self.out, 5);
+        self.out.reserve(5);
         self.out.push(tag);
         let at = self.out.len();
         self.out.extend_from_slice(&[0; 4]);
@@ -567,6 +558,7 @@ impl<'o> Writer<'o> {
             n: 0,
             expected,
             variant,
+            fields: FieldNames::default(),
         })
     }
 
@@ -580,7 +572,7 @@ impl<'o> Writer<'o> {
         len: usize,
     ) -> Result<Container<'o>, transport::Error> {
         self.check_depth()?;
-        reserve(self.out, 5);
+        self.out.reserve(5);
         self.out.push(OBJECT);
         self.out.extend_from_slice(&1u32.to_le_bytes());
         write_key(self.out, variant)?;
@@ -592,15 +584,53 @@ impl<'o> Writer<'o> {
     }
 }
 
+/// How many of an object's field names are kept on the stack before the
+/// rest go to the heap. Few types have more fields than this.
+const INLINE_FIELDS: usize = 16;
+
+/// The field names an object has written, to refuse a repeat. A derived
+/// `Serialize` never repeats a name, but a hand-written one can. The names
+/// are the type's own, never data, so keeping them copies nothing secret.
+/// They are compared one by one: an object has too few for a hash set to
+/// pay for its allocation and hashing.
+#[derive(Default)]
+struct FieldNames {
+    inline: [&'static str; INLINE_FIELDS],
+    len: usize,
+    spilled: Vec<&'static str>,
+}
+
+impl FieldNames {
+    /// Record `name`; whether it was new.
+    fn insert(&mut self, name: &'static str) -> bool {
+        let seen = self.inline[..self.len.min(INLINE_FIELDS)]
+            .iter()
+            .chain(&self.spilled)
+            .any(|&known| known == name);
+        if seen {
+            return false;
+        }
+        if self.len < INLINE_FIELDS {
+            self.inline[self.len] = name;
+        } else {
+            self.spilled.push(name);
+        }
+        self.len += 1;
+        true
+    }
+}
+
 /// An array, an object or a map being written.
 struct Container<'o> {
-    out: &'o mut Vec<u8>,
+    out: &'o mut Buffer,
     depth: usize,
     /// Where the count goes.
     at: usize,
     n: usize,
     expected: Option<usize>,
     variant: Option<&'static str>,
+    /// An object's field names so far; an array writes none.
+    fields: FieldNames,
 }
 
 impl Container<'_> {
@@ -630,12 +660,15 @@ impl Container<'_> {
     }
 
     /// An object's entry: a field or variant name the type declares, then
-    /// its value.
+    /// its value. A name the object has already written is refused.
     fn field<T: Serialize + ?Sized>(
         &mut self,
         key: &'static str,
         value: &T,
     ) -> Result<(), transport::Error> {
+        if !self.fields.insert(key) {
+            return Err(written(FrameWriteError::DuplicateKey));
+        }
         write_key(self.out, key)?;
         self.child(value, || PathSegment::Key(key.to_owned()))
     }
@@ -645,17 +678,20 @@ impl Container<'_> {
             return Err(written(FrameWriteError::CountMismatch));
         }
         let n = u32::try_from(self.n).map_err(|_| written(FrameWriteError::TooLong))?;
-        self.out[self.at..self.at + 4].copy_from_slice(&n.to_le_bytes());
+        self.out.overwrite(self.at, &n.to_le_bytes());
         Ok(())
     }
 }
 
 /// A map being written. Each key is written as a node the moment it is
-/// given, so no copy of it is kept.
+/// given, so no copy of it is kept: only where it lies in the blob, so
+/// that a repeat is found among the keys when the map ends.
 struct MapWriter<'o> {
     c: Container<'o>,
     /// Whether a key has been written whose value is next.
     pending: bool,
+    /// Where each key's node lies in the blob.
+    keys: Vec<Range<usize>>,
 }
 
 impl<'o> ser::Serializer for Writer<'o> {
@@ -723,7 +759,6 @@ impl<'o> ser::Serializer for Writer<'o> {
     }
     fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<(), transport::Error> {
         self.check_depth()?;
-        reserve(self.out, 1);
         self.out.push(SOME);
         value.serialize(Writer {
             out: self.out,
@@ -788,6 +823,7 @@ impl<'o> ser::Serializer for Writer<'o> {
         Ok(MapWriter {
             c: self.container(MAP, len, None)?,
             pending: false,
+            keys: Vec::with_capacity(len.unwrap_or(0)),
         })
     }
     fn serialize_struct(
@@ -914,8 +950,10 @@ impl ser::SerializeMap for MapWriter<'_> {
             ));
         }
         let index = self.c.n;
+        let start = self.c.out.len();
         key.serialize(KeyWriter(&mut *self.c.out))
             .map_err(|e| e.at(PathSegment::Entry(index)))?;
+        self.keys.push(start..self.c.out.len());
         self.pending = true;
         Ok(())
     }
@@ -938,6 +976,16 @@ impl ser::SerializeMap for MapWriter<'_> {
                 "a map key was written without its value",
             ));
         }
+        // The blob only grows while the map is written, so every range
+        // still holds its key.
+        let out: &[u8] = self.c.out.risky_ref();
+        match distinct(self.keys.iter().map(|range| MapKey(&out[range.clone()]))) {
+            Ok(()) => {}
+            Err(Invalid::DuplicateKey) => return Err(written(FrameWriteError::DuplicateKey)),
+            // Every key was written by `KeyWriter`, which writes only the
+            // kinds a key may be.
+            Err(Invalid::Malformed) => unreachable!("a map key the writer wrote reads"),
+        }
         self.c.end()
     }
 }
@@ -948,7 +996,7 @@ fn key_refused() -> transport::Error {
 
 /// Writes a map's key node: an integer, text or bytes. A `char` and a unit
 /// variant's name are text, and a newtype struct is what it holds.
-struct KeyWriter<'o>(&'o mut Vec<u8>);
+struct KeyWriter<'o>(&'o mut Buffer);
 
 type NoKey = ser::Impossible<(), transport::Error>;
 
@@ -1117,35 +1165,34 @@ mod tests {
         }
     }
 
-    #[test]
-    fn reserve_keeps_the_bytes_and_makes_room() {
-        let mut out = vec![1, 2, 3];
-        out.shrink_to_fit();
-        reserve(&mut out, 100);
-        assert_eq!(out, [1, 2, 3]);
-        assert!(out.capacity() >= 103);
-        let capacity = out.capacity();
-        reserve(&mut out, 1);
-        assert_eq!(out.capacity(), capacity, "a buffer with room is left alone");
-        // A full buffer grows for even a little more than its length.
-        let mut full = vec![1, 2, 3];
-        full.shrink_to_fit();
-        reserve(&mut full, 4);
-        assert!(full.capacity() >= 7);
-    }
-
-    /// The two refusals no blob can reach: they mean the reader and the
-    /// validator, or the writer and the validator, disagree.
+    /// The refusal no blob can reach: it means the reader and the
+    /// validator disagree.
     #[test]
     fn a_bug_is_reported_as_one() {
         let error = mismatch(transport::Error::new(transport::MALFORMED));
         assert_eq!(error, malformed());
-        let error = refused_own(Invalid::Malformed);
-        assert_eq!(error.kind(), ErrorKind::Unwritable);
-        assert_eq!(error.message(), "the writer wrote a malformed storage blob");
-        let error = refused_own(Invalid::DuplicateKey);
-        assert_eq!(error.kind(), ErrorKind::Unwritable);
-        assert_eq!(error.message(), "duplicate key");
+    }
+
+    /// Field names are kept on the stack until an object has more than
+    /// fit there, and a repeat is found on either side of that line.
+    #[test]
+    fn field_names_spill_past_the_inline_ones() {
+        const NAMES: [&str; INLINE_FIELDS + 2] = [
+            "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q",
+            "r",
+        ];
+        let mut fields = FieldNames::default();
+        for name in NAMES {
+            assert!(fields.insert(name), "{name} is new");
+        }
+        assert_eq!(
+            fields.spilled,
+            ["q", "r"],
+            "the names past the inline ones spill"
+        );
+        assert!(!fields.insert("a"), "an inline name repeats");
+        assert!(!fields.insert("r"), "a spilled name repeats");
+        assert!(fields.insert("s"), "a new name is still new");
     }
 
     /// Map keys are compared by value across integer widths, and by node
@@ -1156,13 +1203,18 @@ mod tests {
         assert!(key(&[tags::UINT8, 1]) == key(&[tags::INT64, 1, 0, 0, 0, 0, 0, 0, 0]));
         assert!(key(&[tags::INT8, 0xFF]) != key(&[tags::UINT8, 0xFF]));
         assert!(key(&[tags::STRING, 1, 0, 0, 0, b'a']) != key(&[tags::BYTES, 1, 0, 0, 0, b'a']));
-        assert!(distinct(vec![MapKey(&[tags::UINT8, 2]), MapKey(&[tags::UINT8, 1])]).is_ok());
+        assert!(
+            distinct([MapKey(&[tags::UINT8, 2]), MapKey(&[tags::UINT8, 1])].into_iter()).is_ok()
+        );
         assert_eq!(
-            distinct(vec![
-                MapKey(&[tags::UINT8, 1]),
-                MapKey(&[tags::UINT8, 2]),
-                MapKey(&[tags::UINT16, 1, 0])
-            ]),
+            distinct(
+                [
+                    MapKey(&[tags::UINT8, 1]),
+                    MapKey(&[tags::UINT8, 2]),
+                    MapKey(&[tags::UINT16, 1, 0])
+                ]
+                .into_iter()
+            ),
             Err(Invalid::DuplicateKey)
         );
     }

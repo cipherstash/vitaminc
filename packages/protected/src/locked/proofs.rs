@@ -62,16 +62,18 @@ fn the_value_is_inside_the_interior_aligned_and_against_the_end() {
 }
 
 #[kani::proof]
-#[kani::unwind(33)]
+#[kani::unwind(65)]
 fn wipe_raw_zeroes_exactly_the_bytes_it_is_given() {
-    let mut buf: [u8; 32] = kani::any();
+    // Wide enough to hold a byte-wise head, whole words and a tail,
+    // whatever the buffer's alignment.
+    let mut buf: [u8; 64] = kani::any();
     let len: usize = kani::any();
-    kani::assume(len <= 24);
+    kani::assume(len <= 56);
     let before = buf;
-    // SAFETY: `len <= 24 < 32`, so the range is inside `buf`.
+    // SAFETY: `len <= 56 < 64`, so the range is inside `buf`.
     unsafe { wipe_raw(buf.as_mut_ptr(), len) };
     let mut i = 0;
-    while i < 32 {
+    while i < 64 {
         if i < len {
             assert!(buf[i] == 0);
         } else {

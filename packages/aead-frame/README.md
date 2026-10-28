@@ -98,7 +98,7 @@ are nodes, so an integer, text or bytes key keeps its kind. Only the plain
 scalars are admitted: no logical types, no `undefined`, no passthrough.
 And every refusal has a stable `ErrorKind`, so a caller can tell a reader
 that needs upgrading from a corrupt blob. The blob is plaintext, so it
-comes back `Protected`, and is wiped when dropped.
+comes back in a `Buffer`: read through `risky_ref`, wiped when dropped.
 
 ```rust
 # #[cfg(feature = "serde")]
@@ -107,7 +107,7 @@ use vitaminc_aead_frame::storage;
 use vitaminc_protected::Controlled;
 
 let blob = storage::to_vec(&Some(Option::<u8>::None)).expect("writes");
-assert_eq!(blob.risky_ref(), &[0x56, 0x43, 0x53, 0x01, 0xF5, 0x00]);
+assert_eq!(blob.risky_ref().as_slice(), &[0x56, 0x43, 0x53, 0x01, 0xF5, 0x00]);
 let back: Option<Option<u8>> = storage::from_slice(blob.risky_ref()).expect("reads");
 assert_eq!(back, Some(None));
 # }
@@ -176,7 +176,7 @@ What the numbers show:
 - Reading text or bytes costs little more than copying them out: 64 KiB of bytes reads at about 32 GiB/s, as fast as MessagePack.
 - On values with many small parts, the storage profile is the slowest of the five. It writes 1,000 records 6.7 times as slowly as MessagePack and 31 times as slowly as Borsh, and reads them 3.2 and 6.4 times as slowly. MessagePack carries the same field names, so the names are not the cost; each element or field costs the storage writer about 40 to 90 ns more. This is the clearest place to look for a speedup.
 - The storage profile is also the largest: 1,000 records take 57% more bytes than in MessagePack, and the map 89% more. Every length and count is a fixed four bytes and every value has a kind byte, where MessagePack packs small lengths and integers into one byte. Borsh is the smallest for records, but writes an integer at its full width, so the map of `u64` values is nearly as large as in the storage profile.
-- A storage write costs more than a transport write on values with many parts, 26% more for 1,000 records and 43% more for the map, because it reads the blob back to find a repeated key before it returns it. Storage and transport reads are within about 12% of each other.
+- The tables predate a change to the storage writer. It used to read the whole blob back before returning it, to find a repeated key, and that pass was 55% of a 1,000-record write. It now refuses a repeated field name as it writes, comparing the names an object has written on the stack, and checks a map's keys where they lie in the blob when the map ends. Measured against the tables' code on the same machine, that made a 1,000-record write 47% faster, a single record 41% faster and the map 28% faster, and left reads unchanged. The tables also predate later changes to the writer and the reader: the blob is now written into a `Buffer` that is wiped sixteen bytes at a time, and the reader tells a value's kind from its tag. They have not been measured again since.
 
 ## Tests
 

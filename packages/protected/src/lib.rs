@@ -7,6 +7,7 @@
 extern crate self as vitaminc_protected;
 
 mod as_protected_ref;
+mod buffer;
 mod controlled;
 mod conversions;
 mod debug;
@@ -30,6 +31,7 @@ pub mod bitvec;
 pub mod slice_index;
 
 pub use as_protected_ref::{AsProtectedRef, ProtectedRef};
+pub use buffer::Buffer;
 pub use zeroed::Zeroed;
 
 // Exports
