@@ -9,9 +9,9 @@ use crate::{locked::wipe_vec, private::ControlledPrivate, Controlled, OpaqueDebu
 /// bytes still in it, and `zeroize` wipes a `Vec<u8>` one byte a store. A
 /// `Buffer` does neither. It grows into a fresh allocation and wipes the
 /// old one before it is freed; and it is wiped sixteen bytes a store, when
-/// it is dropped, when it is [`zeroize`]d, and when it is [`clear`]ed. So
-/// a `Buffer` is what a writer of secret bytes returns, and `&mut Buffer`
-/// is what it writes into.
+/// it is dropped and when it is [`zeroize`]d. So a `Buffer` is what a
+/// writer of secret bytes returns, and `&mut Buffer` is what it writes
+/// into.
 ///
 /// It is a [`Controlled`] type, like [`Protected`](crate::Protected): its
 /// bytes are read through [`risky_ref`](Controlled::risky_ref) and taken
@@ -24,7 +24,6 @@ use crate::{locked::wipe_vec, private::ControlledPrivate, Controlled, OpaqueDebu
 /// make at the use, through `risky_ref`. Its `Debug` shows nothing.
 ///
 /// [`zeroize`]: Zeroize::zeroize
-/// [`clear`]: Buffer::clear
 /// [`reserve`]: Buffer::reserve
 /// [`overwrite`]: Buffer::overwrite
 ///
@@ -69,12 +68,6 @@ impl Buffer {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
-    }
-
-    /// How many bytes fit before the buffer grows.
-    #[inline]
-    pub fn capacity(&self) -> usize {
-        self.0.capacity()
     }
 
     /// Make room for `additional` more bytes.
@@ -132,11 +125,6 @@ impl Buffer {
     #[inline]
     pub fn overwrite(&mut self, at: usize, bytes: &[u8]) {
         self.0[at..][..bytes.len()].copy_from_slice(bytes);
-    }
-
-    /// Wipe every byte and keep the allocation, for writing into again.
-    pub fn clear(&mut self) {
-        wipe_vec(&mut self.0);
     }
 }
 
@@ -221,14 +209,17 @@ mod tests {
         );
         assert_eq!(out.risky_ref(), &[1, 2, 3, 4, 5]);
         assert!(
-            out.capacity() >= LEAST,
+            out.risky_ref().capacity() >= LEAST,
             "the first growth is at least {LEAST}"
         );
 
         let mut big = Buffer::with_capacity(100);
         big.extend_from_slice(&[7; 100]);
         big.reserve(1);
-        assert!(big.capacity() >= 200, "a buffer doubles its length");
+        assert!(
+            big.risky_ref().capacity() >= 200,
+            "a buffer doubles its length"
+        );
 
         let before = big.risky_ref().as_ptr();
         big.reserve(10);
@@ -239,23 +230,16 @@ mod tests {
     }
 
     #[test]
-    fn clear_wipes_and_keeps_the_allocation() {
-        let mut out = Buffer::with_capacity(16);
-        out.extend_from_slice(b"secret");
-        let before = out.risky_ref().as_ptr();
-        out.clear();
-        assert!(out.is_empty());
-        assert!(core::ptr::eq(out.risky_ref().as_ptr(), before));
-        assert_eq!(out.capacity(), 16);
-    }
-
-    #[test]
     fn zeroize_wipes_and_releases_the_allocation() {
         let mut out = Buffer::with_capacity(16);
         out.extend_from_slice(b"secret");
         out.zeroize();
         assert!(out.is_empty());
-        assert_eq!(out.capacity(), 0, "nothing is left for the drop to wipe");
+        assert_eq!(
+            out.risky_ref().capacity(),
+            0,
+            "nothing is left for the drop to wipe"
+        );
     }
 
     #[test]
