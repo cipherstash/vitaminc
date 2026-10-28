@@ -1,0 +1,98 @@
+name: "Kani (storage reader)"
+
+# Proves, rather than tests, the pieces the storage profile's reader is
+# built from, which parses bytes that may be corrupt or tampered with:
+#
+# - the header is refused exactly as its rules say;
+# - a count never exceeds the bytes left;
+# - a scalar, an object's key and a map's key are read at the cursor and
+#   in bounds, from any position, and a wide scalar is read whole or
+#   refused;
+# - the depth bound is 128;
+# - two integer map keys are one key exactly when their values are equal,
+#   across every pair of widths;
+# - two text or two bytes keys are one key exactly when their bytes are
+#   equal;
+# - keys of different kinds are never one key.
+#
+# The harnesses live in packages/aead-frame/src/storage/proofs.rs, and build
+# only under `cfg(kani)`. One after another they take about fifteen minutes,
+# most of it the proofs over map keys, so they run two at a time. Kept apart
+# from kani.yml so a change to one crate does not run the other's proofs.
+#
+# Kani installs its own pinned nightly and CBMC on first use (`cargo kani
+# setup`, a few minutes); the cache keeps that between runs.
+on:
+  # No branch filter: a stacked PR (a feature branch as base) must run this
+  # gate too; see go.yml.
+  pull_request:
+    paths:
+      # The reader, its proofs, and the module it shares with the
+      # transport, which defines the storage tags and builds its errors.
+      - "packages/aead-frame/src/**"
+      # The leaf codec, tags and integers the reader calls.
+      - "packages/aead/src/**"
+      # Protected and Zeroizing, which the serde feature compiles in.
+      - "packages/protected/src/**"
+      # Anything that changes how those compile.
+      - "packages/aead-frame/Cargo.toml"
+      - "packages/aead/Cargo.toml"
+      - "packages/protected/Cargo.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/kani-storage.yml"
+
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kani-storage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KANI_VERSION: "0.67.0"
+
+jobs:
+  kani:
+    runs-on: ubuntu-latest
+    name: "📐 Kani (storage reader)"
+    # About fifteen minutes of proofs, run two at a time, plus Kani's setup
+    # when the cache misses. Anything past this is a hang.
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin/cargo-kani
+            ~/.cargo/bin/kani
+            ~/.kani/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-kani-${{ env.KANI_VERSION }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: setup rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: install kani
+        # A plain `cargo install`, like the mutants and crap gates, rather
+        # than the Kani GitHub Action the org allowlist may not permit.
+        run: |
+          if ! cargo kani --version 2>/dev/null | grep -q "$KANI_VERSION"; then
+            cargo install --locked kani-verifier --version "$KANI_VERSION"
+            cargo kani setup
+          fi
+
+      - name: prove
+        # Two at a time: the map key proofs each solve over 128-bit values,
+        # and a 16 GB runner is not sure to hold four of them at once.
+        run: cargo kani -p vitaminc-aead-frame --features serde -j 2 --output-format terse
