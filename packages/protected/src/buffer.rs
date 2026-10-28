@@ -16,10 +16,20 @@ use crate::{locked::wipe_vec, private::ControlledPrivate, Controlled, OpaqueDebu
 /// It is a [`Controlled`] type, like [`Protected`](crate::Protected): its
 /// bytes are read through [`risky_ref`](Controlled::risky_ref) and taken
 /// through [`risky_unwrap`](Controlled::risky_unwrap), so every read of
-/// what it holds is named at the use. Writing needs no such name: every
-/// way to add bytes goes through [`reserve`], so there is no way to grow
-/// it that leaves a copy behind, and [`overwrite`] patches bytes already
-/// written without handing out a slice. It is not `Clone` and has no
+/// what it holds is named at the use. Writing through `Buffer`'s own
+/// methods needs no such name: each of them that adds bytes goes through
+/// [`reserve`], so none of them grows it in a way that leaves a copy
+/// behind, and [`overwrite`] patches bytes already written without
+/// handing out a slice.
+///
+/// The [`Controlled`] trait also has methods that lend out the `Vec<u8>`
+/// itself, such as [`inner_mut`](Controlled::inner_mut) and
+/// [`risky_inner_mut`](Controlled::risky_inner_mut). Those are escape
+/// hatches: a `Vec` grown past its capacity through one of them frees its
+/// old allocation unwiped, and that is the caller's risk, as it is with
+/// [`risky_unwrap`](Controlled::risky_unwrap).
+///
+/// It is not `Clone` and has no
 /// `PartialEq`: a copy or a comparison of secret bytes is a decision to
 /// make at the use, through `risky_ref`. Its `Debug` shows nothing.
 ///
