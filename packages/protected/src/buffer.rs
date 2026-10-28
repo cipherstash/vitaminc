@@ -259,6 +259,19 @@ mod tests {
     }
 
     #[test]
+    fn risky_inner_mut_changes_the_bytes_the_buffer_holds() {
+        let mut out = Buffer::new();
+        out.extend_from_slice(&[1, 2]);
+        out.risky_inner_mut().push(3);
+        out.risky_inner_mut()[0] = 7;
+        assert_eq!(
+            out.risky_ref(),
+            &[7, 2, 3],
+            "a change through risky_inner_mut is a change to the buffer"
+        );
+    }
+
+    #[test]
     fn a_vec_moves_in_and_out() {
         let out: Buffer = Controlled::new(vec![1u8, 2]);
         assert_eq!(out.risky_ref(), &[1, 2]);
