@@ -405,10 +405,11 @@ func goType(t testing.TB, raw json.RawMessage) (reflect.Type, string) {
 }
 
 // deniesUnknown reports whether a row's type is itself a struct that
-// denies unknown keys. A row refused for one is skipped: UnmarshalStorage
-// has no way to deny them. A struct that denies them nested in another
-// type is not looked for: a row refused for that would fail below, rather
-// than be skipped along with whatever else it shows.
+// denies unknown keys. UnmarshalStorage has no way to deny them, so a
+// refused row of such a type that Go reads anyway is skipped. A row of
+// that type that Go refuses is still checked for its error class. A
+// struct that denies them nested in another type is not looked for: a row
+// refused for that would fail below, rather than be skipped.
 func deniesUnknown(raw json.RawMessage) bool {
 	var kind map[string]json.RawMessage
 	if json.Unmarshal(raw, &kind) != nil {
@@ -429,14 +430,14 @@ func TestStorageCorpusReads(t *testing.T) {
 			t.Logf("%s: not expressible in Go: %s", row.Name, why)
 			continue
 		}
-		if !row.HasReads && deniesUnknown(row.Type) {
+		blob := mustHex(t, row.Blob)
+		into := reflect.New(ty)
+		err := UnmarshalStorage(blob, into.Interface())
+		if !row.HasReads && err == nil && deniesUnknown(row.Type) {
 			t.Logf("%s: not expressible in Go: UnmarshalStorage has no way to deny unknown fields", row.Name)
 			continue
 		}
 		expressed++
-		blob := mustHex(t, row.Blob)
-		into := reflect.New(ty)
-		err := UnmarshalStorage(blob, into.Interface())
 		if !row.HasReads {
 			if class := storageClass(t, row.Name, row.Refusal); !errors.Is(err, class) {
 				t.Errorf("%s: %v, want %v", row.Name, err, class)
