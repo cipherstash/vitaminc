@@ -2859,7 +2859,6 @@ dependencies = [
  "vitaminc-aead",
  "vitaminc-encrypt",
  "vitaminc-protected",
- "zeroize",
 ]
 
 [[package]]
