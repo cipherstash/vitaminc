@@ -126,6 +126,16 @@ carry no detail about the bytes.
 
 ## Performance
 
+The storage profile is neither the fastest nor the smallest format in the tables below, and is not meant to be. It is for bytes that are kept, and what it buys is paid for in bytes and time:
+
+- The blob is checked whole before any value is built. Every length and count is checked against the end of the blob, nesting is bounded at 128, a repeated key is refused and a reservation is clamped, so hostile bytes are refused before anything is allocated for them. The reader then walks the blob a second time to build the value.
+- The output is wiped. It comes back in a `Buffer`, wiped sixteen bytes at a time as it grows and when it is dropped, so no copy of the plaintext is left behind in freed memory.
+- A value has one encoding. Every length and count is four bytes and every integer and float is its full width, with no packing of small values, so the size of a blob follows the shape of the value rather than its contents, and the writer does the same work for any integer.
+- Every node carries its kind. An integer reads back at its exact width, a map key keeps its kind, and `None`, `Some(())` and `Some(None)` are three different blobs.
+- The format is versioned and frozen. The header names the version, `STORAGE.md` specifies version 1, the golden corpus pins it, the validator has Kani proofs, and a refusal has a stable kind, so a reader can tell a blob it is too old to read from a corrupt one.
+
+The benches put a price on those properties.
+
 `benches/storage.rs` writes and reads five values with the storage profile, with the transport serde format, and, for comparison, with `serde_json`, MessagePack (`rmp_serde`) and Borsh, using Criterion:
 
 ```sh
@@ -174,9 +184,9 @@ What the numbers show:
 
 - Writing a large value costs the format little more than the wipe. MessagePack and Borsh write 64 KiB in about 1.1 µs; the storage profile and the transport format take 1.9 µs, and the difference is wiping the buffer, sixteen bytes at a time, when it is dropped. JSON writes no wipe, but writes bytes as a list of numbers, 3.6 times as large and 75 times as slow.
 - Reading text or bytes costs little more than copying them out: 64 KiB of bytes reads in 1.06 µs, as fast as MessagePack.
-- On values with many small parts, the storage profile and the transport format are the slowest of the five, with JSON close behind. The storage profile writes 1,000 records twice as slowly as MessagePack and 9 times as slowly as Borsh, and reads them 2.6 and 3.9 times as slowly. MessagePack carries the same field names, so the names are not the cost; each record costs the storage writer about 70 ns more and the reader about 320 ns more. The reader is the clearest place left to look for a speedup.
+- On values with many small parts, the storage profile and the transport format are the slowest of the five, with JSON close behind. The storage profile writes 1,000 records twice as slowly as MessagePack and 9 times as slowly as Borsh, and reads them 2.6 and 3.9 times as slowly. MessagePack carries the same field names, so the names are not the cost; each record costs the storage writer about 70 ns more and the reader about 320 ns more. One record is slower even than JSON, twice as slow to write and to read. About half of the writing gap is allocation: the buffer starts empty and grows through 64, 128 and 256 bytes, each growth a copy and a wipe of the old allocation, where `serde_json` starts at 128 bytes and grows once. The reading gap is the two walks: validating the blob costs about as much as JSON's whole parse, and building the value on the second walk costs about twice JSON's, since the reader classifies a node before it reads it. The reader is the clearest place left to look for a speedup.
 - The storage profile and the transport format are written by one writer, and read by one reader, so their times differ only where the formats do: the transport map is written faster because its repeated-key check compares the keys' text where it lies in the buffer, where the storage profile works out each key's identity from its node first.
-- The storage profile is also the largest: 1,000 records take 57% more bytes than in MessagePack, and the map 89% more. Every length and count is a fixed four bytes and every value has a kind byte, where MessagePack packs small lengths and integers into one byte. Borsh is the smallest for records, but writes an integer at its full width, so the map of `u64` values is nearly as large as in the storage profile.
+- The storage profile is also the largest: 1,000 records take 57% more bytes than in MessagePack, and the map 89% more. Every length and count is a fixed four bytes and every value has a kind byte, where MessagePack packs small lengths and integers into one byte. One record is larger even than its JSON, 164 bytes to 126: its thirteen lengths and counts cost 52 bytes where JSON's quotes, colons, commas and brackets cost 40; its eleven kind bytes cost 11; its three numbers cost 24 bytes at full width where JSON prints them in 8; and the header costs 4. The flag is the one saving, a kind byte where JSON writes `false`. Borsh is the smallest for records, but writes an integer at its full width, so the map of `u64` values is nearly as large as in the storage profile.
 
 ## Tests
 
