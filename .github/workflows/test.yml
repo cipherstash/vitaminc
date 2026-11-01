@@ -188,6 +188,12 @@ jobs:
         # storage profile's, which hold the code to its golden corpus.
         run: cargo test -p vitaminc-aead-frame --features serde
 
+      - name: bench smoke test (aead-frame storage)
+        # `cargo test` does not run bench targets, and the storage bench
+        # checks that every format reads each value back. Run as a test,
+        # Criterion runs each bench once, untimed, so those checks run.
+        run: cargo test -p vitaminc-aead-frame --features serde --bench storage
+
       - name: test (equality term feature)
         # The workspace run unifies hmac's dev-dependency features, so test
         # prf alone without `normalize` as well as with it, and check that
