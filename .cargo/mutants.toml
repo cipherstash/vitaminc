@@ -33,8 +33,10 @@ exclude_globs = [
     "packages/aead-derive/src/lib.rs",
     # Kani proof harnesses: built only under `cfg(kani)`, so no test binary
     # ever contains them and every mutant there would survive spuriously.
-    # The Kani gate (.github/workflows/kani.yml) is what checks this file.
+    # The Kani gates check them: .github/workflows/kani.yml the first,
+    # .github/workflows/kani-storage.yml the second.
     "packages/protected/src/locked/proofs.rs",
+    "packages/aead-frame/src/storage/proofs.rs",
 ]
 
 exclude_re = [

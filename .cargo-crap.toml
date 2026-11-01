@@ -30,7 +30,10 @@ missing = "pessimistic"
 # Defensive: integration tests aren't walked today, but this keeps them out of
 # the score if that changes. `test_support.rs` holds `#[cfg(test)]` assertion
 # helpers — test code, not shipped risk, so it does not belong in the report.
-exclude = ["tests/**", "src/test_support.rs"]
+# `proofs.rs` files hold Kani harnesses, built only under `cfg(kani)`, so no
+# test binary contains them and llvm-cov would always read them as 0%; the
+# Kani workflows are what check them.
+exclude = ["tests/**", "src/test_support.rs", "src/**/proofs.rs"]
 
 # Functions to analyse but hide from the report. An entry containing `/` or
 # `**` matches the defining file; otherwise it matches the function name.
