@@ -293,8 +293,6 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// negating the protections that the [Controlled] type provides.
     ///
     /// **Use with caution!**
-    ///
-    // TODO: Consider feature flagging this method
     fn risky_unwrap(self) -> Self::Inner;
 
     /// Provides a reference to the inner value.
