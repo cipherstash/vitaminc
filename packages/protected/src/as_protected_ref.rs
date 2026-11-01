@@ -66,10 +66,31 @@ impl<'a> AsProtectedRef<'a, [u8]> for Cow<'a, str> {
     }
 }
 
+/// A string can also lend itself as text, for a consumer that cares which
+/// it is (such as `vitaminc-aead`, which seals text and bytes as different
+/// leaves). With both impls, an unannotated `"pw".as_protected_ref()` does
+/// not compile, so a caller always picks one.
+impl<'a> AsProtectedRef<'a, str> for str {
+    fn as_protected_ref(&'a self) -> ProtectedRef<'a, str> {
+        ProtectedRef(self)
+    }
+}
+
+impl<'a> AsProtectedRef<'a, str> for Cow<'a, str> {
+    fn as_protected_ref(&'a self) -> ProtectedRef<'a, str> {
+        ProtectedRef(self)
+    }
+}
+
 /// A wrapper around a reference to prevent inner access.
-/// Conceptually similar to `&T`, but it can only be made from a protected
-/// source (see [`AsProtectedRef`]), and the inner value is reached only
-/// through the combinators that take it or through [`risky_ref`](Self::risky_ref).
+/// Conceptually similar to `&T`, but it can only be made inside this crate,
+/// through [`AsProtectedRef`], and the inner value is reached only through
+/// the combinators that take it or through [`risky_ref`](Self::risky_ref).
+///
+/// A `ProtectedRef` does not mean the value behind it is wiped. One lent by
+/// a [`Controlled`] owner or a [`Locked`](crate::Locked) is wiped when that
+/// owner drops. One lent by a bare `[u8; N]`, `str` or `Cow<str>` is a plain
+/// borrow that nothing wipes.
 pub struct ProtectedRef<'a, T>(pub(crate) &'a T)
 where
     T: ?Sized;
@@ -77,15 +98,18 @@ where
 impl<'a, T: ?Sized> ProtectedRef<'a, T> {
     /// Provides the borrow this wraps, for its full lifetime.
     ///
-    /// This is the same escape hatch as [`Controlled::risky_ref`] on the
-    /// owner the borrow came from. It exists so another crate can read
-    /// through a protected borrow deliberately: `vitaminc-aead` uses it to
-    /// walk a `ProtectedRef` as plaintext. It grants no more than the owner
-    /// already does, since whoever made this `ProtectedRef` could have
-    /// called `risky_ref` on the owner instead.
+    /// This is the borrow's counterpart to [`Controlled::risky_ref`]. It
+    /// exists so another crate can read through a protected borrow
+    /// deliberately: `vitaminc-aead` uses it to walk a `ProtectedRef` as
+    /// plaintext, and it can only do that through a public method.
     ///
-    /// The owner still does the wiping. Dropping the `ProtectedRef` wipes
-    /// nothing.
+    /// Code that receives a `ProtectedRef` could already read it, because
+    /// [`Controlled::update_with_ref`] hands its closure the same `&T`. This
+    /// method makes that one explicit step, under the `risky_` name, rather
+    /// than a detour through a throwaway `Protected`.
+    ///
+    /// Dropping the `ProtectedRef` wipes nothing. Whatever lent it is
+    /// responsible for wiping (see [`ProtectedRef`]).
     ///
     /// This is a risky operation because it bypasses the protections that
     /// the wrapper provides.
