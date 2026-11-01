@@ -172,7 +172,7 @@ pub trait Controlled: ControlledPrivate + Zeroize {
         F: FnOnce(Self::Inner, &A) -> Out,
     {
         let arg: ProtectedRef<'a, A> = other.as_protected_ref();
-        <Self as ReplaceT<Out>>::Output::init_from_inner(f(self.risky_unwrap(), arg.inner_ref()))
+        <Self as ReplaceT<Out>>::Output::init_from_inner(f(self.risky_unwrap(), arg.risky_ref()))
     }
 
     /// Similar to `map` but using references to that the inner value is updated in place.
@@ -250,7 +250,7 @@ pub trait Controlled: ControlledPrivate + Zeroize {
         A: ?Sized + 'a,
         F: FnMut(&mut Self::Inner, &A),
     {
-        f(self.inner_mut(), other.inner_ref());
+        f(self.inner_mut(), other.risky_ref());
     }
 
     /// Iterate over the inner value and wrap each element in a `Protected`.

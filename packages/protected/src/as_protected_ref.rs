@@ -67,13 +67,39 @@ impl<'a> AsProtectedRef<'a, [u8]> for Cow<'a, str> {
 }
 
 /// A wrapper around a reference to prevent inner access.
-/// Conceptually similar to `&T` but prevents direct access to the inner value outside of this crate.
+/// Conceptually similar to `&T`, but it can only be made from a protected
+/// source (see [`AsProtectedRef`]), and the inner value is reached only
+/// through the combinators that take it or through [`risky_ref`](Self::risky_ref).
 pub struct ProtectedRef<'a, T>(pub(crate) &'a T)
 where
     T: ?Sized;
 
 impl<'a, T: ?Sized> ProtectedRef<'a, T> {
-    pub(crate) fn inner_ref(&self) -> &T {
+    /// Provides the borrow this wraps, for its full lifetime.
+    ///
+    /// This is the same escape hatch as [`Controlled::risky_ref`] on the
+    /// owner the borrow came from. It exists so another crate can read
+    /// through a protected borrow deliberately: `vitaminc-aead` uses it to
+    /// walk a `ProtectedRef` as plaintext. It grants no more than the owner
+    /// already does, since whoever made this `ProtectedRef` could have
+    /// called `risky_ref` on the owner instead.
+    ///
+    /// The owner still does the wiping. Dropping the `ProtectedRef` wipes
+    /// nothing.
+    ///
+    /// This is a risky operation because it bypasses the protections that
+    /// the wrapper provides.
+    /// **Use with caution!**
+    ///
+    /// ```
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{AsProtectedRef, Protected};
+    ///
+    /// let secret = Protected::new([7u8; 4]);
+    /// let pref = secret.as_protected_ref();
+    /// assert_eq!(pref.risky_ref(), &[7u8; 4]);
+    /// ```
+    pub fn risky_ref(&self) -> &'a T {
         self.0
     }
 }
