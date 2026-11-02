@@ -30,6 +30,8 @@ mod protected;
 mod test_util;
 mod timing_safe;
 mod usage;
+#[cfg(feature = "wiping-allocator")]
+mod wiping_allocator;
 mod zeroed;
 use zeroize::Zeroize;
 
@@ -67,6 +69,8 @@ pub use non_empty::MaybeEmpty as IsEmpty;
 pub use non_empty::{EmptyError, MaybeEmpty, NonEmpty};
 pub use protected::{flatten_array, Protected};
 pub use usage::{Acceptable, DefaultScope, Scope, Usage};
+#[cfg(feature = "wiping-allocator")]
+pub use wiping_allocator::WipingAllocator;
 
 pub use debug::{OpaqueDebug, Redacted};
 pub use timing_safe::{Choice, TimingSafeEq};
