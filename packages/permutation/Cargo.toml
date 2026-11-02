@@ -24,4 +24,4 @@ thiserror = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-serde_json = "1.0.150"
+serde_json = { workspace = true }
