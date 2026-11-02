@@ -9,8 +9,8 @@ x.into_aad().as_bytes() == x.into_prf_context().as_bytes()
 ```
 
 That equality holds by construction, not by test. A context type implements
-one trait, [`IntoContext`](https://docs.rs/vitaminc-context/latest/vitaminc_context/trait.IntoContext.html),
-which names its parts as a [`ContextPiece`](https://docs.rs/vitaminc-context/latest/vitaminc_context/enum.ContextPiece.html)
+one trait, [`IntoContext`],
+which names its parts as a [`ContextPiece`]
 tree. `IntoAad` and `IntoPrfContext` are blanket implementations over it
 and cannot be implemented by hand, so no type can be given one encoding on
 one side and a different encoding on the other.
@@ -29,6 +29,12 @@ impl<'a> IntoContext<'a> for TenantId {
 let piece = TenantId(7).into_context();
 assert_eq!(piece.to_string(), "(\"tenant\", 7u64)");
 assert_eq!(piece.encode(), ("tenant", 7u64).into_context().encode());
+```
+
+## Installation
+
+```sh
+cargo add vitaminc-context
 ```
 
 ## The encoding
@@ -67,7 +73,7 @@ assert_eq!(runtime.encode(), ("users/email", 7u64).into_context().encode());
 A cipher or PRF that walks a structure derives the context each part is
 sealed or derived under from the caller's context, with a reserved domain
 label so it can never equal a caller-built composite:
-[`Context::for_map_entry`](https://docs.rs/vitaminc-context/latest/vitaminc_context/struct.Context.html#method.for_map_entry),
+[`Context::for_map_entry`],
 `for_sequence_element`, `for_leaf`, the empty-sequence and empty-map
 markers, `for_option_some` and `refine`. There is one set, shared by both
 derivations, because a derived context describes the shape of the
@@ -87,3 +93,24 @@ Encoded bytes prove nothing about emptiness. Framing gives an empty value a
 non-empty encoding — `None` encodes to an eight-byte count word — so an
 `Encoded` leaf counts as empty and `NonEmpty` will not certify it. Prove a
 context non-empty on the value, before it is encoded.
+
+## Cargo features
+
+No optional features are enabled by default.
+
+| Feature | Effect |
+| --- | --- |
+| `arbitrary` | Implements `quickcheck::Arbitrary` for `ContextPiece` for property tests. |
+
+## Compatibility
+
+Requires Rust <!-- msrv:vitaminc-context -->**1.88.0**<!-- /msrv --> and the Rust standard library (`std`).
+MSRV increases require a minor release; patch releases retain the existing
+floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
+
+License: MIT.
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[`Context::for_map_entry`]: https://docs.rs/vitaminc-context/latest/vitaminc_context/struct.Context.html#method.for_map_entry
+[`ContextPiece`]: https://docs.rs/vitaminc-context/latest/vitaminc_context/enum.ContextPiece.html
+[`IntoContext`]: https://docs.rs/vitaminc-context/latest/vitaminc_context/trait.IntoContext.html

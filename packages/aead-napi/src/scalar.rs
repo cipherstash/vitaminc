@@ -2,7 +2,7 @@
 //! and back: BigInt widths, and the text of a calendar date, a timestamp,
 //! a decimal and a UUID.
 //!
-//! Nothing here touches a `napi_env`, so it is all unit-tested natively.
+//! These conversions do not require a JavaScript environment.
 
 use std::fmt;
 
@@ -16,21 +16,28 @@ use vitaminc_aead::{Int, Logical, TimeUnit};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ConversionError {
+    /// The integer fits neither `i128` nor `u128`.
     #[error("BigInt is outside the signed/unsigned 128-bit range")]
     IntegerRange,
+    /// The calendar date is malformed or outside the supported range.
     #[error("invalid calendar date")]
     InvalidDate,
+    /// The timestamp is malformed or outside the supported range.
     #[error("invalid or out-of-range timestamp")]
     InvalidTimestamp,
+    /// The decimal is malformed or exceeds the supported precision or scale.
     #[error("invalid or out-of-range decimal")]
     InvalidDecimal,
+    /// The decimal is NaN or infinite.
     #[error("decimal must be finite")]
     NonFiniteDecimal,
+    /// The UUID text is malformed.
     #[error("invalid UUID")]
     InvalidUuid,
 }
 
 impl ConversionError {
+    /// Return the stable `ERR_*` code exposed to JavaScript callers.
     pub fn code(self) -> &'static str {
         match self {
             Self::IntegerRange => "ERR_INTEGER_RANGE",
