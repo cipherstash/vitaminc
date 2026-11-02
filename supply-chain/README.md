@@ -26,8 +26,21 @@ check `safe-to-deploy` only, since `crypto-reviewed` is recorded here.
 
 ## When a dependency PR fails `🔏 cargo vet`
 
-The failure means a version moved and nobody has read the delta. Run, on the
-PR's branch:
+A version moved and the store does not cover it. Two things can be true, and
+the CI step after the failure says which. First, on the PR's branch:
+
+```sh
+cargo vet                      # without --locked: fetches the registries
+```
+
+`imports.lock` only keeps the imported audits the committed graph needs, so a
+bump to a version that Mozilla, Google, ISRG, the Bytecode Alliance or Zcash
+has already audited still fails `--locked` until the chain is pulled in. If
+that command passes and the only change is to `imports.lock`, commit it to
+the PR and you are done: that is a registry's existing audit being recorded,
+not a new trust decision, and the diff shows whose word it is.
+
+Otherwise nobody has read the delta yet:
 
 ```sh
 cargo vet                      # says which crate and versions need an audit
@@ -89,10 +102,13 @@ workspace crate is added.
 
 ## Refreshing imports
 
+A dependency PR carries the `imports.lock` entries its own versions need (see
+above). Separately, now and then:
+
 ```sh
 cargo vet regenerate imports  # fetch the registries, update imports.lock
-cargo vet prune
+cargo vet prune               # drop exemptions the imports now cover
 ```
 
-Do this in its own PR so the diff to `imports.lock` is reviewable on its own.
+Do that in its own PR so the diff to `imports.lock` is reviewable on its own.
 Adding a registry is a trust decision: their `safe-to-deploy` becomes ours.
