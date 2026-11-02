@@ -1,4 +1,14 @@
 
 # cargo-vet audits file
 
-[audits]
+[[audits.napi]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "3.14.2 -> 3.15.0"
+notes = "Hunks map to napi-rs #3584, #3592, #3603, #3607, #3610, #3612, #3623 and #3626: memory-safety and leak fixes in class wrapping, native-borrow rooting, typed-array conversion and env teardown, plus ReadableStream cancel support. The new unsafe Send/Sync impls and the one napi_run_script of a constant three-line JS source were read and look sound. No new dependencies, no build.rs or FFI signature changes; Buffer and Uint8Array ownership paths are unchanged apart from a fixed reference leak on the error path."
+
+[[audits.napi-sys]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "3.4.0 -> 3.4.1"
+notes = "One doc-comment path fix in src/wasi_heap_sync.rs; no code change. build.rs unchanged."
