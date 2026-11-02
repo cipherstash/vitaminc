@@ -1,0 +1,36 @@
+
+# cargo-vet audits file
+
+[criteria.crypto-reviewed]
+description = """
+The cryptographic or secret-handling code in this crate, or in the delta
+between the two versions, has been read by someone on the vitaminc team with
+these questions in mind:
+
+- Secret-dependent branches, memory accesses or division: anything that would
+  make an operation's timing a function of key or plaintext bytes.
+- Zeroization: buffers that hold secrets are wiped on drop, and no change
+  leaves a copy behind (reallocation, Clone, Debug, serialisation).
+- Randomness: how the RNG is seeded, where entropy comes from, and that no
+  output is reused or made predictable.
+- Algorithm and parameter changes: nonce sizes, tag lengths, key schedules,
+  domain separation, anything that alters bytes on the wire or at rest.
+
+It is required, on top of safe-to-deploy, for the crates vitaminc builds its
+primitives on; see `dependency-criteria` in config.toml. It does not imply
+safe-to-deploy: record both.
+"""
+
+[criteria.does-not-implement-crypto]
+description = """
+The crate implements no cryptographic algorithm and handles no key or
+plaintext material of its own, so there is nothing for `crypto-reviewed` to
+check: a build script, a proc macro, a collection type, an FFI shim. It
+exists because criteria are transitive: requiring `crypto-reviewed` of
+`aws-lc-rs` requires it of `cc` and `cmake` too, and this is how those are
+answered without pretending anyone reviewed their cryptography. Google's
+registry publishes audits under the same name, and they are imported as-is.
+"""
+implies = "crypto-reviewed"
+
+[audits]

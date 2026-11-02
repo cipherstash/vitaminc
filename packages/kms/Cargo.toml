@@ -17,7 +17,11 @@ rust-version = "1.94.1"
 vitaminc-async-traits = { version = "0.8.1", path = "../async-traits" }
 vitaminc-traits = { version = "0.8.1", path = "../traits" }
 vitaminc-protected = { version = "0.8.1", path = "../protected" }
-aws-sdk-kms = "1.109.0"
+# `default-features = false` drops the SDK's `rustls` feature, which is the
+# legacy hyper 0.14 + rustls 0.21 + ring client: end-of-life, carrying open
+# RustSec advisories, and unused once `default-https-client` (hyper 1 +
+# rustls 0.23 on aws-lc-rs) is on. The other two are the rest of the default set.
+aws-sdk-kms = { version = "1.109.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-config = "1.8.18"
 
 thiserror = { workspace = true }

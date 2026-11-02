@@ -1,0 +1,71 @@
+name: "Deny"
+on:
+  push:
+    branches:
+      - main
+  # No branch filter, for the same reason as test.yml: a stacked PR must run
+  # this gate too.
+  pull_request:
+  # A nightly sweep on main: a RustSec advisory published against a version
+  # already in Cargo.lock has no PR to fail, so this is what surfaces it.
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Holds Cargo.lock to deny.toml: no advisories or yanked versions, licences
+  # from the allow list only, crates.io as the only source, and no new crate
+  # with a build script. cargo-deny never compiles anything; it reads
+  # `cargo metadata` and the lockfile, so this stays cheap.
+  deny:
+    runs-on: ubuntu-latest
+    name: "🛡️ cargo deny"
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: setup rust
+        # Only for `cargo metadata`; no code is built.
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: install cargo-deny
+        # A pinned release tarball with its checksum, rather than
+        # `cargo install` (slow, and would itself resolve an unpinned tree)
+        # or the cargo-deny-action (a third-party action the org allowlist
+        # may not permit). The digest is the one GitHub publishes for the
+        # release asset. When bumping, update both values together.
+        env:
+          VERSION: "0.20.2"
+          SHA256: "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
+        run: |
+          set -euo pipefail
+          asset="cargo-deny-${VERSION}-x86_64-unknown-linux-musl"
+          curl -sSfL -o cargo-deny.tar.gz \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${VERSION}/${asset}.tar.gz"
+          echo "${SHA256}  cargo-deny.tar.gz" | sha256sum -c -
+          tar -xzf cargo-deny.tar.gz --strip-components=1 -C "$HOME/.cargo/bin" "${asset}/cargo-deny"
+          cargo deny --version
+
+      - name: cargo deny check
+        # `--locked` refuses to touch Cargo.lock, so the graph checked is the
+        # one the PR ships. `all-features` is set in deny.toml so optional
+        # dependencies (chrono, uuid, serde, ...) are covered too.
+        run: cargo deny --locked check
+
+      - name: cargo deny check (nested test workspaces)
+        # Two test harnesses keep their own lockfiles and build --locked: the
+        # Node addon and the Go bindings' wasm guest. Dependabot does not
+        # touch them, so a yanked or advisory-bearing version can sit there
+        # unnoticed (chacha20 0.10.1 did). Same config, each manifest in turn.
+        run: |
+          set -euo pipefail
+          for manifest in packages/aead-napi/tests/addon/Cargo.toml bindings/go/vcencrypt/guest/Cargo.toml; do
+            echo "::group::$manifest"
+            cargo deny --locked --config deny.toml --manifest-path "$manifest" check
+            echo "::endgroup::"
+          done
