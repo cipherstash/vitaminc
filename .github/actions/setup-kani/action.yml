@@ -6,12 +6,17 @@ inputs:
     description: "The kani-verifier version."
     # The one pin for every Kani workflow.
     default: "0.67.0"
+  cache-name:
+    description: "Names this workflow's cache. Each workflow proves a different crate and fetches different crates for it, so each keeps its own cache: a shared one would be saved by whichever ran first, and miss the other's crates."
+    required: true
 
 runs:
   using: "composite"
   steps:
-    # Both workflows share this cache: it holds only the pinned Kani and
-    # the crates the lockfile names, which are the same for both.
+    # One cache per workflow (`cache-name`): it holds the pinned Kani and
+    # the crates that workflow's proofs fetch. An exact hit is never saved
+    # again, so a cache shared between workflows that fetch different
+    # crates would keep missing some of them until the lockfile changed.
     - uses: actions/cache@v6
       with:
         path: |
@@ -21,7 +26,7 @@ runs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-        key: ${{ runner.os }}-kani-${{ inputs.version }}-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-kani-${{ inputs.cache-name }}-${{ inputs.version }}-${{ hashFiles('**/Cargo.lock') }}
 
     - name: setup rust stable
       uses: dtolnay/rust-toolchain@stable
@@ -35,7 +40,9 @@ runs:
       env:
         KANI_VERSION: ${{ inputs.version }}
       run: |
-        if ! cargo kani --version 2>/dev/null | grep -q "$KANI_VERSION"; then
+        # A fixed-string, whole-word match, so a cached 10.67.0 or 0.67.01
+        # is not taken for 0.67.0.
+        if ! cargo kani --version 2>/dev/null | grep -qwF "$KANI_VERSION"; then
           cargo install --locked kani-verifier --version "$KANI_VERSION"
           cargo kani setup
         fi

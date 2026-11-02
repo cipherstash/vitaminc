@@ -21,7 +21,7 @@ name: "Kani (storage reader)"
 # from kani.yml so a change to one crate does not run the other's proofs.
 #
 # Kani is installed by .github/actions/setup-kani, which holds the version
-# pin and the cache both Kani workflows share.
+# pin; each workflow keeps its own cache.
 on:
   # No branch filter: a stacked PR (a feature branch as base) must run this
   # gate too; see go.yml.
@@ -69,6 +69,8 @@ jobs:
       - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup-kani
+        with:
+          cache-name: storage
 
       - name: prove
         # Two at a time: the map key proofs each solve over 128-bit values,

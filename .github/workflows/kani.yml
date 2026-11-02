@@ -9,7 +9,7 @@ name: "Kani"
 # the four of them verify in well under a minute.
 #
 # Kani is installed by .github/actions/setup-kani, which holds the version
-# pin and the cache both Kani workflows share.
+# pin; each workflow keeps its own cache.
 on:
   # No branch filter: a stacked PR (a feature branch as base) must run this
   # gate too; see go.yml.
@@ -43,6 +43,8 @@ jobs:
       - uses: actions/checkout@v7
 
       - uses: ./.github/actions/setup-kani
+        with:
+          cache-name: protected
 
       - name: prove (vitaminc-protected)
         run: cargo kani -p vitaminc-protected
