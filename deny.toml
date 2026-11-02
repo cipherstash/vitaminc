@@ -72,8 +72,13 @@ deny = []
 # common shape of a malicious release. This list is every crate in the tree
 # with a build script today (platform-specific ones included, because the
 # graph is checked for every target). A dependabot PR that adds one fails
-# here, and the review decides whether to add it.
+# here, and the review decides whether to add it. The nested test
+# workspaces (Node addon, Go guest) are checked against this same list.
 allow-build-scripts = [
+  # Ours. In the root workspace it is a member and not subject to this list;
+  # the two nested test workspaces (see deny.yml) see it as a path dependency
+  # and would fail without it.
+  "vitaminc-protected",
   "alloca",
   "anyhow",
   "aws-lc-rs",

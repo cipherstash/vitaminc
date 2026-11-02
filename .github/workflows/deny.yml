@@ -56,3 +56,16 @@ jobs:
         # one the PR ships. `all-features` is set in deny.toml so optional
         # dependencies (chrono, uuid, serde, ...) are covered too.
         run: cargo deny --locked check
+
+      - name: cargo deny check (nested test workspaces)
+        # Two test harnesses keep their own lockfiles and build --locked: the
+        # Node addon and the Go bindings' wasm guest. Dependabot does not
+        # touch them, so a yanked or advisory-bearing version can sit there
+        # unnoticed (chacha20 0.10.1 did). Same config, each manifest in turn.
+        run: |
+          set -euo pipefail
+          for manifest in packages/aead-napi/tests/addon/Cargo.toml bindings/go/vcencrypt/guest/Cargo.toml; do
+            echo "::group::$manifest"
+            cargo deny --locked --config deny.toml --manifest-path "$manifest" check
+            echo "::endgroup::"
+          done

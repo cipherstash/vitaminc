@@ -1,7 +1,14 @@
 version: 2
 updates:
 - package-ecosystem: cargo
-  directory: "/"
+  # The root workspace and the two test harnesses that keep their own
+  # lockfiles (built --locked, checked by deny.yml and vet.yml). Without
+  # them here a yanked or advisory-bearing version sits in a nested lockfile
+  # until someone notices; chacha20 0.10.1 and ctutils 0.4.2 did.
+  directories:
+    - "/"
+    - "/packages/aead-napi/tests/addon"
+    - "/bindings/go/vcencrypt/guest"
   schedule:
     interval: weekly
     day: monday
