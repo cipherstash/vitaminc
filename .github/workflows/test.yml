@@ -234,8 +234,9 @@ jobs:
         # heap, measured by scanning dead memory. The stack guarantee is
         # stated for optimised builds, and the plain `cargo test` above
         # skips those cases at opt-level 0, so they run here under
-        # `--release`.
-        run: cargo test -p vitaminc-protected --release --test residue_stack --test residue_heap
+        # `--release`. The `WipingAllocator` scan needs its feature, which
+        # the plain `cargo test` above does not enable.
+        run: cargo test -p vitaminc-protected --release --features wiping-allocator --test residue_stack --test residue_heap --test wiping_allocator
 
       - name: test (aead optional scalar features)
         # Only dev-dependencies enable these on vitaminc-aead, so a build

@@ -215,6 +215,21 @@ if !key.locked() {
 
 The operating system can refuse to lock memory, most often because `RLIMIT_MEMLOCK` (64 KiB by default on many Linux hosts) is too small; every value costs at least one page of it, whatever its size. A seccomp filter can refuse the core-dump exclusion. By default the value is created anyway and the refusal is readable from `lock_error`; call `require_locked()` on a value that must be locked, or set `LockPolicy::Strict` once at startup to make every constructor fail instead. `Locked` protects the bytes of `T` itself, so use it for inline types such as `[u8; N]`; a `Vec<u8>` inside it has only its header in the locked region.
 
+### Wiping freed memory (experimental)
+
+`Protected` wipes a value when it is dropped, but it cannot reach a block that is freed from under it: a `Vec<u8>` that outgrows its allocation moves to a fresh block and frees the old one with the bytes still in it. `Buffer` closes that gap for the bytes it writes. With the `wiping-allocator` feature, `WipingAllocator` closes it for every allocation in the process: installed as the global allocator, it wipes each block before it is freed, and copies rather than grows in place, so a `Vec` grown by pushes, a `String` that reallocates, or a dependency's working buffer leaves nothing behind. The cost is a store over every freed byte and a copy on every growth, for every allocation, which is why it is a feature and off by default. It does not cover memory another allocator frees, memory the operating system reclaims when a process dies, or the stack.
+
+```rust
+# #[cfg(feature = "wiping-allocator")]
+# mod example {
+use vitaminc_protected::WipingAllocator;
+
+#[global_allocator]
+static ALLOCATOR: WipingAllocator = WipingAllocator::new(std::alloc::System);
+# }
+# fn main() {}
+```
+
 ### Generators
 
 `Protected` supports generating new values from functions that return the inner value.
@@ -247,6 +262,7 @@ No optional features are enabled by default.
 | --- | --- |
 | `bitvec` | Exposes bit-slice indexing adapters. Accesses use ordinary indexing, so they do not hide the index. |
 | `arbitrary` | Implements `quickcheck::Arbitrary` for `Protected<T>` when `T` supports it, for property tests. |
+| `wiping-allocator` | Exposes `WipingAllocator`, a global allocator that wipes every block before it is freed. Experimental: a cost on every free and every growth in the process. |
 
 The `bitvec` dependency is present even without the feature; the flag exposes
 the adapters. `arbitrary` is for test data, not cryptographic randomness.

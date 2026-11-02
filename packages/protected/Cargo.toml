@@ -14,7 +14,7 @@ rust-version.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.docs.rs]
-features = ["bitvec", "arbitrary"]
+features = ["bitvec", "arbitrary", "wiping-allocator"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
@@ -50,6 +50,14 @@ trybuild = "1.0.118"
 name = "locked_fork"
 harness = false
 
+# Installs `WipingAllocator` as the test binary's global allocator.
+[[test]]
+name = "wiping_allocator"
+required-features = ["wiping-allocator"]
+
 [features]
 bitvec = []
 arbitrary = ["dep:quickcheck"]
+# `WipingAllocator`: a global allocator that wipes every block before it is
+# freed. Experimental, and a cost on every free in the process.
+wiping-allocator = []
