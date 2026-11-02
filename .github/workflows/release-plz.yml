@@ -8,12 +8,24 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  id-token: write
 
+# Both jobs run in the `release` environment, which only `main` may use. A
+# workflow runs from whichever branch triggered it, so without it, a branch
+# whose copy of this file runs on that branch would get what these jobs get:
+#
+# - RELEASE_PLZ_APP_PRIVATE_KEY, which is an environment secret, so a job
+#   outside `release` cannot read it;
+# - an OIDC token crates.io accepts. Only the Release job asks for one, and
+#   its token names the environment; every crate's trusted publisher
+#   requires `release`, so a token from anywhere else is refused.
+#
+# Removing `environment:` from a branch's copy gains nothing: the job then
+# gets neither the secret nor a token crates.io accepts.
 jobs:
   release-plz-pr:
     name: "Release PR"
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - name: Generate GitHub App token
         id: app-token
@@ -90,6 +102,13 @@ jobs:
   release-plz-release:
     name: "Release"
     runs-on: ubuntu-latest
+    environment: release
+    # Job-level permissions replace the workflow's, so restate them. Only
+    # this job publishes, so only it can ask for an OIDC token.
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
     steps:
       - name: Generate GitHub App token
         id: app-token
