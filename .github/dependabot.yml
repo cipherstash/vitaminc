@@ -3,10 +3,48 @@ updates:
 - package-ecosystem: cargo
   directory: "/"
   schedule:
-    interval: daily
+    interval: weekly
+    day: monday
   open-pull-requests-limit: 10
+  # Let a release age before it is proposed. tokio 1.54.0 was yanked for a
+  # use-after-free two days after publication (RUSTSEC-2026-0384); most
+  # compromised or broken releases are caught by the ecosystem within days,
+  # and nothing here is time-critical. Security updates ignore the cooldown,
+  # so an advisory against the pinned version still arrives at once.
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+    semver-minor-days: 7
+    semver-patch-days: 3
+  groups:
+    # One weekly PR for routine patch bumps, so review effort goes to the
+    # changes that carry it. Crates that touch keys, plaintext, randomness
+    # or memory wiping are excluded: those get their own PR and a full read
+    # on every bump, whatever the semver level.
+    cargo-patch:
+      applies-to: version-updates
+      update-types:
+        - "patch"
+      patterns:
+        - "*"
+      exclude-patterns:
+        - "aws-lc-rs"
+        - "aws-lc-sys"
+        - "aes-gcm"
+        - "chacha20"
+        - "digest"
+        - "getrandom"
+        - "hmac"
+        - "rand"
+        - "rand_core"
+        - "sha2"
+        - "subtle"
+        - "zeroize"
+        - "zeroize_derive"
 - package-ecosystem: github-actions
   directory: "/"
   schedule:
     interval: weekly
   open-pull-requests-limit: 10
+  cooldown:
+    default-days: 7

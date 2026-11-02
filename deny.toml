@@ -1,0 +1,131 @@
+# cargo-deny configuration. Run locally with `cargo deny --locked check`;
+# CI runs the same in .github/workflows/deny.yml.
+#
+# What this holds the lockfile to, in order of how often it will fire:
+#   advisories  no RustSec advisory, no yanked version
+#   bans        no new crate with a build script (see `allow-build-scripts`)
+#   sources     crates.io only
+#   licenses    the allow list below, for everything that ships
+#
+# Reference: https://embarkstudios.github.io/cargo-deny/checks/cfg.html
+
+[graph]
+# Optional dependencies (chrono, uuid, rust_decimal, serde, ...) are part of
+# what we ship, so check the graph with every feature on.
+all-features = true
+
+[output]
+feature-depth = 1
+
+[advisories]
+db-path = "$CARGO_HOME/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Unsound and unmaintained advisories are reported as warnings by default,
+# which the workflow would not fail on. We want to see both: "Vetted" in
+# README.md means picking dependencies that are looked after.
+unmaintained = "workspace"
+yanked = "deny"
+# Each entry needs the advisory id and a reason; prefer a bump to an ignore.
+ignore = []
+
+[licenses]
+# SPDX identifiers only. Everything in the tree today is one of these or an
+# OR-expression containing one. The LGPL and BSL appear only as alternatives
+# in OR-expressions, so the allowed branch is what applies.
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+  "CC0-1.0",
+]
+confidence-threshold = 0.8
+# Dev-dependencies are not licence-checked (`include-dev` defaults to false):
+# they are not distributed. This is why `orderable-bytes`, a dev-dependency
+# of vitaminc-ore under the CipherStash Client Library Licence, needs no
+# entry here. Advisories, bans and sources do cover dev-dependencies.
+exceptions = []
+
+[licenses.private]
+ignore = true
+
+[bans]
+# A dozen or so crates resolve to two versions today (digest 0.10 and 0.11,
+# syn 2 and 3, ...). Tightening this to "deny" is a separate clean-up; "warn"
+# keeps the duplication visible without blocking PRs.
+multiple-versions = "warn"
+# `*` requirements are only used for path dev-dependencies between
+# workspace members (the derive test crates). Registry wildcards are denied.
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+deny = []
+
+[bans.build]
+# The supply-chain gate with teeth: a crate's build script runs arbitrary
+# code on every developer machine and in CI, and a new one is the most
+# common shape of a malicious release. This list is every crate in the tree
+# with a build script today (platform-specific ones included, because the
+# graph is checked for every target). A dependabot PR that adds one fails
+# here, and the review decides whether to add it.
+allow-build-scripts = [
+  "alloca",
+  "anyhow",
+  "aws-lc-rs",
+  "aws-lc-sys",
+  "aws-types",
+  "borsh",
+  "crunchy",
+  "generic-array",
+  "getrandom",
+  "httparse",
+  "icu_normalizer_data",
+  "icu_properties_data",
+  "libc",
+  "libm",
+  "minicov",
+  "napi",
+  "napi-sys",
+  "num-traits",
+  "proc-macro2",
+  "quote",
+  "radium",
+  "ring",
+  "rust_decimal",
+  "rustls",
+  "rustversion",
+  "serde",
+  "serde_core",
+  "serde_json",
+  "target-tuple",
+  "thiserror",
+  "typenum",
+  "unicode-general-category",
+  "wasm-bindgen",
+  "wasm-bindgen-shared",
+  "winapi",
+  "winapi-i686-pc-windows-gnu",
+  "winapi-x86_64-pc-windows-gnu",
+  "windows_aarch64_gnullvm",
+  "windows_aarch64_msvc",
+  "windows_i686_gnu",
+  "windows_i686_gnullvm",
+  "windows_i686_msvc",
+  "windows_x86_64_gnu",
+  "windows_x86_64_gnullvm",
+  "windows_x86_64_msvc",
+  "wit-bindgen",
+  "zerocopy",
+  "zmij",
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
