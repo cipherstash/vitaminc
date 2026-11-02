@@ -189,6 +189,10 @@ pub fn normalize(ty: Option<Logical>, v: Physical<'_>) -> Result<Normalized, Nor
 
 /// An integer of any width: a sign byte, then the big-endian 128-bit word.
 pub fn integer(value: Int) -> Protected<Vec<u8>> {
+    // `sign_and_word` is `#[inline]`, so it is compiled into this function
+    // and the sign and word stay in registers until they are written to the
+    // buffer, rather than coming back through an unwiped stack slot
+    // (checked in the compiled code for AArch64; Rust does not promise it).
     let (negative, word) = value.sign_and_word();
     fixed::<17>(|b| {
         b[0] = u8::from(!negative);
@@ -225,6 +229,9 @@ pub fn date(days: Int) -> Option<Protected<Vec<u8>>> {
 /// chrono's `DateTime<Utc>` orders by, truncated). `None` outside the
 /// timestamp range.
 pub fn timestamp(unit: TimeUnit, count: Int) -> Option<Protected<Vec<u8>>> {
+    // `timestamp_nanos` is `#[inline]` for the same reason as
+    // `sign_and_word` in `integer`: so the count is not returned through
+    // an unwiped stack slot.
     let nanos = timestamp_nanos(unit, count)?;
     let seconds = i64::try_from(nanos.div_euclid(NANOS_PER_SECOND)).ok()?;
     let sub = (nanos.rem_euclid(NANOS_PER_SECOND) as u32) / 1_000 * 1_000;
