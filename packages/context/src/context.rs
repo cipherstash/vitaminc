@@ -142,6 +142,10 @@ impl<'a> Context<'a> {
     /// the result apart from a caller binding the tuple `(context, key)` as
     /// a context of its own, which is a two-piece list of typed leaves and
     /// so can never equal a three-piece labelled frame.
+    ///
+    /// Only the key is bound, not which entries the map holds: a database
+    /// query reads some columns, not all, so a map's membership is
+    /// deliberately not authenticated (ADR 0002).
     pub fn for_map_entry(&self, key: &str) -> Context<'static> {
         Self::pae(&[MAP_ENTRY_DOMAIN, self.as_bytes(), key.as_bytes()])
     }
@@ -186,9 +190,10 @@ impl<'a> Context<'a> {
     /// it. Sealing elements under a labelled derivation means a leaf
     /// verifies only in the position it was sealed for.
     ///
-    /// The element index is deliberately not bound. Records are retrieved in
-    /// a different order than they were inserted, so element order is a
-    /// caller obligation, not an authenticated fact.
+    /// The element index, and the sequence's length, are deliberately not
+    /// bound. Records are retrieved in a different order than they were
+    /// inserted, and in part, so element order is a caller obligation, not
+    /// an authenticated fact (ADR 0002).
     pub fn for_sequence_element(&self) -> Context<'static> {
         Self::pae(&[SEQ_ELEMENT_DOMAIN, self.as_bytes(), b"element"])
     }
