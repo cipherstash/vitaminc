@@ -13,10 +13,15 @@ Two test harnesses keep their own lockfiles and so their own stores:
 serve more than one workspace: cargo vet rejects policy entries for crates
 not in the graph, and `regenerate exemptions` prunes whatever the current
 graph does not need. Every command below takes `--manifest-path` for those
-two. The duplication goes away if the harnesses become members of the root
-workspace, which is the fix worth making; until then a delta that appears
-in more than one lockfile is certified in each store, and the nested stores
-check `safe-to-deploy` only, since `crypto-reviewed` is recorded here.
+two. They stay separate by choice (much of this code is moving to Stack, so
+folding them in is not worth doing). Two consequences: a delta that appears
+in more than one lockfile is certified in each store, with the nested stores
+checking `safe-to-deploy` only since `crypto-reviewed` is recorded here; and
+the nested lockfiles lag the root, so a nested bump often reaches a version
+the root store already exempts. That version may be exempted in the nested
+store too (`cargo vet add-exemption --manifest-path <harness> <crate>
+<version>`): the root already ships it unaudited, so nothing new is being
+trusted. A version the root does not have is audited like any other.
 
 - `audits.toml`: audits we have recorded, and the `crypto-reviewed` criterion.
 - `config.toml`: which registries we import, what each first-party crate
