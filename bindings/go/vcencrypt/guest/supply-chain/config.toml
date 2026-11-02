@@ -170,6 +170,10 @@ criteria = "safe-to-deploy"
 version = "0.2.189"
 criteria = "safe-to-deploy"
 
+[[exemptions.libc]]
+version = "0.2.191"
+criteria = "safe-to-deploy"
+
 [[exemptions.memchr]]
 version = "2.8.3"
 criteria = "safe-to-deploy"
@@ -246,6 +250,10 @@ criteria = "safe-to-deploy"
 version = "3.0.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.syn]]
+version = "3.0.9"
+criteria = "safe-to-deploy"
+
 [[exemptions.tap]]
 version = "1.0.1"
 criteria = "safe-to-deploy"
@@ -254,8 +262,16 @@ criteria = "safe-to-deploy"
 version = "2.0.19"
 criteria = "safe-to-deploy"
 
+[[exemptions.thiserror]]
+version = "2.0.21"
+criteria = "safe-to-deploy"
+
 [[exemptions.thiserror-impl]]
 version = "2.0.19"
+criteria = "safe-to-deploy"
+
+[[exemptions.thiserror-impl]]
+version = "2.0.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.toml_datetime]]

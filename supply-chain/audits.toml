@@ -39,6 +39,12 @@ criteria = ["safe-to-deploy", "crypto-reviewed"]
 delta = "0.11.2 -> 0.11.3"
 notes = "Additive only: a TryCustomizedInit trait with a blanket impl over CustomizedInit, and dev::initialized_mac_test split out of mac_test. No change to any hashing, MAC or buffer code; no unsafe, no new dependencies, no build script (build = false). Both hunks match RustCrypto/traits #2367 and #2395 in the changelog."
 
+[[audits.js-sys]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+delta = "0.3.106 -> 0.3.107"
+notes = "Hand-written JS bindings only; the delta adds Temporal, ECMAScript and WebAssembly bindings, a Promise<T, E> rejection type parameter and wasm64 pointer-width fixes, all matching the wasm-bindgen 0.2.130 release notes. No new unsafe, build script, dependencies or embedded code; js-sys implements no cryptography. The stable Reflect::get, global() and Uint8Array APIs that getrandom's wasm_js backend uses are untouched."
+
 [[audits.napi]]
 who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"
@@ -50,3 +56,57 @@ who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"
 delta = "3.4.0 -> 3.4.1"
 notes = "One doc-comment path fix in src/wasi_heap_sync.rs; no code change. build.rs unchanged."
+
+[[audits.unicode-normalization]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.25 -> 0.1.26"
+notes = "Unicode 17.0.0 to 18.0.0 table regeneration (upstream #117: scripts/unicode.py version bump and regenerated src/tables.rs, all data literals and generated range patterns) plus licence metadata declaring Unicode-3.0 for the UCD data with LICENSE-UNICODE added (#116). The normalisation logic is untouched; no new unsafe, dependencies or build script. NFC/NFKC output changes only for code points newly assigned in Unicode 18."
+
+[[audits.wasm-bindgen]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+delta = "0.2.129 -> 0.2.130"
+notes = "Every hunk maps to the upstream 0.2.130 changelog: Nullable<T> and the Maybe*WasmAbi traits, encoded sequences and slice modes, fixed externref slots for statics, once_cell replaced by core::cell::LazyCell, the ErasableGeneric lifetime soundness fix (#5178), and leak-free argument rejection. The &[u8], &mut [u8], *mut u8 and Vec<u8> ABI paths that getrandom's wasm_js backend uses to fill a Uint8Array and copy it back keep their wire format (WasmSlice ptr+len, WasmWordRepr) with no new unsafe on them; build.rs is unchanged and the only dependency change is the removal of once_cell. The crate implements no cryptography."
+
+[[audits.wasm-bindgen-futures]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-run"
+delta = "0.4.79 -> 0.4.80"
+notes = "Version pins on js-sys and wasm-bindgen and a check-cfg entry; no source change."
+
+[[audits.wasm-bindgen-macro]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+delta = "0.2.129 -> 0.2.130"
+notes = "Version pin bump on wasm-bindgen-macro-support and a new check-cfg entry; no source change. A proc-macro shim with no cryptography in it."
+
+[[audits.wasm-bindgen-macro-support]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+delta = "0.2.129 -> 0.2.130"
+notes = "Proc-macro codegen only: the custom section is emitted as a repr(C) byte-array struct, try_from_abi plumbing releases arguments before a throw, Nullable and slice/vec mode attributes are parsed, descriptor symbols are qualified by module_path!(), shim-name hashing covers inline_js and call style, and PartialEq/Eq on imported types is emitted by hand. No new file, env, process or network access at expansion time, no new dependencies, no unsafe in the macro itself. Not a cryptographic crate; the slice and pointer glue it emits for imports is unchanged."
+
+[[audits.wasm-bindgen-shared]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+delta = "0.2.129 -> 0.2.130"
+notes = "SCHEMA_VERSION and approved schema hash bumped; module_path carried in the schema with a const-fn FNV-1a hash and module_mangled_symbol for symbol names; new SEQ_MODE/NULLABLE type tags. Compile-time metadata shared with the CLI, no runtime code and no cryptography; build.rs unchanged."
+
+[[audits.wasm-bindgen-test]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-run"
+delta = "0.3.79 -> 0.3.80"
+notes = "Drops the async-trait dependency in favour of native async fn in the private Routine trait; version pins. Test harness only."
+
+[[audits.wasm-bindgen-test-macro]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-run"
+delta = "0.3.79 -> 0.3.80"
+notes = "A check-cfg entry; no source change."
+
+[[audits.wasm-bindgen-test-shared]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-run"
+delta = "0.2.129 -> 0.2.130"
+notes = "A check-cfg entry; no source change."

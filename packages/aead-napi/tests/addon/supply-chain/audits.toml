@@ -7,6 +7,18 @@ criteria = "safe-to-deploy"
 delta = "3.14.2 -> 3.15.0"
 notes = "Hunks map to napi-rs #3584, #3592, #3603, #3607, #3610, #3612, #3623 and #3626: memory-safety and leak fixes in class wrapping, native-borrow rooting, typed-array conversion and env teardown, plus ReadableStream cancel support. The new unsafe Send/Sync impls and the one napi_run_script of a constant three-line JS source were read and look sound. No new dependencies, no build.rs or FFI signature changes; Buffer and Uint8Array ownership paths are unchanged apart from a fixed reference leak on the error path."
 
+[[audits.napi-derive]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "3.6.12 -> 3.6.13"
+notes = "Version bump and the napi-derive-backend requirement raised to 6.1.6; no code change."
+
+[[audits.napi-derive-backend]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "6.1.5 -> 6.1.6"
+notes = "Codegen only (napi-rs #3584, #3603): fn.rs defers the native borrow scope through napi 3.15.0's defer_native_borrow_scope and NativeBorrowScopeRelease, and struct.rs replaces the ZST dangling pointer with a heap placeholder. Pure token generation with no env, filesystem, network or process access. Requires napi >= 3.15.0."
+
 [[audits.napi-sys]]
 who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"
