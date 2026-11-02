@@ -33,4 +33,8 @@ registry publishes audits under the same name, and they are imported as-is.
 """
 implies = "crypto-reviewed"
 
-[audits]
+[[audits.digest]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+delta = "0.11.2 -> 0.11.3"
+notes = "Additive only: a TryCustomizedInit trait with a blanket impl over CustomizedInit, and dev::initialized_mac_test split out of mac_test. No change to any hashing, MAC or buffer code; no unsafe, no new dependencies, no build script (build = false). Both hunks match RustCrypto/traits #2367 and #2395 in the changelog."
