@@ -220,10 +220,14 @@ The operating system can refuse to lock memory, most often because `RLIMIT_MEMLO
 `Protected` wipes a value when it is dropped, but it cannot reach a block that is freed from under it: a `Vec<u8>` that outgrows its allocation moves to a fresh block and frees the old one with the bytes still in it. `Buffer` closes that gap for the bytes it writes. With the `wiping-allocator` feature, `WipingAllocator` closes it for every allocation in the process: installed as the global allocator, it wipes each block before it is freed, and copies rather than grows in place, so a `Vec` grown by pushes, a `String` that reallocates, or a dependency's working buffer leaves nothing behind. The cost is a store over every freed byte and a copy on every growth, for every allocation, which is why it is a feature and off by default. It does not cover memory another allocator frees, memory the operating system reclaims when a process dies, or the stack.
 
 ```rust
+# #[cfg(feature = "wiping-allocator")]
+# mod example {
 use vitaminc_protected::WipingAllocator;
 
 #[global_allocator]
 static ALLOCATOR: WipingAllocator = WipingAllocator::new(std::alloc::System);
+# }
+# fn main() {}
 ```
 
 ### Generators
