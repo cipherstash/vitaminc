@@ -19,7 +19,7 @@
 //!
 //! # Compatibility
 //!
-//! Requires Rust <!-- msrv:vitaminc-protected-derive -->**1.88.0**<!-- /msrv -->. These procedural macros run on the compiler host;
+//! Requires Rust <!-- msrv:vitaminc-protected-derive -->**1.89.0**<!-- /msrv -->. These procedural macros run on the compiler host;
 //! the parent crate requires `std`. This crate has no Cargo feature flags.
 //! MSRV increases require a minor release; patch releases retain the existing
 //! floor. See the [workspace policy](https://github.com/cipherstash/vitaminc#compatibility).

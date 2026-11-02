@@ -69,7 +69,7 @@ assert!(!debug.contains("example-token"));
 
 ## Compatibility
 
-The minimum supported Rust version (MSRV) is <!-- msrv:workspace -->**1.88.0**<!-- /msrv -->, except for
+The minimum supported Rust version (MSRV) is <!-- msrv:workspace -->**1.89.0**<!-- /msrv -->, except for
 `vitaminc-kms`, which requires <!-- msrv:vitaminc-kms -->**1.94.1**<!-- /msrv -->. Enabling the facade's `aws-kms`
 feature raises its requirement to <!-- msrv:vitaminc/aws-kms -->**1.94.1**<!-- /msrv --> too.
 

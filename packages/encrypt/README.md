@@ -442,7 +442,7 @@ match encrypt_with_key(&key, "message") {
 
 ## Compatibility
 
-Requires Rust <!-- msrv:vitaminc-encrypt -->**1.88.0**<!-- /msrv --> and the Rust standard library (`std`).
+Requires Rust <!-- msrv:vitaminc-encrypt -->**1.89.0**<!-- /msrv --> and the Rust standard library (`std`).
 MSRV increases require a minor release; patch releases retain the existing
 floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
 
