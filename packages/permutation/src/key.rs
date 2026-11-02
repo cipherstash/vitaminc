@@ -49,6 +49,10 @@ pub struct BatchSeedError {
 // `ptr::read`+`forget` move-out primitive into this crate. The drop-glue
 // guarantee holds as long as `KeyInner` stays `ZeroizeOnDrop`.
 //
+// Nor `Zeroize`: `zeroize(&mut self)` would leave a live key of all zeros,
+// which is not a permutation (it is the key from #277). Dropping a key is
+// the only way to wipe it, and the drop glue does that.
+//
 // Every key is a permutation of `0..N`. A key comes to exist in three ways:
 // from bytes, which are checked (`new`, `Deserialize`); from a shuffle's
 // output, which is a permutation by construction (`random`, `from_seed`,
@@ -61,8 +65,9 @@ pub struct BatchSeedError {
 /// stored there. Every key is a permutation of `0..N`: [`new`](Self::new)
 /// and deserialization refuse bytes that are not. Supported
 /// generation/application sizes are 8, 16, 32, 64, and 128. Key storage is
-/// wiped on drop; cloning makes a separate owned copy.
-#[derive(Clone, Debug, Serialize, Zeroize)]
+/// wiped on drop, and only on drop, so a live key is always a permutation;
+/// cloning makes a separate owned copy.
+#[derive(Clone, Debug, Serialize)]
 pub struct PermutationKey<const N: usize>(KeyInner<N>);
 
 /// Reads the same bytes the derived `Serialize` writes, then refuses any that
