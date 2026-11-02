@@ -49,11 +49,12 @@ pub struct BatchSeedError {
 // `ptr::read`+`forget` move-out primitive into this crate. The drop-glue
 // guarantee holds as long as `KeyInner` stays `ZeroizeOnDrop`.
 //
-// Every way to make a key checks that it is a permutation of `0..N`:
-// `new` and `Deserialize` check the bytes they are given, and the others
-// (`random`, `from_seed`, `invert`, `complement`, `permute`) build one from
-// keys that already are. So every `PermutationKey` is a bijection, and the
-// `NonZero` impls of `BitwisePermute` rely on that.
+// Every key is a permutation of `0..N`. A key comes to exist in three ways:
+// from bytes, which are checked (`new`, `Deserialize`); from a shuffle's
+// output, which is a permutation by construction (`random`, `from_seed`,
+// `from_seeds`); or from an existing key, composed or copied (`invert`,
+// `complement`, `permute`, `Clone`). The `NonZero` impls of
+// `BitwisePermute` rely on this.
 /// A position permutation stored as `N` byte-sized source indices.
 ///
 /// Applying a key moves each output position's value from the source index
@@ -67,7 +68,10 @@ pub struct PermutationKey<const N: usize>(KeyInner<N>);
 /// Reads the same bytes the derived `Serialize` writes, then refuses any that
 /// are not a permutation. A refused key is dropped, and so wiped, inside the
 /// call; the error says nothing about its bytes.
-impl<'de, const N: usize> Deserialize<'de> for PermutationKey<N> {
+impl<'de, const N: usize> Deserialize<'de> for PermutationKey<N>
+where
+    [u8; N]: IsPermutable,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -88,12 +92,12 @@ impl<'de, const N: usize> Deserialize<'de> for PermutationKey<N> {
 /// The key is secret, so the check runs in time that depends on `N` alone:
 /// it counts each candidate value across every slot with constant-time
 /// comparisons, rather than indexing a table by a key byte or stopping at
-/// the first fault. Only the one-bit answer is revealed.
-fn is_permutation<const N: usize>(key: &[u8; N]) -> Choice {
-    // A byte holds 256 values, so a longer key always repeats one.
-    if N > 256 {
-        return Choice::from(0);
-    }
+/// the first fault. Only the one-bit answer is revealed. `N` is a supported
+/// size, so at most 128, and a byte can name every value.
+fn is_permutation<const N: usize>(key: &[u8; N]) -> Choice
+where
+    [u8; N]: IsPermutable,
+{
     let mut valid = Choice::from(1);
     for value in 0..N {
         let value = value as u8;
@@ -129,11 +133,11 @@ impl<const N: usize> PermutationKey<N> {
     ///
     /// assert!(PermutationKey::new(Protected::new([0u8, 0, 3, 1, 4, 5, 7, 6])).is_err());
     /// ```
-    pub fn new<C>(key: C) -> Result<Self, NotAPermutation>
+    pub fn new<C>(mut key: C) -> Result<Self, NotAPermutation>
     where
         C: Controlled<Inner = [u8; N]>,
+        [u8; N]: IsPermutable,
     {
-        let mut key = key;
         let mut inner = KeyInner::<N>::generate(|| [0; N]);
         inner.inner_mut().copy_from_slice(key.risky_ref());
         key.zeroize();
@@ -142,7 +146,10 @@ impl<const N: usize> PermutationKey<N> {
 
     /// The one gate for bytes from outside: refuses any that are not a
     /// permutation. A refused key is dropped, and so wiped, here.
-    fn checked(inner: KeyInner<N>) -> Result<Self, NotAPermutation> {
+    fn checked(inner: KeyInner<N>) -> Result<Self, NotAPermutation>
+    where
+        [u8; N]: IsPermutable,
+    {
         if bool::from(is_permutation(inner.risky_ref())) {
             Ok(Self(inner))
         } else {
@@ -557,7 +564,7 @@ mod tests {
     /// bit comes from input bit 0, so a nonzero input could map to zero.
     #[test]
     fn a_key_that_is_not_a_permutation_is_refused() {
-        let identity: [u8; 8] = core::array::from_fn(|i| i as u8);
+        let identity = identity::<8>();
         let mut repeated = identity;
         repeated[5] = 2;
         let mut out_of_range = identity;
@@ -646,13 +653,6 @@ mod tests {
 
     /// 256 is the longest key a byte can index, and still checked; one
     /// slot longer always repeats a value.
-    #[test]
-    fn the_check_holds_up_to_the_longest_key_a_byte_can_index() {
-        let identity: [u8; 256] = core::array::from_fn(|i| i as u8);
-        assert!(bool::from(super::is_permutation(&identity)));
-        assert!(!bool::from(super::is_permutation(&[0u8; 257])));
-    }
-
     #[test]
     fn key_complement_case() -> Result<(), Box<dyn std::error::Error>> {
         test_key_complement::<8>()?;
