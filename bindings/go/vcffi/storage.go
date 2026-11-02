@@ -125,8 +125,6 @@ type storageWriter struct {
 }
 
 var (
-	int128Type          = reflect.TypeOf(vcvalue.Int128{})
-	uint128Type         = reflect.TypeOf(vcvalue.Uint128{})
 	textMarshalerType   = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
 	textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
 )
@@ -135,7 +133,12 @@ func (w *storageWriter) any(v any, depth int) error {
 	return w.reflect(reflect.ValueOf(v), depth)
 }
 
+// The model's own types, which [storageWriter.model] writes. Int128 and
+// Uint128 are [16]byte too, so [byteArray] also leaves them out, for a
+// value model cannot box and for the reader.
 var (
+	int128Type    = reflect.TypeOf(vcvalue.Int128{})
+	uint128Type   = reflect.TypeOf(vcvalue.Uint128{})
 	someType      = reflect.TypeOf(Some{})
 	objectType    = reflect.TypeOf(vcvalue.Object{})
 	entriesType   = reflect.TypeOf(StorageEntries{})
@@ -589,8 +592,14 @@ func keyOf(k any) (mapKey, error) {
 	var id keyID
 	switch t := rv.Type(); {
 	case t == int128Type || t == uint128Type:
-		id = wideKey(arrayBytes(rv), t == int128Type)
-		_ = w.any(rv.Interface(), 0)
+		b := arrayBytes(rv)
+		signed := t == int128Type
+		id = wideKey(b, signed)
+		tag := byte(tagUint128)
+		if signed {
+			tag = tagInt128
+		}
+		w.buf = append(append(w.buf, tag), b...)
 	case byteArray(t):
 		b := arrayBytes(rv)
 		id = keyID{kind: keyBytes, s: string(b)}
