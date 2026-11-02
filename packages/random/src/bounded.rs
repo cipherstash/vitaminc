@@ -113,13 +113,12 @@ impl BoundedRng<Protected<u32>> for SafeRand {
     /// secret; a caller whose secret bound may be zero should construct a
     /// [`Protected<NonZeroU32>`] and use that impl, which never panics.
     fn next_below(&mut self, n: Protected<u32>) -> Protected<u32> {
-        // Check the bound before `map` unwraps it: `Controlled::map` hands
-        // the raw inner value to the closure, so a zero check inside the
-        // closure would panic with the secret already out of its wrapper and
-        // unwinding without being wiped. Checked here, an unwind drops `n`
-        // still wrapped, and `Protected`'s drop glue zeroizes it.
+        // Check the bound here rather than inside the closure, so the
+        // panic names this method's contract. Either way the value is
+        // wiped on unwind: here `n` is still wrapped, and inside the closure
+        // `Controlled::map` only lends it, and `n` is wiped when it drops.
         assert!(*n.risky_ref() != 0, "range must be non-zero");
-        n.map(|n| below_u32(self, n))
+        n.map(|n| below_u32(self, *n))
     }
 }
 
@@ -146,7 +145,7 @@ impl BoundedRngInclusive<u32> for SafeRand {
 impl BoundedRngInclusive<Protected<u32>> for SafeRand {
     fn next_bounded(&mut self, max: Protected<u32>) -> Protected<u32> {
         // `0..=max` is never empty, so no pre-check is needed here.
-        max.map(|max| upto_u32(self, max))
+        max.map(|max| upto_u32(self, *max))
     }
 }
 

@@ -1,5 +1,5 @@
 // A `Usage` scope says which code may take the value. A `ProtectedRef` would
-// carry it to any consumer (`zip_ref`, `update_with_ref`, encryption), so a
+// carry it to any consumer (`zip_ref`, `risky_update_with_ref`, encryption), so a
 // `Usage` does not lend one; `risky_ref` is the deliberate way in.
 use vitaminc_protected::{AsProtectedRef, Protected, ProtectedRef, Usage};
 

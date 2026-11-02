@@ -110,7 +110,7 @@ impl<'a, T: ?Sized> ProtectedRef<'a, T> {
     /// plaintext, and it can only do that through a public method.
     ///
     /// Code that receives a `ProtectedRef` could already read it, because
-    /// [`Controlled::update_with_ref`] hands its closure the same `&T`. This
+    /// [`Controlled::risky_update_with_ref`] hands its closure the same `&T`. This
     /// method makes that one explicit step, under the `risky_` name, rather
     /// than a detour through a throwaway `Protected`.
     ///
