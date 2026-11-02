@@ -735,6 +735,10 @@ impl<T: Zeroize + TimingSafeEq> TimingSafeEq for Locked<T> {
     }
 }
 
+/// A `Locked` value lends a [`ProtectedRef`] like a `Protected` one does. The
+/// value stays in locked memory, but whatever the borrow is passed to reads
+/// it from there: an HMAC keeps it in its state, and encryption copies it
+/// into a wiped, unlocked buffer while it seals.
 impl<'a, T: Zeroize> AsProtectedRef<'a, T> for Locked<T> {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, T> {
         ProtectedRef(self.risky_ref())

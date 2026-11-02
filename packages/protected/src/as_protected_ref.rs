@@ -1,4 +1,4 @@
-use crate::Controlled;
+use crate::{private::Lends, Controlled};
 use std::borrow::Cow;
 
 /// Trait for types that can be converted to a `ProtectedRef`.
@@ -36,10 +36,14 @@ pub trait AsProtectedRef<'a, A: ?Sized> {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, A>;
 }
 
+/// `Protected`, and `Equatable` and `Exportable` around a type that lends,
+/// lend their inner value. A [`Usage`](crate::Usage) does not: its scope
+/// says which code may take the value, and a `ProtectedRef` would carry the
+/// value to any consumer, whatever the scope. Reach it through
+/// [`Controlled::risky_ref`] instead, which says so at the call site.
 impl<'a, T> AsProtectedRef<'a, <T as Controlled>::Inner> for T
 where
-    //<T as ControlledPrivate>::Inner: AsRef<A>,
-    T: Controlled,
+    T: Controlled + Lends,
 {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, <T as Controlled>::Inner> {
         ProtectedRef(self.risky_ref())
@@ -52,10 +56,10 @@ impl<'a, const N: usize> AsProtectedRef<'a, [u8; N]> for [u8; N] {
     }
 }
 
-// TODO: This is only really needed for compatability (so that types not using this API don't have to be moved).
-// It might make sense to put this behind a feature flag.
 /// String references cannot be zeroized, so we can't implement `Zeroize` for `Protected<&str>`.
-/// Instead, we implement `AsProtectedRef` to allow the use of string references in functions that take them.
+/// Instead, a string lends a `ProtectedRef`, so it can be passed to functions that take one.
+/// It lends its bytes here, and its text below; a caller whose target type does not
+/// already say which must annotate it.
 impl<'a> AsProtectedRef<'a, [u8]> for str {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
         ProtectedRef(self.as_bytes())

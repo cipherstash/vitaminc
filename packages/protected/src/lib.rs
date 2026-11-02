@@ -194,6 +194,14 @@ mod private {
     impl<T: Zeroize> Sealed for Exportable<T> {}
     impl<T, S> Sealed for Usage<T, S> {}
 
+    /// The `Controlled` types that lend a `ProtectedRef` to their inner
+    /// value. `Usage` is left out, at any depth, so that a scoped value never
+    /// reaches a consumer that ignores the scope without a `risky_` call.
+    pub trait Lends {}
+    impl<T: Zeroize> Lends for Protected<T> {}
+    impl<T: Zeroize + Lends> Lends for Equatable<T> {}
+    impl<T: Zeroize + Lends> Lends for Exportable<T> {}
+
     /// Private trait that is used to hide the inner value of a Controlled type
     /// as well as preventing consumers from implementing Controlled themselves.
     /// Marker trait used to seal the `Controlled` trait, preventing external implementations.

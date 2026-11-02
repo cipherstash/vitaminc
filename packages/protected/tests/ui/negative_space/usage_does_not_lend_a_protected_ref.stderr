@@ -1,0 +1,14 @@
+error[E0599]: the method `as_protected_ref` exists for struct `Usage<Protected<[u8; 32]>>`, but its trait bounds were not satisfied
+ --> tests/ui/negative_space/usage_does_not_lend_a_protected_ref.rs:8:45
+  |
+8 |     let _: ProtectedRef<'_, [u8; 32]> = key.as_protected_ref();
+  |                                             ^^^^^^^^^^^^^^^^ method cannot be called on `Usage<Protected<[u8; 32]>>` due to unsatisfied trait bounds
+  |
+ ::: src/usage/mod.rs
+  |
+  | pub struct Usage<T, Scope = DefaultScope>(pub(crate) T, pub(crate) PhantomData<Scope>);
+  | ----------------------------------------- doesn't satisfy `Usage<Protected<[u8; 32]>>: AsProtectedRef<'_, _>` or `_: Lends`
+  |
+  = note: the following trait bounds were not satisfied:
+          `Usage<Protected<[u8; 32]>>: vitaminc_protected::private::Lends`
+          which is required by `Usage<Protected<[u8; 32]>>: AsProtectedRef<'_, _>`
