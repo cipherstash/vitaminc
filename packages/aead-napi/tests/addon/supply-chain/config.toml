@@ -242,10 +242,6 @@ criteria = "safe-to-deploy"
 version = "0.2.190"
 criteria = "safe-to-deploy"
 
-[[exemptions.libc]]
-version = "0.2.191"
-criteria = "safe-to-deploy"
-
 [[exemptions.memchr]]
 version = "2.8.3"
 criteria = "safe-to-deploy"
@@ -354,10 +350,6 @@ criteria = "safe-to-deploy"
 version = "1.0.151"
 criteria = "safe-to-deploy"
 
-[[exemptions.serde_json]]
-version = "1.0.154"
-criteria = "safe-to-deploy"
-
 [[exemptions.slab]]
 version = "0.4.12"
 criteria = "safe-to-deploy"
@@ -368,10 +360,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.syn]]
 version = "3.0.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.syn]]
-version = "3.0.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.tap]]

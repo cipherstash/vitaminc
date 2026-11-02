@@ -145,10 +145,6 @@ criteria = "safe-to-deploy"
 version = "0.7.8"
 criteria = "safe-to-deploy"
 
-[[exemptions.async-trait]]
-version = "0.1.89"
-criteria = "safe-to-run"
-
 [[exemptions.aws-config]]
 version = "1.9.0"
 criteria = "safe-to-deploy"
@@ -571,7 +567,7 @@ criteria = "safe-to-deploy"
 
 [[exemptions.once_cell]]
 version = "1.21.3"
-criteria = ["safe-to-deploy", "crypto-reviewed"]
+criteria = "safe-to-deploy"
 
 [[exemptions.opaque-debug]]
 version = "0.3.1"
@@ -752,10 +748,6 @@ criteria = "safe-to-deploy"
 [[exemptions.slab]]
 version = "0.4.12"
 criteria = ["safe-to-deploy", "crypto-reviewed"]
-
-[[exemptions.socket2]]
-version = "0.5.10"
-criteria = "safe-to-deploy"
 
 [[exemptions.socket2]]
 version = "0.6.3"
