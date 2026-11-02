@@ -17,7 +17,7 @@
 use core::convert::Infallible;
 use std::collections::HashSet;
 
-use vitaminc_protected::{Controlled, Protected};
+use vitaminc_protected::{Buffer, Controlled};
 
 use crate::leaf::{self, Item};
 use crate::plaintext::{Error, MapSink, SeqSink, Sink, SourceError};
@@ -86,6 +86,16 @@ impl<E: Error, C> Error for DecryptError<E, C> {
 }
 
 /// Decrypt into any sink.
+///
+/// All leaves are authenticated before the sink is called. This does not
+/// authenticate passthrough data, sequence order, or sequence length.
+///
+/// # Errors
+///
+/// Opening failures leave the sink unvisited. A malformed plaintext leaf or
+/// sink failure during the subsequent walk can leave externally borrowed sink
+/// state partially updated: no rollback is provided. Use an owned target or
+/// temporary buffer if the caller needs to publish output only on success.
 pub fn decrypt_into<'a, C, S, A>(
     cipher: &C,
     node: Node<C::Leaf>,
@@ -110,6 +120,12 @@ where
 /// The sink is held across the await, so the future is `Send` only if the
 /// sink is. A caller with a sink that is not (a builder of JavaScript
 /// values) awaits [`open_all_async`] and then calls [`walk`] itself.
+///
+/// # Errors and cancellation
+///
+/// Has the same partial-output behavior as [`decrypt_into`] once walking starts.
+/// While opening is suspended the sink has not been visited. Dropping the future
+/// drops owned state but cannot guarantee cancellation of a remote request.
 pub async fn decrypt_into_async<'a, C, S, A>(
     cipher: &C,
     node: Node<C::Leaf>,
@@ -132,6 +148,17 @@ fn sealed_any<'n, L: 'n>(mut nodes: impl Iterator<Item = &'n Node<L>>) -> bool {
 }
 
 /// Feed an opened tree to a sink.
+///
+/// This function does no cryptographic authentication; the caller supplies
+/// already-opened leaves. It consumes the tree and wipes each protected leaf
+/// buffer when dropped, including unvisited leaves on failure.
+///
+/// # Errors
+///
+/// Returns [`DecryptError::Malformed`] for invalid structure or leaf encoding,
+/// [`DecryptError::Auth`] for a nonempty empty-container marker, or
+/// [`DecryptError::Sink`] for a refused value. Earlier sink writes are not
+/// rolled back when a later node fails.
 pub fn walk<S: Sink>(node: Node<Opened>, sink: S) -> Result<S::Ok, DecryptError<S::Error>> {
     let empty_marker = |plaintext: Opened| match plaintext.risky_ref().is_empty() {
         true => Ok(()),
@@ -194,24 +221,19 @@ fn walk_map<S: Sink>(
 
 /// Decrypt into a frame: the Go guest's whole `decrypt`.
 ///
-/// The frame is plaintext, so it is built and returned inside `Protected`
+/// The frame is plaintext, so it is built in a [`Buffer`]
 /// and wiped on every error path.
 pub fn decrypt_to_frame<'a, C, A>(
     cipher: &C,
     node: Node<C::Leaf>,
     aad: A,
-) -> Result<Protected<Vec<u8>>, DecryptError<crate::frame::FrameWriteError, C::Error>>
+) -> Result<Buffer, DecryptError<crate::frame::FrameWriteError, C::Error>>
 where
     C: Cipher,
     A: IntoAad<'a>,
 {
-    let mut out = Protected::new(Vec::new());
-    decrypt_into(
-        cipher,
-        node,
-        aad,
-        crate::frame::FrameWriter::new(out.risky_inner_mut()),
-    )?;
+    let mut out = Buffer::new();
+    decrypt_into(cipher, node, aad, crate::frame::FrameWriter::new(&mut out))?;
     Ok(out)
 }
 
@@ -380,8 +402,11 @@ mod tests {
         let sealed = encrypt(sample(), &Mock, "ctx").expect("encrypts");
         let frame = decrypt_to_frame(&Mock, sealed, "ctx").expect("decrypts");
         assert_eq!(
-            frame.risky_ref(),
-            crate::to_frame(sample()).expect("frames").risky_ref()
+            frame.risky_ref().as_slice(),
+            crate::to_frame(sample())
+                .expect("frames")
+                .risky_ref()
+                .as_slice()
         );
     }
 

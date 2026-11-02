@@ -14,10 +14,11 @@ The words MUST, MUST NOT and MAY are used as in RFC 2119.
 A blob is the plaintext of a ciphertext that is kept. That asks more of a
 format than a compact encoding, and the profile is built for it:
 
-- **The plaintext is handled as a secret.** `to_vec` returns the blob
-  `Protected`. It grows its buffer into a fresh allocation and wipes the
-  old one, writes a `Display` value straight into the blob, keeps no copy
-  of a key, and wipes what it wrote if writing fails. The reader borrows
+- **The plaintext is handled as a secret.** `to_vec` returns the blob in
+  a `Buffer`, which is read through `risky_ref` and wiped when it is
+  dropped. The writer grows its buffer into a fresh allocation and wipes
+  the old one, writes a `Display` value straight into the blob, keeps no
+  copy of a key, and wipes what it wrote if writing fails. The reader borrows
   text and bytes from the blob rather than copying them. See
   [Memory and timing](#memory-and-timing).
 - **A refusal never repeats the plaintext.** Error messages are fixed text.
@@ -35,9 +36,8 @@ format than a compact encoding, and the profile is built for it:
   Readers that differ on a repeated key, or that accept several spellings
   of one value, can read one authenticated blob as two different values.
   Here a repeated key is refused, and each tag has one payload layout:
-  there are no variable-length integers and no choice of length width. The
-  corpus pins the bytes and the refusals that every implementation (this
-  crate, and `vcffi` in Go) must match.
+  there are no variable-length integers and no choice of length width.
+  Every implementation must use the encodings and validation rules below.
 - **A value reads back as it was written.** `None`, `Some(None)` and
   `Some(())` are three different blobs. An integer keeps its width, a
   float keeps its bits, and a map key keeps its kind.
@@ -116,7 +116,7 @@ Stable, and covered by this specification:
 - `storage::ErrorKind`, the class of a refusal.
 
 The Go module `bindings/go/vcffi` implements the same format
-(`MarshalStorage`, `UnmarshalStorage`), held to the same corpus.
+(`MarshalStorage`, `UnmarshalStorage`).
 
 Not stable, and not covered: everything else in `vitaminc-aead-frame`.
 The transport frame (`Frame`, `FrameWriter`, `to_frame`), the transport
@@ -296,9 +296,7 @@ writing that value back gives the form in the table above.
   them, and reads a missing `Option` field as `None`, as serde's derive
   does.
 
-The corpus's `reads` rows pin these: each is a blob, a type described in
-the corpus's own terms, and what that type reads it as, or that it refuses
-it. They are frozen with the rest of version 1.
+These conversion rules are part of the version 1 compatibility contract.
 
 ### Not supported
 
@@ -349,20 +347,6 @@ A change to either is a new version, introduced in two steps:
 A reader keeps reading every version it ever read. Version numbers are never
 reused.
 
-The golden corpus in `testdata/storage-v1.json` pins version 1: values
-and their bytes (`vectors`), blobs and their refusal classes (`refused`),
-and blobs read by types (`reads`). Its rows are never edited or removed,
-and CI checks that with `scripts/storage_corpus_append_only.py`; rows MAY
-be added. `tests/storage_coverage.rs` fails if a tag, a map key kind, a
-part of a numbered rule in [Reading](#reading), or a clause of
-[Reading by type](#reading-by-type) or of [Map keys](#map-keys) on reading,
-has no row that shows it. It holds
-those rules and clauses, and the grammar they refer to, word for word, so
-a change to them here fails it until the change has a row. A reader in another language passes
-when it reads every vector as its value and refuses every refused row by
-its class; one that maps blobs onto types also reads every `reads` row as
-it says.
-
 ## The format's version and the application's schema
 
 The version covers how a value becomes bytes. It does not cover the type
@@ -388,7 +372,7 @@ that, and never changes because the type did.
 
 ## The blob inside an outer envelope
 
-A blob is plaintext, and `to_vec` returns it `Protected`. The caller seals
+A blob is plaintext, and `to_vec` returns it in a `Buffer`. The caller seals
 it whole, header included, under an envelope of its own (Stack Encrypt's
 ciphertext). The header is therefore encrypted with the value: nothing
 about the blob, its version included, can be seen before decryption, and
@@ -409,12 +393,15 @@ choice, and needs nothing from this profile.
 
 The writer grows its buffer into a fresh allocation and wipes the old one,
 formats a `Display` value straight into the blob, keeps no copy of a key,
-and wipes everything if writing fails. The blob it returns is `Protected`,
-and wiped when dropped. The reader borrows text and bytes from the blob
-rather than copying them, and finds a repeated map key by comparing keys
-where they lie in the blob. `tests/storage_wipe.rs` checks that no block
-the writer frees still holds the value, and the zeroize audit (#523)
-checked in LLVM IR and assembly that every wipe survives optimization.
+and wipes everything if writing fails. The wipes run when a `Buffer` is
+dropped, so under `panic = "unwind"` a panic still wipes a partly written
+blob, and under `panic = "abort"` nothing is wiped when the process aborts.
+The blob it returns is a `Buffer`: its bytes are read through `risky_ref`,
+and it is wiped when dropped. The reader borrows text and bytes from the
+blob rather than copying them, and finds a repeated map key by comparing
+keys where they lie in the blob. The writer frees no heap block that still
+holds the value, and a zeroize audit checked in LLVM IR and assembly that
+every wipe survives optimization.
 
 Copies on the stack and in registers are not wiped:
 
@@ -429,4 +416,3 @@ Rust has no way to reach every copy the compiler makes, and wiping the one
 copy the source names would claim more than it gives. The heap holds no
 such copy. None of it is constant time, and serde's own impls are not. A
 `T: Zeroize` does not wipe fields it read before a later field failed.
-Improvements to any of this MUST keep the bytes, which the corpus checks.

@@ -12,13 +12,6 @@ use crate::{
 
 pub(crate) type KeyInner<const N: usize> = Exportable<Protected<[u8; N]>>;
 
-/// One seed in a [`PermutationKey::from_seeds`] batch could not derive a key.
-///
-/// `index` is the seed's position in the iterator passed to `from_seeds`.
-/// For [`RandomError::SeedRejected`] that seed can never derive a key.
-/// `from_seeds` consumed and wiped the batch, so recovery starts from the
-/// caller's own retained seeds: replace the one at `index` with a fresh
-/// seed and derive the whole batch again.
 /// The bytes given for a [`PermutationKey`] are not a permutation: they do
 /// not hold each of `0..N` exactly once. The error names none of the bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -27,6 +20,13 @@ pub struct NotAPermutation {
     len: usize,
 }
 
+/// One seed in a [`PermutationKey::from_seeds`] batch could not derive a key.
+///
+/// `index` is the seed's position in the iterator passed to `from_seeds`.
+/// For [`RandomError::SeedRejected`] that seed can never derive a key.
+/// `from_seeds` consumed and wiped the batch, so recovery starts from the
+/// caller's own retained seeds: replace the one at `index` with a fresh
+/// seed and derive the whole batch again.
 #[derive(Debug, thiserror::Error)]
 #[error("seed at index {index} could not derive a key: {source}")]
 pub struct BatchSeedError {
@@ -54,6 +54,13 @@ pub struct BatchSeedError {
 // (`random`, `from_seed`, `invert`, `complement`, `permute`) build one from
 // keys that already are. So every `PermutationKey` is a bijection, and the
 // `NonZero` impls of `BitwisePermute` rely on that.
+/// A position permutation stored as `N` byte-sized source indices.
+///
+/// Applying a key moves each output position's value from the source index
+/// stored there. Every key is a permutation of `0..N`: [`new`](Self::new)
+/// and deserialization refuse bytes that are not. Supported
+/// generation/application sizes are 8, 16, 32, 64, and 128. Key storage is
+/// wiped on drop; cloning makes a separate owned copy.
 #[derive(Clone, Debug, Serialize, Zeroize)]
 pub struct PermutationKey<const N: usize>(KeyInner<N>);
 

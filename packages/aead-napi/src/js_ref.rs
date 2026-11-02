@@ -2,7 +2,7 @@
 //!
 //! The walk runs on the JavaScript thread, reading each value as it goes:
 //! no tree is built, and a scalar leaves the engine only to go straight to
-//! the sink. ADR 0001 section 6 gives the mapping:
+//! the sink. Values map to sink calls as follows:
 //!
 //! | JavaScript             | `Sink` call                                     |
 //! | ---------------------- | ----------------------------------------------- |
@@ -36,7 +36,7 @@ use vitaminc_aead::plaintext::{Error as _, SourceError};
 use vitaminc_aead::{
     to_frame, Encrypt, Float, Logical, MapSink, Physical, SeqSink, Sink, TimeUnit,
 };
-use vitaminc_protected::Protected;
+use vitaminc_protected::Buffer;
 
 use crate::error::JsFault;
 use crate::js::{
@@ -67,7 +67,7 @@ impl<'e> JsRef<'e> {
     /// Snapshot the value as a frame, on the JavaScript thread, so it can be
     /// encrypted on a worker with no JavaScript access. The frame is
     /// plaintext and comes back wiped on drop.
-    pub fn to_frame(self) -> napi::Result<Protected<Vec<u8>>> {
+    pub fn to_frame(self) -> napi::Result<Buffer> {
         to_frame(self).map_err(frame_error)
     }
 }

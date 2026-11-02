@@ -1,0 +1,12 @@
+[package]
+name = "rust-documentation-golden"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+# Keep this skill example independent of the enclosing repository workspace.
+[workspace]

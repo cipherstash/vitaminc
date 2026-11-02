@@ -10,7 +10,7 @@ use vitaminc_protected::Protected;
 /// Implements AES-256-GCM. Backend is selected at compile time:
 /// `aws-lc-rs` on native targets, `aes-gcm` (RustCrypto) on `wasm32`.
 ///
-/// This is the sink-based [`Cipher`] of ADR 0001: it seals and opens one
+/// This [`Cipher`] seals and opens one
 /// tagged leaf under the AAD the walk derived for the leaf's place in the
 /// tree, and nothing else. The container logic (element and entry AAD,
 /// empty markers, the nothing-sealed refusal) lives once in
@@ -47,7 +47,7 @@ impl Aes256Cipher {
 
     /// This cipher, opening wire version 1 leaves as well as current ones.
     ///
-    /// Use it only to read ciphertext from the pre-ADR 0001 `Value` path:
+    /// Use it only to read ciphertext from the legacy `Value` path:
     /// `vitaminc-aead-value` 0.5 and the Go binding built on it. Those
     /// leaves are tagged like today's, so they open to the same values.
     /// `vitaminc-encrypt` 0.5's `Encrypt` path also wrote version 1 leaves,
@@ -65,7 +65,7 @@ impl Aes256Cipher {
     }
 }
 
-/// The wire version the pre-ADR 0001 `Value` path sealed its tagged leaves
+/// The wire version the legacy `Value` path sealed its tagged leaves
 /// under. See [`Aes256Cipher::opening_version_1`].
 const VALUE_PATH_WIRE_VERSION: u8 = 1;
 

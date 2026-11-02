@@ -1,7 +1,7 @@
 [package]
 name = "vitaminc-random-derives"
 description = "Derive macros for vitaminc-random. Part of the Vitamin-C cryptographic suite."
-documentation.workspace = true
+documentation = "https://docs.rs/vitaminc-random-derives"
 version.workspace = true
 repository.workspace = true
 authors.workspace = true
@@ -19,3 +19,7 @@ proc-macro = true
 syn = { version = "3", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
+
+[dev-dependencies]
+# Path-only consumer dependency for runnable macro documentation.
+vitaminc-random = { path = "../random" }

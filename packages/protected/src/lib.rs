@@ -1,3 +1,11 @@
+// These definitions precede the README so rustdoc links to the version being built.
+// The README supplies published-API URLs for GitHub. See docs/documentation.md.
+//! [ConstantTimeEq]: crate::ConstantTimeEq
+//! [Controlled]: crate::Controlled
+//! [Equatable]: crate::Equatable
+//!
+#![deny(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 #![warn(unused_results)]
 #![cfg_attr(test, allow(unused_results))]
@@ -7,6 +15,7 @@
 extern crate self as vitaminc_protected;
 
 mod as_protected_ref;
+mod buffer;
 mod controlled;
 mod conversions;
 mod debug;
@@ -25,11 +34,19 @@ mod zeroed;
 use zeroize::Zeroize;
 
 #[cfg(feature = "bitvec")]
+#[cfg_attr(docsrs, doc(cfg(feature = "bitvec")))]
+/// Indexing bit slices with protected indices (`bitvec` feature).
+/// These adapters perform ordinary indexed accesses; they do not hide the index
+/// through a constant-time scan.
 pub mod bitvec;
 
+/// Array indexing using a protected index.
+/// Indexing exposes the selected memory access and panics on an out-of-bounds
+/// index, just as ordinary indexing does.
 pub mod slice_index;
 
 pub use as_protected_ref::{AsProtectedRef, ProtectedRef};
+pub use buffer::Buffer;
 pub use zeroed::Zeroed;
 
 // Exports
@@ -110,6 +127,8 @@ pub(crate) fn move_inner_out<W: MoveInner>(wrapper: W) -> W::Inner {
 /// ReplaceT is a sealed trait that is used to replace the inner value of a type.
 /// It is only implemented for types that are Controlled.
 pub trait ReplaceT<K>: private::Sealed {
+    /// Wrapper holding the replacement value. Capability adapters may be retained,
+    /// but `Usage<Protected<T>, S>` maps to an unscoped `Protected<K>`.
     type Output: Controlled;
 }
 

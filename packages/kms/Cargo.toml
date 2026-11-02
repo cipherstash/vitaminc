@@ -10,7 +10,7 @@ license.workspace = true
 authors.workspace = true
 keywords.workspace = true
 categories.workspace = true
-# Own floor, above the workspace MSRV: the AWS SDK (aws-config, aws-sdk-kms) needs 1.94.1.
+# Own floor, above the workspace MSRV, required by the AWS SDK.
 rust-version = "1.94.1"
 
 [dependencies]

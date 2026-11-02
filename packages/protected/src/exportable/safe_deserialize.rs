@@ -1,13 +1,20 @@
 use crate::Controlled;
 use serde::{Deserialize, Deserializer};
 
+/// Explicit deserialization channel for supported values and controlled wrappers.
+///
+/// The blanket controlled implementation deserializes the inner value first,
+/// then wraps it. It does not wipe the input buffer or guarantee that a
+/// deserializer's temporary allocations are protected.
 pub trait SafeDeserialize<'de>: Sized {
+    /// Read a value through the supplied deserializer and forward format or
+    /// validation failures as `D::Error`. Input cleanup belongs to the caller.
     fn safe_deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>;
 }
 
-/// Blanket implementation for all controlled types who's inner type implements `SafeSerialize`.
+/// Blanket implementation for all controlled types whose inner type implements `SafeDeserialize`.
 impl<'de, T> SafeDeserialize<'de> for T
 where
     T::Inner: SafeDeserialize<'de>,
