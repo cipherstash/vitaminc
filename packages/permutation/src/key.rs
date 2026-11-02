@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
+use subtle::{Choice, ConstantTimeEq};
 use vitaminc_protected::{Controlled, Exportable, Protected, Zeroed};
 use vitaminc_random::{Generatable, RandomError, SafeRand, SeedableRng};
 use zeroize::Zeroize;
@@ -39,13 +40,67 @@ pub struct BatchSeedError {
 // (E0509), and recovering them would mean duplicating `protected`'s
 // `ptr::read`+`forget` move-out primitive into this crate. The drop-glue
 // guarantee holds as long as `KeyInner` stays `ZeroizeOnDrop`.
-#[derive(Clone, Debug, Serialize, Deserialize, Zeroize)]
+//
+// `Deserialize` is written by hand, not derived: it refuses bytes that are not
+// a permutation of `0..N`, so every `PermutationKey` a safe caller can hold is
+// a bijection. The `NonZero` impls of `BitwisePermute` rely on that.
+#[derive(Clone, Debug, Serialize, Zeroize)]
 pub struct PermutationKey<const N: usize>(KeyInner<N>);
+
+/// Reads the same bytes the derived `Serialize` writes, then refuses any that
+/// are not a permutation. A refused key is dropped, and so wiped, inside the
+/// call; the error says nothing about its bytes.
+impl<'de, const N: usize> Deserialize<'de> for PermutationKey<N> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Named as the derive named `PermutationKey`, so formats that record
+        // the name read what earlier releases wrote.
+        #[derive(Deserialize)]
+        #[serde(rename = "PermutationKey")]
+        struct Unchecked<const N: usize>(KeyInner<N>);
+
+        let Unchecked(inner) = Unchecked::<N>::deserialize(deserializer)?;
+        if bool::from(is_permutation(inner.risky_ref())) {
+            Ok(Self(inner))
+        } else {
+            Err(de::Error::custom(format_args!(
+                "a permutation key must hold each of 0..{N} exactly once"
+            )))
+        }
+    }
+}
+
+/// Whether `key` holds each value in `0..N` exactly once.
+///
+/// The key is secret, so the check runs in time that depends on `N` alone:
+/// it counts each candidate value across every slot with constant-time
+/// comparisons, rather than indexing a table by a key byte or stopping at
+/// the first fault. Only the one-bit answer is revealed.
+fn is_permutation<const N: usize>(key: &[u8; N]) -> Choice {
+    // A byte holds 256 values, so a longer key always repeats one.
+    if N > 256 {
+        return Choice::from(0);
+    }
+    let mut valid = Choice::from(1);
+    for value in 0..N {
+        let value = value as u8;
+        let mut count = 0u16;
+        for byte in key {
+            count += u16::from(byte.ct_eq(&value).unwrap_u8());
+        }
+        valid &= count.ct_eq(&1);
+    }
+    valid
+}
 
 impl<const N: usize> PermutationKey<N> {
     /// # Safety
     ///
     /// This function is unsafe because it does not check that the key is a valid permutation.
+    /// `key` must hold each of `0..N` exactly once. Deserializing a key checks this;
+    /// this constructor leaves it to the caller.
     ///
     pub unsafe fn new_unchecked(key: [u8; N]) -> Self {
         Self(KeyInner::<N>::new(key))
@@ -431,6 +486,104 @@ mod tests {
             "seed at index 3 could not derive a key: The seed produced an unusable batch; discard it and generate a fresh seed"
         );
         assert!(std::error::Error::source(&err).is_some());
+    }
+
+    /// A serialized key reads back as the same key.
+    #[test]
+    fn a_serialized_key_reads_back() -> Result<(), Box<dyn std::error::Error>> {
+        fn check<const N: usize>() -> Result<(), Box<dyn std::error::Error>>
+        where
+            [u8; N]: IsPermutable + Zeroed,
+        {
+            let key = PermutationKey::<N>::from_seed([3u8; 32])?;
+            let read: PermutationKey<N> = serde_json::from_str(&serde_json::to_string(&key)?)?;
+            assert_eq!(read.0.risky_unwrap(), key.0.risky_unwrap(), "N = {N}");
+            Ok(())
+        }
+        check::<8>()?;
+        check::<16>()?;
+        check::<32>()?;
+        check::<64>()?;
+        check::<128>()?;
+        Ok(())
+    }
+
+    /// Bytes that are not a permutation are refused, and the error names
+    /// none of them. All zeros is the key from #277: with it, every output
+    /// bit comes from input bit 0, so a nonzero input could map to zero.
+    #[test]
+    fn a_key_that_is_not_a_permutation_is_refused() {
+        let identity: [u8; 8] = core::array::from_fn(|i| i as u8);
+        let mut repeated = identity;
+        repeated[5] = 2;
+        let mut out_of_range = identity;
+        out_of_range[7] = 8;
+        for bytes in [[0u8; 8], [7u8; 8], repeated, out_of_range] {
+            let json = serde_json::to_string(&bytes).expect("serializes");
+            let err =
+                serde_json::from_str::<PermutationKey<8>>(&json).expect_err("not a permutation");
+            assert_eq!(
+                err.to_string(),
+                "a permutation key must hold each of 0..8 exactly once",
+                "{bytes:?}"
+            );
+        }
+        let json = serde_json::to_string(&identity).expect("serializes");
+        assert!(serde_json::from_str::<PermutationKey<8>>(&json).is_ok());
+    }
+
+    #[test]
+    fn a_key_of_the_wrong_length_is_refused() {
+        let json = serde_json::to_string(&[0u8, 1, 2, 3]).expect("serializes");
+        assert!(serde_json::from_str::<PermutationKey<8>>(&json).is_err());
+    }
+
+    /// The constant-time check agrees with a plain one on a valid key of
+    /// each supported length, and on keys one slot away from it: every byte
+    /// in every slot up to 32, and for longer keys the bytes either side of
+    /// the range's ends, which keeps the test fast.
+    #[test]
+    fn the_permutation_check_agrees_with_a_plain_one() -> Result<(), Box<dyn std::error::Error>> {
+        fn plain<const N: usize>(key: &[u8; N]) -> bool {
+            let mut sorted = *key;
+            sorted.sort_unstable();
+            sorted.iter().enumerate().all(|(i, &v)| usize::from(v) == i)
+        }
+        fn check<const N: usize>(values: &[u8]) -> Result<(), Box<dyn std::error::Error>>
+        where
+            [u8; N]: IsPermutable + Zeroed,
+        {
+            let key = PermutationKey::<N>::from_seed([9u8; 32])?.0.risky_unwrap();
+            assert!(bool::from(super::is_permutation(&key)), "N = {N}");
+            for slot in 0..N {
+                for &value in values {
+                    let mut changed = key;
+                    changed[slot] = value;
+                    assert_eq!(
+                        bool::from(super::is_permutation(&changed)),
+                        plain(&changed),
+                        "N = {N}, slot {slot} = {value}"
+                    );
+                }
+            }
+            Ok(())
+        }
+        let every: Vec<u8> = (0..=u8::MAX).collect();
+        check::<8>(&every)?;
+        check::<16>(&every)?;
+        check::<32>(&every)?;
+        check::<64>(&[0, 1, 62, 63, 64, 65, 255])?;
+        check::<128>(&[0, 1, 126, 127, 128, 129, 255])?;
+        Ok(())
+    }
+
+    /// 256 is the longest key a byte can index, and still checked; one
+    /// slot longer always repeats a value.
+    #[test]
+    fn the_check_holds_up_to_the_longest_key_a_byte_can_index() {
+        let identity: [u8; 256] = core::array::from_fn(|i| i as u8);
+        assert!(bool::from(super::is_permutation(&identity)));
+        assert!(!bool::from(super::is_permutation(&[0u8; 257])));
     }
 
     #[test]
