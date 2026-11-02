@@ -250,6 +250,17 @@ mod tests {
         );
     }
 
+    // `reserve` tells the compiler there is room once `grow` returns, which
+    // is sound only because `grow` panics when it cannot make that room. If
+    // it ever returned instead, `push` would write past the allocation.
+    #[test]
+    #[should_panic(expected = "capacity overflow")]
+    fn reserve_panics_when_the_room_cannot_be_allocated() {
+        let mut out = Buffer::new();
+        out.push(1);
+        out.reserve(usize::MAX);
+    }
+
     #[test]
     fn zeroize_wipes_and_releases_the_allocation() {
         let mut out = Buffer::with_capacity(16);
