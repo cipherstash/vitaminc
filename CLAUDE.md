@@ -35,7 +35,7 @@ Every third-party crate version in `Cargo.lock` must pass three gates in CI: `ca
 - Review the published crate (`cargo vet diff`), not the git tag; they can differ.
 - Crates the primitives are built on (aws-lc-rs, aes-gcm, chacha20, digest, getrandom, hmac, rand, sha2, subtle, zeroize) need `crypto-reviewed` as well as `safe-to-deploy`, and get a full read on every bump.
 - Do NOT add an exemption or an `ignore` entry to make a PR pass. Record an audit, or leave the PR open.
-- Do NOT write an audit entry in a person's name; draft the notes and let them run `cargo vet certify`.
+- Commit the audit onto the dependency PR itself, next to the lockfile change; no separate PR and no rebase. `who` is the person who approves that PR, and the notes say what was read and against which upstream changes.
 
 ## Releases
 

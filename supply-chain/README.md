@@ -54,8 +54,12 @@ cargo vet certify <crate> <old> <new>
 ```
 
 `certify` asks which criteria you are vouching for and opens an editor for
-notes. Commit `supply-chain/` to the PR. The `who` field is you: an agent may
-do the reading and draft the notes, but the entry is a person's word.
+notes (or takes `--criteria` and `--notes`). Commit `supply-chain/` to the
+dependency PR itself, so the lockfile change and its audit are reviewed and
+merged together; nothing goes to `main` separately and nothing is rebased.
+The `who` field is the person who approves that PR: an agent may do the
+reading and draft the notes, but the entry is a person's word, given by
+approving the PR that carries it.
 
 What to look for is the same list as the `crypto-reviewed` description in
 `audits.toml`, plus for every crate: a new or changed `build.rs`, new
