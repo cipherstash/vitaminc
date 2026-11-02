@@ -427,13 +427,12 @@ fn f64_canonicalisation_is_idempotent(bits: u64) -> bool {
     canonical_f64(value).to_bits() == value.to_bits()
 }
 
-/// Whether `bytes` holds exactly `expected`, compared inside the
-/// protected value with `zip_ref` so the encoding never leaves its
-/// wrapper. Only the answer, which is not secret, is taken out.
+/// Whether `bytes` holds exactly `expected`. The encoding is compared
+/// through a borrow, so no copy of it is made outside its `Protected`, and
+/// there is nothing left unwiped. Only the answer, which is not secret,
+/// is taken out.
 fn holds(bytes: &Protected<Vec<u8>>, expected: &[u8]) -> bool {
-    Protected::new(expected.to_vec())
-        .zip_ref(bytes, |expected, bytes: &Vec<u8>| *bytes == expected)
-        .risky_unwrap()
+    bytes.risky_ref().as_slice() == expected
 }
 
 mod given_any_canonical_f64 {
