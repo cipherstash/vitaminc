@@ -91,7 +91,7 @@ The `release` job publishes through crates.io trusted publishing, and crates.io 
    ```
 
    Do not run `release-plz release` with it: release-plz goes on to the existing crates, and crates.io refuses them.
-3. On crates.io, set up trusted publishing for each new crate (repository `cipherstash/vitaminc`, workflow `release-plz.yml`). Then re-run the failed `Release` job (`gh run rerun <run-id> --failed`). It skips what is already published, publishes the rest through trusted publishing, and creates their tags and GitHub releases.
+3. On crates.io, set up trusted publishing for each new crate (repository `cipherstash/vitaminc`, workflow `release-plz.yml`, environment `release`). Then re-run the failed `Release` job (`gh run rerun <run-id> --failed`). It skips what is already published, publishes the rest through trusted publishing, and creates their tags and GitHub releases.
 4. Tag and release each crate published in step 2. The job skips a crate that is already published and creates no tag for it, so those crates have neither. Tag the commit the other `-v<version>` tags name (`git rev-list -n1 <another crate's tag>`), and use the crate's changelog section as the notes:
 
    ```bash
@@ -152,7 +152,9 @@ All publishable workspace crates are in a single `version_group`. This means eve
 
 ## Secrets
 
-Publishing uses crates.io trusted publishing (the workflow's `id-token: write` permission), so the repository holds no crates.io token. The workflow authenticates to GitHub as an app, through the `RELEASE_PLZ_APP_ID` variable and the `RELEASE_PLZ_APP_PRIVATE_KEY` secret, so its pushes trigger CI.
+Publishing uses crates.io trusted publishing (the `Release` job's `id-token: write` permission), so the repository holds no crates.io token. The workflow authenticates to GitHub as an app, through the `RELEASE_PLZ_APP_ID` variable and the `RELEASE_PLZ_APP_PRIVATE_KEY` secret, so its pushes trigger CI.
+
+Both jobs run in the `release` environment, whose deployment branch rule allows only `main`. `RELEASE_PLZ_APP_PRIVATE_KEY` is a secret of that environment, not of the repository, and every crate's trusted publisher on crates.io names the environment `release`. A workflow runs from whichever branch triggered it, so without these, anyone who can push a branch could run this workflow from it, read the app key, and publish any crate. Keep all three when changing the workflow: a job that needs the key or publishes must declare `environment: release`, and a new crate's trusted publisher must name it.
 
 ## Semver checking
 
