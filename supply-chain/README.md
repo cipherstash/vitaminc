@@ -18,10 +18,11 @@ folding them in is not worth doing). Two consequences: a delta that appears
 in more than one lockfile is certified in each store, with the nested stores
 checking `safe-to-deploy` only since `crypto-reviewed` is recorded here; and
 the nested lockfiles lag the root, so a nested bump often reaches a version
-the root store already exempts. That version may be exempted in the nested
-store too (`cargo vet add-exemption --manifest-path <harness> <crate>
-<version>`): the root already ships it unaudited, so nothing new is being
-trusted. A version the root does not have is audited like any other.
+the root store already exempts. That is not a reason to exempt it in the
+harness store too: audit the delta, record it in every store whose lockfile
+has it (the root included), and run `cargo vet prune` in each, which drops
+the root's exemption once the audit chain reaches the version. Lagging
+harnesses are how the root's exemptions get burnt down.
 
 - `audits.toml`: audits we have recorded, and the `crypto-reviewed` criterion.
 - `config.toml`: which registries we import, what each first-party crate
