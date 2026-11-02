@@ -205,7 +205,7 @@ pub trait Controlled: ControlledPrivate + Zeroize {
         F: FnOnce(Self::Inner, &A) -> Out,
     {
         let arg: ProtectedRef<'a, A> = other.as_protected_ref();
-        <Self as ReplaceT<Out>>::Output::init_from_inner(f(self.risky_unwrap(), arg.inner_ref()))
+        <Self as ReplaceT<Out>>::Output::init_from_inner(f(self.risky_unwrap(), arg.risky_ref()))
     }
 
     /// Update the inner value in place through a mutable borrow.
@@ -285,7 +285,7 @@ pub trait Controlled: ControlledPrivate + Zeroize {
         A: ?Sized + 'a,
         F: FnMut(&mut Self::Inner, &A),
     {
-        f(self.inner_mut(), other.inner_ref());
+        f(self.inner_mut(), other.risky_ref());
     }
 
     /// Iterate over the inner value and wrap each element in a `Protected`.
@@ -329,8 +329,6 @@ pub trait Controlled: ControlledPrivate + Zeroize {
     /// negating the protections that the [Controlled] type provides.
     ///
     /// **Use with caution!**
-    ///
-    // TODO: Consider feature flagging this method
     fn risky_unwrap(self) -> Self::Inner;
 
     /// Provides a reference to the inner value.
