@@ -17,6 +17,7 @@ The [architecture decision records](docs/adr) explain past design decisions:
 
 - [Describe plaintext once and consume it with sinks](docs/adr/0001-describe-plaintext-once-and-consume-it-with-sinks.md).
 - [Null equality terms and null placement in order spaces](docs/adr/0002-every-null-gets-an-equality-term-and-an-order-space-may-place-nulls-first-or-last.md).
+- [Leaves are authenticated; a container's membership and order are not](docs/adr/0002-leaves-are-authenticated-container-membership-and-order-are-not.md).
 - [A versioned storage profile for values that are kept](docs/adr/0003-a-versioned-storage-profile-for-values-that-are-kept.md).
 
 These records retain their historical discussion and status. Crate docs
@@ -48,8 +49,32 @@ refusal classes, and typed reads against `testdata/storage-v1.json`. The
 independent reader in `tests/support/reference.rs` checks the implementation
 against the specification. Existing corpus rows must not be edited or
 removed; new rows may be added. Run `mise run storage:corpus:check` to check
-that constraint, which CI also enforces. Other language implementations
-must match the corpus's values, refusal classes, and supported typed reads.
+that constraint, which CI also enforces. Other language implementations,
+including Go's `bindings/go/vcffi`, must match the corpus's values, refusal
+classes, and supported typed reads.
+
+`tests/storage_coverage.rs` fails if a tag, a map key kind, a part of a
+numbered reading rule in STORAGE.md, or a clause of *Reading by type* or of
+*Map keys* on reading has no corpus row that shows it. A refused row counts
+only if it reads once the clause's cause is removed. The test holds those
+rules, clauses, and the key grammar word for word, so changing their text in
+STORAGE.md fails it until the change is covered.
+
+`packages/aead-frame/src/storage/proofs.rs` holds Kani proofs about the
+storage reader's pieces, for every input within their bounds: the header,
+counts, scalars and keys, the depth bound of 128, and when two map keys are
+one key. A proof over whole bodies did not solve in a usable time, so whole
+bodies are left to the property tests and fuzzing. Run the proofs with
+`cargo kani -p vitaminc-aead-frame --features serde`; CI runs them in
+`.github/workflows/kani-storage.yml`.
+
+`tests/storage_wipe.rs` and `tests/transport_wipe.rs` install an allocator
+that inspects every block as it is freed, and fail if one still holds a key
+or a value the storage writer, the transport writer, or `to_frame` wrote.
+
+The storage profile benchmarks behind the aead-frame README's performance
+tables run with
+`cargo bench -p vitaminc-aead-frame --features serde --bench storage`.
 
 `cargo test -p vitaminc-aead-napi` runs Rust tests and builds a standalone
 addon for the README example and Node suites: value conformance, object
