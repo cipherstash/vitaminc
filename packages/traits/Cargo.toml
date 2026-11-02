@@ -23,3 +23,7 @@ zeroize = { workspace = true }
 bytes = { version = "^1", features = ["serde"] }
 anyhow = "1"
 
+[dev-dependencies]
+# The README demonstrates adapting a real digest to these traits.
+sha2 = { version = "0.11.0", features = ["zeroize"] }
+

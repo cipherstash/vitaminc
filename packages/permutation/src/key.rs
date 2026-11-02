@@ -39,14 +39,35 @@ pub struct BatchSeedError {
 // (E0509), and recovering them would mean duplicating `protected`'s
 // `ptr::read`+`forget` move-out primitive into this crate. The drop-glue
 // guarantee holds as long as `KeyInner` stays `ZeroizeOnDrop`.
+/// A position permutation stored as `N` byte-sized source indices.
+///
+/// Applying a key moves each output position's value from the source index
+/// stored there. Supported generation/application sizes are 8, 16, 32, 64,
+/// and 128. Key storage is wiped on drop; cloning makes a separate owned copy.
 #[derive(Clone, Debug, Serialize, Deserialize, Zeroize)]
 pub struct PermutationKey<const N: usize>(KeyInner<N>);
 
 impl<const N: usize> PermutationKey<N> {
+    /// Construct a key from raw source indices without validating them.
+    ///
     /// # Safety
     ///
-    /// This function is unsafe because it does not check that the key is a valid permutation.
+    /// `key` must be a bijection of `0..N`: every entry must be less than `N`,
+    /// and each index in that range must occur exactly once (no duplicates or
+    /// omissions). Byte-sized indices can represent such a key only for
+    /// `N <= 256`. Generation and permutation operations in this crate further
+    /// restrict `N` to 8, 16, 32, 64, or 128 through their trait bounds.
+    /// An invalid key can break indexing and inversion assumptions in those
+    /// operations. This constructor checks neither indices nor size.
     ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vitaminc_permutation::{PermutationKey, Permute};
+    /// // SAFETY: every index in 0..8 occurs exactly once.
+    /// let key = unsafe { PermutationKey::new_unchecked([7, 6, 5, 4, 3, 2, 1, 0]) };
+    /// assert_eq!(key.permute([0u8, 1, 2, 3, 4, 5, 6, 7]), [7, 6, 5, 4, 3, 2, 1, 0]);
+    /// ```
     pub unsafe fn new_unchecked(key: [u8; N]) -> Self {
         Self(KeyInner::<N>::new(key))
     }

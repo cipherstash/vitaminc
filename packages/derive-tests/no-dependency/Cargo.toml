@@ -1,0 +1,19 @@
+[package]
+name = "derive-tests-no-dependency"
+description = "Test-only crate, never published: the vitaminc-protected derives from a crate that depends on neither vitaminc-protected nor vitaminc."
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Neither `vitaminc-protected` nor `vitaminc` may appear here, even as a dev-dependency: trybuild copies dev-dependencies into its cases, and the derives read this manifest to find the protected crate.
+[dependencies]
+vitaminc-protected-derive = { path = "../../protected-derive" }
+
+[dev-dependencies]
+trybuild = "1.0.118"
+
+[[test]]
+name = "ui"
+path = "tests/ui.rs"

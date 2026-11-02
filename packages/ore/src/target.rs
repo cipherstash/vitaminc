@@ -581,6 +581,7 @@ impl<const N: usize> OwnTarget for &[u8; N] {
 // decimal encoding takes. A `chrono::DateTime<Utc>` may be a leap second,
 // which has no count, so it is checked, not fitting.
 #[cfg(feature = "chrono")]
+#[cfg_attr(docsrs, doc(cfg(feature = "chrono")))]
 mod chrono_rows {
     use super::*;
     use chrono::{DateTime, NaiveDate, Utc};
@@ -619,6 +620,7 @@ mod chrono_rows {
 }
 
 #[cfg(feature = "rust_decimal")]
+#[cfg_attr(docsrs, doc(cfg(feature = "rust_decimal")))]
 mod decimal_rows {
     use super::*;
 
@@ -635,6 +637,7 @@ mod decimal_rows {
 }
 
 #[cfg(feature = "uuid")]
+#[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
 mod uuid_rows {
     use super::*;
 

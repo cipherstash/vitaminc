@@ -1,9 +1,19 @@
+// These definitions precede the README so rustdoc links to the version being built.
+// The README supplies published-API URLs for GitHub. See docs/documentation.md.
+//!
+// Workspace crates release together; keep cross-crate links on that version.
+#![deny(missing_docs)]
+#![doc = concat!(
+    "\n[Controlled]: https://docs.rs/vitaminc-protected/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_protected/trait.Controlled.html\n",
+)]
 #![deny(clippy::unwrap_used, clippy::todo, unsafe_code, unused_imports)]
 #![doc = include_str!("../README.md")]
 use vitaminc_protected::{Controlled, Zeroed};
 
 /// Defines the size of the output of a hash function.
 pub trait OutputSize<const N: usize> {
+    /// Output length in bytes.
     const SIZE: usize;
 }
 
@@ -15,7 +25,9 @@ where
     const SIZE: usize = N;
 }
 
+/// The length of a cryptographic key in bytes.
 pub trait KeySize {
+    /// Key length in bytes.
     const SIZE: usize;
 }
 
@@ -51,6 +63,7 @@ where
 /// This allows us to reason about the input type and its sensitivity.
 pub trait Update<T> {
     // TODO: Make this bound on a "tagged" value (i.e. sensitive or safe)
+    /// Append `data` to the input accumulated by this hasher.
     fn update(&mut self, data: T);
 
     /// Digest input data in a chained manner.
@@ -69,8 +82,12 @@ pub trait FixedOutputReset<const N: usize, O>
 where
     O: Controlled + OutputSize<N>,
 {
+    /// Write the accumulated digest into `out`, then reset for another input.
+    /// A keyed implementation retains its key when resetting.
     fn finalize_into_reset(&mut self, out: &mut O);
 
+    /// Return the accumulated digest in a new output and reset the hasher.
+    /// Uses [`finalize_into_reset`](Self::finalize_into_reset) with a zeroed output.
     fn finalize_reset(&mut self) -> O
     where
         O: Zeroed,

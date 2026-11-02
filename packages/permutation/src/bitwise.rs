@@ -4,7 +4,10 @@ use zeroize::{Zeroize, Zeroizing};
 
 // TODO: Make this a private trait
 // FIXME: This trait is backwards - self should be T and the argument should be a key
+/// Rearrange the `N` bit positions of a value, preserving its number of set bits.
+/// A bit permutation alone does not provide confidentiality.
 pub trait BitwisePermute<const N: usize, T> {
+    /// Apply this permutation to `input` and return the rearranged value.
     fn bitwise_permute(&self, input: T) -> T;
 }
 

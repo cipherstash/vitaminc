@@ -2,7 +2,7 @@
 //!
 //! The walk runs on the JavaScript thread, reading each value as it goes:
 //! no tree is built, and a scalar leaves the engine only to go straight to
-//! the sink. ADR 0001 section 6 gives the mapping:
+//! the sink. Values map to sink calls as follows:
 //!
 //! | JavaScript             | `Sink` call                                     |
 //! | ---------------------- | ----------------------------------------------- |

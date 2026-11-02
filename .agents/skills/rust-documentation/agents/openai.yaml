@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Documentation"
+  short_description: "Build and verify Rust API docs and project guides"
+  default_prompt: "Use $rust-documentation to design, build, and verify this Rust documentation."

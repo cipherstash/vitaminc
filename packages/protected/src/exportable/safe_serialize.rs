@@ -12,7 +12,16 @@ use serde::{Serialize, Serializer};
 // And a reader?
 
 // TODO: SafeSerialize *maybe* should consume self
+/// Explicit serialization channel for supported values and controlled wrappers.
+///
+/// Serialization exposes the value to the serializer. The name does not promise
+/// encryption, constant-time serialization, or wiping of serialized copies. The
+/// blanket `Controlled` implementation delegates to its inner value; callers
+/// must decide whether exporting that value is appropriate.
 pub trait SafeSerialize {
+    /// Serialize through the supplied serializer, forwarding its errors.
+    /// On failure the serializer may already have written partial output; this
+    /// trait provides neither rollback nor cleanup of that output.
     fn safe_serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer;
