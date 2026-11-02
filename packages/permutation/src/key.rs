@@ -2,7 +2,6 @@ use serde::{de, Deserialize, Deserializer, Serialize};
 use subtle::{Choice, ConstantTimeEq};
 use vitaminc_protected::{Controlled, Exportable, Protected, Zeroed};
 use vitaminc_random::{Generatable, RandomError, SafeRand, SeedableRng};
-use zeroize::Zeroize;
 
 use super::private::IsPermutable;
 use crate::{
