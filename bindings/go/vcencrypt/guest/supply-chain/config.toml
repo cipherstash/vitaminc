@@ -210,10 +210,6 @@ criteria = "safe-to-deploy"
 version = "0.7.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.rand]]
-version = "0.10.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.rustversion]]
 version = "1.0.23"
 criteria = "safe-to-deploy"
@@ -304,10 +300,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.wyz]]
 version = "0.5.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.zeroize]]
-version = "1.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zeroize_derive]]
