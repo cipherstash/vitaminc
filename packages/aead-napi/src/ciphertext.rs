@@ -122,7 +122,7 @@ impl NapiPassthrough for PassthroughFrame {
 
     fn from_js(value: Unknown<'_>, depth: usize) -> Result<Self> {
         let frame = vitaminc_aead::to_frame(JsRef::at_depth(value, depth)).map_err(frame_error)?;
-        Ok(PassthroughFrame(frame.risky_ref().clone()))
+        Ok(PassthroughFrame(frame.risky_ref().to_vec()))
     }
 
     /// A frame parsed `depth` levels down is bounded there; a payload that
@@ -434,7 +434,7 @@ mod tests {
             }
         }
         let frame = to_frame(Arrays(levels)).expect("within the frame's own bound");
-        CipherText::Passthrough(PassthroughFrame(frame.risky_ref().clone()))
+        CipherText::Passthrough(PassthroughFrame(frame.risky_ref().to_vec()))
     }
 
     #[test]
