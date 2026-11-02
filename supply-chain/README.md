@@ -13,10 +13,16 @@ Two test harnesses keep their own lockfiles and so their own stores:
 serve more than one workspace: cargo vet rejects policy entries for crates
 not in the graph, and `regenerate exemptions` prunes whatever the current
 graph does not need. Every command below takes `--manifest-path` for those
-two. The duplication goes away if the harnesses become members of the root
-workspace, which is the fix worth making; until then a delta that appears
-in more than one lockfile is certified in each store, and the nested stores
-check `safe-to-deploy` only, since `crypto-reviewed` is recorded here.
+two. They stay separate by choice (much of this code is moving to Stack, so
+folding them in is not worth doing). Two consequences: a delta that appears
+in more than one lockfile is certified in each store, with the nested stores
+checking `safe-to-deploy` only since `crypto-reviewed` is recorded here; and
+the nested lockfiles lag the root, so a nested bump often reaches a version
+the root store already exempts. That is not a reason to exempt it in the
+harness store too: audit the delta, record it in every store whose lockfile
+has it (the root included), and run `cargo vet prune` in each, which drops
+the root's exemption once the audit chain reaches the version. Lagging
+harnesses are how the root's exemptions get burnt down.
 
 - `audits.toml`: audits we have recorded, and the `crypto-reviewed` criterion.
 - `config.toml`: which registries we import, what each first-party crate
@@ -26,8 +32,21 @@ check `safe-to-deploy` only, since `crypto-reviewed` is recorded here.
 
 ## When a dependency PR fails `🔏 cargo vet`
 
-The failure means a version moved and nobody has read the delta. Run, on the
-PR's branch:
+A version moved and the store does not cover it. Two things can be true, and
+the CI step after the failure says which. First, on the PR's branch:
+
+```sh
+cargo vet                      # without --locked: fetches the registries
+```
+
+`imports.lock` only keeps the imported audits the committed graph needs, so a
+bump to a version that Mozilla, Google, ISRG, the Bytecode Alliance or Zcash
+has already audited still fails `--locked` until the chain is pulled in. If
+that command passes and the only change is to `imports.lock`, commit it to
+the PR and you are done: that is a registry's existing audit being recorded,
+not a new trust decision, and the diff shows whose word it is.
+
+Otherwise nobody has read the delta yet:
 
 ```sh
 cargo vet                      # says which crate and versions need an audit
@@ -41,8 +60,12 @@ cargo vet certify <crate> <old> <new>
 ```
 
 `certify` asks which criteria you are vouching for and opens an editor for
-notes. Commit `supply-chain/` to the PR. The `who` field is you: an agent may
-do the reading and draft the notes, but the entry is a person's word.
+notes (or takes `--criteria` and `--notes`). Commit `supply-chain/` to the
+dependency PR itself, so the lockfile change and its audit are reviewed and
+merged together; nothing goes to `main` separately and nothing is rebased.
+The `who` field is the person who approves that PR: an agent may do the
+reading and draft the notes, but the entry is a person's word, given by
+approving the PR that carries it.
 
 What to look for is the same list as the `crypto-reviewed` description in
 `audits.toml`, plus for every crate: a new or changed `build.rs`, new
@@ -89,10 +112,13 @@ workspace crate is added.
 
 ## Refreshing imports
 
+A dependency PR carries the `imports.lock` entries its own versions need (see
+above). Separately, now and then:
+
 ```sh
 cargo vet regenerate imports  # fetch the registries, update imports.lock
-cargo vet prune
+cargo vet prune               # drop exemptions the imports now cover
 ```
 
-Do this in its own PR so the diff to `imports.lock` is reviewable on its own.
+Do that in its own PR so the diff to `imports.lock` is reviewable on its own.
 Adding a registry is a trust decision: their `safe-to-deploy` becomes ours.
