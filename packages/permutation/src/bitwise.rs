@@ -49,10 +49,10 @@ macro_rules! impl_nonzeroint_bitwise_permutable {
                 let out = self.bitwise_permute(input.get());
                 input.zeroize();
                 // A permutation moves bits without adding or dropping any, so
-                // a nonzero input gives a nonzero output for every key a safe
-                // caller can hold (deserialization refuses non-permutations).
-                // Only a key from `new_unchecked` that broke its contract can
-                // reach the panic, which is still not undefined behaviour.
+                // a nonzero input gives a nonzero output, and every key is a
+                // permutation (see `PermutationKey`). The check costs one
+                // comparison, so a broken invariant panics rather than being
+                // undefined behaviour.
                 <$nonzero_type>::new(out)
                     .expect("a permutation key maps a nonzero input to a nonzero output")
             }
@@ -170,20 +170,6 @@ mod tests {
         ] {
             assert_eq!(key128.bitwise_permute(n).count_ones(), n.count_ones());
         }
-    }
-
-    // A key that is not a permutation can only come from `new_unchecked`
-    // used against its contract. Before #277, a NonZero input through one
-    // could become `NonZero::new_unchecked(0)`, which is undefined
-    // behaviour. Now it panics. All zeros sources every output bit from
-    // input bit 0, so the input 2 (bit 0 clear) maps to zero.
-    #[test]
-    #[should_panic(expected = "a permutation key maps a nonzero input to a nonzero output")]
-    fn a_nonzero_input_through_a_broken_key_panics_rather_than_being_zero() {
-        // SAFETY: deliberately broken; the point is that no `unsafe` in the
-        // crate relies on the contract any more.
-        let key = unsafe { PermutationKey::<8>::new_unchecked([0; 8]) };
-        let _ = key.bitwise_permute(NonZeroU8::new(2).unwrap());
     }
 
     // Same key + same input must produce the same output. Cheap guard against

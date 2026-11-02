@@ -19,6 +19,14 @@ pub(crate) type KeyInner<const N: usize> = Exportable<Protected<[u8; N]>>;
 /// `from_seeds` consumed and wiped the batch, so recovery starts from the
 /// caller's own retained seeds: replace the one at `index` with a fresh
 /// seed and derive the whole batch again.
+/// The bytes given for a [`PermutationKey`] are not a permutation: they do
+/// not hold each of `0..N` exactly once. The error names none of the bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("a permutation key must hold each of 0..{len} exactly once")]
+pub struct NotAPermutation {
+    len: usize,
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("seed at index {index} could not derive a key: {source}")]
 pub struct BatchSeedError {
@@ -41,9 +49,11 @@ pub struct BatchSeedError {
 // `ptr::read`+`forget` move-out primitive into this crate. The drop-glue
 // guarantee holds as long as `KeyInner` stays `ZeroizeOnDrop`.
 //
-// `Deserialize` is written by hand, not derived: it refuses bytes that are not
-// a permutation of `0..N`, so every `PermutationKey` a safe caller can hold is
-// a bijection. The `NonZero` impls of `BitwisePermute` rely on that.
+// Every way to make a key checks that it is a permutation of `0..N`:
+// `new` and `Deserialize` check the bytes they are given, and the others
+// (`random`, `from_seed`, `invert`, `complement`, `permute`) build one from
+// keys that already are. So every `PermutationKey` is a bijection, and the
+// `NonZero` impls of `BitwisePermute` rely on that.
 #[derive(Clone, Debug, Serialize, Zeroize)]
 pub struct PermutationKey<const N: usize>(KeyInner<N>);
 
@@ -62,13 +72,7 @@ impl<'de, const N: usize> Deserialize<'de> for PermutationKey<N> {
         struct Unchecked<const N: usize>(KeyInner<N>);
 
         let Unchecked(inner) = Unchecked::<N>::deserialize(deserializer)?;
-        if bool::from(is_permutation(inner.risky_ref())) {
-            Ok(Self(inner))
-        } else {
-            Err(de::Error::custom(format_args!(
-                "a permutation key must hold each of 0..{N} exactly once"
-            )))
-        }
+        Self::checked(inner).map_err(de::Error::custom)
     }
 }
 
@@ -96,14 +100,47 @@ fn is_permutation<const N: usize>(key: &[u8; N]) -> Choice {
 }
 
 impl<const N: usize> PermutationKey<N> {
-    /// # Safety
+    /// Makes a key from bytes that must be a permutation of `0..N`: each
+    /// value exactly once, the byte at position `i` naming the input element
+    /// that moves to position `i`.
     ///
-    /// This function is unsafe because it does not check that the key is a valid permutation.
-    /// `key` must hold each of `0..N` exactly once. Deserializing a key checks this;
-    /// this constructor leaves it to the caller.
+    /// The bytes arrive in a [`Controlled`] container (for instance
+    /// `Protected<[u8; N]>`) and are copied into the key's own wiped-on-drop
+    /// storage; the container is wiped before this returns, whether or not
+    /// the bytes are a permutation. The check runs in constant time.
     ///
-    pub unsafe fn new_unchecked(key: [u8; N]) -> Self {
-        Self(KeyInner::<N>::new(key))
+    /// To keep a key, serialize it; to make one, prefer
+    /// [`random`](Generatable::random) or [`from_seed`](Self::from_seed).
+    ///
+    /// ```
+    /// # mod vitaminc { pub mod permutation { pub use vitaminc_permutation::*; } pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::permutation::{Permute, PermutationKey};
+    /// use vitaminc::protected::{Controlled, Protected};
+    ///
+    /// let key = PermutationKey::new(Protected::new([2u8, 0, 3, 1, 4, 5, 7, 6])).expect("a permutation");
+    /// assert_eq!(key.permute([10u8, 11, 12, 13, 14, 15, 16, 17]), [12, 10, 13, 11, 14, 15, 17, 16]);
+    ///
+    /// assert!(PermutationKey::new(Protected::new([0u8, 0, 3, 1, 4, 5, 7, 6])).is_err());
+    /// ```
+    pub fn new<C>(key: C) -> Result<Self, NotAPermutation>
+    where
+        C: Controlled<Inner = [u8; N]>,
+    {
+        let mut key = key;
+        let mut inner = KeyInner::<N>::generate(|| [0; N]);
+        inner.inner_mut().copy_from_slice(key.risky_ref());
+        key.zeroize();
+        Self::checked(inner)
+    }
+
+    /// The one gate for bytes from outside: refuses any that are not a
+    /// permutation. A refused key is dropped, and so wiped, here.
+    fn checked(inner: KeyInner<N>) -> Result<Self, NotAPermutation> {
+        if bool::from(is_permutation(inner.risky_ref())) {
+            Ok(Self(inner))
+        } else {
+            Err(NotAPermutation { len: N })
+        }
     }
 
     /// Creates a new permutation key from a seed.
@@ -258,7 +295,7 @@ mod tests {
         elementwise::Permute,
         key::KeyInner,
         private::{identity, IsPermutable},
-        BatchSeedError, PermutationKey,
+        BatchSeedError, NotAPermutation, PermutationKey,
     };
     use vitaminc_protected::{Controlled, Protected, Zeroed};
     use vitaminc_random::{Generatable, RandomError, SafeRand, SeedableRng};
@@ -530,6 +567,29 @@ mod tests {
         }
         let json = serde_json::to_string(&identity).expect("serializes");
         assert!(serde_json::from_str::<PermutationKey<8>>(&json).is_ok());
+    }
+
+    /// `new` checks exactly as deserialization does, and gives back a key
+    /// that permutes as its bytes say.
+    #[test]
+    fn new_makes_a_key_only_from_a_permutation() {
+        let bytes = [2u8, 0, 3, 1, 4, 5, 7, 6];
+        let key = PermutationKey::new(Protected::new(bytes)).expect("a permutation");
+        let input = [10u8, 11, 12, 13, 14, 15, 16, 17];
+        assert_eq!(key.permute(input), [12, 10, 13, 11, 14, 15, 17, 16]);
+        let mut repeated = bytes;
+        repeated[7] = 2;
+        let mut out_of_range = bytes;
+        out_of_range[7] = 8;
+        for bytes in [[0u8; 8], repeated, out_of_range] {
+            let err =
+                PermutationKey::<8>::new(Protected::new(bytes)).expect_err("not a permutation");
+            assert_eq!(err, NotAPermutation { len: 8 }, "{bytes:?}");
+            assert_eq!(
+                err.to_string(),
+                "a permutation key must hold each of 0..8 exactly once"
+            );
+        }
     }
 
     #[test]
