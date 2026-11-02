@@ -669,7 +669,7 @@ const WIPE_WORD: usize = mem::size_of::<u128>();
 /// # Safety
 ///
 /// `ptr` must be valid for writes of `len` bytes.
-pub(super) unsafe fn wipe_raw(ptr: *mut u8, len: usize) {
+pub(crate) unsafe fn wipe_raw(ptr: *mut u8, len: usize) {
     let head = ptr.align_offset(WIPE_WORD).min(len);
     let words = (len - head) / WIPE_WORD;
     let tail = len - head - words * WIPE_WORD;
