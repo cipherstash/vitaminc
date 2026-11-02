@@ -62,16 +62,8 @@ criteria = "safe-to-deploy"
 version = "1.17.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.aws-lc-rs]]
-version = "1.18.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.aws-lc-sys]]
 version = "0.43.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.aws-lc-sys]]
-version = "0.46.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.bitvec]]
