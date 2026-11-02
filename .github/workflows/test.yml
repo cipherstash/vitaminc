@@ -117,10 +117,11 @@ jobs:
         # Execution in Node remains covered by the wasm-pack step in test.
         run: python3 .github/scripts/check_doc_examples.py . --target wasm32-unknown-unknown
 
-  # The storage profile's golden corpus pins bytes customers keep, so a row
-  # it had is never edited or removed; rows may be added. The Rust test
-  # holds the code to the corpus, and this holds the corpus to itself. See
-  # packages/aead-frame/scripts/storage_corpus_append_only.py.
+  # The storage profile's golden corpora (one storage-vN.json per version)
+  # pin bytes customers keep, so a row one had is never edited or removed,
+  # and no corpus is removed; rows and corpora may be added. The Rust test
+  # holds the code to the corpora, and this holds each corpus to itself.
+  # See packages/aead-frame/scripts/storage_corpus_append_only.py.
   storage-corpus:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
