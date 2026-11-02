@@ -51,8 +51,13 @@ macro_rules! impl_nonzeroint_bitwise_permutable {
             fn bitwise_permute(&self, mut input: $nonzero_type) -> $nonzero_type {
                 let out = self.bitwise_permute(input.get());
                 input.zeroize();
-                // If the input is NonZero, the output will be NonZero
-                unsafe { <$nonzero_type>::new_unchecked(out) }
+                // A permutation moves bits without adding or dropping any, so
+                // a nonzero input gives a nonzero output, and every key is a
+                // permutation (see `PermutationKey`). The check costs one
+                // comparison, so a broken invariant panics rather than being
+                // undefined behaviour.
+                <$nonzero_type>::new(out)
+                    .expect("a permutation key maps a nonzero input to a nonzero output")
             }
         }
     };
@@ -144,8 +149,8 @@ mod tests {
     // but neither creates nor destroys them. This is the strongest single
     // property check available for the bit-shuffle glue: any bug that drops,
     // duplicates, or mis-positions a bit will change the count. As a
-    // corollary, this is also what justifies the `unsafe new_unchecked` in
-    // the NonZero impls: popcount > 0 in -> popcount > 0 out.
+    // corollary, a NonZero input always gives a NonZero output: popcount > 0
+    // in -> popcount > 0 out.
     #[test]
     fn bitwise_permute_preserves_hamming_weight() {
         let key8 = tests::gen_key::<8>([0; 32]);
