@@ -716,7 +716,7 @@ pub(crate) fn wipe_vec(out: &mut Vec<u8>) {
 ///
 /// `slot` must point to `size_of::<T>()` writable bytes that will never be
 /// read as a `T` again.
-unsafe fn wipe_bytes<T>(slot: *mut T) {
+pub(crate) unsafe fn wipe_bytes<T>(slot: *mut T) {
     wipe_raw(slot.cast::<u8>(), mem::size_of::<T>());
 }
 

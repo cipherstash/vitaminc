@@ -104,7 +104,7 @@ Import from that module:
 use vitaminc::protected::{Controlled, Protected};
 
 let mut token = Protected::new(String::from("example-token"));
-token.update(|value| value.push_str("-updated"));
+token.risky_update(|value| value.push_str("-updated"));
 
 let debug = format!("{token:?}");
 assert!(debug.contains("***"));
@@ -137,7 +137,7 @@ The same example becomes:
 use vitaminc_protected::{Controlled, Protected};
 
 let mut token = Protected::new(String::from("example-token"));
-token.update(|value| value.push_str("-updated"));
+token.risky_update(|value| value.push_str("-updated"));
 
 let debug = format!("{token:?}");
 assert!(debug.contains("***"));
@@ -234,7 +234,7 @@ This version compiles:
 use vitaminc_protected::{Controlled, Equatable, Protected};
 
 let mut secret = Protected::new(String::from("example-token"));
-secret.update(|text| text.make_ascii_uppercase());
+secret.risky_update(|text| text.make_ascii_uppercase());
 println!("{secret:?}"); // Debug output hides the contents.
 
 let expected: Equatable<Protected<[u8; 4]>> = Equatable::new(*b"demo");
@@ -243,7 +243,8 @@ assert_eq!(expected, supplied);
 ```
 
 The wrappers do not implement `Deref`.
-To change a value inside its wrapper, call `update`.
+To change a value inside its wrapper, call `risky_update`.
+The `risky_` prefix is a warning: its closure gets a mutable borrow, which can move the value out of the wrapper.
 
 ### Generate a password and keep it protected
 
@@ -566,7 +567,7 @@ The wrapper cannot protect a copy that the receiving code makes.
 A password's `into_unprotected_string()` method returns an ordinary `String`.
 You must wipe that `String` yourself.
 
-The closures you pass to `update`, `map`, and `Locked::with` also receive the plain value.
+The closures you pass to `map`, `risky_update`, and `Locked::with` also see the plain value.
 A closure makes clear which code can use the plain value.
 The closure does not stop that code from copying or revealing the value.
 Where you can, use APIs that take the protected value directly, as the encryption examples above do.

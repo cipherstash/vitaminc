@@ -30,7 +30,7 @@ use vitaminc_traits::OutputSize;
 /// impl AsyncFixedOutput<4, Protected<[u8; 4]>> for PreparedOutput {
 ///     type Error = std::convert::Infallible;
 ///     async fn try_finalize_into(self, out: &mut Protected<[u8; 4]>) -> Result<(), Self::Error> {
-///         out.update(|bytes| bytes.copy_from_slice(self.0.risky_ref()));
+///         out.risky_update(|bytes| bytes.copy_from_slice(self.0.risky_ref()));
 ///         Ok(())
 ///     }
 /// }

@@ -14,7 +14,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// # Current limitations
 ///
 /// Scope propagation is incomplete: mapping `Usage<Protected<T>, S>` returns
-/// an unscoped `Protected`, as does [`Controlled::zip`], and `update_with` does
+/// an unscoped `Protected`, as does [`Controlled::zip`], and `risky_update_with` does
 /// not check scope compatibility. The `Controlled` escape hatches also remain
 /// available. Serialization is allowed
 /// whenever `T::Inner` implements [`SafeSerialize`], even when `T` is not an

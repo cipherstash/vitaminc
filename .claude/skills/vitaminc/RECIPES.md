@@ -28,10 +28,10 @@ fn api_token() -> Result<Protected<String>, TokenUnavailable> {
     })
 }
 
-/// Transform without unwrapping. The closure owns the bare value, so it returns
-/// it (here as bytes, in the same allocation) rather than dropping it unwiped.
+/// Transform without unwrapping. The closure borrows the value and its result
+/// comes back wrapped. The wrapper wipes the original when the closure returns.
 fn token_bytes(token: Protected<String>) -> Protected<Vec<u8>> {
-    token.map(String::into_bytes)
+    token.map(|token| token.as_bytes().to_vec())
 }
 
 /// To read a value without taking it, borrow it. The wrapper keeps ownership

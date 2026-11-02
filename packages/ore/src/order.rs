@@ -670,7 +670,7 @@ fn make_room(
             return Err(NormalizeError::Reserved);
         }
         if nulls == NullOrder::First {
-            code.update(|code| increment(code));
+            code.risky_update(|code| increment(code));
         }
         return Ok(code);
     }
@@ -821,7 +821,7 @@ fn variable_width(bytes: &[u8]) -> Protected<Vec<u8>> {
 /// to wipe those.
 fn fixed<const N: usize>(mut write: impl FnMut(&mut [u8; N])) -> Protected<Vec<u8>> {
     let mut bytes = Protected::new(vec![0u8; N]);
-    bytes.update(|bytes| {
+    bytes.risky_update(|bytes| {
         let array = <&mut [u8; N]>::try_from(bytes.as_mut_slice())
             .expect("the vector was made with exactly N bytes");
         write(array);

@@ -342,7 +342,7 @@ impl<const N: usize> AlphaPassword<N> {
 fn protected_string(chars: impl ExactSizeIterator<Item = char>) -> Protected<String> {
     let mut output = Protected::new(String::with_capacity(chars.len()));
     for c in chars {
-        output.update(|string| string.push(c));
+        output.risky_update(|string| string.push(c));
     }
     output
 }
