@@ -29,7 +29,7 @@ skill's general guidance.
 
 ## Dependency updates
 
-Every third-party crate version in `Cargo.lock` must pass three gates in CI: `cargo deny` (advisories, yanked versions, sources, licences, build scripts; `deny.toml`), `cargo vet` (a recorded audit or exemption for every version; `supply-chain/`), and the tests. A dependabot PR that fails `🔏 cargo vet` needs the delta read and recorded; `supply-chain/README.md` has the steps and the review checklist.
+Every third-party crate version in `Cargo.lock` must pass three gates in CI: `cargo deny` (advisories, yanked versions, sources, licences, build scripts; `deny.toml`), `cargo vet` (a recorded audit or exemption for every version; `supply-chain/`), and the tests. The Node addon and Go guest test harnesses have their own lockfiles and their own `supply-chain/` stores, checked the same way with `--manifest-path`. A dependabot PR that fails `🔏 cargo vet` needs the delta read and recorded; `supply-chain/README.md` has the steps and the review checklist.
 
 - Review the published crate (`cargo vet diff`), not the git tag; they can differ.
 - Crates the primitives are built on (aws-lc-rs, aes-gcm, chacha20, digest, getrandom, hmac, rand, sha2, subtle, zeroize) need `crypto-reviewed` as well as `safe-to-deploy`, and get a full read on every bump.

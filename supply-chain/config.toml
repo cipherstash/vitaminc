@@ -23,30 +23,30 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
 [policy.vitaminc]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-aead]
-audit-as-crates-io = true
+audit-as-crates-io = false
 dependency-criteria = { zeroize = ["safe-to-deploy", "crypto-reviewed"] }
 
 [policy.vitaminc-aead-derive]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-aead-frame]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-aead-napi]
-audit-as-crates-io = true
+audit-as-crates-io = false
 dependency-criteria = { zeroize = ["safe-to-deploy", "crypto-reviewed"] }
 
 [policy.vitaminc-async-traits]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-context]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-encrypt]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-encrypt.dependency-criteria]
 aes-gcm = ["safe-to-deploy", "crypto-reviewed"]
@@ -54,7 +54,7 @@ aws-lc-rs = ["safe-to-deploy", "crypto-reviewed"]
 zeroize = ["safe-to-deploy", "crypto-reviewed"]
 
 [policy.vitaminc-hmac]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-hmac.dependency-criteria]
 hmac = ["safe-to-deploy", "crypto-reviewed"]
@@ -62,21 +62,21 @@ sha2 = ["safe-to-deploy", "crypto-reviewed"]
 zeroize = ["safe-to-deploy", "crypto-reviewed"]
 
 [policy.vitaminc-kms]
-audit-as-crates-io = true
+audit-as-crates-io = false
 dependency-criteria = { zeroize = ["safe-to-deploy", "crypto-reviewed"] }
 
 [policy.vitaminc-normalize]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-ore]
-audit-as-crates-io = true
+audit-as-crates-io = false
 dependency-criteria = { zeroize = ["safe-to-deploy", "crypto-reviewed"] }
 
 [policy.vitaminc-password]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-permutation]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-permutation.dependency-criteria]
 rand = ["safe-to-deploy", "crypto-reviewed"]
@@ -84,10 +84,10 @@ subtle = ["safe-to-deploy", "crypto-reviewed"]
 zeroize = ["safe-to-deploy", "crypto-reviewed"]
 
 [policy.vitaminc-prf]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-protected]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-protected.dependency-criteria]
 digest = ["safe-to-deploy", "crypto-reviewed"]
@@ -95,10 +95,10 @@ subtle = ["safe-to-deploy", "crypto-reviewed"]
 zeroize = ["safe-to-deploy", "crypto-reviewed"]
 
 [policy.vitaminc-protected-derive]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-random]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-random.dependency-criteria]
 chacha20 = ["safe-to-deploy", "crypto-reviewed"]
@@ -107,10 +107,10 @@ rand = ["safe-to-deploy", "crypto-reviewed"]
 zeroize = ["safe-to-deploy", "crypto-reviewed"]
 
 [policy.vitaminc-random-derives]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.vitaminc-traits]
-audit-as-crates-io = true
+audit-as-crates-io = false
 dependency-criteria = { zeroize = ["safe-to-deploy", "crypto-reviewed"] }
 
 [[exemptions.aead]]
@@ -892,86 +892,6 @@ criteria = "safe-to-deploy"
 [[exemptions.version_check]]
 version = "0.9.5"
 criteria = ["safe-to-deploy", "crypto-reviewed"]
-
-[[exemptions.vitaminc]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-aead]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-aead-derive]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-aead-frame]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-aead-napi]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-async-traits]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-context]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-encrypt]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-hmac]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-kms]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-normalize]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-ore]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-password]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-permutation]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-prf]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-protected]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-protected-derive]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-random]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-random-derives]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.vitaminc-traits]]
-version = "0.8.1"
-criteria = "safe-to-deploy"
 
 [[exemptions.vsimd]]
 version = "0.8.0"

@@ -20,7 +20,21 @@ jobs:
   # result depends only on the tree.
   vet:
     runs-on: ubuntu-latest
-    name: "🔏 cargo vet"
+    name: "🔏 cargo vet (${{ matrix.name }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each workspace has its own store next to its manifest. The two
+          # test harnesses keep their own lockfiles, so they are vetted on
+          # their own; see supply-chain/README.md for why that is and what
+          # would remove the duplication.
+          - name: workspace
+            manifest: Cargo.toml
+          - name: node-addon
+            manifest: packages/aead-napi/tests/addon/Cargo.toml
+          - name: go-guest
+            manifest: bindings/go/vcencrypt/guest/Cargo.toml
 
     steps:
       - uses: actions/checkout@v7
@@ -48,9 +62,9 @@ jobs:
           cargo vet --version
 
       - name: cargo vet
-        run: cargo vet --locked
+        run: cargo vet --locked --manifest-path "${{ matrix.manifest }}"
 
       - name: what to do when this fails
         if: failure()
         run: |
-          echo "::notice::A dependency version has no audit. See supply-chain/README.md: review the delta with 'cargo vet diff', then record it with 'cargo vet certify' and commit supply-chain/."
+          echo "::notice::A dependency version has no audit. See supply-chain/README.md: review the delta with 'cargo vet diff', then record it with 'cargo vet certify --manifest-path ${{ matrix.manifest }}' and commit the store."

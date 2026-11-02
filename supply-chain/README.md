@@ -1,10 +1,22 @@
 # Dependency audits
 
-This directory is [cargo-vet](https://mozilla.github.io/cargo-vet/)'s store.
-`cargo vet` fails when a third-party crate version in `Cargo.lock` has
-neither an audit nor an exemption, and CI runs it on every PR (`vet.yml`).
-Nothing here is edited by hand except `audits.toml`'s criteria and the
-`dependency-criteria` tables in `config.toml`; the tool rewrites the rest.
+This directory is [cargo-vet](https://mozilla.github.io/cargo-vet/)'s store
+for the root workspace. `cargo vet` fails when a third-party crate version
+in `Cargo.lock` has neither an audit nor an exemption, and CI runs it on
+every PR (`vet.yml`). Nothing here is edited by hand except `audits.toml`'s
+criteria and the `dependency-criteria` tables in `config.toml`; the tool
+rewrites the rest.
+
+Two test harnesses keep their own lockfiles and so their own stores:
+`packages/aead-napi/tests/addon/supply-chain/` (Node addon) and
+`bindings/go/vcencrypt/guest/supply-chain/` (Go wasm guest). A store cannot
+serve more than one workspace: cargo vet rejects policy entries for crates
+not in the graph, and `regenerate exemptions` prunes whatever the current
+graph does not need. Every command below takes `--manifest-path` for those
+two. The duplication goes away if the harnesses become members of the root
+workspace, which is the fix worth making; until then a delta that appears
+in more than one lockfile is certified in each store, and the nested stores
+check `safe-to-deploy` only, since `crypto-reviewed` is recorded here.
 
 - `audits.toml`: audits we have recorded, and the `crypto-reviewed` criterion.
 - `config.toml`: which registries we import, what each first-party crate
@@ -68,6 +80,12 @@ cargo vet prune               # drop exemptions the imports now cover
 
 Start with the `crypto-reviewed` exemptions. Never add an exemption to make a
 PR pass; that is what `certify` is for.
+
+Our own crates are `audit-as-crates-io = false` in every store: they are
+published, so cargo vet would otherwise treat each as a third-party crate to
+be audited against crates.io, and the next release-plz version bump would
+fail `--locked` vetting with nothing to certify. Keep it `false` when a new
+workspace crate is added.
 
 ## Refreshing imports
 
