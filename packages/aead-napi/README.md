@@ -214,7 +214,7 @@ This crate defines no Cargo feature flags.
 
 ## Compatibility
 
-Requires Rust <!-- msrv:vitaminc-aead-napi -->**1.88.0**<!-- /msrv --> and the Rust standard library (`std`).
+Requires Rust <!-- msrv:vitaminc-aead-napi -->**1.89.0**<!-- /msrv --> and the Rust standard library (`std`).
 This crate targets native Node.js addons; it is not a WebAssembly binding.
 MSRV increases require a minor release; patch releases retain the existing
 floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).

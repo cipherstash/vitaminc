@@ -74,6 +74,25 @@ jobs:
           cargo fetch --locked
           python3 .github/scripts/check_doc_examples.py .
 
+  # The one MSRV check branch protection requires. The matrix job names carry
+  # the toolchain version, so requiring them directly blocked every PR that
+  # raised an MSRV until someone edited the ruleset. `always()` keeps this job
+  # running when the matrix fails, because a skipped job counts as passing.
+  msrv-gate:
+    needs: [msrv-matrix, msrv]
+    if: always()
+    runs-on: ubuntu-latest
+    name: "🦀 MSRV"
+    permissions: {}
+    steps:
+      - name: Every MSRV check passed
+        env:
+          MATRIX: ${{ needs.msrv-matrix.result }}
+          MSRV: ${{ needs.msrv.result }}
+        run: |
+          echo "msrv-matrix: $MATRIX, msrv: $MSRV"
+          [ "$MATRIX" = success ] && [ "$MSRV" = success ]
+
   documentation:
     runs-on: ubuntu-latest
     name: "📚 Documentation"
