@@ -105,6 +105,12 @@ criteria = "safe-to-deploy"
 delta = "0.1.25 -> 0.1.26"
 notes = "Unicode 17.0.0 to 18.0.0 table regeneration (upstream #117: scripts/unicode.py version bump and regenerated src/tables.rs, all data literals and generated range patterns) plus licence metadata declaring Unicode-3.0 for the UCD data with LICENSE-UNICODE added (#116). The normalisation logic is untouched; no new unsafe, dependencies or build script. NFC/NFKC output changes only for code points newly assigned in Unicode 18."
 
+[[audits.uuid]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "1.21.0 -> 1.29.0"
+notes = "Eight minor releases, every hunk accounted for by the upstream release notes: branchless hex parse and format (#894), MaybeUninit encode helpers (#892; the new unsafe checks lengths before copying and fully initialises buffers before assume_init), parser diagnostics and the empty-input panic fix, case-insensitive urn prefix, v7 counter and ordering fixes, new serde adapters, NonNilUuid versioned constructors. No build script and no new runtime dependency (gungraun is a dev-dep for benches; the optional rand 0.9 to 0.10 bump sits behind fast-rng; rng.rs is unchanged). The byte-level API vitaminc uses (from_slice, as_bytes, into_bytes, field order) is unchanged; MSRV is now 1.89."
+
 [[audits.wasm-bindgen]]
 who = "Dan Draper <dan@cipherstash.com>"
 criteria = ["safe-to-deploy", "crypto-reviewed"]
