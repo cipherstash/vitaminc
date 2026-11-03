@@ -77,7 +77,7 @@ impl SafeRand {
     /// written against either meaning were wrong for some inputs
     /// (cipherstash/vitaminc#198). The equivalent call is
     /// `next_below(max + 1)` (for `max == u32::MAX` that is the whole word:
-    /// use [`Rng::next_u32`](rand::Rng::next_u32)), or `next_below(n)` when
+    /// use [`Rng::next_u32`]), or `next_below(n)` when
     /// the caller has a length `n` rather than a maximum.
     ///
     /// Besides the power-of-two case, both the value drawn for a given seed

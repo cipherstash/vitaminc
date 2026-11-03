@@ -13,7 +13,7 @@
 //! range. The encoder refuses anything outside it: a larger mantissa would
 //! lose its top bits and take the bytes of another value.
 //!
-//! The layout is documented on [`decimal`](crate::decimal), the public
+//! The layout is documented on [`decimal`](crate::decimal()), the public
 //! function that wraps this encoder, so it is in the published docs.
 //!
 //! ## Constant time

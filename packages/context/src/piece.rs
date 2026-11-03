@@ -2,7 +2,7 @@
 //!
 //! [`ContextPiece`] is the tree a context is made of: text, bytes, integers
 //! and unit at the leaves, lists at the branches. Every context type
-//! describes itself as one through [`IntoContext`], and
+//! describes itself as one through [`IntoContext`](crate::IntoContext), and
 //! [`ContextPiece::encode`] is the only place that turns a tree into bytes.
 //! That is what makes the AEAD's associated data and the PRF's context the
 //! same bytes for the same value: both are views of this encoding, and
