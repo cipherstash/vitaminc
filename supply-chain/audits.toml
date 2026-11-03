@@ -33,6 +33,18 @@ registry publishes audits under the same name, and they are imported as-is.
 """
 implies = "crypto-reviewed"
 
+[[audits.aws-lc-rs]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+delta = "1.17.3 -> 1.18.2"
+notes = "Full read of the delta: ML-DSA stabilised out of unstable, RSA KeyPair::from_components validated with RSA_check_key, out-of-place AEAD seal_out_of_place_scatter with every buffer length checked before EVP_AEAD_CTX_seal_scatter, and 1.18.1's fail-closed tightening of seal_in_place_append_tag (post-Extend length verified before the FFI capacity is passed), streaming-cipher IV-context validation, and RSA digest-algorithm matching enforced on the ParsedPublicKey path. Zeroization only improved (ECDH agree returns Zeroizing<Vec<u8>>, KeyEncryptionKey zeroizes on drop); no change to rand/SystemRandom, AES-GCM, HMAC, nonce or tag handling, and the new branches are on public lengths only. No feature or build.rs change; aws-lc-sys moves 0.43 to 0.46 (AWS-LC 5.2 to 5.11, including the EVP_DecryptUpdate padded-mode fix the new canary tests pin) and is audited separately. One semantic change: hkdf::Salt::from(Okm<Algorithm>) now takes the Salt algorithm from the Okm's requested Algorithm rather than the PRK's; vitaminc does not use that path."
+
+[[audits.aws-lc-sys]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "0.43.0 -> 0.46.0"
+notes = "The vendored aws-lc/ tree is byte-identical to upstream AWS-LC v5.11.0 (fa9bc8d6; 0.43.0 was v5.2.0, 683ebde4), verified by diff -rq against shallow clones of both tags with the only differences being paths excluded by the crate's Cargo.toml include globs; the C and assembly delta was not read line by line. All Rust and build glue outside aws-lc/ was read in full: the build scripts gain size-opt defines (AWS_LC_SYS_SMALL, or opt-level s/z), DEP_AWS_LC_* metadata, Cranelift link-name normalisation and jitterentropy CFLAGS fixes, with no new network, download or filesystem access beyond OUT_DIR. src/*_crypto.rs are rust-bindgen 0.73.2 output whose non-declaration changes are identical across every target, with symbol additions matching the AWS-LC 5.4 to 5.10 APIs; generated-include changes are symbol-list only. The 26 prebuilt NASM objects match the aws-lc-rs repository blobs at tag aws-lc-sys/v0.46.0 and its documented CI generation workflow, but were not rebuilt from source here."
+
 [[audits.digest]]
 who = "Dan Draper <dan@cipherstash.com>"
 criteria = ["safe-to-deploy", "crypto-reviewed"]
