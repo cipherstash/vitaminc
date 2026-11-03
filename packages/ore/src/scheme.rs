@@ -8,7 +8,7 @@
 //! salt the space derives, and encrypts the sealed [`OrderPlaintext`]s of
 //! that space with what it derived; it never sees bytes that skipped the
 //! encoding (the only ways to make a plaintext are
-//! [`order`](crate::order) and [`order_with_nulls`](crate::order_with_nulls))
+//! [`order`](crate::order()) and [`order_with_nulls`](crate::order_with_nulls))
 //! or a salt it could derive differently from another scheme.
 
 use core::cmp::Ordering;
@@ -33,7 +33,7 @@ const SALT_LABEL: &[u8] = b"vitaminc/ore/v1";
 /// One scalar's order term before encryption: bytes whose order is the
 /// value's order, encoded as the target they were made for.
 ///
-/// Only [`order`](crate::order) and [`order_with_nulls`](crate::order_with_nulls)
+/// Only [`order`](crate::order()) and [`order_with_nulls`](crate::order_with_nulls)
 /// build one, so a scheme can rely on the bytes being the
 /// encoding of their target, and on there being at least one: a
 /// fixed-width target encodes to its width, and text and bytes start with

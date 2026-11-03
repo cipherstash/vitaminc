@@ -205,7 +205,7 @@ impl Error for TermsError {
 /// A `Terms` refuses every value [`EncryptSink`] refuses, for the same
 /// [`Unencryptable`](vitaminc_aead::Unencryptable) reason and at the same path, so an index never holds
 /// terms for a value that cannot be stored. It keeps the
-/// [`shape`](vitaminc_aead::shape) rules through the code `EncryptSink`
+/// [`shape`] rules through the code `EncryptSink`
 /// keeps them with: nothing deeper than the transport's depth limit, every
 /// scalar valid for its logical type, every passthrough subtree framable,
 /// no map key given twice, no child sink dropped without a value, and

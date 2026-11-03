@@ -126,6 +126,13 @@ jobs:
           RUSTDOCFLAGS: -D warnings
       - name: README and crate landing-page links (offline)
         run: python3 .github/scripts/check_doc_links.py .
+      - name: docs (all features, private items)
+        # Private items' links are only checked when they are documented, so
+        # the public builds above miss a broken or ambiguous one. This runs
+        # after the link check so its pages cannot satisfy a README link.
+        run: cargo doc --workspace --locked --all-features --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: -D warnings
       - name: doctests (all features)
         run: cargo test --workspace --locked --doc --all-features
       - name: README consumers (native)

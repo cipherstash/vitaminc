@@ -4,7 +4,7 @@
 //! [`Normalized`]: crate::Normalized
 //! [`Term`]: crate::Term
 //! [`Terms`]: crate::Terms
-//! [`decimal`]: crate::decimal
+//! [`decimal`]: crate::decimal()
 //! [`domain::NULL`]: crate::domain::NULL
 //!
 #![deny(missing_docs)]
