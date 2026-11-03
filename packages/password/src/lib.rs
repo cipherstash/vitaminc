@@ -1,3 +1,5 @@
+// These definitions precede the README so rustdoc links to the version being built.
+// The README supplies published-API URLs for GitHub. See docs/documentation.md.
 //! [`Password`]: crate::Password
 //! [`AlphaNumericPassword`]: crate::AlphaNumericPassword
 //! [`AlphaPassword`]: crate::AlphaPassword
@@ -5,8 +7,16 @@
 #![deny(missing_docs, rustdoc::broken_intra_doc_links)]
 #![doc = include_str!("../README.md")]
 
-use vitaminc_protected::{Controlled, OpaqueDebug, Protected};
-use vitaminc_random::{Generatable, RandomError, SafeRand};
+use vitaminc_protected::{Controlled, OpaqueDebug};
+use vitaminc_random::{Generatable, SafeRand};
+
+#[doc(no_inline)]
+pub use vitaminc_protected::Protected;
+#[doc(no_inline)]
+pub use vitaminc_random::RandomError;
+
+#[cfg(test)]
+mod cleanup_tests;
 
 /// Number of letters at the front of [`STANDARD_CHARS`]: `A..=Z` then
 /// `a..=z`. [`AlphaPassword`] draws from `STANDARD_CHARS[..ALPHA_LEN]`.
@@ -31,7 +41,9 @@ const STANDARD_CHARS: [char; 94] = [
 /// [`Generatable::random`] with a securely seeded [`SafeRand`] for a longer
 /// password. Building a generation call with `N < 20` fails compilation.
 /// The 94-character alphabet gives approximately 131 bits at the minimum
-/// length; see the crate's security contract for the bounded-draw bias.
+/// length. Character selection uses [`SafeRand::next_below`]'s near-uniform
+/// bounded draw; see [Randomness and entropy](crate#randomness-and-entropy)
+/// for the bias bound and seed requirements.
 ///
 /// The characters are wiped on drop, and `Debug` reveals no contents. There
 /// is no raw-value constructor, ordinary equality, or implicit string access.
@@ -42,7 +54,7 @@ const STANDARD_CHARS: [char; 94] = [
 /// use vitaminc_password::Password;
 /// let password: Password<20> = Password::generate()?;
 /// let secret = password.into_protected_string();
-/// # Ok::<(), vitaminc_random::RandomError>(())
+/// # Ok::<(), vitaminc_password::RandomError>(())
 /// ```
 #[derive(OpaqueDebug)]
 pub struct Password<const N: usize>(Protected<[char; N]>);
@@ -60,7 +72,7 @@ pub struct Password<const N: usize>(Protected<[char; N]>);
 /// use vitaminc_password::AlphaNumericPassword;
 /// let password: AlphaNumericPassword<22> = AlphaNumericPassword::generate()?;
 /// let secret = password.into_protected_string();
-/// # Ok::<(), vitaminc_random::RandomError>(())
+/// # Ok::<(), vitaminc_password::RandomError>(())
 /// ```
 #[derive(OpaqueDebug)]
 pub struct AlphaNumericPassword<const N: usize>(Password<N>);
@@ -78,7 +90,7 @@ pub struct AlphaNumericPassword<const N: usize>(Password<N>);
 /// use vitaminc_password::AlphaPassword;
 /// let password: AlphaPassword<23> = AlphaPassword::generate()?;
 /// let secret = password.into_protected_string();
-/// # Ok::<(), vitaminc_random::RandomError>(())
+/// # Ok::<(), vitaminc_password::RandomError>(())
 /// ```
 #[derive(OpaqueDebug)]
 pub struct AlphaPassword<const N: usize>(Password<N>);
@@ -94,7 +106,7 @@ impl Password<20> {
     ///
     /// ```
     /// let password = vitaminc_password::Password::generate()?;
-    /// # Ok::<(), vitaminc_random::RandomError>(())
+    /// # Ok::<(), vitaminc_password::RandomError>(())
     /// ```
     pub fn generate() -> Result<Self, RandomError> {
         Self::random(&mut SafeRand::from_entropy()?)
@@ -112,7 +124,7 @@ impl AlphaNumericPassword<22> {
     ///
     /// ```
     /// let password = vitaminc_password::AlphaNumericPassword::generate()?;
-    /// # Ok::<(), vitaminc_random::RandomError>(())
+    /// # Ok::<(), vitaminc_password::RandomError>(())
     /// ```
     pub fn generate() -> Result<Self, RandomError> {
         Self::random(&mut SafeRand::from_entropy()?)
@@ -130,7 +142,7 @@ impl AlphaPassword<23> {
     ///
     /// ```
     /// let password = vitaminc_password::AlphaPassword::generate()?;
-    /// # Ok::<(), vitaminc_random::RandomError>(())
+    /// # Ok::<(), vitaminc_password::RandomError>(())
     /// ```
     pub fn generate() -> Result<Self, RandomError> {
         Self::random(&mut SafeRand::from_entropy()?)
@@ -138,6 +150,32 @@ impl AlphaPassword<23> {
 }
 
 impl<const N: usize> Password<N> {
+    /// The number of ASCII characters (and encoded bytes), without exposing them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let password = vitaminc_password::Password::generate()?;
+    /// assert_eq!(password.len(), 20);
+    /// # Ok::<(), vitaminc_password::RandomError>(())
+    /// ```
+    pub const fn len(&self) -> usize {
+        N
+    }
+
+    /// Whether the password is empty. Generated passwords are always nonempty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let password = vitaminc_password::Password::generate()?;
+    /// assert!(!password.is_empty());
+    /// # Ok::<(), vitaminc_password::RandomError>(())
+    /// ```
+    pub const fn is_empty(&self) -> bool {
+        N == 0
+    }
+
     const VALID_LENGTH: () = assert!(N >= 20, "Password requires at least 20 characters");
 
     /// Consume the password, wiping its source array, and export a plain string.
@@ -152,7 +190,7 @@ impl<const N: usize> Password<N> {
     /// let exported = vitaminc_password::Password::generate()?.into_unprotected_string();
     /// assert_eq!(exported.len(), 20);
     /// // The owner of `exported` is now responsible for its cleanup.
-    /// # Ok::<(), vitaminc_random::RandomError>(())
+    /// # Ok::<(), vitaminc_password::RandomError>(())
     /// ```
     pub fn into_unprotected_string(self) -> String {
         self.into_protected_string().risky_unwrap()
@@ -167,22 +205,46 @@ impl<const N: usize> Password<N> {
     /// # Examples
     ///
     /// ```
-    /// use vitaminc_protected::Controlled;
-    /// let secret = vitaminc_password::Password::generate()?.into_protected_string();
-    /// assert_eq!(secret.risky_ref().len(), 20);
-    /// # Ok::<(), vitaminc_random::RandomError>(())
+    /// let password = vitaminc_password::Password::generate()?;
+    /// assert_eq!(password.len(), 20);
+    /// let secret = password.into_protected_string();
+    /// # Ok::<(), vitaminc_password::RandomError>(())
     /// ```
     pub fn into_protected_string(self) -> Protected<String> {
         // Only the generators construct Password: every char is ASCII. Keeping
         // the source wrapped (rather than using Controlled::map) ensures its
         // drop still wipes it. Protect the destination before writing secrets.
-        let mut output = Protected::new(String::with_capacity(N));
-        output.extend(self.0.risky_ref().iter().copied());
-        output
+        protected_string(self.0.risky_ref().iter().copied())
     }
 }
 
 impl<const N: usize> AlphaNumericPassword<N> {
+    /// The number of ASCII characters (and encoded bytes), without exposing them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let password = vitaminc_password::AlphaNumericPassword::generate()?;
+    /// assert_eq!(password.len(), 22);
+    /// # Ok::<(), vitaminc_password::RandomError>(())
+    /// ```
+    pub const fn len(&self) -> usize {
+        N
+    }
+
+    /// Whether the password is empty. Generated passwords are always nonempty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let password = vitaminc_password::AlphaNumericPassword::generate()?;
+    /// assert!(!password.is_empty());
+    /// # Ok::<(), vitaminc_password::RandomError>(())
+    /// ```
+    pub const fn is_empty(&self) -> bool {
+        N == 0
+    }
+
     const VALID_LENGTH: () = assert!(
         N >= 22,
         "AlphaNumericPassword requires at least 22 characters"
@@ -196,7 +258,7 @@ impl<const N: usize> AlphaNumericPassword<N> {
     /// ```
     /// let exported = vitaminc_password::AlphaNumericPassword::generate()?.into_unprotected_string();
     /// assert_eq!(exported.len(), 22);
-    /// # Ok::<(), vitaminc_random::RandomError>(())
+    /// # Ok::<(), vitaminc_password::RandomError>(())
     /// ```
     pub fn into_unprotected_string(self) -> String {
         self.0.into_unprotected_string()
@@ -209,7 +271,7 @@ impl<const N: usize> AlphaNumericPassword<N> {
     ///
     /// ```
     /// let secret = vitaminc_password::AlphaNumericPassword::generate()?.into_protected_string();
-    /// # Ok::<(), vitaminc_random::RandomError>(())
+    /// # Ok::<(), vitaminc_password::RandomError>(())
     /// ```
     pub fn into_protected_string(self) -> Protected<String> {
         self.0.into_protected_string()
@@ -217,6 +279,32 @@ impl<const N: usize> AlphaNumericPassword<N> {
 }
 
 impl<const N: usize> AlphaPassword<N> {
+    /// The number of ASCII characters (and encoded bytes), without exposing them.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let password = vitaminc_password::AlphaPassword::generate()?;
+    /// assert_eq!(password.len(), 23);
+    /// # Ok::<(), vitaminc_password::RandomError>(())
+    /// ```
+    pub const fn len(&self) -> usize {
+        N
+    }
+
+    /// Whether the password is empty. Generated passwords are always nonempty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let password = vitaminc_password::AlphaPassword::generate()?;
+    /// assert!(!password.is_empty());
+    /// # Ok::<(), vitaminc_password::RandomError>(())
+    /// ```
+    pub const fn is_empty(&self) -> bool {
+        N == 0
+    }
+
     const VALID_LENGTH: () = assert!(N >= 23, "AlphaPassword requires at least 23 characters");
 
     /// Export a plain string, transferring cleanup responsibility to its owner.
@@ -227,7 +315,7 @@ impl<const N: usize> AlphaPassword<N> {
     /// ```
     /// let exported = vitaminc_password::AlphaPassword::generate()?.into_unprotected_string();
     /// assert_eq!(exported.len(), 23);
-    /// # Ok::<(), vitaminc_random::RandomError>(())
+    /// # Ok::<(), vitaminc_password::RandomError>(())
     /// ```
     pub fn into_unprotected_string(self) -> String {
         self.0.into_unprotected_string()
@@ -240,11 +328,23 @@ impl<const N: usize> AlphaPassword<N> {
     ///
     /// ```
     /// let secret = vitaminc_password::AlphaPassword::generate()?.into_protected_string();
-    /// # Ok::<(), vitaminc_random::RandomError>(())
+    /// # Ok::<(), vitaminc_password::RandomError>(())
     /// ```
     pub fn into_protected_string(self) -> Protected<String> {
         self.0.into_protected_string()
     }
+}
+
+// Callers supply exactly the generated ASCII characters, so the iterator's
+// length is the required byte capacity. Keep this helper private: arbitrary
+// Unicode input could outgrow that allocation. Iterating explicitly also lets
+// the cleanup test inject an unwind after a known number of bytes are written.
+fn protected_string(chars: impl ExactSizeIterator<Item = char>) -> Protected<String> {
+    let mut output = Protected::new(String::with_capacity(chars.len()));
+    for c in chars {
+        output.update(|string| string.push(c));
+    }
+    output
 }
 
 /// `N` characters drawn independently from `set`, each with one fixed-count
@@ -342,6 +442,8 @@ mod tests {
             ($ty:ident, $n:literal, $inner:expr) => {{
                 let mut rng = SafeRand::from_seed(SEED);
                 let value = $ty::<$n>::random(&mut rng).unwrap();
+                assert_eq!(value.len(), $n);
+                assert!(!value.is_empty());
                 let inner: fn(&$ty<$n>) -> &Protected<[char; $n]> = $inner;
                 let source = inner(&value);
                 let expected: String = source.risky_ref().iter().collect();
@@ -359,16 +461,16 @@ mod tests {
             }};
         }
         use vitaminc_protected::Protected;
-        check!(Password, 20, |p: &Password<20>| &p.0);
-        check!(AlphaNumericPassword, 22, |p: &AlphaNumericPassword<22>| &p
-            .0
-             .0);
-        check!(AlphaPassword, 23, |p: &AlphaPassword<23>| &p.0 .0);
-        check!(Password, 128, |p: &Password<128>| &p.0);
-        check!(AlphaNumericPassword, 128, |p: &AlphaNumericPassword<
-            128,
-        >| &p.0 .0);
-        check!(AlphaPassword, 128, |p: &AlphaPassword<128>| &p.0 .0);
+        check!(Password, 20, |Password(chars)| chars);
+        check!(AlphaNumericPassword, 22, |AlphaNumericPassword(
+            Password(chars),
+        )| chars);
+        check!(AlphaPassword, 23, |AlphaPassword(Password(chars))| chars);
+        check!(Password, 128, |Password(chars)| chars);
+        check!(AlphaNumericPassword, 128, |AlphaNumericPassword(
+            Password(chars),
+        )| chars);
+        check!(AlphaPassword, 128, |AlphaPassword(Password(chars))| chars);
     }
 
     #[test]

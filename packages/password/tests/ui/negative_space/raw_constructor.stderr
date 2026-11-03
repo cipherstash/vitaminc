@@ -1,10 +1,10 @@
 error[E0599]: no associated function or constant named `new` found for struct `Password<N>` in the current scope
- --> tests/ui/fail/raw_constructor.rs:4:23
+ --> tests/ui/negative_space/raw_constructor.rs:4:23
   |
 4 |     let _ = Password::new(['a'; 20]);
   |                       ^^^ associated function or constant not found in `Password<_>`
   |
-note: if you're trying to build a new `Password<_>`, consider using `Password::<20>::generate` which returns `Result<Password<20>, vitaminc_random::RandomError>`
+note: if you're trying to build a new `Password<_>`, consider using `Password::<20>::generate` which returns `Result<Password<20>, RandomError>`
  --> src/lib.rs
   |
   |     pub fn generate() -> Result<Self, RandomError> {

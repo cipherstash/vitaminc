@@ -7,11 +7,12 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 
-use vitaminc_password::{AlphaNumericPassword, AlphaPassword, Password};
+use crate::{AlphaNumericPassword, AlphaPassword, Password};
 use vitaminc_protected::{Controlled, Protected};
 use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 
 thread_local! {
+    static LAST_ALLOCATION: Cell<*mut u8> = const { Cell::new(std::ptr::null_mut()) };
     static COUNTING: Cell<bool> = const { Cell::new(false) };
     static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
     static REALLOCATIONS: Cell<usize> = const { Cell::new(0) };
@@ -35,7 +36,11 @@ unsafe impl GlobalAlloc for Watching {
             let _ = ALLOCATIONS.try_with(|count| count.set(count.get() + 1));
         }
         // SAFETY: forwarded allocator request with unchanged layout.
-        unsafe { System.alloc(layout) }
+        let ptr = unsafe { System.alloc(layout) };
+        if COUNTING.try_with(Cell::get).unwrap_or(false) {
+            let _ = LAST_ALLOCATION.try_with(|last| last.set(ptr));
+        }
+        ptr
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
@@ -73,7 +78,7 @@ unsafe impl GlobalAlloc for Watching {
 #[global_allocator]
 static ALLOCATOR: Watching = Watching;
 
-fn check_conversion(convert: impl FnOnce() -> Protected<String>, unwind: bool) {
+fn check_conversion(convert: impl FnOnce() -> Protected<String>, finish: fn(Protected<String>)) {
     ALLOCATIONS.set(0);
     REALLOCATIONS.set(0);
     COUNTING.set(true);
@@ -89,20 +94,23 @@ fn check_conversion(convert: impl FnOnce() -> Protected<String>, unwind: bool) {
     let contents = output.risky_ref();
     assert!(!contents.is_empty());
     assert!(contents.bytes().all(|byte| byte != 0));
+    watch(contents.as_ptr().cast_mut(), contents.len());
+    finish(output);
+    assert_freed_wiped();
+}
+
+// Register only a live allocation and a prefix known to have been initialized.
+// Pointer identity is observed here; bytes are read only inside dealloc, using
+// the pointer that System is about to free, with its own valid provenance.
+fn watch(ptr: *mut u8, initialized_len: usize) {
+    assert!(!ptr.is_null());
     FREED.store(false, Ordering::SeqCst);
     WIPED.store(false, Ordering::SeqCst);
-    LENGTH.store(contents.len(), Ordering::SeqCst);
-    WATCHED.store(contents.as_ptr().cast_mut(), Ordering::SeqCst);
+    LENGTH.store(initialized_len, Ordering::SeqCst);
+    WATCHED.store(ptr, Ordering::SeqCst);
+}
 
-    if unwind {
-        let result = std::panic::catch_unwind(move || {
-            let _owned = output;
-            panic!("exercise secret cleanup during unwinding");
-        });
-        assert!(result.is_err());
-    } else {
-        drop(output);
-    }
+fn assert_freed_wiped() {
     assert!(FREED.load(Ordering::SeqCst), "allocation was not freed");
     assert!(
         WIPED.load(Ordering::SeqCst),
@@ -110,23 +118,72 @@ fn check_conversion(convert: impl FnOnce() -> Protected<String>, unwind: bool) {
     );
 }
 
+fn drop_while_unwinding(output: Protected<String>) {
+    let result = std::panic::catch_unwind(move || {
+        let _owned = output;
+        panic!("exercise secret cleanup during unwinding");
+    });
+    assert!(result.is_err());
+}
+
+fn check_password<P: Generatable>(
+    rng: &mut SafeRand,
+    convert: fn(P) -> Protected<String>,
+    finish: fn(Protected<String>),
+) {
+    let password = P::random(rng).unwrap();
+    check_conversion(|| convert(password), finish);
+}
+
+fn check_partial_population_unwind() {
+    ALLOCATIONS.set(0);
+    REALLOCATIONS.set(0);
+    COUNTING.set(true);
+    let result = std::panic::catch_unwind(|| {
+        let chars = (0..20).map(|index| {
+            if index == 10 {
+                // The production helper pushes each previous char before asking
+                // for the next. Exactly ten ASCII bytes are initialized. Stop
+                // counting before the panic runtime can allocate its payload.
+                COUNTING.set(false);
+                watch(LAST_ALLOCATION.get(), 10);
+                panic!("interrupt a partially populated password string");
+            }
+            'x'
+        });
+        crate::protected_string(chars)
+    });
+    COUNTING.set(false);
+    assert!(result.is_err());
+    assert_eq!(ALLOCATIONS.get(), 1);
+    assert_eq!(REALLOCATIONS.get(), 0);
+    assert_freed_wiped();
+}
+
 // One test owns the observation state, so tests never race for WATCHED. The
-// count is thread-local so allocations by the test harness do not affect it.
+// count is thread-local so allocations by other unit tests do not affect it.
 #[test]
 fn conversions_allocate_once_and_wipe_on_drop_and_unwind() {
     let mut rng = SafeRand::from_seed([7; 32]);
-    for unwind in [false, true] {
-        let password = Password::<20>::random(&mut rng).unwrap();
-        check_conversion(|| password.into_protected_string(), unwind);
-        let password = AlphaNumericPassword::<22>::random(&mut rng).unwrap();
-        check_conversion(|| password.into_protected_string(), unwind);
-        let password = AlphaPassword::<23>::random(&mut rng).unwrap();
-        check_conversion(|| password.into_protected_string(), unwind);
-        let password = Password::<128>::random(&mut rng).unwrap();
-        check_conversion(|| password.into_protected_string(), unwind);
-        let password = AlphaNumericPassword::<128>::random(&mut rng).unwrap();
-        check_conversion(|| password.into_protected_string(), unwind);
-        let password = AlphaPassword::<128>::random(&mut rng).unwrap();
-        check_conversion(|| password.into_protected_string(), unwind);
+    for finish in [drop::<Protected<String>>, drop_while_unwinding] {
+        check_password(&mut rng, Password::<20>::into_protected_string, finish);
+        check_password(
+            &mut rng,
+            AlphaNumericPassword::<22>::into_protected_string,
+            finish,
+        );
+        check_password(&mut rng, AlphaPassword::<23>::into_protected_string, finish);
+        check_password(&mut rng, Password::<128>::into_protected_string, finish);
+        check_password(
+            &mut rng,
+            AlphaNumericPassword::<128>::into_protected_string,
+            finish,
+        );
+        check_password(
+            &mut rng,
+            AlphaPassword::<128>::into_protected_string,
+            finish,
+        );
     }
+    check_partial_population_unwind();
 }

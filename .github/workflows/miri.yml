@@ -79,7 +79,12 @@ jobs:
           MIRIFLAGS: "-Zmiri-tree-borrows -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check"
         run: cargo +nightly miri test -p vitaminc-protected --target-dir target/miri-strict
 
+      - name: miri test (password cleanup)
+        # Filter the library tests to the deterministic cleanup tests; the
+        # default-constructor tests require OS entropy, which Miri cannot supply.
+        run: cargo +nightly miri test -p vitaminc-password --lib cleanup_tests
+
       - name: miri test, strict models (password cleanup)
         env:
           MIRIFLAGS: "-Zmiri-tree-borrows -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check"
-        run: cargo +nightly miri test -p vitaminc-password --test cleanup --target-dir target/miri-strict
+        run: cargo +nightly miri test -p vitaminc-password --lib cleanup_tests --target-dir target/miri-strict

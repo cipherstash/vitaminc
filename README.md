@@ -82,17 +82,18 @@ cargo add vitaminc --features password
 ```rust
 # #[cfg(feature = "password")]
 # {
-use vitaminc::password::{AlphaNumericPassword, AlphaPassword, Password};
-use vitaminc::protected::Controlled;
-use vitaminc::random::RandomError;
+use vitaminc::password::{AlphaNumericPassword, AlphaPassword, Password, RandomError};
 
 fn example() -> Result<(), RandomError> {
-    let secret = Password::generate()?.into_protected_string();
-    assert_eq!(secret.risky_ref().len(), 20);
-    let alphanumeric = AlphaNumericPassword::generate()?.into_protected_string();
-    assert_eq!(alphanumeric.risky_ref().len(), 22);
-    let alphabetic = AlphaPassword::generate()?.into_protected_string();
-    assert_eq!(alphabetic.risky_ref().len(), 23);
+    let password = Password::generate()?;
+    assert_eq!(password.len(), 20);
+    let secret = password.into_protected_string();
+    // Dropping the protected string wipes its contents.
+    drop(secret);
+    let alphanumeric = AlphaNumericPassword::generate()?;
+    assert_eq!(alphanumeric.len(), 22);
+    let alphabetic = AlphaPassword::generate()?;
+    assert_eq!(alphabetic.len(), 23);
     Ok(())
 }
 
