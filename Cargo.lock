@@ -2720,6 +2720,7 @@ dependencies = [
  "vitaminc-protected",
  "vitaminc-random",
  "vitaminc-traits",
+ "zeroize",
 ]
 
 [[package]]

@@ -63,9 +63,12 @@ name = "prf_normalize"
 path = "tests/prf_normalize.rs"
 required-features = ["prf", "normalize"]
 
+[dev-dependencies]
+zeroize.workspace = true
+
 [dev-dependencies.vitaminc]
 path = "./"
-features = ["protected"]
+features = ["protected", "password", "random", "encrypt"]
 default-features = false
 
 # Workspace dependencies whose declared MSRVs apply to this feature scenario.

@@ -28,13 +28,28 @@ EXAMPLES = {
                {'vitaminc-random': []}),
     'random-derive': ('packages/random/README.md', 'Generatable', 1,
                       {'vitaminc-random': []}),
-    'facade': ('README.md', 'Usage', 0, {'vitaminc': ['protected']}),
+    'facade': ('README.md', 'Installation and usage', 0, {'vitaminc': ['protected']}),
+    'direct': ('README.md', 'Installation and usage', 1, {'vitaminc-protected': []}),
+    'secret-type': ('README.md', 'Examples', 0,
+                    {'vitaminc-protected': [], 'zeroize': ['derive']}),
+    'wrappers': ('README.md', 'Examples', 1, {'vitaminc-protected': []}),
     'password': ('packages/password/README.md', 'Quick Start', 0,
                  {'vitaminc-password': []}),
     'password-batch': ('packages/password/README.md', 'Longer passwords and batches', 0,
                        {'vitaminc-password': [], 'vitaminc-random': []}),
-    'password-facade': ('README.md', 'Generate passwords', 0,
-                        {'vitaminc': ['password']}),
+    'readme-password': ('README.md', 'Examples', 2, {'vitaminc-password': []}),
+    'password-facade': ('README.md', 'Examples', 3, {'vitaminc': ['password']}),
+    'random-token': ('README.md', 'Examples', 4,
+                     {'vitaminc-random': [], 'vitaminc-protected': []}),
+    'context-encryption': ('README.md', 'Examples', 5,
+                           {'vitaminc-encrypt': [], 'vitaminc-random': [], 'vitaminc-protected': []}),
+    'struct-encryption': ('README.md', 'Examples', 6,
+                          {'vitaminc-aead': [], 'vitaminc-encrypt': [],
+                           'vitaminc-random': [], 'vitaminc-protected': []}),
+    'locked-key': ('README.md', 'Examples', 7,
+                   {'vitaminc-protected': [], 'vitaminc-random': []}),
+    'escape-hatches': ('README.md', 'Escape hatches - use with care!', 0,
+                        {'vitaminc-protected': []}),
     'storage': ('packages/aead-frame/README.md', 'Storage profile (feature `serde`)', 0,
                 {'vitaminc-aead-frame': ['serde'], 'vitaminc-protected': []}),
 }
@@ -82,6 +97,7 @@ def main():
         defaults, members = workspace(root)
         packages = {m['package']['name']: path for path, m in members.items()}
         allowed = locked_packages(root / 'Cargo.lock')
+        registry = tomllib.loads((root / 'Cargo.toml').read_text())['workspace']['dependencies']
         env = dict(os.environ)
         # Share build artifacts, but never dependency resolution or features.
         env['CARGO_TARGET_DIR'] = str(root / 'target/doc-consumers')
@@ -96,7 +112,13 @@ def main():
                             f'rust-version = {json.dumps(defaults["rust-version"])}',
                             'publish = false\n\n[workspace]\n\n[dependencies]']
                 for dependency, features in dependencies.items():
-                    manifest.append(f'{dependency} = {{ path = {json.dumps(str(packages[dependency]))}, '
+                    if dependency in packages:
+                        source = f'path = {json.dumps(str(packages[dependency]))}'
+                    else:
+                        spec = registry[dependency]
+                        version = spec if isinstance(spec, str) else spec['version']
+                        source = f'version = {json.dumps(version)}'
+                    manifest.append(f'{dependency} = {{ {source}, '
                                     f'default-features = false, features = {json.dumps(features)} }}')
                 (directory / 'Cargo.toml').write_text('\n'.join(manifest) + '\n')
                 (directory / 'src/main.rs').write_text(example((root / readme).read_text(), heading, index))
