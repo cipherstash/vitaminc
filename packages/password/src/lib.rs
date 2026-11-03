@@ -394,6 +394,7 @@ mod tests {
     use crate::{AlphaNumericPassword, AlphaPassword, ALPHANUMERIC_LEN, ALPHA_LEN, STANDARD_CHARS};
 
     use super::Password;
+    use proptest::prelude::*;
     use vitaminc_protected::Controlled;
     use vitaminc_random::{Generatable, SafeRand, SeedableRng};
 
@@ -404,12 +405,11 @@ mod tests {
     // miss a generate() implementation that accidentally uses a fixed seed.
     // This is a statistical regression check, not a uniqueness guarantee.
     // With 2–32 passwords per batch and >128 bits per password, an accidental
-    // collision across QuickCheck's 100 cases per type is negligible.
+    // collision across 100 cases per type is negligible.
     fn distinct_batch(
-        extra: u8,
+        count: usize,
         mut generate: impl FnMut() -> Result<crate::Protected<String>, crate::RandomError>,
     ) -> bool {
-        let count = 2 + usize::from(extra % 31);
         let mut previous: Vec<crate::Protected<String>> = Vec::with_capacity(count);
         for _ in 0..count {
             let password = generate().expect("OS-seeded password generation");
@@ -424,25 +424,29 @@ mod tests {
         true
     }
 
-    #[quickcheck_macros::quickcheck]
-    fn standard_generations_are_distinct(extra: u8) -> bool {
-        distinct_batch(extra, || {
-            Password::generate().map(Password::into_protected_string)
-        })
-    }
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
 
-    #[quickcheck_macros::quickcheck]
-    fn alphanumeric_generations_are_distinct(extra: u8) -> bool {
-        distinct_batch(extra, || {
-            AlphaNumericPassword::generate().map(AlphaNumericPassword::into_protected_string)
-        })
-    }
+        #[test]
+        fn standard_generations_are_distinct(count in 2usize..=32) {
+            prop_assert!(distinct_batch(count, || {
+                Password::generate().map(Password::into_protected_string)
+            }), "duplicate password in batch");
+        }
 
-    #[quickcheck_macros::quickcheck]
-    fn alpha_generations_are_distinct(extra: u8) -> bool {
-        distinct_batch(extra, || {
-            AlphaPassword::generate().map(AlphaPassword::into_protected_string)
-        })
+        #[test]
+        fn alphanumeric_generations_are_distinct(count in 2usize..=32) {
+            prop_assert!(distinct_batch(count, || {
+                AlphaNumericPassword::generate().map(AlphaNumericPassword::into_protected_string)
+            }), "duplicate password in batch");
+        }
+
+        #[test]
+        fn alpha_generations_are_distinct(count in 2usize..=32) {
+            prop_assert!(distinct_batch(count, || {
+                AlphaPassword::generate().map(AlphaPassword::into_protected_string)
+            }), "duplicate password in batch");
+        }
     }
 
     #[test]

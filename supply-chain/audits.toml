@@ -81,6 +81,18 @@ criteria = "safe-to-deploy"
 delta = "3.4.0 -> 3.4.1"
 notes = "One doc-comment path fix in src/wasi_heap_sync.rs; no code change. build.rs unchanged."
 
+[[audits.proptest]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-run"
+version = "1.12.0"
+notes = "Reviewed the published crates.io package for use as a dev-dependency. No build script or network client. Reviewed manifest/features, proptest and assertion macro expansion, runner and shrink/rejection limits, RNG setup, config environment parsing, failure-persistence paths and append-only writes, fork replay and child handling, and the feature-gated unsafe panic-hook and hardware-RNG code. Environment access is for PROPTEST configuration; file writes are documented regression seeds and configured fork replay files; child execution is the test executable through rusty-fork. The password tests enable only std, leaving fork, timeout, hardware-rng, handle-panics and the optional proc macro disabled; their generated inputs contain only batch sizes, so persistence and diagnostic output contain no passwords. This is a safe-to-run review, not a cryptographic or randomness-quality certification. Agent-prepared review for approval in PR #592."
+
+[[audits.rand_xorshift]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-run"
+version = "0.5.0"
+notes = "Reviewed the complete published src/lib.rs and Cargo manifests. no_std with forbid(unsafe_code), no build script, and no filesystem, environment, process or network access. The only required dependency is rand_core 0.10; optional serde supplies serialization. State updates are fixed integer shifts and XORs; seed conversion uses fixed-size arrays and rand_core utilities. from_rng and try_from_rng retry only all-zero seeds. Used transitively by Proptest to generate test inputs, never to generate application passwords. Safe-to-run only: XorShift is explicitly not a cryptographic RNG. Agent-prepared review for approval in PR #592."
+
 [[audits.serde_json]]
 who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"

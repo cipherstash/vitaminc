@@ -18,7 +18,6 @@ vitaminc-random = { version = "0.8.1", path = "../random" }
 vitaminc-protected = { version = "0.8.1", path = "../protected" }
 
 [dev-dependencies]
-quickcheck = "1.1.0"
-quickcheck_macros = "1.2.0"
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 serde = { workspace = true }
 trybuild = "1.0.118"
