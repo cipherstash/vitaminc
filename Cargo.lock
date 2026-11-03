@@ -2865,6 +2865,8 @@ dependencies = [
 name = "vitaminc-password"
 version = "0.8.1"
 dependencies = [
+ "quickcheck",
+ "quickcheck_macros",
  "serde",
  "trybuild",
  "vitaminc-protected",

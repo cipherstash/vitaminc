@@ -400,6 +400,51 @@ mod tests {
     const SEED: [u8; 32] = [7u8; 32];
     const SAMPLES: usize = 512;
 
+    // Exercise the public, OS-seeded path: testing a caller-seeded RNG would
+    // miss a generate() implementation that accidentally uses a fixed seed.
+    // This is a statistical regression check, not a uniqueness guarantee.
+    // With 2–32 passwords per batch and >128 bits per password, an accidental
+    // collision across QuickCheck's 100 cases per type is negligible.
+    fn distinct_batch(
+        extra: u8,
+        mut generate: impl FnMut() -> Result<crate::Protected<String>, crate::RandomError>,
+    ) -> bool {
+        let count = 2 + usize::from(extra % 31);
+        let mut previous: Vec<crate::Protected<String>> = Vec::with_capacity(count);
+        for _ in 0..count {
+            let password = generate().expect("OS-seeded password generation");
+            if previous
+                .iter()
+                .any(|other| other.risky_ref() == password.risky_ref())
+            {
+                return false;
+            }
+            previous.push(password);
+        }
+        true
+    }
+
+    #[quickcheck_macros::quickcheck]
+    fn standard_generations_are_distinct(extra: u8) -> bool {
+        distinct_batch(extra, || {
+            Password::generate().map(Password::into_protected_string)
+        })
+    }
+
+    #[quickcheck_macros::quickcheck]
+    fn alphanumeric_generations_are_distinct(extra: u8) -> bool {
+        distinct_batch(extra, || {
+            AlphaNumericPassword::generate().map(AlphaNumericPassword::into_protected_string)
+        })
+    }
+
+    #[quickcheck_macros::quickcheck]
+    fn alpha_generations_are_distinct(extra: u8) -> bool {
+        distinct_batch(extra, || {
+            AlphaPassword::generate().map(AlphaPassword::into_protected_string)
+        })
+    }
+
     #[test]
     fn defaults_have_the_promised_types_lengths_and_alphabets() -> Result<(), crate::RandomError> {
         let standard: Password<20> = Password::generate()?;
