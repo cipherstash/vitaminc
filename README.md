@@ -27,6 +27,7 @@ Vitamin C is in active development and aims to address the following:
 | --- | --- |
 | Encrypt and decrypt Rust values with AES-256-GCM | [`vitaminc-encrypt`](https://github.com/cipherstash/vitaminc/tree/main/packages/encrypt) |
 | Keep sensitive values out of debug output and wipe them on drop | [`vitaminc-protected`](https://github.com/cipherstash/vitaminc/tree/main/packages/protected) |
+| Generate protected passwords | [`vitaminc-password`](https://github.com/cipherstash/vitaminc/tree/main/packages/password) |
 | Generate cryptographic randomness | [`vitaminc-random`](https://github.com/cipherstash/vitaminc/tree/main/packages/random) |
 | Describe structured values or implement an encryption backend | [`vitaminc-aead`](https://github.com/cipherstash/vitaminc/tree/main/packages/aead), with [`vitaminc-context`](https://github.com/cipherstash/vitaminc/tree/main/packages/context) for associated data |
 | Derive pseudorandom values or equality-index terms | [`vitaminc-prf`](https://github.com/cipherstash/vitaminc/tree/main/packages/prf) for the interfaces, [`vitaminc-hmac`](https://github.com/cipherstash/vitaminc/tree/main/packages/hmac) for HMAC-SHA256, and [`vitaminc-normalize`](https://github.com/cipherstash/vitaminc/tree/main/packages/normalize) for equality encodings |
@@ -67,6 +68,42 @@ assert!(debug.contains("***"));
 assert!(!debug.contains("example-token"));
 ```
 
+## Generate passwords
+
+Enable the `password` feature to generate passwords and keep their strings
+protected. The defaults exceed 128 bits with a securely seeded RNG: 20 standard,
+22 alphanumeric, or 23 alphabetic characters. The feature also enables the
+`protected` and `random` modules.
+
+```plaintext
+cargo add vitaminc --features password
+```
+
+```rust
+# #[cfg(feature = "password")]
+# {
+use vitaminc::password::{AlphaNumericPassword, AlphaPassword, Password};
+use vitaminc::protected::Controlled;
+use vitaminc::random::RandomError;
+
+fn example() -> Result<(), RandomError> {
+    let secret = Password::generate()?.into_protected_string();
+    assert_eq!(secret.risky_ref().len(), 20);
+    let alphanumeric = AlphaNumericPassword::generate()?.into_protected_string();
+    assert_eq!(alphanumeric.risky_ref().len(), 22);
+    let alphabetic = AlphaPassword::generate()?.into_protected_string();
+    assert_eq!(alphabetic.risky_ref().len(), 23);
+    Ok(())
+}
+
+if let Err(error) = example() {
+    eprintln!("Password generation failed: {error}");
+    std::process::exit(1);
+}
+# }
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
 ## Compatibility
 
 The minimum supported Rust version (MSRV) is <!-- msrv:workspace -->**1.89.0**<!-- /msrv -->, except for
@@ -94,6 +131,7 @@ crate. Some also enable supporting facade features:
 | Feature | Also enables |
 | --- | --- |
 | `context`, `permutation` | `protected` |
+| `password` | `protected`, `random` |
 | `prf` | `context` |
 | `hmac` | `prf` |
 | `async-traits`, `aws-kms` | `traits` |
@@ -118,11 +156,9 @@ crate directly and enable its feature; the facade does not forward them.
 | `normalize`  | [`vitaminc-normalize`](https://github.com/cipherstash/vitaminc/tree/main/packages/normalize) | [![crates.io](https://img.shields.io/crates/v/vitaminc-normalize.svg)](https://crates.io/crates/vitaminc-normalize) | [![docs.rs](https://docs.rs/vitaminc-normalize/badge.svg)](https://docs.rs/vitaminc-normalize) |
 | `ore`  | [`vitaminc-ore`](https://github.com/cipherstash/vitaminc/tree/main/packages/ore) | [![crates.io](https://img.shields.io/crates/v/vitaminc-ore.svg)](https://crates.io/crates/vitaminc-ore) | [![docs.rs](https://docs.rs/vitaminc-ore/badge.svg)](https://docs.rs/vitaminc-ore) |
 | `aws-kms`  | [`vitaminc-kms`](https://github.com/cipherstash/vitaminc/tree/main/packages/kms) | [![crates.io](https://img.shields.io/crates/v/vitaminc-kms.svg)](https://crates.io/crates/vitaminc-kms) | [![docs.rs](https://docs.rs/vitaminc-kms/badge.svg)](https://docs.rs/vitaminc-kms) |
-| —¹  | [`vitaminc-password`](https://github.com/cipherstash/vitaminc/tree/main/packages/password) | [![crates.io](https://img.shields.io/crates/v/vitaminc-password.svg)](https://crates.io/crates/vitaminc-password) | [![docs.rs](https://docs.rs/vitaminc-password/badge.svg)](https://docs.rs/vitaminc-password) |
+| `password` | [`vitaminc-password`](https://github.com/cipherstash/vitaminc/tree/main/packages/password) | [![crates.io](https://img.shields.io/crates/v/vitaminc-password.svg)](https://crates.io/crates/vitaminc-password) | [![docs.rs](https://docs.rs/vitaminc-password/badge.svg)](https://docs.rs/vitaminc-password) |
 | `permutation`  | [`vitaminc-permutation`](https://github.com/cipherstash/vitaminc/tree/main/packages/permutation) | [![crates.io](https://img.shields.io/crates/v/vitaminc-permutation.svg)](https://crates.io/crates/vitaminc-permutation) | [![docs.rs](https://docs.rs/vitaminc-permutation/badge.svg)](https://docs.rs/vitaminc-permutation) |
 | `prf`  | [`vitaminc-prf`](https://github.com/cipherstash/vitaminc/tree/main/packages/prf) | [![crates.io](https://img.shields.io/crates/v/vitaminc-prf.svg)](https://crates.io/crates/vitaminc-prf) | [![docs.rs](https://docs.rs/vitaminc-prf/badge.svg)](https://docs.rs/vitaminc-prf) |
 | `protected`  | [`vitaminc-protected`](https://github.com/cipherstash/vitaminc/tree/main/packages/protected) | [![crates.io](https://img.shields.io/crates/v/vitaminc-protected.svg)](https://crates.io/crates/vitaminc-protected) | [![docs.rs](https://docs.rs/vitaminc-protected/badge.svg)](https://docs.rs/vitaminc-protected) |
 | `random`  | [`vitaminc-random`](https://github.com/cipherstash/vitaminc/tree/main/packages/random) | [![crates.io](https://img.shields.io/crates/v/vitaminc-random.svg)](https://crates.io/crates/vitaminc-random) | [![docs.rs](https://docs.rs/vitaminc-random/badge.svg)](https://docs.rs/vitaminc-random) |
 | `traits`  | [`vitaminc-traits`](https://github.com/cipherstash/vitaminc/tree/main/packages/traits) | [![crates.io](https://img.shields.io/crates/v/vitaminc-traits.svg)](https://crates.io/crates/vitaminc-traits) | [![docs.rs](https://docs.rs/vitaminc-traits/badge.svg)](https://docs.rs/vitaminc-traits) |
-
-¹ `vitaminc-password` is not currently exposed as a `vitaminc` facade feature — depend on the crate directly.

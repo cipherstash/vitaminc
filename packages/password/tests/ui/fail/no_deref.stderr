@@ -1,0 +1,35 @@
+error[E0277]: the trait bound `Password<20>: Deref` is not satisfied
+ --> tests/ui/fail/no_deref.rs:6:16
+  |
+6 |     implicit::<Password<20>>();
+  |                ^^^^^^^^^^^^ the trait `Deref` is not implemented for `Password<20>`
+  |
+note: required by a bound in `implicit`
+ --> tests/ui/fail/no_deref.rs:3:16
+  |
+3 | fn implicit<T: std::ops::Deref>() {}
+  |                ^^^^^^^^^^^^^^^ required by this bound in `implicit`
+
+error[E0277]: the trait bound `AlphaNumericPassword<22>: Deref` is not satisfied
+ --> tests/ui/fail/no_deref.rs:7:16
+  |
+7 |     implicit::<AlphaNumericPassword<22>>();
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^ the trait `Deref` is not implemented for `AlphaNumericPassword<22>`
+  |
+note: required by a bound in `implicit`
+ --> tests/ui/fail/no_deref.rs:3:16
+  |
+3 | fn implicit<T: std::ops::Deref>() {}
+  |                ^^^^^^^^^^^^^^^ required by this bound in `implicit`
+
+error[E0277]: the trait bound `AlphaPassword<23>: Deref` is not satisfied
+ --> tests/ui/fail/no_deref.rs:8:16
+  |
+8 |     implicit::<AlphaPassword<23>>();
+  |                ^^^^^^^^^^^^^^^^^ the trait `Deref` is not implemented for `AlphaPassword<23>`
+  |
+note: required by a bound in `implicit`
+ --> tests/ui/fail/no_deref.rs:3:16
+  |
+3 | fn implicit<T: std::ops::Deref>() {}
+  |                ^^^^^^^^^^^^^^^ required by this bound in `implicit`

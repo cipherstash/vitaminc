@@ -29,6 +29,10 @@ EXAMPLES = {
     'random-derive': ('packages/random/README.md', 'Generatable', 1,
                       {'vitaminc-random': []}),
     'facade': ('README.md', 'Usage', 0, {'vitaminc': ['protected']}),
+    'password': ('packages/password/README.md', 'Quick Start', 0,
+                 {'vitaminc-password': [], 'vitaminc-protected': [], 'vitaminc-random': []}),
+    'password-facade': ('README.md', 'Generate passwords', 0,
+                        {'vitaminc': ['password']}),
     'storage': ('packages/aead-frame/README.md', 'Storage profile (feature `serde`)', 0,
                 {'vitaminc-aead-frame': ['serde'], 'vitaminc-protected': []}),
 }

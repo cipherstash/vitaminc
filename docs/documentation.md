@@ -122,10 +122,8 @@ strict rustdoc gate in `go.yml`.
 
 ## Missing API documentation
 
-All published crates except `vitaminc-password` enforce `deny(missing_docs)`.
-The password crate remains deferred with eight missing-doc warnings. It needs
-its readiness work before adopting the lint. Do not add broad exemptions to
-make a build pass; document public contracts or keep genuinely internal items
+All published crates enforce `deny(missing_docs)`. Do not add broad exemptions
+to make a build pass; document public contracts or keep genuinely internal items
 out of the public API. This lint checks presence, not accuracy or usefulness.
 
 Installation versions and MSRV numbers have their own synchronizers; see

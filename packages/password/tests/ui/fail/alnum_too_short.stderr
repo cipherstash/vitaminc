@@ -1,0 +1,25 @@
+error[E0080]: evaluation panicked: AlphaNumericPassword requires at least 22 characters
+ --> $RUST/core/src/panic.rs
+  |
+  = note: evaluation of `vitaminc_password::AlphaNumericPassword::<21>::VALID_LENGTH` failed here
+  |
+ ::: src/lib.rs
+  |
+  |       const VALID_LENGTH: () = assert!(
+  |  ______________________________-
+  | |         N >= 22,
+  | |         "AlphaNumericPassword requires at least 22 characters"
+  | |     );
+  | |_____- in this macro invocation
+
+note: erroneous constant encountered
+ --> src/lib.rs
+  |
+  |         let () = Self::VALID_LENGTH;
+  |                  ^^^^^^^^^^^^^^^^^^
+
+note: the above error was encountered while instantiating `fn <AlphaNumericPassword<21> as Generatable>::random`
+ --> tests/ui/fail/alnum_too_short.rs:6:13
+  |
+6 |     let _ = AlphaNumericPassword::<21>::random(&mut rng);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

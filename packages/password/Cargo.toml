@@ -16,3 +16,7 @@ rust-version.workspace = true
 [dependencies]
 vitaminc-random = { version = "0.8.1", path = "../random" }
 vitaminc-protected = { version = "0.8.1", path = "../protected" }
+
+[dev-dependencies]
+serde = { workspace = true }
+trybuild = "1.0.118"

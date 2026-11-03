@@ -1,0 +1,21 @@
+error[E0080]: evaluation panicked: AlphaPassword requires at least 23 characters
+ --> $RUST/core/src/panic.rs
+  |
+  = note: evaluation of `vitaminc_password::AlphaPassword::<22>::VALID_LENGTH` failed here
+  |
+ ::: src/lib.rs
+  |
+  |     const VALID_LENGTH: () = assert!(N >= 23, "AlphaPassword requires at least 23 characters");
+  |                              ----------------------------------------------------------------- in this macro invocation
+
+note: erroneous constant encountered
+ --> src/lib.rs
+  |
+  |         let () = Self::VALID_LENGTH;
+  |                  ^^^^^^^^^^^^^^^^^^
+
+note: the above error was encountered while instantiating `fn <AlphaPassword<22> as Generatable>::random`
+ --> tests/ui/fail/alpha_too_short.rs:6:13
+  |
+6 |     let _ = AlphaPassword::<22>::random(&mut rng);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

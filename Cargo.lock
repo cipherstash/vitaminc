@@ -2677,6 +2677,7 @@ dependencies = [
  "vitaminc-kms",
  "vitaminc-normalize",
  "vitaminc-ore",
+ "vitaminc-password",
  "vitaminc-permutation",
  "vitaminc-prf",
  "vitaminc-protected",
@@ -2864,6 +2865,8 @@ dependencies = [
 name = "vitaminc-password"
 version = "0.8.1"
 dependencies = [
+ "serde",
+ "trybuild",
  "vitaminc-protected",
  "vitaminc-random",
 ]

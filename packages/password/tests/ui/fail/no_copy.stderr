@@ -1,0 +1,35 @@
+error[E0277]: the trait bound `Password<20>: Copy` is not satisfied
+ --> tests/ui/fail/no_copy.rs:6:12
+  |
+6 |     copy::<Password<20>>();
+  |            ^^^^^^^^^^^^ the trait `Copy` is not implemented for `Password<20>`
+  |
+note: required by a bound in `copy`
+ --> tests/ui/fail/no_copy.rs:3:12
+  |
+3 | fn copy<T: Copy>() {}
+  |            ^^^^ required by this bound in `copy`
+
+error[E0277]: the trait bound `AlphaNumericPassword<22>: Copy` is not satisfied
+ --> tests/ui/fail/no_copy.rs:7:12
+  |
+7 |     copy::<AlphaNumericPassword<22>>();
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^ the trait `Copy` is not implemented for `AlphaNumericPassword<22>`
+  |
+note: required by a bound in `copy`
+ --> tests/ui/fail/no_copy.rs:3:12
+  |
+3 | fn copy<T: Copy>() {}
+  |            ^^^^ required by this bound in `copy`
+
+error[E0277]: the trait bound `AlphaPassword<23>: Copy` is not satisfied
+ --> tests/ui/fail/no_copy.rs:8:12
+  |
+8 |     copy::<AlphaPassword<23>>();
+  |            ^^^^^^^^^^^^^^^^^ the trait `Copy` is not implemented for `AlphaPassword<23>`
+  |
+note: required by a bound in `copy`
+ --> tests/ui/fail/no_copy.rs:3:12
+  |
+3 | fn copy<T: Copy>() {}
+  |            ^^^^ required by this bound in `copy`
