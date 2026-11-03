@@ -173,7 +173,7 @@ impl<const N: usize> Password<N> {
     /// # Ok::<(), vitaminc_password::RandomError>(())
     /// ```
     pub const fn is_empty(&self) -> bool {
-        N == 0
+        false // Every constructor enforces a nonzero minimum length.
     }
 
     const VALID_LENGTH: () = assert!(N >= 20, "Password requires at least 20 characters");
@@ -242,7 +242,7 @@ impl<const N: usize> AlphaNumericPassword<N> {
     /// # Ok::<(), vitaminc_password::RandomError>(())
     /// ```
     pub const fn is_empty(&self) -> bool {
-        N == 0
+        false // Every constructor enforces a nonzero minimum length.
     }
 
     const VALID_LENGTH: () = assert!(
@@ -302,7 +302,7 @@ impl<const N: usize> AlphaPassword<N> {
     /// # Ok::<(), vitaminc_password::RandomError>(())
     /// ```
     pub const fn is_empty(&self) -> bool {
-        N == 0
+        false // Every constructor enforces a nonzero minimum length.
     }
 
     const VALID_LENGTH: () = assert!(N >= 23, "AlphaPassword requires at least 23 characters");
