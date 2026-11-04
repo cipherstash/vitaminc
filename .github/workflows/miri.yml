@@ -1,19 +1,18 @@
 name: "Miri"
 
-# Runs the vitaminc-protected test suite under Miri to detect undefined
-# behaviour in the crate's `unsafe` code.
+# Runs the vitaminc-protected test suite and password allocation-cleanup test
+# under Miri to detect undefined behaviour in their `unsafe` code.
 #
-# `vitaminc-protected` is the only crate in the workspace with first-party
-# `unsafe`: the move-out in `move_inner_out` (`ptr::read` + `mem::forget`), which
-# is how `risky_unwrap` / `flatten` / `transpose` move the inner secret out past
+# `vitaminc-protected` uses `unsafe` in `move_inner_out`
+# (`ptr::read` + `mem::forget`), which is how
+# `risky_unwrap` / `flatten` / `transpose` move the inner secret out past
 # the zeroizing `Drop`. Miri interprets the tests under the Stacked/Tree Borrows
 # model, catching aliasing/provenance UB that a normal test run (and even ASan)
 # can miss.
 #
-# Scoped to `vitaminc-protected` on purpose: Miri can't execute the aws-lc-rs
-# FFI (vitaminc-encrypt) or the entropy syscalls in random/permutation/password,
-# and `protected` is where the only unsafe lives. Expand the matrix if other
-# crates grow pure-Rust `unsafe`.
+# Miri can't execute the aws-lc-rs FFI (vitaminc-encrypt) or the entropy
+# syscalls in random/permutation/password, so the password cleanup test uses a
+# deterministic fixture seed. Its test allocator observes live bytes before free.
 on:
   # No branch filter: a stacked PR (a feature branch as base) must run this
   # gate too. With `branches: [main]` here, retargeting a PR onto its
@@ -21,6 +20,7 @@ on:
   pull_request:
     paths:
       - "packages/protected/**"
+      - "packages/password/**"
       - ".github/workflows/miri.yml"
       - "!**.md"
 
@@ -78,3 +78,13 @@ jobs:
         env:
           MIRIFLAGS: "-Zmiri-tree-borrows -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check"
         run: cargo +nightly miri test -p vitaminc-protected --target-dir target/miri-strict
+
+      - name: miri test (password cleanup)
+        # Filter the library tests to the deterministic cleanup tests; the
+        # default-constructor tests require OS entropy, which Miri cannot supply.
+        run: cargo +nightly miri test -p vitaminc-password --lib cleanup_tests
+
+      - name: miri test, strict models (password cleanup)
+        env:
+          MIRIFLAGS: "-Zmiri-tree-borrows -Zmiri-strict-provenance -Zmiri-symbolic-alignment-check"
+        run: cargo +nightly miri test -p vitaminc-password --lib cleanup_tests --target-dir target/miri-strict

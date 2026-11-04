@@ -1,0 +1,35 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+ --> tests/ui/negative_space/private_fields.rs:5:13
+  |
+5 |     let _ = Password(Protected::new(['a'; 20]));
+  |             ^^^^^^^^
+  |
+note: constructor is not visible here due to private fields
+ --> src/lib.rs
+  |
+  | pub struct Password<const N: usize>(Protected<[char; N]>);
+  |                                     ^^^^^^^^^^^^^^^^^^^^ private field
+
+error[E0423]: cannot initialize a tuple struct which contains private fields
+ --> tests/ui/negative_space/private_fields.rs:6:13
+  |
+6 |     let _ = AlphaNumericPassword(Password::generate().unwrap());
+  |             ^^^^^^^^^^^^^^^^^^^^
+  |
+note: constructor is not visible here due to private fields
+ --> src/lib.rs
+  |
+  | pub struct AlphaNumericPassword<const N: usize>(Password<N>);
+  |                                                 ^^^^^^^^^^^ private field
+
+error[E0423]: cannot initialize a tuple struct which contains private fields
+ --> tests/ui/negative_space/private_fields.rs:7:13
+  |
+7 |     let _ = AlphaPassword(Password::generate().unwrap());
+  |             ^^^^^^^^^^^^^
+  |
+note: constructor is not visible here due to private fields
+ --> src/lib.rs
+  |
+  | pub struct AlphaPassword<const N: usize>(Password<N>);
+  |                                          ^^^^^^^^^^^ private field

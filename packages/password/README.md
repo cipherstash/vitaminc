@@ -3,21 +3,92 @@
 [![Crates.io](https://img.shields.io/crates/v/vitaminc-password.svg)](https://crates.io/crates/vitaminc-password)
 [![Workflow Status](https://github.com/cipherstash/vitaminc/actions/workflows/test.yml/badge.svg)](https://github.com/cipherstash/vitaminc/actions/workflows/test.yml)
 
-Secure password generator with protected memory handling.
+Generate passwords with at least 128 bits of entropy from a securely seeded
+random generator, and keep their contents protected until use. This crate
+provides generation and secret handling, not password hashing, storage or login
+verification.
 
 This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) framework to make cryptography code healthy.
 
-## Features
-
-- **Cryptographically secure**: Uses `vitaminc-random` for secure random generation
-- **Protected memory**: Passwords are stored in `Protected` types that zeroize on drop
-- **Multiple character sets**: Choose from standard (all printable), alphanumeric, or alphabetic passwords
-- **Compile-time length**: Password length is specified at compile time for type safety
-- **No heap allocations** (until conversion to String): Passwords stored as fixed-size arrays
-
 ## Installation
 
-Add this to your `Cargo.toml`:
+<!-- workspace-deps:start -->
+```toml
+[dependencies]
+vitaminc-password = "0.8.1"
+```
+<!-- workspace-deps:end -->
+
+## Quick Start
+
+[`Password`] chooses a 20-character password and seeds its generator from the
+operating system. Propagate entropy failures; there is no predictable fallback.
+Convert to a protected string to keep automatic wiping and redacted debug output:
+
+```rust
+use vitaminc_password::{Password, Protected, RandomError};
+
+fn new_password() -> Result<Protected<String>, RandomError> {
+    let password = Password::generate()?;
+    assert_eq!(password.len(), 20);
+    Ok(password.into_protected_string())
+}
+
+match new_password() {
+    Ok(secret) => {
+        // Keep the value protected until its destination needs it.
+        // Dropping `secret` wipes its string allocation.
+        drop(secret);
+    }
+    Err(error) => {
+        eprintln!("Password generation failed: {error}");
+        std::process::exit(1);
+    }
+}
+```
+
+`Protected` and `RandomError` are re-exported for the generated value and its
+failure type; ordinary generation needs only the dependency above. The password's
+`len()` and `is_empty()` methods inspect public metadata without exposing contents.
+
+The `password` feature of the `vitaminc` facade also exposes this crate as
+`vitaminc::password` and enables `vitaminc::protected` and `vitaminc::random`.
+
+## Alphabets and defaults
+
+Each type offers `generate()` with no arguments. Its default is the shortest
+length exceeding the 128-bit target for that alphabet:
+
+| Type | Alphabet | Default and minimum length | Approximate entropy |
+| --- | --- | ---: | ---: |
+| [`Password`] | 94 non-space printable ASCII characters | 20 | 131 bits |
+| [`AlphaNumericPassword`] | `A-Z`, `a-z`, `0-9` | 22 | 131 bits |
+| [`AlphaPassword`] | `A-Z`, `a-z` | 23 | 131 bits |
+
+```rust
+use vitaminc_password::{AlphaNumericPassword, AlphaPassword, Password};
+
+let standard: Password<20> = Password::generate()?;
+let alphanumeric: AlphaNumericPassword<22> = AlphaNumericPassword::generate()?;
+let alphabetic: AlphaPassword<23> = AlphaPassword::generate()?;
+# Ok::<(), vitaminc_password::RandomError>(())
+```
+
+An alphabet specifies the allowed characters, not required character classes:
+a password need not contain a digit, punctuation, or both letter cases. The
+standard alphabet includes quotes, slashes and other punctuation. Pass passwords
+as data through the destination's API; do not interpolate them into commands,
+SQL or markup.
+
+## Longer passwords and batches
+
+Use `Generatable::random` for an explicit compile-time length or to reuse a
+securely seeded generator across a batch. Building a generation call below the
+type's minimum length fails compilation; `cargo check` alone may not evaluate
+that const-generic assertion. There is no public raw-value constructor. Use
+`Protected<String>` for an existing password received from elsewhere.
+
+Add `vitaminc-random` explicitly for this lower-level API:
 
 <!-- workspace-deps:start -->
 ```toml
@@ -27,262 +98,88 @@ vitaminc-random = "0.8.1"
 ```
 <!-- workspace-deps:end -->
 
-## Quick Start
-
-```rust
-use vitaminc_password::Password;
-use vitaminc_random::{SafeRand, SeedableRng, Generatable};
-
-// Generate a 16-character password with all printable characters
-let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
-let password: Password<16> = Generatable::random(&mut rng)?;
-```
-
-## Usage
-
-### Password Types
-
-Vitamin C Password provides three types of passwords with different character sets:
-
-1. **`Password<N>`** - Uses all 94 printable ASCII characters
-2. **`AlphaNumericPassword<N>`** - Uses only letters (A-Z, a-z) and numbers (0-9) - 62 characters
-3. **`AlphaPassword<N>`** - Uses only letters (A-Z, a-z) - 52 characters
-
-The `N` parameter specifies the password length at compile time.
-
-### Generating Passwords
-
-#### Standard Password (All Printable Characters)
-
-Includes uppercase, lowercase, numbers, and special characters:
-
-```rust
-use vitaminc_password::Password;
-use vitaminc_random::{SafeRand, SeedableRng, Generatable};
-
-let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
-
-// Generate a 20-character password
-let password: Password<20> = Generatable::random(&mut rng)?;
-```
-
-**Character set**: `A-Z`, `a-z`, `0-9`, and special characters:
-```
-~ ` ! @ # $ % ^ & * ( ) _ - + = { [ } ] | \ : ; " ' < , > . ? /
-```
-
-#### Alphanumeric Password
-
-For systems that don't accept special characters:
-
 ```rust
 use vitaminc_password::AlphaNumericPassword;
-use vitaminc_random::{SafeRand, SeedableRng, Generatable};
+use vitaminc_random::{Generatable, RandomError, SafeRand};
 
-let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
-
-// Generate a 16-character alphanumeric password
-let password: AlphaNumericPassword<16> = Generatable::random(&mut rng)?;
-```
-
-**Character set**: `A-Z`, `a-z`, `0-9` (62 characters)
-
-#### Alphabetic Password
-
-For maximum compatibility or readability:
-
-```rust
-use vitaminc_password::AlphaPassword;
-use vitaminc_random::{SafeRand, SeedableRng, Generatable};
-
-let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
-
-// Generate a 24-character alphabetic password
-let password: AlphaPassword<24> = Generatable::random(&mut rng)?;
-```
-
-**Character set**: `A-Z`, `a-z` (52 characters)
-
-### Password Length
-
-The password length is specified as a const generic parameter. You can generate passwords of any length:
-
-```rust,ignore
-# // Requires `rng` from the Quick Start example.
-let short: Password<8> = Generatable::random(&mut rng)?;
-let medium: Password<16> = Generatable::random(&mut rng)?;
-let long: Password<32> = Generatable::random(&mut rng)?;
-let very_long: Password<128> = Generatable::random(&mut rng)?;
-```
-
-### Converting to String
-
-> **⚠️ Not yet implemented:** `into_protected_string()` and `into_unprotected_string()` are currently `unimplemented!()` stubs — calling them panics. The examples in this section (and the Use Cases below) show the **planned** API. See Current Limitations.
-
-Passwords are stored securely in `Protected` types. When you need to use them (e.g., to send to an API or display to the user), you will be able to convert them to strings:
-
-#### Protected String (Recommended)
-
-Maintains protection with automatic zeroization:
-
-```rust,ignore
-use vitaminc_protected::Protected;
-
-let password: Password<16> = Generatable::random(&mut rng)?;
-let protected_string: Protected<String> = password.into_protected_string();
-// Use the protected string...
-// It will be zeroized when dropped
-```
-
-**Note**: This functionality is currently under development (see WIP markers in code).
-
-#### Unprotected String
-
-For final use where the password needs to leave protected memory:
-
-```rust,ignore
-let password: Password<16> = Generatable::random(&mut rng)?;
-let string: String = password.into_unprotected_string();
-// Use the string immediately
-// No automatic zeroization after this point
-```
-
-**Important**: Once converted to an unprotected `String`, the password is no longer automatically zeroized. Only use this as a final step right before the password is needed.
-
-## Password Strength
-
-The entropy (randomness) of a password depends on both its length and the character set size:
-
-**Entropy formula**: `log2(charset_size^length)` bits
-
-### Standard Password
-- Character set: 94 characters
-- 16 characters: ~105 bits of entropy
-- 20 characters: ~131 bits of entropy
-- 32 characters: ~210 bits of entropy
-
-### Alphanumeric Password
-- Character set: 62 characters
-- 16 characters: ~95 bits of entropy
-- 20 characters: ~119 bits of entropy
-- 32 characters: ~190 bits of entropy
-
-### Alphabetic Password
-- Character set: 52 characters
-- 16 characters: ~91 bits of entropy
-- 20 characters: ~113 bits of entropy
-- 32 characters: ~181 bits of entropy
-
-**Recommendation**: For most use cases, 16-20 characters provides excellent security (>100 bits of entropy).
-
-## Security Features
-
-### Cryptographically Secure Random Generation
-
-All passwords are generated using `vitaminc-random`'s `SafeRand`, which uses ChaCha20, a cryptographically secure pseudo-random number generator (CSPRNG).
-
-### Protected Memory
-
-Passwords are stored in `Protected<[char; N]>`, which ensures:
-
-- **Automatic zeroization**: Memory is cleared when the password is dropped
-- **No accidental leakage**: the opaque `Debug` impl prints only the type name (e.g. `Protected<[char; 16]>`), never the contents
-- **Constant-time operations**: Where applicable, to prevent timing side-channels
-
-### Near-Uniform Character Selection
-
-Each character is one fixed-count bounded draw in `0..set.len()`, so every character of the set is reachable and the number of random words consumed never depends on the values drawn. The draw is not exactly uniform: `SafeRand`'s bounded reduction has a statistical distance from uniform of at most `set.len() / 2⁶⁴`. The exact distance is smaller than that ceiling — `r(n − r) / (n · 2⁶⁴)`, with `n = set.len()` and `r = 2⁶⁴ mod n` — and works out to at most 2⁻⁵⁹ per character for the 94-, 62- and 52-character sets in this crate. That bias is far below anything an attacker could exploit, but a protocol that needs exact uniformity must account for it.
-
-## Use Cases
-
-### Password Manager
-
-Generate secure passwords for user accounts:
-
-```rust,ignore
-use vitaminc_password::Password;
-use vitaminc_random::{RandomError, SafeRand, SeedableRng, Generatable};
-
-fn generate_user_password(length: usize) -> Result<String, RandomError> {
-    let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
-    match length {
-        16 => {
-            let password: Password<16> = Generatable::random(&mut rng)?;
-            Ok(password.into_unprotected_string())
-        },
-        20 => {
-            let password: Password<20> = Generatable::random(&mut rng)?;
-            Ok(password.into_unprotected_string())
-        },
-        32 => {
-            let password: Password<32> = Generatable::random(&mut rng)?;
-            Ok(password.into_unprotected_string())
-        },
-        _ => panic!("Unsupported length"),
+fn batch() -> Result<(), RandomError> {
+    let mut rng = SafeRand::from_entropy()?;
+    for _ in 0..10 {
+        let password = AlphaNumericPassword::<32>::random(&mut rng)?;
+        assert_eq!(password.len(), 32);
+        let secret = password.into_protected_string();
+        // Pass each protected value to its destination; dropping it wipes it.
+        drop(secret);
     }
+    Ok(())
+}
+
+if let Err(error) = batch() {
+    eprintln!("Password generation failed: {error}");
+    std::process::exit(1);
 }
 ```
 
-### API Key Generation
+The supplied RNG must have an unpredictable seed. Fixed seeds are for tests:
+reusing a seed repeats the stream and therefore the passwords. Length checks do
+not make a predictable seed secure. There is no guaranteed seeded-output
+compatibility across library versions.
 
-Generate alphanumeric API keys:
+## Secret handling
 
-```rust,ignore
-use vitaminc_password::AlphaNumericPassword;
-use vitaminc_random::{RandomError, SafeRand, SeedableRng, Generatable};
+Passwords own a `Protected<[char; N]>`. Generation writes into the protected
+array; converting to a protected string borrows that array while it remains
+wrapped, then drops and wipes it. The destination string is protected before
+writing, and reserves all `N` ASCII bytes up front to avoid reallocating secret
+contents. Both owners retain their cleanup behavior during unwinding.
 
-fn generate_api_key() -> Result<String, RandomError> {
-    let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
-    let key: AlphaNumericPassword<32> = Generatable::random(&mut rng)?;
-    Ok(key.into_unprotected_string())
-}
+The password types have opaque `Debug`, no `Copy`, `Clone`, `Default`, `Display`,
+`Deref`, serialization, or ordinary equality. Conversion consumes the password.
+Protection ends where the contents are explicitly exposed: borrowing or exporting
+can let other code copy or log them. Zeroization does not wipe compiler-created
+copies or protect against process termination, swap, or memory dumps; memory is
+not locked.
+
+Use `into_unprotected_string()` only when an external interface requires an
+owned plain `String`. The source array is still wiped, but the returned string
+is not automatically wiped:
+
+```rust
+use vitaminc_password::Password;
+
+let exported: String = Password::generate()?.into_unprotected_string();
+assert_eq!(exported.len(), 20);
+// The receiver of `exported` is responsible for its lifecycle and cleanup.
+# Ok::<(), vitaminc_password::RandomError>(())
 ```
 
-### Temporary Passwords
+## Randomness and entropy
 
-Generate short alphabetic temporary passwords:
+Generation uses `SafeRand` (ChaCha20), with one fixed-count bounded draw per
+character in `0..alphabet_size`. All characters are reachable. The draw is
+near-uniform, not exactly uniform: its exact statistical distance from uniform
+is at most 2⁻⁵⁹ per character for these alphabets. The displayed entropy uses the
+idealized `N * log2(alphabet_size)` estimate; the bias is too small to change
+which minimum length exceeds 128 bits. The target assumes an unpredictable RNG
+seed. Fixed draw count is not a guarantee of constant-time execution of the
+whole generator or conversion.
 
-```rust,ignore
-use vitaminc_password::AlphaPassword;
-use vitaminc_random::{RandomError, SafeRand, SeedableRng, Generatable};
+## Compatibility
 
-fn generate_temp_password() -> Result<String, RandomError> {
-    let mut rng = SafeRand::from_entropy().expect("Failed to seed RNG");
-    let password: AlphaPassword<12> = Generatable::random(&mut rng)?;
-    Ok(password.into_unprotected_string())
-}
-```
-
-## Best Practices
-
-1. **Use appropriate length**: Aim for at least 16 characters for user passwords
-2. **Choose the right character set**: Use `Password` for maximum security, `AlphaNumericPassword` for compatibility
-3. **Minimize lifetime**: Convert to String only when needed and use immediately
-4. **Don't log passwords**: The `Protected` wrapper prevents accidental logging, but be careful after conversion
-5. **Consider the context**: API keys and machine passwords can be longer (32+ characters) since users don't type them
-
-## Current Limitations
-
-This crate is currently in early development (pre-release). Some functionality is not yet complete:
-
-- `into_protected_string()` is not yet implemented
-- `into_unprotected_string()` is not yet implemented
-- Tests are marked as `#[ignore]` pending full implementation
-
-Check the [GitHub repository](https://github.com/cipherstash/vitaminc) for the latest development status.
-
-## Roadmap
-
-Future enhancements under consideration:
-
-- Custom character sets
-- Pattern-based password generation (e.g., word-based passwords)
-- Password strength estimation
-- HKDF-based generation with user-provided context
-- Full `into_protected_string()` implementation
+Requires Rust <!-- msrv:vitaminc-password -->**1.89.0**<!-- /msrv --> and `std`.
+There are no optional crate features. Native and JavaScript WebAssembly builds
+use the entropy backend supplied by `vitaminc-random`; JavaScript hosts need Web
+Crypto and the corresponding WASM bindings. Length is a const generic; extremely
+large values consume correspondingly large stack space. String conversion
+allocates memory.
 
 ## CipherStash
 
 Vitamin C is brought to you by the team at [CipherStash](https://cipherstash.com).
 
 License: MIT
+
+<!-- GitHub API links target the latest release; src/lib.rs resolves these for rustdoc. -->
+[`Password`]: https://docs.rs/vitaminc-password/latest/vitaminc_password/struct.Password.html
+[`AlphaNumericPassword`]: https://docs.rs/vitaminc-password/latest/vitaminc_password/struct.AlphaNumericPassword.html
+[`AlphaPassword`]: https://docs.rs/vitaminc-password/latest/vitaminc_password/struct.AlphaPassword.html

@@ -1,7 +1,6 @@
 # Vitamin C Protected
 
-[![Crates.io](https://img.shields.io/crates/v/vitaminc-protected.svg)](https://crates.io/crates/vitaminc-protected)
-[![Workflow Status](https://github.com/cipherstash/vitaminc/actions/workflows/test.yml/badge.svg)](https://github.com/cipherstash/vitaminc/actions/workflows/test.yml)
+[![Crates.io](https://img.shields.io/crates/v/vitaminc-protected.svg)](https://crates.io/crates/vitaminc-protected) [![Workflow Status](https://github.com/cipherstash/vitaminc/actions/workflows/test.yml/badge.svg)](https://github.com/cipherstash/vitaminc/actions/workflows/test.yml)
 
 This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) framework to make cryptography code healthy.
 
@@ -40,15 +39,12 @@ let x = Protected::new([0u8; 32]);
 ```
 
 `Protected` will call `zeroize` on the inner value when it goes out of scope.
-Because that wipe is a real `Drop`, `Protected` is never `Copy`, even when the
-inner type is: unlike a move, a `Copy` value has no single owner whose drop can
-wipe it. Duplicating the wrapper is an explicit `clone()`, and each clone is
-wiped when it drops. See the `Protected` type docs for the full rationale.
-`risky_unwrap` is the escape hatch: it hands back the plain inner value along
-with the obligation to wipe it. Combinators such as `map` show the plain value
-only to their closure and return the result re-wrapped.
-It also provides an "opaque" implementation of the `Debug` trait so you can debug protected values
-without accidentally leaking their innards.
+Because that wipe is a real `Drop`, `Protected` is never `Copy`, even when the inner type is: unlike a move, a `Copy` value has no single owner whose drop can wipe it.
+Duplicating the wrapper is an explicit `clone()`, and each clone is wiped when it drops.
+See the `Protected` type docs for the full rationale.
+`risky_unwrap` is the escape hatch: it hands back the plain inner value along with the obligation to wipe it.
+Combinators such as `map` show the plain value only to their closure and return the result re-wrapped.
+It also provides an "opaque" implementation of the `Debug` trait so you can debug protected values without accidentally leaking their innards.
 
 ```rust
 use vitaminc_protected::{Controlled, Protected};
@@ -146,17 +142,13 @@ Use [flatten_array] to convert a `[Protected<T>; N]` into a `Protected<[T; N]>`.
 
 ### Protected digests
 
-`ProtectedDigest` requires a fixed-output implementation that zeroizes its
-internal state on drop. Enable the digest crate's zeroization feature, such as
-`sha2 = { version = "0.11", features = ["zeroize"] }`.
+`ProtectedDigest` requires a fixed-output implementation that zeroizes its internal state on drop.
+Enable the digest crate's zeroization feature, such as `sha2 = { version = "0.11", features = ["zeroize"] }`.
 
-Unkeyed digests use `new`; keyed fixed-output functions implementing `KeyInit`
-use `new_with_key` so the key remains in a `Controlled` container at the API
-boundary.
+Unkeyed digests use `new`; keyed fixed-output functions implementing `KeyInit` use `new_with_key` so the key remains in a `Controlled` container at the API boundary.
 
-Secret inputs use `update` and protected outputs use `finalize_into`. Public
-protocol framing and intentionally exposed outputs cross separate, explicitly
-named channels:
+Secret inputs use `update` and protected outputs use `finalize_into`.
+Public protocol framing and intentionally exposed outputs cross separate, explicitly named channels:
 
 ```rust
 use sha2::Sha256;
@@ -178,7 +170,10 @@ Beyond the adapters above, the crate exports `TimingSafeEq` and `Choice` (timing
 
 ### Non-empty contexts
 
-An AEAD associated-data value or PRF context can legitimately be empty, but a caller that uses one value to domain-separate fields needs it *not* to be. `NonEmpty<T>` carries that invariant in the type, checked once at construction: `nonempty!("users/email")` is checked at compile time (an empty literal does not compile), and `NonEmpty::new(value)` checks a dynamic value structurally — `""`, `None`, `Some("")` and `("", "")` are all rejected, without parsing any encoding. An API that requires the invariant takes `NonEmpty<T>` directly; a bare `&str` argument cannot be value-checked at compile time, so there is deliberately no implicit conversion from a string or byte slice. Integers are never empty and convert with `From`, and a proven value extends with `.with(tail)` without a second check.
+An AEAD associated-data value or PRF context can legitimately be empty, but a caller that uses one value to domain-separate fields needs it *not* to be.
+`NonEmpty<T>` carries that invariant in the type, checked once at construction: `nonempty!("users/email")` is checked at compile time (an empty literal does not compile), and `NonEmpty::new(value)` checks a dynamic value structurally — `""`, `None`, `Some("")` and `("", "")` are all rejected, without parsing any encoding.
+An API that requires the invariant takes `NonEmpty<T>` directly; a bare `&str` argument cannot be value-checked at compile time, so there is deliberately no implicit conversion from a string or byte slice.
+Integers are never empty and convert with `From`, and a proven value extends with `.with(tail)` without a second check.
 
 ```rust
 use vitaminc_protected::{nonempty, EmptyError, NonEmpty};
@@ -193,7 +188,38 @@ assert_eq!(NonEmpty::new(("", None::<&str>)).unwrap_err(), EmptyError);
 
 ### Locked storage for long-lived secrets
 
-`Protected` wipes a value when it is dropped, which is the right guarantee for a value that lives for one call. Nothing drops a static, a leaked `Arc`, or anything at all when the process dies on `SIGTERM`, `SIGKILL` or `process::exit`, so a key that lives for the process needs its protection applied when it is allocated, not when it is dropped. On Unix, `Locked<T>` stores the value in memory obtained from the operating system that is locked against swapping (`mlock`), excluded from core dumps on Linux (`MADV_DONTDUMP`), fenced by guard pages, and never moved. It is wiped on drop like `Protected`, and while `locked()` is true the kernel will not page the bytes out to swap, nor on Linux include them in a core dump, even if the drop never happens (a hibernation image is written outside that mechanism and is not covered). On other targets the value lives on the ordinary heap, wiped on drop but neither locked nor fenced, and `lock_error()` reports `Unavailable`.
+Use `Locked<T>` for a secret that lives as long as the process, such as a long-lived key.
+
+`Protected` wipes a value when the value is dropped.
+Wiping on drop is enough for a value that lives for one call.
+Some values are never dropped:
+
+- a static;
+- a leaked `Arc`;
+- every value, when the process ends on `SIGTERM`, `SIGKILL`, or `process::exit`.
+
+A key that lives as long as the process needs protection from the moment it is allocated, not only when it is dropped.
+
+On Unix, `Locked<T>` stores the value in memory that it gets from the operating system.
+That memory is:
+
+- locked, so that it is not swapped to disk (`mlock`);
+- left out of core dumps, on Linux only (`MADV_DONTDUMP`);
+- surrounded by guard pages;
+- never moved.
+
+`Locked<T>` wipes the value when it is dropped, as `Protected` does.
+While `locked()` returns `true`, the kernel does not write the bytes to swap.
+On Linux, the kernel also leaves the bytes out of core dumps.
+Both protections apply even if the value is never dropped.
+
+These protections do not keep the bytes out of a hibernation image.
+The system writes that image by a different mechanism.
+
+On other targets, `Locked<T>` stores the value on the ordinary heap.
+The value is wiped when it is dropped.
+The heap memory has no lock and no guard pages.
+On those targets, `lock_error()` reports `Unavailable`.
 
 ```rust
 # use vitaminc_protected::{Locked, LockError};
@@ -211,7 +237,10 @@ if !key.locked() {
 # }
 ```
 
-The operating system can refuse to lock memory, most often because `RLIMIT_MEMLOCK` (64 KiB by default on many Linux hosts) is too small; every value costs at least one page of it, whatever its size. A seccomp filter can refuse the core-dump exclusion. By default the value is created anyway and the refusal is readable from `lock_error`; call `require_locked()` on a value that must be locked, or set `LockPolicy::Strict` once at startup to make every constructor fail instead. `Locked` protects the bytes of `T` itself, so use it for inline types such as `[u8; N]`; a `Vec<u8>` inside it has only its header in the locked region.
+The operating system can refuse to lock memory, most often because `RLIMIT_MEMLOCK` (64 KiB by default on many Linux hosts) is too small; every value costs at least one page of it, whatever its size.
+A seccomp filter can refuse the core-dump exclusion.
+By default the value is created anyway and the refusal is readable from `lock_error`; call `require_locked()` on a value that must be locked, or set `LockPolicy::Strict` once at startup to make every constructor fail instead.
+`Locked` protects the bytes of `T` itself, so use it for inline types such as `[u8; N]`; a `Vec<u8>` inside it has only its header in the locked region.
 
 ### Generators
 
@@ -246,14 +275,14 @@ No optional features are enabled by default.
 | `bitvec` | Exposes bit-slice indexing adapters. Accesses use ordinary indexing, so they do not hide the index. |
 | `arbitrary` | Implements `quickcheck::Arbitrary` for `Protected<T>` when `T` supports it, for property tests. |
 
-The `bitvec` dependency is present even without the feature; the flag exposes
-the adapters. `arbitrary` is for test data, not cryptographic randomness.
+The `bitvec` dependency is present even without the feature; the flag exposes the adapters.
+`arbitrary` is for test data, not cryptographic randomness.
 
 ## Compatibility
 
 Requires Rust <!-- msrv:vitaminc-protected -->**1.89.0**<!-- /msrv --> and the Rust standard library (`std`).
-MSRV increases require a minor release; patch releases retain the existing
-floor. See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
+MSRV increases require a minor release; patch releases retain the existing floor.
+See the [workspace compatibility policy](https://github.com/cipherstash/vitaminc#compatibility).
 
 ## CipherStash
 

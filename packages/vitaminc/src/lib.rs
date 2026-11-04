@@ -1,5 +1,37 @@
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+// The README links to the latest published API for GitHub. These definitions come
+// first, so rustdoc links to the version being built. See docs/documentation.md.
+#![doc = concat!(
+    "\n[`AlphaNumericPassword`]: https://docs.rs/vitaminc-password/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_password/struct.AlphaNumericPassword.html\n",
+    "\n[`AlphaPassword`]: https://docs.rs/vitaminc-password/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_password/struct.AlphaPassword.html\n",
+    "\n[`Controlled`]: https://docs.rs/vitaminc-protected/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_protected/trait.Controlled.html\n",
+    "\n[`Decrypt`]: https://docs.rs/vitaminc-aead/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_aead/trait.Decrypt.html\n",
+    "\n[`Encrypt`]: https://docs.rs/vitaminc-aead/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_aead/trait.Encrypt.html\n",
+    "\n[`Equatable`]: https://docs.rs/vitaminc-protected/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_protected/struct.Equatable.html\n",
+    "\n[`Generatable::random`]: https://docs.rs/vitaminc-random/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_random/trait.Generatable.html#tymethod.random\n",
+    "\n[`Locked`]: https://docs.rs/vitaminc-protected/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_protected/struct.Locked.html\n",
+    "\n[`Locked::require_locked`]: https://docs.rs/vitaminc-protected/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_protected/struct.Locked.html#method.require_locked\n",
+    "\n[`OpaqueDebug`]: https://docs.rs/vitaminc-protected/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_protected/trait.OpaqueDebug.html\n",
+    "\n[`Password`]: https://docs.rs/vitaminc-password/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_password/struct.Password.html\n",
+    "\n[`Protected`]: https://docs.rs/vitaminc-protected/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_protected/struct.Protected.html\n",
+    "\n[`SafeRand::from_entropy`]: https://docs.rs/vitaminc-random/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_random/struct.SafeRand.html#method.from_entropy\n",
+    "\n[`TimingSafeEq`]: https://docs.rs/vitaminc-protected/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_protected/trait.TimingSafeEq.html\n",
+)]
 #![doc = include_str!("../README.md")]
 
 #[cfg(feature = "aead")]
@@ -25,6 +57,10 @@ pub use vitaminc_normalize as normalize;
 #[cfg(feature = "ore")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ore")))]
 pub use vitaminc_ore as ore;
+
+#[cfg(feature = "password")]
+#[cfg_attr(docsrs, doc(cfg(feature = "password")))]
+pub use vitaminc_password as password;
 
 #[cfg(feature = "aws-kms")]
 #[cfg_attr(docsrs, doc(cfg(feature = "aws-kms")))]
