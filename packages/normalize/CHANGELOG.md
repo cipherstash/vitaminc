@@ -3,11 +3,13 @@
 
 ### Breaking
 
-- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
+- **Breaking:** the crate now needs Rust 1.89 or later.
+  Version 0.8.1 needed Rust 1.88.
 
 ### Fixes
 
-- Normalizing an integer or a timestamp no longer passes the value through an unwiped stack slot. The `vitaminc-aead` helpers it calls are now inlined.
+- Normalizing an integer or a timestamp no longer passes the value through a stack slot that is not wiped.
+  The `vitaminc-aead` helpers that this crate calls are now inlined into this crate's code.
 
 ## [0.8.1] - 2026-10-26
 

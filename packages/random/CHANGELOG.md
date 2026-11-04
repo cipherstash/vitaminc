@@ -10,11 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Breaking
 
-- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
+- **Breaking:** the crate now needs Rust 1.89 or later.
+  Version 0.8.1 needed Rust 1.88.
 
 ### Documentation
 
-- WebAssembly: the docs no longer ask for the `getrandom_backend="wasm_js"` rustflag. On `wasm32-unknown-unknown`, `getrandom` 0.4 selects the JavaScript backend from the `wasm_js` feature that this crate enables.
+- The WebAssembly instructions no longer ask you to set the `getrandom_backend="wasm_js"` rustflag.
+  On `wasm32-unknown-unknown`, `getrandom` 0.4 selects the JavaScript backend from the `wasm_js` feature.
+  This crate enables that feature.
 
 ## [0.8.1] - 2026-10-26
 

@@ -1,10 +1,16 @@
 
 ## [0.9.0] - 2026-11-04
 
-### Changes
+### Dependencies
 
-- `aws-sdk-kms` is now built without its `rustls` default feature. That feature adds the legacy hyper 0.14 and rustls 0.21 client, which is end-of-life and has open RustSec advisories. The SDK's `default-https-client` (hyper 1 with rustls 0.23 on aws-lc-rs) was already the client in use, and stays enabled with `rt-tokio`. If your code relied on this crate to enable the SDK's `rustls` feature, enable it in your own manifest.
-- The minimum supported Rust version is still 1.94.1.
+- This crate now turns off the default features of `aws-sdk-kms`.
+  The crate enables only the `default-https-client` and `rt-tokio` features of `aws-sdk-kms`.
+  The default `rustls` feature added an old HTTP client, made of hyper 0.14 and rustls 0.21.
+  The old client is no longer maintained.
+  The old client also has open RustSec security advisories.
+  The SDK already used `default-https-client`, so requests use the same client as in 0.8.1.
+  If your code relied on this crate to enable the `rustls` feature, enable the feature in your own `Cargo.toml`.
+- This crate still needs Rust 1.94.1 or later.
 
 ## [0.8.1] - 2026-10-26
 

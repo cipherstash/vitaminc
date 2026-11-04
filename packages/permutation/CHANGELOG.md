@@ -3,16 +3,29 @@
 
 ### Breaking
 
-- **Breaking:** `PermutationKey::new_unchecked` is removed. Use `PermutationKey::new(Protected::new(bytes))` instead. It returns a `Result`, refuses bytes that are not a permutation with `NotAPermutation`, and wipes the container it is given.
-- **Breaking:** `PermutationKey<N>` no longer implements `Zeroize`. Zeroizing a key left a live key of all zeros, which is not a permutation. Dropping a key wipes it. As a result, a key cannot be held in `Protected`, in `Zeroizing`, or in a struct that derives `Zeroize`.
-- **Breaking:** `PermutationKey<N>` implements `Deserialize` only for supported key sizes. Deserializing an unsupported size is now a compile error.
-- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
+- **Breaking:** `PermutationKey::new_unchecked` is removed.
+  Use `PermutationKey::new(Protected::new(bytes))` instead.
+  The new function returns a `Result`, and refuses bytes that are not a permutation with `NotAPermutation`.
+  The function also wipes the container you pass to it.
+- **Breaking:** `PermutationKey<N>` no longer implements `Zeroize`.
+  Zeroizing a key left a usable key of all zeros.
+  A key of all zeros is not a permutation.
+  Dropping a key still wipes it.
+  As a result, you cannot put a key in `Protected`, in `Zeroizing`, or in a struct that derives `Zeroize`.
+- **Breaking:** `PermutationKey<N>` implements `Deserialize` only for the key sizes that this crate supports.
+  Deserializing a key of another size is now a compile error.
+- **Breaking:** the crate now needs Rust 1.89 or later.
+  Version 0.8.1 needed Rust 1.88.
 
 ### Fixes
 
-- Deserializing a key now checks, in constant time, that it holds each of `0..N` exactly once. A key that fails the check is refused, and the error does not include its bytes.
-  Before, a key with a repeated or out-of-range index was accepted. A `NonZero` permutation through such a key could produce zero, which is undefined behavior from safe code.
-  The serialized format is unchanged, and every valid key still deserializes. The crate no longer contains `unsafe` code.
+- Deserialization now checks, in constant time, that a key contains each index below `N` exactly once.
+  The error for a key that fails the check does not include the key's bytes.
+  In 0.8.1, deserializing accepted a key with a repeated or out-of-range index.
+  With such a key, permuting a `NonZero` value could produce zero.
+  A `NonZero` value of zero is undefined behavior, reached from safe code.
+  The serialized format is unchanged, and every valid key still deserializes.
+  The crate no longer contains `unsafe` code.
 
 ## [0.8.1] - 2026-10-26
 

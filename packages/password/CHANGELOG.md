@@ -3,20 +3,32 @@
 
 ### Breaking
 
-- **Breaking:** `Password::new` is removed. To keep an existing secret, wrap it in `Protected::new`.
-- **Breaking:** each password type now has a minimum length, checked at compile time. `Password<N>` needs at least 20 characters, `AlphaNumericPassword<N>` at least 22, and `AlphaPassword<N>` at least 23. Each minimum gives more than 128 bits of entropy. The minimums also apply to generation with an RNG you supply. A shorter `N` fails to compile, so use a longer length.
-- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
+- **Breaking:** `Password::new` is removed.
+  To keep an existing secret, wrap the secret in `Protected::new` instead.
+- **Breaking:** each password type now has a minimum length, and the compiler checks it.
+  `Password<N>` needs at least 20 characters.
+  `AlphaNumericPassword<N>` needs at least 22 characters.
+  `AlphaPassword<N>` needs at least 23 characters.
+  Each minimum gives more than 128 bits of entropy.
+  The minimums also apply when you generate a password with your own random number generator.
+  If your code uses a shorter length, increase the length, because a shorter length no longer compiles.
+- **Breaking:** the crate now needs Rust 1.89 or later.
+  Version 0.8.1 needed Rust 1.88.
 
 ### Features
 
-- `generate()` on `Password`, `AlphaNumericPassword` and `AlphaPassword` makes a password of the minimum length from operating system entropy, and returns `Result<_, RandomError>`.
-- `len()` and `is_empty()` report a password's length without reading its characters.
-- The crate re-exports `Protected` and `RandomError`, so generating a password needs only this crate.
-- The `vitaminc` facade exposes the crate as `vitaminc::password`.
+- The new `generate()` function on each password type makes a password of the minimum length.
+  The function uses randomness from the operating system, and returns `Result<_, RandomError>`.
+- The new `len()` and `is_empty()` methods report the length of a password without reading its characters.
+- This crate now re-exports `Protected` and `RandomError`, so you need only this crate to generate a password.
+- The `vitaminc` crate now exposes this crate as `vitaminc::password`, behind its `password` feature.
 
 ### Fixes
 
-- `into_protected_string()` works. In 0.8.1 it panicked with `unimplemented!`. The conversion wipes the original characters, and the returned string is wiped on drop.
+- `into_protected_string()` now works.
+  In 0.8.1, the method panicked with `unimplemented!`.
+  The conversion wipes the original characters.
+  The returned string is wiped when it is dropped.
 
 ## [0.8.1] - 2026-10-26
 

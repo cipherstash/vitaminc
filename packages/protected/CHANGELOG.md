@@ -3,30 +3,49 @@
 
 ### Breaking
 
-- **Breaking:** `Usage<T, S>` no longer implements `AsProtectedRef`. A scoped value therefore cannot reach a consumer that ignores its scope (`zip_ref`, `update_with_ref` or encryption) by accident. To reach the value deliberately, use `Controlled::risky_ref`. `Protected` still lends a `ProtectedRef`, and so do `Equatable` and `Exportable` around a type that lends one.
-- **Breaking:** `str` and `Cow<str>` now lend both `ProtectedRef<'_, str>` and `ProtectedRef<'_, [u8]>`. Where nothing else fixes the type, `s.as_protected_ref()` needs a target type. Choose `str` to seal the string as text, which decrypts as a `String`, or `[u8]` to seal it as bytes.
-- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
+- **Breaking:** `Usage<T, S>` no longer implements `AsProtectedRef`.
+  A scoped value can no longer reach code that ignores its scope by mistake.
+  Code that ignores scope includes `zip_ref`, `update_with_ref`, and encryption.
+  To reach the value on purpose, call `Controlled::risky_ref`.
+  `Protected` still lends a `ProtectedRef`.
+  `Equatable` and `Exportable` also lend a `ProtectedRef` when the type they wrap lends one.
+- **Breaking:** `str` and `Cow<str>` now lend both `ProtectedRef<'_, str>` and `ProtectedRef<'_, [u8]>`.
+  If nothing else in your code fixes the type, `s.as_protected_ref()` needs a type annotation.
+  Choose `str` to seal the string as text.
+  Text decrypts as a `String`.
+  Choose `[u8]` to seal the string as bytes.
+- **Breaking:** the crate now needs Rust 1.89 or later.
+  Version 0.8.1 needed Rust 1.88.
 
 ### Features
 
-- `Buffer` is a byte buffer for secret output. It wipes every allocation that it outgrows, and wipes itself on drop.
-  It is a `Controlled` type:
+- The new `Buffer` type contains secret output bytes.
+  A `Buffer` wipes each allocation that it outgrows.
+  A `Buffer` also wipes its bytes when it is dropped.
+  `Buffer` is a `Controlled` type, so you use it like this:
 
-  - read the bytes with `risky_ref`
-  - take the `Vec<u8>` with `risky_unwrap`
-  - patch bytes in place with `overwrite`
+  - To read the bytes, call `risky_ref`.
+  - To take the `Vec<u8>` out of the `Buffer`, call `risky_unwrap`.
+  - To change bytes in place, call `overwrite`.
 
-  `Buffer` has no `Clone`, `PartialEq` or `Deref`, and its `Debug` output is redacted. The frame and blob writers in `vitaminc-aead` and `vitaminc-aead-frame` return a `Buffer`.
-- `ProtectedRef::risky_ref` reads through a protected borrow deliberately. It is the same escape hatch that the owner offers through `Controlled::risky_ref`.
+  `Buffer` does not implement `Clone`, `PartialEq`, or `Deref`.
+  The `Debug` output of a `Buffer` is redacted.
+  The frame and blob writers in `vitaminc-aead` and `vitaminc-aead-frame` return a `Buffer`.
+- The new `ProtectedRef::risky_ref` method reads a value through a protected borrow, on purpose.
+  The method gives the same access as `Controlled::risky_ref` gives on the owner of the value.
 
 ### Performance
 
-- `Locked` regions and `Buffer` are wiped 16 bytes per volatile store instead of one. The guarantee is unchanged.
+- `Locked` regions and `Buffer` are now wiped 16 bytes per volatile store, not 1 byte.
+  The wiping guarantee is unchanged.
 
-### Not guaranteed
+### What is not guaranteed
 
-- A `ProtectedRef` does not promise that its value is wiped. A `str`, `[u8; N]` or `Cow<str>` can lend one with nothing behind it that wipes. The docs said otherwise before.
-- When you pass a borrow of a `Locked` value to a function, that function can read the value outside locked memory.
+- A `ProtectedRef` does not guarantee that its value is wiped.
+  A `str`, `[u8; N]`, or `Cow<str>` can lend a `ProtectedRef`.
+  Those types do not wipe their values.
+  The documentation in 0.8.1 said otherwise.
+- If you pass a borrow of a `Locked` value to a function, the function can read the value outside locked memory.
 
 ## [0.8.1] - 2026-10-26
 

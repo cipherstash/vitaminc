@@ -3,11 +3,13 @@
 
 ### Breaking
 
-- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
+- **Breaking:** the crate now needs Rust 1.89 or later.
+  Version 0.8.1 needed Rust 1.88.
 
 ### Fixes
 
-- Encoding an integer no longer leaves the converted value in an unwiped stack slot. The encoded bytes are unchanged.
+- Encoding an integer no longer leaves the converted value in a stack slot that is not wiped.
+  The encoded bytes are unchanged.
 
 ## [0.8.1] - 2026-10-26
 
