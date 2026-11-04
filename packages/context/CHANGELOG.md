@@ -1,12 +1,13 @@
 
 ## [0.9.0] - 2026-11-04
 
-### Documentation
+### Breaking
 
-- record that leaves are authenticated and container membership and order are not
-- clarify features and Rust requirements
-- clarify crate guides and navigation
-- fix the remaining doc links a private-items build refuses, so internal docs build with warnings denied
+- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
+
+### Not guaranteed
+
+- The docs now say what a context does not bind. A map's context binds each entry's key, but not which entries the map holds. A sequence's context binds neither an element's index nor the sequence's length. Rows come back from a database in any order, and some columns may be missing. See ADR 0002.
 
 ## [0.8.1] - 2026-10-26
 

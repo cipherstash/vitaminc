@@ -3,25 +3,16 @@
 
 ### Breaking
 
-- **Breaking:** make generated passwords usable
+- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88. The `aws-kms` feature still needs 1.94.1.
+- **Breaking:** the facade re-exports crates with breaking changes in this release, including `protected`, `aead` and `permutation`. See each crate's 0.9.0 changelog.
+
+### Features
+
+- A new `password` feature exposes `vitaminc-password` as `vitaminc::password`, and enables `protected` and `random`.
 
 ### Documentation
 
-- make examples executable and copyable
-- clarify features and Rust requirements
-- clarify crate guides and navigation
-- demonstrate safe cryptography workflows
-- clarify examples and improve navigation
-- rewrite the README changes in plain language
-- put each README sentence on its own line
-- link require_locked to its API documentation
-- apply review feedback on the plain-language README
-- keep the README introduction in its published wording
-- link API names and explain encoding terms in the README
-
-### Fixes
-
-- keep examples on the protected path
+- The README is rewritten in plain language. It helps you choose a crate and install it. It has worked examples for protecting secrets, generating passwords, encrypting a value in its context, and keeping long-lived keys in locked memory. CI compiles and runs the examples.
 
 ## [0.8.1] - 2026-10-26
 

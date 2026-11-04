@@ -3,16 +3,20 @@
 
 ### Breaking
 
-- **Breaking:** make generated passwords usable
+- **Breaking:** `Password::new` is removed. To keep an existing secret, wrap it in `Protected::new`.
+- **Breaking:** each password type now has a minimum length, checked at compile time. `Password<N>` needs at least 20 characters, `AlphaNumericPassword<N>` at least 22, and `AlphaPassword<N>` at least 23. Each minimum gives more than 128 bits of entropy. The minimums also apply to generation with an RNG you supply. A shorter `N` fails to compile, so use a longer length.
+- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
 
-### Documentation
+### Features
 
-- automate installation version updates
+- `generate()` on `Password`, `AlphaNumericPassword` and `AlphaPassword` makes a password of the minimum length from operating system entropy, and returns `Result<_, RandomError>`.
+- `len()` and `is_empty()` report a password's length without reading its characters.
+- The crate re-exports `Protected` and `RandomError`, so generating a password needs only this crate.
+- The `vitaminc` facade exposes the crate as `vitaminc::password`.
 
 ### Fixes
 
-- keep examples on the protected path
-- express nonempty invariant
+- `into_protected_string()` works. In 0.8.1 it panicked with `unimplemented!`. The conversion wipes the original characters, and the returned string is wiped on drop.
 
 ## [0.8.1] - 2026-10-26
 

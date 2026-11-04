@@ -3,23 +3,8 @@
 
 ### Breaking
 
-- **Breaking:** return frames and blobs in a Buffer, so the plaintext they hold is wiped sixteen bytes a store
-- **Breaking:** make Buffer a Controlled type, so its bytes are read through risky_ref and not a plain slice
-
-### Dependencies
-
-- bump napi in /packages/aead-napi/tests/addon
-- bump the cargo-patch group across 3 directories with 5 updates
-
-### Documentation
-
-- make examples executable and copyable
-- clarify features and Rust requirements
-- clarify crate guides and navigation
-
-### Fixes
-
-- clear the fourteen open RustSec advisories in the lockfile
+- **Breaking:** `JsRef::to_frame` returns a `vitaminc_protected::Buffer` instead of `Protected<Vec<u8>>`. Read the bytes with `Controlled::risky_ref`, or take the `Vec<u8>` with `Controlled::risky_unwrap`. The buffer wipes itself on drop. The JavaScript API is unchanged.
+- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
 
 ## [0.8.1] - 2026-10-26
 

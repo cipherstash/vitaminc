@@ -1,15 +1,13 @@
 
 ## [0.9.0] - 2026-11-04
 
-### Documentation
+### Breaking
 
-- clarify features and Rust requirements
-- clarify crate guides and navigation
-- fix the remaining doc links a private-items build refuses, so internal docs build with warnings denied
+- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
 
 ### Fixes
 
-- convert and encode an integer in one step, so the converted value is not left in an unwiped stack slot
+- Encoding an integer no longer leaves the converted value in an unwiped stack slot. The encoded bytes are unchanged.
 
 ## [0.8.1] - 2026-10-26
 

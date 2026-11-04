@@ -1,15 +1,13 @@
 
 ## [0.9.0] - 2026-11-04
 
-### Documentation
+### Breaking
 
-- clarify features and Rust requirements
-- clarify crate guides and navigation
-- fix the remaining doc links a private-items build refuses, so internal docs build with warnings denied
+- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
 
 ### Fixes
 
-- inline the Int and TimeUnit helpers, so a caller in another crate is not handed plaintext through an unwiped return slot
+- Normalizing an integer or a timestamp no longer passes the value through an unwiped stack slot. The `vitaminc-aead` helpers it calls are now inlined.
 
 ## [0.8.1] - 2026-10-26
 

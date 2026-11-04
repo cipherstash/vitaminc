@@ -1,16 +1,10 @@
 
 ## [0.9.0] - 2026-11-04
 
-### Documentation
+### Changes
 
-- clarify public API contracts
-- make examples executable and copyable
-- clarify features and Rust requirements
-- clarify crate guides and navigation
-
-### Fixes
-
-- clear the fourteen open RustSec advisories in the lockfile
+- `aws-sdk-kms` is now built without its `rustls` default feature. That feature adds the legacy hyper 0.14 and rustls 0.21 client, which is end-of-life and has open RustSec advisories. The SDK's `default-https-client` (hyper 1 with rustls 0.23 on aws-lc-rs) was already the client in use, and stays enabled with `rt-tokio`. If your code relied on this crate to enable the SDK's `rustls` feature, enable it in your own manifest.
+- The minimum supported Rust version is still 1.94.1.
 
 ## [0.8.1] - 2026-10-26
 

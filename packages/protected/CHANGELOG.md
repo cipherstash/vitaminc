@@ -3,34 +3,30 @@
 
 ### Breaking
 
-- **Breaking:** stop Usage lending a ProtectedRef, so a scoped value cannot reach a scope-blind consumer without a risky call
-- **Breaking:** return frames and blobs in a Buffer, so the plaintext they hold is wiped sixteen bytes a store
-- **Breaking:** make Buffer a Controlled type, so its bytes are read through risky_ref and not a plain slice
-
-### Documentation
-
-- clarify public API contracts
-- make examples executable and copyable
-- clarify features and Rust requirements
-- clarify crate guides and navigation
-- limit Buffer's no-copy promise to its own methods, since the Controlled methods that lend the Vec can grow it unwiped
-- clarify locked storage wording
-- rewrite the README changes in plain language
-- put each README sentence on its own line
+- **Breaking:** `Usage<T, S>` no longer implements `AsProtectedRef`. A scoped value therefore cannot reach a consumer that ignores its scope (`zip_ref`, `update_with_ref` or encryption) by accident. To reach the value deliberately, use `Controlled::risky_ref`. `Protected` still lends a `ProtectedRef`, and so do `Equatable` and `Exportable` around a type that lends one.
+- **Breaking:** `str` and `Cow<str>` now lend both `ProtectedRef<'_, str>` and `ProtectedRef<'_, [u8]>`. Where nothing else fixes the type, `s.as_protected_ref()` needs a target type. Choose `str` to seal the string as text, which decrypts as a `String`, or `[u8]` to seal it as bytes.
+- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
 
 ### Features
 
-- add ProtectedRef::risky_ref so other crates can read through a protected borrow deliberately
+- `Buffer` is a byte buffer for secret output. It wipes every allocation that it outgrows, and wipes itself on drop.
+  It is a `Controlled` type:
 
-### Fixes
+  - read the bytes with `risky_ref`
+  - take the `Vec<u8>` with `risky_unwrap`
+  - patch bytes in place with `overwrite`
 
-- make borrowed strings say text or bytes, and stop promising a ProtectedRef is wiped
-- unwind the wipe_raw proof 65 times, so Kani can finish its 64-byte check loop
+  `Buffer` has no `Clone`, `PartialEq` or `Deref`, and its `Debug` output is redacted. The frame and blob writers in `vitaminc-aead` and `vitaminc-aead-frame` return a `Buffer`.
+- `ProtectedRef::risky_ref` reads through a protected borrow deliberately. It is the same escape hatch that the owner offers through `Controlled::risky_ref`.
 
 ### Performance
 
-- wipe sixteen bytes a store, so a growing frame or blob is not wiped a byte at a time
-- tell the compiler reserve made room, so Vec's own reallocating growth is compiled out of Buffer's push paths
+- `Locked` regions and `Buffer` are wiped 16 bytes per volatile store instead of one. The guarantee is unchanged.
+
+### Not guaranteed
+
+- A `ProtectedRef` does not promise that its value is wiped. A `str`, `[u8; N]` or `Cow<str>` can lend one with nothing behind it that wipes. The docs said otherwise before.
+- When you pass a borrow of a `Locked` value to a function, that function can read the value outside locked memory.
 
 ## [0.8.1] - 2026-10-26
 

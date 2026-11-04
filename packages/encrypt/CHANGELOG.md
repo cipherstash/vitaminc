@@ -1,12 +1,14 @@
 
 ## [0.9.0] - 2026-11-04
 
+### Breaking
+
+- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
+
 ### Documentation
 
-- correct security guarantees
-- automate installation version updates
-- clarify features and Rust requirements
-- clarify crate guides and navigation
+- **Corrected:** the README said that a sequence's elements are bound to their positions. They are not: elements can be reordered or dropped without a decryption failure. For data that depends on position, use named map entries, and check the expected keys and count when reading.
+- **Corrected:** the README no longer implies that nonces are unique. Each leaf gets a random 96-bit nonce, and collisions become more likely as more leaves are sealed under one key, across all cipher instances and processes. Limit how much you encrypt under each key, and rotate keys. This crate does not track usage.
 
 ## [0.8.1] - 2026-10-26
 

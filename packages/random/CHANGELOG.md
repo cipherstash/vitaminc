@@ -8,12 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.9.0] - 2026-11-04
 
+### Breaking
+
+- **Breaking:** the minimum supported Rust version is now 1.89. 0.8.1 declared 1.88.
+
 ### Documentation
 
-- automate installation version updates
-- clarify features and Rust requirements
-- clarify crate guides and navigation
-- fix the remaining doc links a private-items build refuses, so internal docs build with warnings denied
+- WebAssembly: the docs no longer ask for the `getrandom_backend="wasm_js"` rustflag. On `wasm32-unknown-unknown`, `getrandom` 0.4 selects the JavaScript backend from the `wasm_js` feature that this crate enables.
 
 ## [0.8.1] - 2026-10-26
 
