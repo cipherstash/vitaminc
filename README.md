@@ -25,6 +25,40 @@ you need, or enable them through the top-level `vitaminc` crate. Feedback and
 [contributions](https://github.com/cipherstash/vitaminc/blob/main/CONTRIBUTING.md)
 are welcome.
 
+## Contents
+
+- [Design goals](#design-goals)
+- [Which crate should I use?](#which-crate-should-i-use)
+- [Installation and usage](#installation-and-usage)
+  - [Facade crate](#option-1-use-the-facade-crate)
+  - [Individual crates](#option-2-use-individual-crates-directly)
+- [Examples](#examples)
+  - [Make your own secret types safer](#make-your-own-secret-types-safer)
+  - [Protect existing values with wrappers](#protect-existing-values-with-wrappers)
+  - [Generate a password and keep it protected](#generate-a-password-and-keep-it-protected)
+  - [Derive `Generatable` for your own types](#derive-generatable-for-your-own-types)
+  - [Encrypt a secret in its application context](#encrypt-a-secret-in-its-application-context)
+  - [Encrypt your own Rust structs](#encrypt-your-own-rust-structs)
+  - [Keep long-lived keys in locked memory](#keep-long-lived-keys-in-locked-memory)
+- [Supporting and specialized crates](#supporting-and-specialized-crates)
+- [Compatibility](#compatibility)
+- [Features and sub-crates](#features-and-sub-crates)
+- [Escape hatches - use with care!](#escape-hatches---use-with-care)
+
+## Design goals
+
+* **Misuse resistant**: make the secure path easy, with types and APIs that
+  reject invalid usage at compile time where possible.
+* **Verified**: combine property and mutation testing, fuzzing, and formal
+  methods where practical, and prefer verified dependencies.
+* **Vetted**: design for expert review and prefer reviewed dependencies.
+* **Minimal**: include only what is necessary and keep optional capabilities
+  behind features.
+* **Consistent**: provide interfaces that work together across the suite.
+* **Compatible**: support native and WebAssembly applications, with embedded
+  (`no_std`) support as a future goal. All crates currently require `std`.
+* **Fast**: pursue performance without compromising security.
+
 ## Which crate should I use?
 
 ### Main crates
@@ -113,8 +147,8 @@ crate imports; the password example also demonstrates the facade API.
 ### Make your own secret types safer
 
 Combine `OpaqueDebug` and `TimingSafeEq` with Zeroize's derives to redact debug
-output, compare fixed-size secrets without short-circuiting, and wipe them on
-drop:
+output, compare equal-length secret contents without short-circuiting, and
+wipe them on drop:
 
 ```sh
 cargo add vitaminc-protected
@@ -129,7 +163,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 struct ApiToken(String);
 
 // Fixed values for this demonstration; generate real tokens with SafeRand below.
-let token = ApiToken(String);
+let token = ApiToken("sk-ant-api03-M_qo...".to_string());
 let same = ApiToken("sk-ant-api03-M_qo...".to_string());
 let different = ApiToken("sk-ant-api04-M_an...".to_string());
 
@@ -141,8 +175,8 @@ assert!(bool::from(token.ts_eq(&same)));
 
 `Zeroize` provides an explicit `.zeroize()` method; the `ZeroizeOnDrop` derive
 also generates the destructor that wipes the fields. Timing guarantees depend
-on the field types: this example uses fixed-size bytes, while string lengths
-and enum variants are not treated as secrets.
+on the field types: string contents are compared in constant time for equal
+lengths, while string lengths and enum variants are not treated as secrets.
 
 ### Protect existing values with wrappers
 
@@ -224,10 +258,11 @@ let text = password.into_protected_string();
 println!("{text:?}");
 ```
 
-### Generate cryptographic randomness for your types
+### Derive `Generatable` for your own types
 
-Seed `SafeRand` from system entropy and use `Generatable` for random values.
-The derive can fill your own structs, including protected fields:
+Use `#[derive(Generatable)]` to generate random instances of your own structs.
+Each field must implement `Generatable`, including protected fields such as
+`Protected<[u8; 32]>`. The macro is re-exported by `vitaminc-random`:
 
 ```sh
 cargo add vitaminc-random vitaminc-protected
@@ -244,6 +279,7 @@ struct ApiToken {
 
 let mut rng = SafeRand::from_entropy().expect("system entropy unavailable");
 let secret: Protected<[u8; 32]> = Generatable::random(&mut rng).expect("generation failed");
+// The derived implementation generates each field using the supplied RNG.
 let token = ApiToken::random(&mut rng).expect("generation failed");
 
 println!("{secret:?}");
@@ -441,20 +477,6 @@ crate. Some also enable supporting facade features:
 These dependencies apply transitively. `normalize` alone does not enable
 `prf`. For options such as `hlist`, `chrono`, or `bitvec`, add the relevant
 crate directly and enable its feature; the facade does not forward them.
-
-## Design goals
-
-* **Misuse resistant**: make the secure path easy, with types and APIs that
-  reject invalid usage at compile time where possible.
-* **Verified**: combine property and mutation testing, fuzzing, and formal
-  methods where practical, and prefer verified dependencies.
-* **Vetted**: design for expert review and prefer reviewed dependencies.
-* **Minimal**: include only what is necessary and keep optional capabilities
-  behind features.
-* **Consistent**: provide interfaces that work together across the suite.
-* **Compatible**: support native and WebAssembly applications, with embedded
-  (`no_std`) support as a future goal. All crates currently require `std`.
-* **Fast**: pursue performance without compromising security.
 
 ## Escape hatches - use with care!
 
