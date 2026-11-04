@@ -48,7 +48,7 @@ EXAMPLES = {
                            'vitaminc-random': [], 'vitaminc-protected': []}),
     'locked-key': ('README.md', 'Examples', 7,
                    {'vitaminc-protected': [], 'vitaminc-random': []}),
-    'escape-hatches': ('README.md', 'Escape hatches - use with care!', 0,
+    'escape-hatches': ('README.md', 'Access the plain value of a secret', 0,
                         {'vitaminc-protected': []}),
     'storage': ('packages/aead-frame/README.md', 'Storage profile (feature `serde`)', 0,
                 {'vitaminc-aead-frame': ['serde'], 'vitaminc-protected': []}),

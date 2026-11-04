@@ -193,7 +193,28 @@ assert_eq!(NonEmpty::new(("", None::<&str>)).unwrap_err(), EmptyError);
 
 ### Locked storage for long-lived secrets
 
-`Protected` wipes a value when it is dropped, which is the right guarantee for a value that lives for one call. Nothing drops a static, a leaked `Arc`, or anything else when the process dies on `SIGTERM`, `SIGKILL`, or `process::exit`, so a key that lives for the process needs protection when it is allocated, not when it is dropped. On Unix, `Locked<T>` stores the value in memory obtained from the operating system that is locked against swapping (`mlock`), excluded from core dumps on Linux (`MADV_DONTDUMP`), fenced by guard pages, and never moved. It is wiped on drop like `Protected`, and while `locked()` is true, the kernel will not page the bytes out to swap, nor on Linux include them in a core dump, even if the drop never happens (a hibernation image is written outside that mechanism and is not covered). On other targets, the value lives on the ordinary heap, wiped on drop but neither locked nor fenced, and `lock_error()` reports `Unavailable`.
+Use `Locked<T>` for a secret that lives as long as the process, such as a long-lived key.
+
+`Protected` wipes a value when the value is dropped. Wiping on drop is enough for a value that lives for one call. Some values are never dropped:
+
+- a static;
+- a leaked `Arc`;
+- every value, when the process ends on `SIGTERM`, `SIGKILL`, or `process::exit`.
+
+A key that lives as long as the process needs protection from the moment it is allocated, not only when it is dropped.
+
+On Unix, `Locked<T>` stores the value in memory that it gets from the operating system. That memory is:
+
+- locked, so that it is not swapped to disk (`mlock`);
+- left out of core dumps, on Linux only (`MADV_DONTDUMP`);
+- surrounded by guard pages;
+- never moved.
+
+`Locked<T>` wipes the value when it is dropped, as `Protected` does. While `locked()` returns `true`, the kernel does not write the bytes to swap. On Linux, the kernel also leaves the bytes out of core dumps. Both protections apply even if the value is never dropped.
+
+These protections do not keep the bytes out of a hibernation image. The system writes that image by a different mechanism.
+
+On other targets, `Locked<T>` stores the value on the ordinary heap. The value is wiped when it is dropped. The heap memory has no lock and no guard pages. On those targets, `lock_error()` reports `Unavailable`.
 
 ```rust
 # use vitaminc_protected::{Locked, LockError};
