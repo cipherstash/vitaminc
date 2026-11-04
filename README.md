@@ -11,7 +11,7 @@ Keys need sufficient randomness, secrets need careful handling, and encrypted da
 Getting these details wrong can undermine the guarantees of the underlying primitives.
 
 Vitamin C is a suite of Rust crates that makes these details easier to get right.
-It provides components for protecting secret values, generating cryptographic randomness, handling keys and passwords, encrypting structured values, and encoding cryptographic context unambiguously.
+It provides components for protecting secret values, generating cryptographic randomness, handling keys and passwords, encrypting structured values, and encoding cryptographic context [unambiguously](https://github.com/cipherstash/vitaminc/blob/main/GLOSSARY.md#context-encoding).
 It builds on libraries such as Subtle, Zeroize, and RustCrypto, with types and APIs designed to prevent misuse.
 The goal is to make invalid states and configurations fail to compile wherever possible.
 This matters even more when code is written by AI.
@@ -111,7 +111,7 @@ assert!(debug.contains("***"));
 assert!(!debug.contains("example-token"));
 ```
 
-`Protected` hides its contents in debug output.
+[`Protected`] hides its contents in debug output.
 `Protected` also wipes its contents when it is dropped.
 
 To enable more than one crate, separate the features with commas:
@@ -169,8 +169,8 @@ The password example also shows the facade.
 
 To protect a secret type that you define, derive these traits:
 
-- `OpaqueDebug`, from `vitaminc-protected`, hides the contents in debug output.
-- `TimingSafeEq`, from `vitaminc-protected`, compares contents of equal length without stopping at the first byte that differs.
+- [`OpaqueDebug`], from `vitaminc-protected`, hides the contents in debug output.
+- [`TimingSafeEq`], from `vitaminc-protected`, compares contents of equal length without stopping at the first byte that differs.
 - `Zeroize` and `ZeroizeOnDrop`, from the Zeroize crate, wipe the contents.
 
 ```sh
@@ -207,7 +207,7 @@ A string's length and an enum's variant are not treated as secrets.
 ### Protect existing values with wrappers
 
 To protect a value of an existing type, such as `String`, wrap it in `Protected`.
-To compare protected values, use `Equatable`.
+To compare protected values, use [`Equatable`].
 Both wrappers hide their contents in debug output, and wipe them when dropped.
 
 ```sh
@@ -267,13 +267,13 @@ Each password type has a default length that gives more than 128 bits of entropy
 
 | Password type | Characters | Default length |
 | --- | --- | ---: |
-| `Password` | Printable ASCII | 20 |
-| `AlphaNumericPassword` | Letters and digits | 22 |
-| `AlphaPassword` | Letters | 23 |
+| [`Password`] | Printable ASCII | 20 |
+| [`AlphaNumericPassword`] | Letters and digits | 22 |
+| [`AlphaPassword`] | Letters | 23 |
 
 Each default length is also the minimum length.
 If you set a shorter length, the build fails.
-To generate longer passwords, or many passwords at once, use `Generatable::random`.
+To generate longer passwords, or many passwords at once, use [`Generatable::random`].
 The password guide explains how, in [Longer passwords and batches](https://github.com/cipherstash/vitaminc/tree/main/packages/password#longer-passwords-and-batches).
 
 Converting a password to a protected string wipes the original characters.
@@ -323,7 +323,7 @@ println!("{secret:?}");
 println!("{:?}", token.bytes); // Debug output hides the contents of protected fields.
 ```
 
-For real secrets, seed the generator from the operating system, as `SafeRand::from_entropy` does.
+For real secrets, seed the generator from the operating system, as [`SafeRand::from_entropy`] does.
 A fixed seed is useful in tests, because a test then generates the same values each time.
 Anyone who knows the seed can generate those values too.
 
@@ -367,7 +367,7 @@ Supply the same context when you decrypt.
 
 ### Encrypt your own Rust structs
 
-To encrypt a struct, derive `Encrypt` and `Decrypt`.
+To encrypt a struct, derive [`Encrypt`] and [`Decrypt`].
 You do not need to serialize the struct first, or take its protected fields out of their wrappers:
 
 ```sh
@@ -412,7 +412,7 @@ The [encryption guide](https://github.com/cipherstash/vitaminc/tree/main/package
 
 ### Keep long-lived keys in locked memory
 
-For a secret that lives longer than one call, use `Locked`.
+For a secret that lives longer than one call, use [`Locked`].
 `Locked` asks the operating system to protect the memory where the secret is stored.
 This example generates the key's bytes directly in that memory.
 The example then refuses to use the key unless the memory is locked:
@@ -469,7 +469,7 @@ When you extend Vitamin C, or connect it to another language or service, add the
 | [`vitaminc-aead-frame`](https://github.com/cipherstash/vitaminc/tree/main/packages/aead-frame) | Encodings for sending values and ciphertexts between programs, and a versioned format for storing them. | Direct dependency | [crates.io](https://crates.io/crates/vitaminc-aead-frame) · [docs.rs](https://docs.rs/vitaminc-aead-frame) |
 | [`vitaminc-aead-napi`](https://github.com/cipherstash/vitaminc/tree/main/packages/aead-napi) | Converts values between Rust and JavaScript in native Node.js addons, through Node-API. This crate is a Rust library, not an npm package. | Direct dependency | [crates.io](https://crates.io/crates/vitaminc-aead-napi) · [docs.rs](https://docs.rs/vitaminc-aead-napi) |
 | [`vitaminc-async-traits`](https://github.com/cipherstash/vitaminc/tree/main/packages/async-traits) | Async traits for hash and message authentication code (MAC) providers that run remotely. | `async-traits` | [crates.io](https://crates.io/crates/vitaminc-async-traits) · [docs.rs](https://docs.rs/vitaminc-async-traits) |
-| [`vitaminc-context`](https://github.com/cipherstash/vitaminc/tree/main/packages/context) | Canonical context encoding for authenticated encryption and pseudorandom functions (PRFs). | `context` | [crates.io](https://crates.io/crates/vitaminc-context) · [docs.rs](https://docs.rs/vitaminc-context) |
+| [`vitaminc-context`](https://github.com/cipherstash/vitaminc/tree/main/packages/context) | [Canonical](https://github.com/cipherstash/vitaminc/blob/main/GLOSSARY.md#context-encoding) context encoding for authenticated encryption and pseudorandom functions (PRFs). | `context` | [crates.io](https://crates.io/crates/vitaminc-context) · [docs.rs](https://docs.rs/vitaminc-context) |
 | [`vitaminc-hmac`](https://github.com/cipherstash/vitaminc/tree/main/packages/hmac) | An HMAC-SHA256 backend that runs in your process, for pseudorandom functions over structured values. | `hmac` | [crates.io](https://crates.io/crates/vitaminc-hmac) · [docs.rs](https://docs.rs/vitaminc-hmac) |
 | [`vitaminc-kms`](https://github.com/cipherstash/vitaminc/tree/main/packages/kms) | An HMAC backend that uses AWS Key Management Service (KMS). | `aws-kms` | [crates.io](https://crates.io/crates/vitaminc-kms) · [docs.rs](https://docs.rs/vitaminc-kms) |
 | [`vitaminc-normalize`](https://github.com/cipherstash/vitaminc/tree/main/packages/normalize) | Encodes structured values in one fixed form, for equality indexes. | `normalize` | [crates.io](https://crates.io/crates/vitaminc-normalize) · [docs.rs](https://docs.rs/vitaminc-normalize) |
@@ -491,11 +491,13 @@ Before you use these crates, read these notes:
 
 ## Compatibility
 
-The minimum supported Rust version (MSRV) is <!-- msrv:workspace -->**1.89.0**<!-- /msrv -->, except for `vitaminc-kms`, which requires <!-- msrv:vitaminc-kms -->**1.94.1**<!-- /msrv -->.
+The minimum supported Rust version (MSRV) is <!-- msrv:workspace -->**1.89.0**<!-- /msrv -->.
+`vitaminc-kms` requires <!-- msrv:vitaminc-kms -->**1.94.1**<!-- /msrv -->.
 Enabling the facade's `aws-kms` feature raises its requirement to <!-- msrv:vitaminc/aws-kms -->**1.94.1**<!-- /msrv --> too.
 
-MSRV increases require a minor release (for example, 0.8 to 0.9) and must be called out in release notes.
-Patch releases retain the existing floor.
+An MSRV increase requires a minor release, for example from 0.8 to 0.9.
+The release notes must state the increase.
+Patch releases keep the existing MSRV.
 
 All crates require `std`; there is no `no_std` configuration yet.
 Supported targets include native builds, `vitaminc-encrypt` on `wasm32-unknown-unknown`, and the separate encryption guest on `wasm32-wasip1`.
@@ -532,7 +534,7 @@ For options such as `hlist`, `chrono`, or `bitvec`, add the relevant crate direc
 Use these methods only as a last resort.
 Each one takes the plain value out of the protection that the wrapper gives it.
 They exist for the rare APIs that cannot accept a protected value.
-For those APIs, the `Controlled` trait has escape hatches: methods that give you the plain value.
+For those APIs, the [`Controlled`] trait has escape hatches: methods that give you the plain value.
 Each method makes you responsible for keeping the value safe:
 
 | Method | What it gives you | What you must do |
@@ -570,4 +572,17 @@ The closure does not stop that code from copying or revealing the value.
 Where you can, use APIs that take the protected value directly, as the encryption examples above do.
 
 <!-- GitHub API links target the latest release; packages/vitaminc/src/lib.rs resolves these for rustdoc. -->
+[`AlphaNumericPassword`]: https://docs.rs/vitaminc-password/latest/vitaminc_password/struct.AlphaNumericPassword.html
+[`AlphaPassword`]: https://docs.rs/vitaminc-password/latest/vitaminc_password/struct.AlphaPassword.html
+[`Controlled`]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/trait.Controlled.html
+[`Decrypt`]: https://docs.rs/vitaminc-aead/latest/vitaminc_aead/trait.Decrypt.html
+[`Encrypt`]: https://docs.rs/vitaminc-aead/latest/vitaminc_aead/trait.Encrypt.html
+[`Equatable`]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/struct.Equatable.html
+[`Generatable::random`]: https://docs.rs/vitaminc-random/latest/vitaminc_random/trait.Generatable.html#tymethod.random
+[`Locked`]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/struct.Locked.html
 [`Locked::require_locked`]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/struct.Locked.html#method.require_locked
+[`OpaqueDebug`]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/trait.OpaqueDebug.html
+[`Password`]: https://docs.rs/vitaminc-password/latest/vitaminc_password/struct.Password.html
+[`Protected`]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/struct.Protected.html
+[`SafeRand::from_entropy`]: https://docs.rs/vitaminc-random/latest/vitaminc_random/struct.SafeRand.html#method.from_entropy
+[`TimingSafeEq`]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/trait.TimingSafeEq.html

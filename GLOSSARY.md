@@ -25,3 +25,13 @@ _Avoid_: Element, item, token
 **Refusal**:
 A value that a profile declines to read or write, together with where in the value it happened. It never contains the value itself or any of its keys.
 _Avoid_: Diagnostic, rejection, failure
+
+### Context encoding
+
+**Canonical encoding**:
+An encoding that gives each value exactly one sequence of bytes. Two programs that encode the same context get the same bytes.
+_Avoid_: Unique encoding, normalized form
+
+**Unambiguous encoding**:
+An encoding in which two different values never produce the same bytes. For example, the contexts `("ab", "c")` and `("a", "bc")` encode differently.
+_Avoid_: Unique encoding
