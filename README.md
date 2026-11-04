@@ -5,6 +5,7 @@
   <img src="https://raw.githubusercontent.com/cipherstash/vitaminc/main/docs/assets/readme-header-light.png" alt="Vitamin C — Misuse resistant vitamins for your cryptography. Open source, by CipherStash." width="1024">
 </picture>
 
+
 Strong cryptography depends on more than choosing a secure algorithm. Keys need
 sufficient randomness, secrets need careful handling, and encrypted data needs
 to be bound to the context in which it is used. Getting these details wrong can
@@ -16,7 +17,7 @@ cryptographic randomness, handling keys and passwords, encrypting structured
 values, and encoding cryptographic context unambiguously. It builds on libraries
 such as Subtle, Zeroize, and RustCrypto, with types and APIs designed to prevent
 misuse. The goal is to make invalid states and configurations fail to compile
-wherever possible.
+wherever possible. This matters even more when code is written by AI.
 
 Developed at [CipherStash](https://cipherstash.com), Vitamin C is open source
 and in active development toward 1.0. Use individual crates for the capabilities
@@ -31,7 +32,7 @@ are welcome.
 Start here for application development. The facade feature column shows how to
 access each component through `vitaminc`; you can also depend on it directly.
 
-| Crate | Purpose | Facade feature | Links |
+| Crate&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | Purpose | Facade feature | Links |
 | --- | --- | --- | --- |
 | [`vitaminc`](https://github.com/cipherstash/vitaminc/tree/main/packages/vitaminc) | Access the suite through one crate with opt-in features. | — | [crates.io](https://crates.io/crates/vitaminc) · [docs.rs](https://docs.rs/vitaminc) |
 | [`vitaminc-protected`](https://github.com/cipherstash/vitaminc/tree/main/packages/protected) | Protect secret values with redacted debug output, controlled access, and zeroization on drop. | `protected` | [crates.io](https://crates.io/crates/vitaminc-protected) · [docs.rs](https://docs.rs/vitaminc-protected) |
@@ -125,12 +126,12 @@ use vitaminc_protected::{OpaqueDebug, TimingSafeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[derive(OpaqueDebug, TimingSafeEq, Zeroize, ZeroizeOnDrop)]
-struct ApiToken([u8; 32]);
+struct ApiToken(String);
 
 // Fixed values for this demonstration; generate real tokens with SafeRand below.
-let token = ApiToken([7; 32]);
-let same = ApiToken([7; 32]);
-let different = ApiToken([8; 32]);
+let token = ApiToken(String);
+let same = ApiToken("sk-ant-api03-M_qo...".to_string());
+let different = ApiToken("sk-ant-api04-M_an...".to_string());
 
 println!("{token:?}"); // The type name is visible; its contents appear as "***".
 assert_eq!(token, same);
