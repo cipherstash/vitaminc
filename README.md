@@ -60,7 +60,7 @@ to redact its debug output and wipe its contents when it is dropped:
 use vitaminc::protected::{Controlled, Protected};
 
 let mut token = Protected::new(String::from("example-token"));
-token.update(|value| value.push_str("-updated"));
+token.risky_update(|value| value.push_str("-updated"));
 
 let debug = format!("{token:?}");
 assert!(debug.contains("***"));
