@@ -12,10 +12,10 @@ This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) f
 <!-- workspace-deps:start -->
 ```toml
 [dependencies]
-vitaminc-random = "0.8.1"
+vitaminc-random = "0.9.0"
 ```
 
-The examples using `Protected` also require `vitaminc-protected = "0.8.1"`
+The examples using `Protected` also require `vitaminc-protected = "0.9.0"`
 under `[dependencies]`.
 <!-- workspace-deps:end -->
 

@@ -1,4 +1,24 @@
 
+## [0.9.0] - 2026-11-04
+
+### Breaking
+
+- **Breaking:** the crate now needs Rust 1.89 or later.
+  Version 0.8.1 needed Rust 1.88.
+
+### Corrected documentation
+
+- **Corrected:** the README said that the elements of a sequence are bound to their positions.
+  The elements are not bound to their positions.
+  Elements can be reordered or removed without a decryption failure.
+  For data where position matters, use named map entries.
+  When you read the data, check the keys and the number of entries.
+- **Corrected:** the README implied that every nonce is unique.
+  Each leaf gets a random 96-bit nonce, so two leaves can get the same nonce by chance.
+  The chance increases with the number of leaves sealed under one key, across all cipher instances and processes.
+  Limit how much data you encrypt under each key, and rotate keys.
+  This crate does not count how much data you encrypt.
+
 ## [0.8.1] - 2026-10-26
 
 ## [0.8.0] - 2026-10-21

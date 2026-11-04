@@ -1,4 +1,28 @@
 
+## [0.9.0] - 2026-11-04
+
+### Breaking
+
+- **Breaking:** the crate now needs Rust 1.89 or later.
+  Version 0.8.1 needed Rust 1.88.
+  The `aws-kms` feature still needs Rust 1.94.1 or later.
+- **Breaking:** this crate re-exports crates that have breaking changes in 0.9.0.
+  Those crates include `protected`, `aead`, `permutation`, and `password`.
+  Before you upgrade, read the 0.9.0 changelog of each crate you use.
+
+### Features
+
+- The new `password` feature exposes `vitaminc-password` as `vitaminc::password`.
+  The feature also enables the `protected` and `random` features.
+
+### Documentation
+
+- The README is rewritten in plain language.
+  The README helps you choose a crate and install it.
+  The README has examples for protecting secrets, generating passwords, and encrypting a value in its context.
+  Another example keeps a long-lived key in locked memory.
+  Continuous integration compiles and runs every example.
+
 ## [0.8.1] - 2026-10-26
 
 ## [0.8.0] - 2026-10-21

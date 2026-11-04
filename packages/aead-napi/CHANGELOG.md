@@ -1,4 +1,15 @@
 
+## [0.9.0] - 2026-11-04
+
+### Breaking
+
+- **Breaking:** `JsRef::to_frame` now returns a `vitaminc_protected::Buffer`, not `Protected<Vec<u8>>`.
+  To read the bytes in a `Buffer`, call `Controlled::risky_ref`.
+  To take the `Vec<u8>` out of it, call `Controlled::risky_unwrap`.
+  The JavaScript API is unchanged.
+- **Breaking:** the crate now needs Rust 1.89 or later.
+  Version 0.8.1 needed Rust 1.88.
+
 ## [0.8.1] - 2026-10-26
 
 ## [0.8.0] - 2026-10-21

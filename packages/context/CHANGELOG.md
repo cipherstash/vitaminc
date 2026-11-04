@@ -1,4 +1,19 @@
 
+## [0.9.0] - 2026-11-04
+
+### Breaking
+
+- **Breaking:** the crate now needs Rust 1.89 or later.
+  Version 0.8.1 needed Rust 1.88.
+
+### What is not authenticated
+
+- The documentation now says what a context does not bind.
+  For a map, the context binds each entry's key, but not which entries the map contains.
+  For a sequence, the context binds neither the index of an element nor the length of the sequence.
+  A database returns rows in any order, and a query can read some columns and not others.
+  Architecture decision record (ADR) 0002 explains this design.
+
 ## [0.8.1] - 2026-10-26
 
 ## [0.8.0] - 2026-10-21

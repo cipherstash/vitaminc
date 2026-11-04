@@ -1,4 +1,52 @@
 
+## [0.9.0] - 2026-11-04
+
+### Breaking
+
+- **Breaking:** `Usage<T, S>` no longer implements `AsProtectedRef`.
+  A scoped value can no longer reach code that ignores its scope by mistake.
+  Code that ignores scope includes `zip_ref`, `update_with_ref`, and encryption.
+  To reach the value on purpose, call `Controlled::risky_ref`.
+  `Protected` still lends a `ProtectedRef`.
+  `Equatable` and `Exportable` also lend a `ProtectedRef` when the type they wrap lends one.
+- **Breaking:** `str` and `Cow<str>` now lend both `ProtectedRef<'_, str>` and `ProtectedRef<'_, [u8]>`.
+  If nothing else in your code fixes the type, `s.as_protected_ref()` needs a type annotation.
+  Choose `str` to seal the string as text.
+  Text decrypts as a `String`.
+  Choose `[u8]` to seal the string as bytes.
+- **Breaking:** the crate now needs Rust 1.89 or later.
+  Version 0.8.1 needed Rust 1.88.
+
+### Features
+
+- The new `Buffer` type contains secret output bytes.
+  A `Buffer` wipes each allocation that it outgrows.
+  A `Buffer` also wipes its bytes when it is dropped.
+  `Buffer` is a `Controlled` type, so you use it like this:
+
+  - To read the bytes, call `risky_ref`.
+  - To take the `Vec<u8>` out of the `Buffer`, call `risky_unwrap`.
+  - To change bytes in place, call `overwrite`.
+
+  `Buffer` does not implement `Clone`, `PartialEq`, or `Deref`.
+  The `Debug` output of a `Buffer` is redacted.
+  The frame and blob writers in `vitaminc-aead` and `vitaminc-aead-frame` return a `Buffer`.
+- The new `ProtectedRef::risky_ref` method reads a value through a protected borrow, on purpose.
+  The method gives the same access as `Controlled::risky_ref` gives on the owner of the value.
+
+### Performance
+
+- `Locked` regions and `Buffer` are now wiped 16 bytes per volatile store, not 1 byte.
+  The wiping guarantee is unchanged.
+
+### What is not guaranteed
+
+- A `ProtectedRef` does not guarantee that its value is wiped.
+  A `str`, `[u8; N]`, or `Cow<str>` can lend a `ProtectedRef`.
+  Those types do not wipe their values.
+  The documentation in 0.8.1 said otherwise.
+- If you pass a borrow of a `Locked` value to a function, the function can read the value outside locked memory.
+
 ## [0.8.1] - 2026-10-26
 
 ## [0.8.0] - 2026-10-21

@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-04
+
+### Breaking
+
+- **Breaking:** the crate now needs Rust 1.89 or later.
+  Version 0.8.1 needed Rust 1.88.
+
+### Documentation
+
+- The WebAssembly instructions no longer ask you to set the `getrandom_backend="wasm_js"` rustflag.
+  On `wasm32-unknown-unknown`, `getrandom` 0.4 selects the JavaScript backend from the `wasm_js` feature.
+  This crate enables that feature.
+
 ## [0.8.1] - 2026-10-26
 
 ## [0.8.0] - 2026-10-21
