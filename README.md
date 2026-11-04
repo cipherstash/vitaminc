@@ -464,7 +464,7 @@ The operating system can refuse to lock memory.
 Some platforms cannot lock memory at all.
 By default, the constructors try to lock the memory.
 If they cannot, they still return a value.
-Call `require_locked()` when your code must have locked memory.
+Call [`Locked::require_locked`] when your code must have locked memory.
 
 Store inline data such as `[u8; 32]` in `Locked`.
 A `Vec` or `String` keeps its contents in a separate buffer, so `Locked` would only lock the `Vec` or `String` header.
@@ -580,3 +580,6 @@ The closures you pass to `update`, `map`, and `Locked::with` also receive the pl
 A closure makes clear which code can use the plain value.
 The closure does not stop that code from copying or revealing the value.
 Where you can, use APIs that take the protected value directly, as the encryption examples above do.
+
+<!-- GitHub API links target the latest release; packages/vitaminc/src/lib.rs resolves these for rustdoc. -->
+[`Locked::require_locked`]: https://docs.rs/vitaminc-protected/latest/vitaminc_protected/struct.Locked.html#method.require_locked

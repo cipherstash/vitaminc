@@ -1,5 +1,11 @@
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+// The README links to the latest published API for GitHub. These definitions come
+// first, so rustdoc links to the version being built. See docs/documentation.md.
+#![doc = concat!(
+    "\n[`Locked::require_locked`]: https://docs.rs/vitaminc-protected/", env!("CARGO_PKG_VERSION"),
+    "/vitaminc_protected/struct.Locked.html#method.require_locked\n",
+)]
 #![doc = include_str!("../README.md")]
 
 #[cfg(feature = "aead")]
