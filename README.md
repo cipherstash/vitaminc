@@ -6,16 +6,16 @@
 </picture>
 
 
-Vitamin C is a set of Rust crates that help you use cryptography safely and
-handle secret values. The crates' types and APIs make the secure way to write
-code the easy way. Invalid states and configurations fail to compile wherever
-the crates can make them fail.
+Vitamin C is a set of Rust crates that help you use cryptography safely and handle secret values.
+The crates' types and APIs make the secure way to write code the easy way.
+Invalid states and configurations fail to compile wherever the crates can make them fail.
 Compile-time checks matter even more when AI writes the code.
 
-A secure algorithm alone does not make cryptography secure. Keys need enough
-randomness. Secrets need careful handling. Encrypted data must only decrypt in
-the context it was encrypted for. A mistake in any of these details can break
-the security that the algorithm provides.
+A secure algorithm alone does not make cryptography secure.
+Keys need enough randomness.
+Secrets need careful handling.
+Encrypted data must only decrypt in the context it was encrypted for.
+A mistake in any of these details can break the security that the algorithm provides.
 
 Vitamin C has crates to:
 
@@ -27,14 +27,14 @@ Vitamin C has crates to:
 
 The crates use libraries such as Subtle, Zeroize, and RustCrypto.
 
-You can add each crate you need as its own dependency. You can also add the
-`vitaminc` facade crate. The facade re-exports each crate when you enable the
-feature for it.
+You can add each crate you need as its own dependency.
+You can also add the `vitaminc` facade crate.
+The facade re-exports each crate when you enable the feature for it.
 
-[CipherStash](https://cipherstash.com) develops Vitamin C. Vitamin C is open
-source. The project is in active development toward version 1.0. CipherStash
-welcomes feedback and
-[contributions](https://github.com/cipherstash/vitaminc/blob/main/CONTRIBUTING.md).
+[CipherStash](https://cipherstash.com) develops Vitamin C.
+Vitamin C is open source.
+The project is in active development toward version 1.0.
+CipherStash welcomes feedback and [contributions](https://github.com/cipherstash/vitaminc/blob/main/CONTRIBUTING.md).
 
 ## Contents
 
@@ -59,27 +59,29 @@ welcomes feedback and
 
 ## Design goals
 
-* **Misuse resistant**: make the secure way the easy way. Make types and APIs
-  reject invalid use at compile time wherever they can.
-* **Verified**: test with property tests, mutation tests, and fuzzing. Use
-  formal methods where practical. Prefer dependencies that are verified.
-* **Vetted**: write code that security experts can review. Prefer dependencies
-  that experts have reviewed.
-* **Minimal**: include only what is necessary. Put optional parts behind
-  features.
+* **Misuse resistant**: make the secure way the easy way.
+  Make types and APIs reject invalid use at compile time wherever they can.
+* **Verified**: test with property tests, mutation tests, and fuzzing.
+  Use formal methods where practical.
+  Prefer dependencies that are verified.
+* **Vetted**: write code that security experts can review.
+  Prefer dependencies that experts have reviewed.
+* **Minimal**: include only what is necessary.
+  Put optional parts behind features.
 * **Consistent**: give the crates interfaces that work together.
-* **Compatible**: support native and WebAssembly applications. Embedded
-  (`no_std`) support is a future goal. Every crate requires `std` today.
+* **Compatible**: support native and WebAssembly applications.
+  Embedded (`no_std`) support is a future goal.
+  Every crate requires `std` today.
 * **Fast**: keep the code fast, without making it less secure.
 
 ## Choose a crate
 
 ### Main crates
 
-Most applications need only these crates. The "Facade feature" column names
-the `vitaminc` feature that enables each crate. You can also add each crate as
-its own dependency. The [supporting crates](#supporting-crates) are listed
-after the examples.
+Most applications need only these crates.
+The "Facade feature" column names the `vitaminc` feature that enables each crate.
+You can also add each crate as its own dependency.
+The [supporting crates](#supporting-crates) are listed after the examples.
 
 | Crate&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | Purpose | Facade feature | Links |
 | --- | --- | --- | --- |
@@ -96,20 +98,21 @@ You can add Vitamin C in two ways:
 - Add the `vitaminc` facade, and enable a feature for each crate you need.
 - Add each crate you need as its own dependency.
 
-Both ways give you the same types and APIs. Only the dependency declarations
-and the import paths differ. You can use both ways in one project.
+Both ways give you the same types and APIs.
+Only the dependency declarations and the import paths differ.
+You can use both ways in one project.
 
 ### Use the facade crate
 
-The facade enables no features by default. Enable a feature for each crate you
-need:
+The facade enables no features by default.
+Enable a feature for each crate you need:
 
 ```sh
 cargo add vitaminc --features protected
 ```
 
-Each feature adds a module to the facade, such as `vitaminc::protected` for the
-`protected` feature. Import from that module:
+Each feature adds a module to the facade, such as `vitaminc::protected` for the `protected` feature.
+Import from that module:
 
 ```rust
 use vitaminc::protected::{Controlled, Protected};
@@ -122,8 +125,8 @@ assert!(debug.contains("***"));
 assert!(!debug.contains("example-token"));
 ```
 
-`Protected` hides its contents in debug output. `Protected` also wipes its
-contents when it is dropped.
+`Protected` hides its contents in debug output.
+`Protected` also wipes its contents when it is dropped.
 
 To enable more than one crate, separate the features with commas:
 
@@ -131,8 +134,7 @@ To enable more than one crate, separate the features with commas:
 cargo add vitaminc --features protected,random,encrypt
 ```
 
-These features add the modules `vitaminc::protected`, `vitaminc::random`, and
-`vitaminc::encrypt`.
+These features add the modules `vitaminc::protected`, `vitaminc::random`, and `vitaminc::encrypt`.
 
 ### Use individual crates
 
@@ -142,8 +144,8 @@ Add each crate you need:
 cargo add vitaminc-protected
 ```
 
-In Rust imports, write the crate name with underscores in place of hyphens. The
-same example becomes:
+In Rust imports, write the crate name with underscores in place of hyphens.
+The same example becomes:
 
 ```rust
 use vitaminc_protected::{Controlled, Protected};
@@ -156,34 +158,33 @@ assert!(debug.contains("***"));
 assert!(!debug.contains("example-token"));
 ```
 
-Add other crates the same way. For example, add `vitaminc-random` and
-`vitaminc-encrypt`, and import them as `vitaminc_random` and
-`vitaminc_encrypt`.
+Add other crates the same way.
+For example, add `vitaminc-random` and `vitaminc-encrypt`, and import them as `vitaminc_random` and `vitaminc_encrypt`.
 
 ### Crates and features that need a direct dependency
 
 Even when you use the facade, you need a direct dependency for these:
 
-- The `vitaminc-aead-frame` and `vitaminc-aead-napi` crates. The facade does
-  not currently include them.
-- Crate features such as `hlist`, `chrono`, and `bitvec`. Enable them on the
-  crate that defines them, because the facade does not pass them on.
-- Some derive macros. A derive macro can need a direct dependency on the crate
-  that re-exports it. Each crate's setup guide says whether its macros need one.
+- The `vitaminc-aead-frame` and `vitaminc-aead-napi` crates.
+  The facade does not currently include them.
+- Crate features such as `hlist`, `chrono`, and `bitvec`.
+  Enable them on the crate that defines them, because the facade does not pass them on.
+- Some derive macros.
+  A derive macro can need a direct dependency on the crate that re-exports it.
+  Each crate's setup guide says whether its macros need one.
 
 ## Examples
 
-Each example starts with the `cargo add` commands it needs, and runs on its
-own. Most examples import the crates directly. The password example also shows
-the facade.
+Each example starts with the `cargo add` commands it needs, and runs on its own.
+Most examples import the crates directly.
+The password example also shows the facade.
 
 ### Protect your own secret types
 
 To protect a secret type that you define, derive these traits:
 
 - `OpaqueDebug`, from `vitaminc-protected`, hides the contents in debug output.
-- `TimingSafeEq`, from `vitaminc-protected`, compares contents of equal length
-  without stopping at the first byte that differs.
+- `TimingSafeEq`, from `vitaminc-protected`, compares contents of equal length without stopping at the first byte that differs.
 - `Zeroize` and `ZeroizeOnDrop`, from the Zeroize crate, wipe the contents.
 
 ```sh
@@ -209,27 +210,26 @@ assert_ne!(token, different);
 assert!(bool::from(token.ts_eq(&same)));
 ```
 
-The `Zeroize` derive adds a `.zeroize()` method. Call `.zeroize()` to wipe the
-fields. The `ZeroizeOnDrop` derive adds a destructor that wipes the fields when
-the value is dropped.
+The `Zeroize` derive adds a `.zeroize()` method.
+Call `.zeroize()` to wipe the fields.
+The `ZeroizeOnDrop` derive adds a destructor that wipes the fields when the value is dropped.
 
-The timing protection depends on the field types. Two strings of equal length
-are compared in constant time, so the time taken does not depend on their
-contents. A string's length and an enum's variant are not treated as secrets.
+The timing protection depends on the field types.
+Two strings of equal length are compared in constant time, so the time taken does not depend on their contents.
+A string's length and an enum's variant are not treated as secrets.
 
 ### Protect existing values with wrappers
 
-To protect a value of a type from another crate, such as `String`, wrap it in
-`Protected`. To compare protected values, use `Equatable`. Both wrappers hide
-their contents in debug output, and wipe them when dropped.
+To protect a value of a type from another crate, such as `String`, wrap it in `Protected`.
+To compare protected values, use `Equatable`.
+Both wrappers hide their contents in debug output, and wipe them when dropped.
 
 ```sh
 cargo add vitaminc-protected
 ```
 
-Comparing two `Protected` values with `==` **does not compile**. The compile
-error stops you from comparing secrets with the inner type's ordinary
-comparison by mistake:
+Comparing two `Protected` values with `==` **does not compile**.
+The compile error stops you from comparing secrets with the inner type's ordinary comparison by mistake:
 
 ```rust,compile_fail,E0369
 use vitaminc_protected::Protected;
@@ -240,8 +240,9 @@ let supplied = Protected::new(*b"demo");
 let matches = expected == supplied; // Error: Protected does not implement PartialEq.
 ```
 
-To compare protected values, wrap them in `Equatable`. `Equatable` uses the
-constant-time comparison of the inner type. This version compiles:
+To compare protected values, wrap them in `Equatable`.
+`Equatable` uses the constant-time comparison of the inner type.
+This version compiles:
 
 ```rust
 use vitaminc_protected::{Controlled, Equatable, Protected};
@@ -255,14 +256,13 @@ let supplied: Equatable<Protected<[u8; 4]>> = Equatable::new(*b"demo");
 assert_eq!(expected, supplied);
 ```
 
-The wrappers do not implement `Deref`. To change a value inside its wrapper,
-call `update`.
+The wrappers do not implement `Deref`.
+To change a value inside its wrapper, call `update`.
 
 ### Generate a password and keep it protected
 
-This example generates a password with a safe default length, from a generator
-seeded by the operating system. The example then converts the password to a
-protected string for your application to use:
+This example generates a password with a safe default length, from a generator seeded by the operating system.
+The example then converts the password to a protected string for your application to use:
 
 ```sh
 cargo add vitaminc-password
@@ -277,8 +277,7 @@ let text: Protected<String> = password.into_protected_string();
 println!("{text:?}"); // Debug output does not show the password.
 ```
 
-Each password type has a default length that gives more than 128 bits of
-entropy, when the generator is securely seeded:
+Each password type has a default length that gives more than 128 bits of entropy, when the generator is securely seeded:
 
 | Password type | Characters | Default length |
 | --- | --- | ---: |
@@ -286,16 +285,16 @@ entropy, when the generator is securely seeded:
 | `AlphaNumericPassword` | Letters and digits | 22 |
 | `AlphaPassword` | Letters | 23 |
 
-Each default length is also the minimum length. If you set a shorter length,
-the build fails. To generate longer passwords, or many passwords at once, use
-`Generatable::random`. The password guide explains how, in
-[Longer passwords and batches](https://github.com/cipherstash/vitaminc/tree/main/packages/password#longer-passwords-and-batches).
+Each default length is also the minimum length.
+If you set a shorter length, the build fails.
+To generate longer passwords, or many passwords at once, use `Generatable::random`.
+The password guide explains how, in [Longer passwords and batches](https://github.com/cipherstash/vitaminc/tree/main/packages/password#longer-passwords-and-batches).
 
-Converting a password to a protected string wipes the original characters. The
-protected string is wiped when it is dropped.
+Converting a password to a protected string wipes the original characters.
+The protected string is wiped when it is dropped.
 
-To use the facade instead, enable its `password` feature. The `password`
-feature also enables `protected` and `random`:
+To use the facade instead, enable its `password` feature.
+The `password` feature also enables `protected` and `random`:
 
 ```sh
 cargo add vitaminc --features password
@@ -311,10 +310,10 @@ println!("{text:?}");
 
 ### Derive `Generatable` for your own types
 
-To generate random values of your own structs, derive `Generatable`. Every
-field must implement `Generatable`. `Protected<[u8; 32]>` implements
-`Generatable`, so protected fields work too. You get the derive macro from
-`vitaminc-random`:
+To generate random values of your own structs, derive `Generatable`.
+Every field must implement `Generatable`.
+`Protected<[u8; 32]>` implements `Generatable`, so protected fields work too.
+You get the derive macro from `vitaminc-random`:
 
 ```sh
 cargo add vitaminc-random vitaminc-protected
@@ -338,17 +337,16 @@ println!("{secret:?}");
 println!("{:?}", token.bytes); // Debug output hides the contents of protected fields.
 ```
 
-For real secrets, seed the generator from the operating system, as
-`SafeRand::from_entropy` does. A fixed seed is useful in tests, because a test
-then generates the same values each time. Anyone who knows the seed can
-generate those values too.
+For real secrets, seed the generator from the operating system, as `SafeRand::from_entropy` does.
+A fixed seed is useful in tests, because a test then generates the same values each time.
+Anyone who knows the seed can generate those values too.
 
 ### Encrypt a secret in its application context
 
-This example generates a protected 256-bit key, and encrypts a value with
-AES-256-GCM. `vitaminc-encrypt` generates the nonce for each encryption. You
-also supply a context, such as a tenant and a field name. Decryption fails
-unless you supply the same context:
+This example generates a protected 256-bit key, and encrypts a value with AES-256-GCM.
+`vitaminc-encrypt` generates the nonce for each encryption.
+You also supply a context, such as a tenant and a field name.
+Decryption fails unless you supply the same context:
 
 ```sh
 cargo add vitaminc-encrypt vitaminc-random vitaminc-protected
@@ -376,15 +374,15 @@ let wrong_context: Result<Protected<String>, _> =
 assert!(wrong_context.is_err());
 ```
 
-The context is used as associated data. Encryption authenticates the context,
-but does not encrypt it. Use a context that does not change, and that cannot be
-confused with another context. Supply the same context when you decrypt.
+The context is used as associated data.
+Encryption authenticates the context, but does not encrypt it.
+Use a context that does not change, and that cannot be confused with another context.
+Supply the same context when you decrypt.
 
 ### Encrypt your own Rust structs
 
-To encrypt a struct, derive `Encrypt` and `Decrypt`. You do not need to
-serialize the struct first, or take its protected fields out of their
-wrappers:
+To encrypt a struct, derive `Encrypt` and `Decrypt`.
+You do not need to serialize the struct first, or take its protected fields out of their wrappers:
 
 ```sh
 cargo add vitaminc-aead vitaminc-encrypt vitaminc-random vitaminc-protected
@@ -418,22 +416,20 @@ assert_eq!(recovered.label, credential.label);
 println!("{:?}", recovered.token); // The decrypted token is also protected.
 ```
 
-Each field is encrypted separately. A field's ciphertext only decrypts under
-that field's name. When you decrypt into `Credential`, the decryption also
-checks that the value has the fields `Credential` expects.
+Each field is encrypted separately.
+A field's ciphertext only decrypts under that field's name.
+When you decrypt into `Credential`, the decryption also checks that the value has the fields `Credential` expects.
 
-Encryption does not authenticate a container as a whole. That is, it does not
-authenticate which entries a map has, or the order and length of a sequence.
-The
-[encryption guide](https://github.com/cipherstash/vitaminc/tree/main/packages/encrypt#how-it-fits-together)
-explains what the data model guarantees.
+Encryption does not authenticate a container as a whole.
+That is, it does not authenticate which entries a map has, or the order and length of a sequence.
+The [encryption guide](https://github.com/cipherstash/vitaminc/tree/main/packages/encrypt#how-it-fits-together) explains what the data model guarantees.
 
 ### Keep long-lived keys in locked memory
 
-For a secret that lives longer than one call, use `Locked`. `Locked` asks the
-operating system to protect the memory where the secret is stored. This example
-generates the key's bytes directly in that memory. The example then refuses to
-use the key unless the memory is locked:
+For a secret that lives longer than one call, use `Locked`.
+`Locked` asks the operating system to protect the memory where the secret is stored.
+This example generates the key's bytes directly in that memory.
+The example then refuses to use the key unless the memory is locked:
 
 ```sh
 cargo add vitaminc-protected vitaminc-random
@@ -459,27 +455,26 @@ match key.require_locked() {
 }
 ```
 
-On Unix, `Locked` uses `mlock`. `mlock` stops the operating system writing the
-memory to swap. `Locked` also puts guard pages on each side of the memory. On
-Linux, the memory is also left out of core dumps.
+On Unix, `Locked` uses `mlock`.
+`mlock` stops the operating system writing the memory to swap.
+`Locked` also puts guard pages on each side of the memory.
+On Linux, the memory is also left out of core dumps.
 
-The operating system can refuse to lock memory. Some platforms cannot lock
-memory at all. By default, the constructors try to lock the memory. If they
-cannot, they still return a value. Call `require_locked()` when your code
-must have locked memory.
+The operating system can refuse to lock memory.
+Some platforms cannot lock memory at all.
+By default, the constructors try to lock the memory.
+If they cannot, they still return a value.
+Call `require_locked()` when your code must have locked memory.
 
-Store inline data such as `[u8; 32]` in `Locked`. A `Vec` or `String` keeps its
-contents in a separate buffer, so `Locked` would only lock the `Vec` or
-`String` header. The
-[locked storage guide](https://github.com/cipherstash/vitaminc/tree/main/packages/protected#locked-storage-for-long-lived-secrets)
-gives the details for each platform.
+Store inline data such as `[u8; 32]` in `Locked`.
+A `Vec` or `String` keeps its contents in a separate buffer, so `Locked` would only lock the `Vec` or `String` header.
+The [locked storage guide](https://github.com/cipherstash/vitaminc/tree/main/packages/protected#locked-storage-for-long-lived-secrets) gives the details for each platform.
 
 ## Supporting crates
 
-These crates contain lower-level components, traits for backends, derive
-macros, and bindings for other languages. Most applications use them only
-through the main crates. When you extend Vitamin C, or connect it to another
-language or service, add them as direct dependencies.
+These crates contain lower-level components, traits for backends, derive macros, and bindings for other languages.
+Most applications use them only through the main crates.
+When you extend Vitamin C, or connect it to another language or service, add them as direct dependencies.
 
 | Crate | Purpose | Facade feature | Links |
 | --- | --- | --- | --- |
@@ -501,40 +496,34 @@ language or service, add them as direct dependencies.
 
 Before you use these crates, read these notes:
 
-- Use each derive macro through the crate that re-exports it. Follow that
-  crate's setup guide.
-- Before you store encoded values, read the
-  [storage contract](https://github.com/cipherstash/vitaminc/blob/main/packages/aead-frame/STORAGE.md)
-  for `vitaminc-aead-frame`.
-- An index reveals information about the values in it. For example, an
-  equality index shows which values are equal, and an ORE index shows their
-  order. Before you choose an index, read the
-  [`vitaminc-normalize` guide](https://github.com/cipherstash/vitaminc/tree/main/packages/normalize)
-  and the [`vitaminc-ore` guide](https://github.com/cipherstash/vitaminc/tree/main/packages/ore).
+- Use each derive macro through the crate that re-exports it.
+  Follow that crate's setup guide.
+- Before you store encoded values, read the [storage contract](https://github.com/cipherstash/vitaminc/blob/main/packages/aead-frame/STORAGE.md) for `vitaminc-aead-frame`.
+- An index reveals information about the values in it.
+  For example, an equality index shows which values are equal, and an ORE index shows their order.
+  Before you choose an index, read the [`vitaminc-normalize` guide](https://github.com/cipherstash/vitaminc/tree/main/packages/normalize) and the [`vitaminc-ore` guide](https://github.com/cipherstash/vitaminc/tree/main/packages/ore).
 
 ## Compatibility
 
-The minimum supported Rust version (MSRV) is <!-- msrv:workspace -->**1.89.0**<!-- /msrv -->, except for
-`vitaminc-kms`, which requires <!-- msrv:vitaminc-kms -->**1.94.1**<!-- /msrv -->. Enabling the facade's `aws-kms`
-feature raises its requirement to <!-- msrv:vitaminc/aws-kms -->**1.94.1**<!-- /msrv --> too.
+The minimum supported Rust version (MSRV) is <!-- msrv:workspace -->**1.89.0**<!-- /msrv -->, except for `vitaminc-kms`, which requires <!-- msrv:vitaminc-kms -->**1.94.1**<!-- /msrv -->.
+Enabling the facade's `aws-kms` feature raises its requirement to <!-- msrv:vitaminc/aws-kms -->**1.94.1**<!-- /msrv --> too.
 
-MSRV increases require a minor release (for example, 0.8 to 0.9) and must be
-called out in release notes. Patch releases retain the existing floor.
+MSRV increases require a minor release (for example, 0.8 to 0.9) and must be called out in release notes.
+Patch releases retain the existing floor.
 
-All crates require `std`; there is no `no_std` configuration yet. Supported
-targets include native builds, `vitaminc-encrypt` on `wasm32-unknown-unknown`,
-and the separate encryption guest on `wasm32-wasip1`. JavaScript WASM hosts need Web
-Crypto and the generated bindings described in the
-[encryption setup guide](https://github.com/cipherstash/vitaminc/tree/main/packages/encrypt#webassembly-setup).
+All crates require `std`; there is no `no_std` configuration yet.
+Supported targets include native builds, `vitaminc-encrypt` on `wasm32-unknown-unknown`, and the separate encryption guest on `wasm32-wasip1`.
+JavaScript WASM hosts need Web Crypto and the generated bindings described in the [encryption setup guide](https://github.com/cipherstash/vitaminc/tree/main/packages/encrypt#webassembly-setup).
 The KMS adapter and Node addon bindings target native applications.
 
-License: MIT. `vitaminc-ore` also includes Unicode-licensed data and declares
-`MIT AND Unicode-3.0`; see its license files.
+License: MIT.
+`vitaminc-ore` also includes Unicode-licensed data and declares `MIT AND Unicode-3.0`; see its license files.
 
 ## Facade features
 
-The facade enables no features by default. Each feature exposes the named
-crate. Some also enable supporting facade features:
+The facade enables no features by default.
+Each feature exposes the named crate.
+Some also enable supporting facade features:
 
 | Feature | Also enables |
 | --- | --- |
@@ -548,15 +537,15 @@ crate. Some also enable supporting facade features:
 | `normalize` | `aead`; also PRF normalization if `prf` is enabled |
 | `ore` | `normalize` |
 
-These dependencies apply transitively. `normalize` alone does not enable
-`prf`. For options such as `hlist`, `chrono`, or `bitvec`, add the relevant
-crate directly and enable its feature; the facade does not forward them.
+These dependencies apply transitively.
+`normalize` alone does not enable `prf`.
+For options such as `hlist`, `chrono`, or `bitvec`, add the relevant crate directly and enable its feature; the facade does not forward them.
 
 ## Access the plain value of a secret
 
-Some APIs need the plain value of a secret, outside its wrapper. For those
-APIs, the `Controlled` trait has methods that give you the plain value. Each
-method makes you responsible for keeping the value safe:
+Some APIs need the plain value of a secret, outside its wrapper.
+For those APIs, the `Controlled` trait has methods that give you the plain value.
+Each method makes you responsible for keeping the value safe:
 
 | Method | What it gives you | What you must do |
 | --- | --- | --- |
@@ -587,8 +576,7 @@ The wrapper cannot protect a copy that the receiving code makes.
 A password's `into_unprotected_string()` method returns an ordinary `String`.
 You must wipe that `String` yourself.
 
-The closures you pass to `update`, `map`, and `Locked::with` also receive the
-plain value. A closure makes clear which code can use the plain value. The
-closure does not stop that code from copying or revealing the value. Where you
-can, use APIs that take the protected value directly, as the encryption
-examples above do.
+The closures you pass to `update`, `map`, and `Locked::with` also receive the plain value.
+A closure makes clear which code can use the plain value.
+The closure does not stop that code from copying or revealing the value.
+Where you can, use APIs that take the protected value directly, as the encryption examples above do.
