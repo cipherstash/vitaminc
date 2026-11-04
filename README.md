@@ -7,32 +7,20 @@
 
 
 Strong cryptography depends on more than choosing a secure algorithm.
-Keys need sufficient randomness.
-Secrets need careful handling.
-Encrypted data needs to be bound to the context in which it is used.
-A mistake in these details can make a system insecure, even when its primitives are secure.
+Keys need sufficient randomness, secrets need careful handling, and encrypted data needs to be bound to the context in which it is used.
+Getting these details wrong can undermine the guarantees of the underlying primitives.
 
 Vitamin C is a suite of Rust crates that makes these details easier to get right.
-Vitamin C provides components for:
-
-- protecting secret values
-- generating cryptographic randomness
-- handling keys and passwords
-- encrypting structured values
-- encoding cryptographic context unambiguously
-
-Vitamin C uses libraries such as Subtle, Zeroize, and RustCrypto.
-The types and APIs are designed to prevent misuse.
+It provides components for protecting secret values, generating cryptographic randomness, handling keys and passwords, encrypting structured values, and encoding cryptographic context unambiguously.
+It builds on libraries such as Subtle, Zeroize, and RustCrypto, with types and APIs designed to prevent misuse.
 The goal is to make invalid states and configurations fail to compile wherever possible.
-Compile errors matter even more when AI writes the code.
+This matters even more when code is written by AI.
 
-[CipherStash](https://cipherstash.com) develops Vitamin C.
-Vitamin C is open source.
-The project is in active development toward 1.0.
+Developed at [CipherStash](https://cipherstash.com), Vitamin C is open source and in active development toward 1.0.
+Use individual crates for the capabilities you need, or enable them through the top-level `vitaminc` crate.
 Feedback and [contributions](https://github.com/cipherstash/vitaminc/blob/main/CONTRIBUTING.md) are welcome.
 
-Use individual crates for the capabilities you need, or enable them through the `vitaminc` facade crate.
-The facade re-exports most of the other crates, each behind a feature.
+The top-level crate is a facade: it re-exports most of the other crates, each behind a feature.
 
 ## Contents
 
@@ -542,7 +530,8 @@ For options such as `hlist`, `chrono`, or `bitvec`, add the relevant crate direc
 ## Escape hatches - use with care!
 
 Use these methods only as a last resort.
-Some APIs need the plain value of a secret, outside its wrapper.
+Each one takes the plain value out of the protection that the wrapper gives it.
+They exist for the rare APIs that cannot accept a protected value.
 For those APIs, the `Controlled` trait has escape hatches: methods that give you the plain value.
 Each method makes you responsible for keeping the value safe:
 
