@@ -13,6 +13,17 @@ The storage specification is also included in rustdoc. Keep its format and
 compatibility contract there; put corpus maintenance and CI instructions in
 the contributor guide.
 
+## Writing style
+
+Write documentation in plain language.
+When you write or rewrite documentation, use the [plain-language skill](https://github.com/auxesis/plain-language-skill).
+The skill follows ISO 24495-1 and the GOV.UK content guidance.
+
+In Markdown files, put each sentence on its own line.
+In a list item, indent the second and later sentences to the item's text.
+GitHub and rustdoc join the lines of a paragraph, so the rendered page does not change.
+A later change to one sentence then changes only one line of the diff.
+
 ## Shared README links
 
 Most crate landing pages include their README with `include_str!`. Keep one
