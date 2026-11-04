@@ -1,4 +1,26 @@
 
+## [0.9.0] - 2026-11-04
+
+### Breaking
+
+- **Breaking:** return frames and blobs in a Buffer, so the plaintext they hold is wiped sixteen bytes a store
+- **Breaking:** make Buffer a Controlled type, so its bytes are read through risky_ref and not a plain slice
+
+### Dependencies
+
+- bump napi in /packages/aead-napi/tests/addon
+- bump the cargo-patch group across 3 directories with 5 updates
+
+### Documentation
+
+- make examples executable and copyable
+- clarify features and Rust requirements
+- clarify crate guides and navigation
+
+### Fixes
+
+- clear the fourteen open RustSec advisories in the lockfile
+
 ## [0.8.1] - 2026-10-26
 
 ## [0.8.0] - 2026-10-21

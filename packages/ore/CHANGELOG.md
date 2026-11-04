@@ -1,4 +1,16 @@
 
+## [0.9.0] - 2026-11-04
+
+### Documentation
+
+- clarify features and Rust requirements
+- clarify crate guides and navigation
+- fix the remaining doc links a private-items build refuses, so internal docs build with warnings denied
+
+### Fixes
+
+- convert and encode an integer in one step, so the converted value is not left in an unwiped stack slot
+
 ## [0.8.1] - 2026-10-26
 
 ### Dependencies

@@ -1,4 +1,37 @@
 
+## [0.9.0] - 2026-11-04
+
+### Breaking
+
+- **Breaking:** stop Usage lending a ProtectedRef, so a scoped value cannot reach a scope-blind consumer without a risky call
+- **Breaking:** return frames and blobs in a Buffer, so the plaintext they hold is wiped sixteen bytes a store
+- **Breaking:** make Buffer a Controlled type, so its bytes are read through risky_ref and not a plain slice
+
+### Documentation
+
+- clarify public API contracts
+- make examples executable and copyable
+- clarify features and Rust requirements
+- clarify crate guides and navigation
+- limit Buffer's no-copy promise to its own methods, since the Controlled methods that lend the Vec can grow it unwiped
+- clarify locked storage wording
+- rewrite the README changes in plain language
+- put each README sentence on its own line
+
+### Features
+
+- add ProtectedRef::risky_ref so other crates can read through a protected borrow deliberately
+
+### Fixes
+
+- make borrowed strings say text or bytes, and stop promising a ProtectedRef is wiped
+- unwind the wipe_raw proof 65 times, so Kani can finish its 64-byte check loop
+
+### Performance
+
+- wipe sixteen bytes a store, so a growing frame or blob is not wiped a byte at a time
+- tell the compiler reserve made room, so Vec's own reallocating growth is compiled out of Buffer's push paths
+
 ## [0.8.1] - 2026-10-26
 
 ## [0.8.0] - 2026-10-21

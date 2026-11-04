@@ -1,4 +1,16 @@
 
+## [0.9.0] - 2026-11-04
+
+### Documentation
+
+- clarify features and Rust requirements
+- clarify crate guides and navigation
+- fix the remaining doc links a private-items build refuses, so internal docs build with warnings denied
+
+### Fixes
+
+- inline the Int and TimeUnit helpers, so a caller in another crate is not handed plaintext through an unwiped return slot
+
 ## [0.8.1] - 2026-10-26
 
 ### Dependencies

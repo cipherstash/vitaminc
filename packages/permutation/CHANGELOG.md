@@ -1,4 +1,23 @@
 
+## [0.9.0] - 2026-11-04
+
+### Breaking
+
+- **Breaking:** replace unsafe new_unchecked with a checked new, so no constructor can make a key that is not a permutation
+- **Breaking:** bound new and Deserialize by IsPermutable, so an unsupported key size is a compile error rather than a runtime refusal
+- **Breaking:** stop PermutationKey implementing Zeroize, since zeroize(&mut self) left a live key of all zeros that is not a permutation
+
+### Documentation
+
+- correct security guarantees
+- clarify public API contracts
+- clarify features and Rust requirements
+- clarify crate guides and navigation
+
+### Fixes
+
+- refuse deserialized keys that are not permutations, so NonZero permutes can never produce zero
+
 ## [0.8.1] - 2026-10-26
 
 ## [0.8.0] - 2026-10-21

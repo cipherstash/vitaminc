@@ -1,4 +1,28 @@
 
+## [0.9.0] - 2026-11-04
+
+### Breaking
+
+- **Breaking:** make generated passwords usable
+
+### Documentation
+
+- make examples executable and copyable
+- clarify features and Rust requirements
+- clarify crate guides and navigation
+- demonstrate safe cryptography workflows
+- clarify examples and improve navigation
+- rewrite the README changes in plain language
+- put each README sentence on its own line
+- link require_locked to its API documentation
+- apply review feedback on the plain-language README
+- keep the README introduction in its published wording
+- link API names and explain encoding terms in the README
+
+### Fixes
+
+- keep examples on the protected path
+
 ## [0.8.1] - 2026-10-26
 
 ## [0.8.0] - 2026-10-21

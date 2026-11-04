@@ -1,4 +1,13 @@
 
+## [0.9.0] - 2026-11-04
+
+### Documentation
+
+- record that leaves are authenticated and container membership and order are not
+- clarify features and Rust requirements
+- clarify crate guides and navigation
+- fix the remaining doc links a private-items build refuses, so internal docs build with warnings denied
+
 ## [0.8.1] - 2026-10-26
 
 ## [0.8.0] - 2026-10-21

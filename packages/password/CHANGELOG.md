@@ -1,4 +1,19 @@
 
+## [0.9.0] - 2026-11-04
+
+### Breaking
+
+- **Breaking:** make generated passwords usable
+
+### Documentation
+
+- automate installation version updates
+
+### Fixes
+
+- keep examples on the protected path
+- express nonempty invariant
+
 ## [0.8.1] - 2026-10-26
 
 ## [0.8.0] - 2026-10-21

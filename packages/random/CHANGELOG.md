@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-04
+
+### Documentation
+
+- automate installation version updates
+- clarify features and Rust requirements
+- clarify crate guides and navigation
+- fix the remaining doc links a private-items build refuses, so internal docs build with warnings denied
+
 ## [0.8.1] - 2026-10-26
 
 ## [0.8.0] - 2026-10-21
