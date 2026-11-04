@@ -13,7 +13,7 @@ The storage specification is also included in rustdoc. Keep its format and
 compatibility contract there; put corpus maintenance and CI instructions in
 the contributor guide.
 
-## Writing style
+## Writing style and formatting
 
 Write documentation in plain language.
 When you write or rewrite documentation, use the [plain-language skill](https://github.com/auxesis/plain-language-skill).

@@ -6,35 +6,33 @@
 </picture>
 
 
-Vitamin C is a set of Rust crates that help you use cryptography safely and handle secret values.
-The crates' types and APIs make the secure way to write code the easy way.
-Invalid states and configurations fail to compile wherever the crates can make them fail.
-Compile-time checks matter even more when AI writes the code.
-
-A secure algorithm alone does not make cryptography secure.
-Keys need enough randomness.
+Strong cryptography depends on more than choosing a secure algorithm.
+Keys need sufficient randomness.
 Secrets need careful handling.
-Encrypted data must only decrypt in the context it was encrypted for.
-A mistake in any of these details can break the security that the algorithm provides.
+Encrypted data needs to be bound to the context in which it is used.
+A mistake in these details can make a system insecure, even when its primitives are secure.
 
-Vitamin C has crates to:
+Vitamin C is a suite of Rust crates that makes these details easier to get right.
+Vitamin C provides components for:
 
-- protect secret values in memory;
-- generate cryptographically secure random values;
-- handle keys and passwords;
-- encrypt structured values;
-- encode cryptographic context in a form that cannot be read two ways.
+- protecting secret values
+- generating cryptographic randomness
+- handling keys and passwords
+- encrypting structured values
+- encoding cryptographic context unambiguously
 
-The crates use libraries such as Subtle, Zeroize, and RustCrypto.
-
-You can add each crate you need as its own dependency.
-You can also add the `vitaminc` facade crate.
-The facade re-exports each crate when you enable the feature for it.
+Vitamin C uses libraries such as Subtle, Zeroize, and RustCrypto.
+The types and APIs are designed to prevent misuse.
+The goal is to make invalid states and configurations fail to compile wherever possible.
+Compile errors matter even more when AI writes the code.
 
 [CipherStash](https://cipherstash.com) develops Vitamin C.
 Vitamin C is open source.
-The project is in active development toward version 1.0.
-CipherStash welcomes feedback and [contributions](https://github.com/cipherstash/vitaminc/blob/main/CONTRIBUTING.md).
+The project is in active development toward 1.0.
+Feedback and [contributions](https://github.com/cipherstash/vitaminc/blob/main/CONTRIBUTING.md) are welcome.
+
+Use individual crates for the capabilities you need, or enable them through the `vitaminc` facade crate.
+The facade re-exports most of the other crates, each behind a feature.
 
 ## Contents
 
@@ -54,8 +52,8 @@ CipherStash welcomes feedback and [contributions](https://github.com/cipherstash
   - [Keep long-lived keys in locked memory](#keep-long-lived-keys-in-locked-memory)
 - [Supporting crates](#supporting-crates)
 - [Compatibility](#compatibility)
-- [Facade features](#facade-features)
-- [Access the plain value of a secret](#access-the-plain-value-of-a-secret)
+- [`vitaminc` crate features](#vitaminc-crate-features)
+- [Escape hatches - use with care!](#escape-hatches---use-with-care)
 
 ## Design goals
 
@@ -220,7 +218,7 @@ A string's length and an enum's variant are not treated as secrets.
 
 ### Protect existing values with wrappers
 
-To protect a value of a type from another crate, such as `String`, wrap it in `Protected`.
+To protect a value of an existing type, such as `String`, wrap it in `Protected`.
 To compare protected values, use `Equatable`.
 Both wrappers hide their contents in debug output, and wipe them when dropped.
 
@@ -376,7 +374,7 @@ assert!(wrong_context.is_err());
 
 The context is used as associated data.
 Encryption authenticates the context, but does not encrypt it.
-Use a context that does not change, and that cannot be confused with another context.
+Use a stable, unambiguous identifier as the context.
 Supply the same context when you decrypt.
 
 ### Encrypt your own Rust structs
@@ -483,7 +481,7 @@ When you extend Vitamin C, or connect it to another language or service, add the
 | [`vitaminc-aead-frame`](https://github.com/cipherstash/vitaminc/tree/main/packages/aead-frame) | Encodings for sending values and ciphertexts between programs, and a versioned format for storing them. | Direct dependency | [crates.io](https://crates.io/crates/vitaminc-aead-frame) · [docs.rs](https://docs.rs/vitaminc-aead-frame) |
 | [`vitaminc-aead-napi`](https://github.com/cipherstash/vitaminc/tree/main/packages/aead-napi) | Converts values between Rust and JavaScript in native Node.js addons, through Node-API. This crate is a Rust library, not an npm package. | Direct dependency | [crates.io](https://crates.io/crates/vitaminc-aead-napi) · [docs.rs](https://docs.rs/vitaminc-aead-napi) |
 | [`vitaminc-async-traits`](https://github.com/cipherstash/vitaminc/tree/main/packages/async-traits) | Async traits for hash and message authentication code (MAC) providers that run remotely. | `async-traits` | [crates.io](https://crates.io/crates/vitaminc-async-traits) · [docs.rs](https://docs.rs/vitaminc-async-traits) |
-| [`vitaminc-context`](https://github.com/cipherstash/vitaminc/tree/main/packages/context) | Encodes context in one fixed form that cannot be read two ways, for authenticated encryption and pseudorandom functions (PRFs). | `context` | [crates.io](https://crates.io/crates/vitaminc-context) · [docs.rs](https://docs.rs/vitaminc-context) |
+| [`vitaminc-context`](https://github.com/cipherstash/vitaminc/tree/main/packages/context) | Canonical context encoding for authenticated encryption and pseudorandom functions (PRFs). | `context` | [crates.io](https://crates.io/crates/vitaminc-context) · [docs.rs](https://docs.rs/vitaminc-context) |
 | [`vitaminc-hmac`](https://github.com/cipherstash/vitaminc/tree/main/packages/hmac) | An HMAC-SHA256 backend that runs in your process, for pseudorandom functions over structured values. | `hmac` | [crates.io](https://crates.io/crates/vitaminc-hmac) · [docs.rs](https://docs.rs/vitaminc-hmac) |
 | [`vitaminc-kms`](https://github.com/cipherstash/vitaminc/tree/main/packages/kms) | An HMAC backend that uses AWS Key Management Service (KMS). | `aws-kms` | [crates.io](https://crates.io/crates/vitaminc-kms) · [docs.rs](https://docs.rs/vitaminc-kms) |
 | [`vitaminc-normalize`](https://github.com/cipherstash/vitaminc/tree/main/packages/normalize) | Encodes structured values in one fixed form, for equality indexes. | `normalize` | [crates.io](https://crates.io/crates/vitaminc-normalize) · [docs.rs](https://docs.rs/vitaminc-normalize) |
@@ -519,7 +517,7 @@ The KMS adapter and Node addon bindings target native applications.
 License: MIT.
 `vitaminc-ore` also includes Unicode-licensed data and declares `MIT AND Unicode-3.0`; see its license files.
 
-## Facade features
+## `vitaminc` crate features
 
 The facade enables no features by default.
 Each feature exposes the named crate.
@@ -541,10 +539,11 @@ These dependencies apply transitively.
 `normalize` alone does not enable `prf`.
 For options such as `hlist`, `chrono`, or `bitvec`, add the relevant crate directly and enable its feature; the facade does not forward them.
 
-## Access the plain value of a secret
+## Escape hatches - use with care!
 
+Use these methods only as a last resort.
 Some APIs need the plain value of a secret, outside its wrapper.
-For those APIs, the `Controlled` trait has methods that give you the plain value.
+For those APIs, the `Controlled` trait has escape hatches: methods that give you the plain value.
 Each method makes you responsible for keeping the value safe:
 
 | Method | What it gives you | What you must do |
