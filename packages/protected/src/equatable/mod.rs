@@ -1,7 +1,7 @@
 use crate::{exportable::SafeSerialize, private::ControlledPrivate, Controlled, Protected};
 use core::num::NonZeroU16;
 use serde::{Serialize, Serializer};
-use subtle::ConstantTimeEq as SubtleCtEq;
+use subtle::{Choice, ConstantTimeEq as SubtleCtEq};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A _controlled_ wrapper type that allows for constant time equality checks of a [Controlled] type.
@@ -230,18 +230,24 @@ pub trait ConstantTimeEq<Rhs: ?Sized = Self>: private::SupportsConstantTimeEq {
     // TODO: Do we also need a constant_time_neq ?
 }
 
+/// Compare two arrays element by element.
+///
+/// Every element pair is compared, whatever the earlier results. The
+/// accumulator is rebuilt as a [`subtle::Choice`] after each element, so each
+/// step passes through `subtle`'s optimisation barrier. Like `subtle` itself,
+/// this is a best-effort defence against the compiler adding an early exit,
+/// not a guarantee.
 impl<const N: usize, T> ConstantTimeEq<Self> for [T; N]
 where
     T: ConstantTimeEq,
 {
     fn constant_time_eq(&self, other: &Self) -> bool {
-        let mut x = true;
+        let mut x = Choice::from(1u8);
         for (ai, bi) in self.iter().zip(other.iter()) {
-            // FIXME: This may get shortcircuited (should use the same idea as subtle)
-            x &= ai.constant_time_eq(bi);
+            x = Choice::from(x.unwrap_u8() & u8::from(ai.constant_time_eq(bi)));
         }
 
-        x
+        x.into()
     }
 }
 
@@ -274,18 +280,40 @@ impl ConstantTimeEq for NonZeroU16 {
     }
 }
 
+/// Compare two byte slices with `subtle`'s slice comparison.
+///
+/// This returns `false` straight away when the lengths differ. So it reveals
+/// the lengths, but not where the bytes differ.
 impl ConstantTimeEq for [u8] {
     fn constant_time_eq(&self, other: &Self) -> bool {
-        if self.len() != other.len() {
-            return false;
-        }
+        self.ct_eq(other).into()
+    }
+}
 
-        let mut x = true;
-        for (ai, bi) in self.iter().zip(other.iter()) {
-            x &= ai.constant_time_eq(bi);
-        }
-
-        x
+/// Compare two byte vectors, delegating to the `[u8]` impl.
+///
+/// Like the `[u8]` impl, this returns `false` straight away when the lengths
+/// differ. So it reveals the lengths, but not where the bytes differ.
+///
+/// This is the impl that lets an `Equatable<Protected<Vec<u8>>>`, a
+/// variable-length secret held as bytes, be compared with `==`.
+///
+/// # Examples
+///
+/// ```
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{Equatable, Protected};
+///
+/// let x: Equatable<Protected<Vec<u8>>> = Equatable::new(vec![1, 2, 3]);
+/// let y: Equatable<Protected<Vec<u8>>> = Equatable::new(vec![1, 2, 3]);
+/// let z: Equatable<Protected<Vec<u8>>> = Equatable::new(vec![1, 2, 3, 4]);
+///
+/// assert_eq!(x, y);
+/// assert_ne!(x, z);
+/// ```
+impl ConstantTimeEq for Vec<u8> {
+    fn constant_time_eq(&self, other: &Self) -> bool {
+        self.as_slice().constant_time_eq(other.as_slice())
     }
 }
 
@@ -348,6 +376,7 @@ mod private {
     impl SupportsConstantTimeEq for isize {}
     impl SupportsConstantTimeEq for NonZeroU16 {}
     impl SupportsConstantTimeEq for [u8] {}
+    impl SupportsConstantTimeEq for Vec<u8> {}
     impl SupportsConstantTimeEq for String {}
     impl SupportsConstantTimeEq for str {}
 }
@@ -450,6 +479,44 @@ mod tests {
     }
 
     #[test]
+    fn ct_eq_vec_u8() {
+        let a: Vec<u8> = vec![1, 2, 3, 4];
+
+        assert!(a.constant_time_eq(&vec![1, 2, 3, 4]));
+        assert!(!a.constant_time_eq(&vec![1, 2, 3, 5]));
+        assert!(!a.constant_time_eq(&vec![9, 2, 3, 4]));
+        assert!(!a.constant_time_eq(&vec![1, 2, 3])); // length mismatch
+        assert!(!a.constant_time_eq(&vec![1, 2, 3, 4, 5])); // length mismatch
+    }
+
+    /// `Equatable<Protected<Vec<u8>>>` must compare with `==` and `!=`,
+    /// which needs `ConstantTimeEq for Vec<u8>` and its sealing marker.
+    /// See issue #602.
+    #[test]
+    fn test_equality_vec_u8() {
+        let x: Equatable<Protected<Vec<u8>>> = Equatable::new(vec![1, 2, 3, 4]);
+        let y: Equatable<Protected<Vec<u8>>> = Equatable::new(vec![1, 2, 3, 4]);
+
+        assert_eq!(x, y);
+        assert!(x.constant_time_eq(&y));
+    }
+
+    #[test]
+    fn test_inequality_vec_u8() {
+        let x: Equatable<Protected<Vec<u8>>> = Equatable::new(vec![1, 2, 3, 4]);
+        let differs: Equatable<Protected<Vec<u8>>> = Equatable::new(vec![1, 2, 3, 5]);
+        let shorter: Equatable<Protected<Vec<u8>>> = Equatable::new(vec![1, 2, 3]);
+        let empty: Equatable<Protected<Vec<u8>>> = Equatable::new(Vec::new());
+
+        assert_ne!(x, differs);
+        assert!(!x.constant_time_eq(&differs));
+        assert_ne!(x, shorter);
+        assert!(!x.constant_time_eq(&shorter));
+        assert_ne!(x, empty);
+        assert!(!x.constant_time_eq(&empty));
+    }
+
+    #[test]
     fn ct_eq_str() {
         assert!("hunter2".constant_time_eq("hunter2"));
         assert!(!"hunter2".constant_time_eq("hunter3"));
@@ -478,6 +545,22 @@ mod tests {
         assert!(a.constant_time_eq(&[1, 2, 3, 4]));
         assert!(!a.constant_time_eq(&[1, 2, 3, 5]));
         assert!(!a.constant_time_eq(&[9, 2, 3, 4])); // partial difference
+
+        // Two mismatches: an accumulator that XORs instead of ANDs would
+        // report these as equal.
+        assert!(!a.constant_time_eq(&[9, 2, 3, 5]));
+    }
+
+    /// The array impl is generic over the element type, so it must also
+    /// hold for an element type that is itself an array.
+    #[test]
+    fn ct_eq_nested_array() {
+        let a: [[u8; 2]; 2] = [[1, 2], [3, 4]];
+
+        assert!(a.constant_time_eq(&[[1, 2], [3, 4]]));
+        assert!(!a.constant_time_eq(&[[1, 2], [3, 5]]));
+        assert!(!a.constant_time_eq(&[[9, 2], [3, 4]]));
+        assert!(!a.constant_time_eq(&[[9, 2], [3, 5]]));
     }
 
     #[test]
