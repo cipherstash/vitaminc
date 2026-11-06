@@ -1,0 +1,21 @@
+error[E0599]: the method `as_protected_ref` exists for array `[u8; 32]`, but its trait bounds were not satisfied
+  --> tests/ui/negative_space/plain_array_does_not_lend_a_protected_ref.rs:13:14
+   |
+13 |     read(key.as_protected_ref());
+   |              ^^^^^^^^^^^^^^^^ method cannot be called on `[u8; 32]` due to unsatisfied trait bounds
+   |
+   = note: the following trait bounds were not satisfied:
+           `[u8; 32]: Controlled`
+           which is required by `[u8; 32]: AsProtectedRef<'_, _>`
+           `[u8; 32]: vitaminc_protected::private::Lends`
+           which is required by `[u8; 32]: AsProtectedRef<'_, _>`
+           `<[u8; 32] as Controlled>::Inner = _`
+           which is required by `[u8; 32]: AsProtectedRef<'_, _>`
+           `[u8]: Sized`
+           which is required by `[u8]: AsProtectedRef<'_, _>`
+           `[u8]: Controlled`
+           which is required by `[u8]: AsProtectedRef<'_, _>`
+           `[u8]: vitaminc_protected::private::Lends`
+           which is required by `[u8]: AsProtectedRef<'_, _>`
+           `<[u8] as Controlled>::Inner = _`
+           which is required by `[u8]: AsProtectedRef<'_, _>`

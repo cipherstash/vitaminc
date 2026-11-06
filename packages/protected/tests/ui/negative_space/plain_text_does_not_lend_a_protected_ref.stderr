@@ -1,0 +1,87 @@
+error[E0599]: the method `as_protected_ref` exists for reference `&'static str`, but its trait bounds were not satisfied
+  --> tests/ui/negative_space/plain_text_does_not_lend_a_protected_ref.rs:18:20
+   |
+18 |     read_text("pw".as_protected_ref());
+   |                    ^^^^^^^^^^^^^^^^ method cannot be called on `&'static str` due to unsatisfied trait bounds
+   |
+   = note: the following trait bounds were not satisfied:
+           `str: Sized`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `str: Controlled`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `str: vitaminc_protected::private::Lends`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `<str as Controlled>::Inner = _`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `&str: Controlled`
+           which is required by `&str: AsProtectedRef<'_, _>`
+           `&str: vitaminc_protected::private::Lends`
+           which is required by `&str: AsProtectedRef<'_, _>`
+           `<&str as Controlled>::Inner = _`
+           which is required by `&str: AsProtectedRef<'_, _>`
+
+error[E0599]: the method `as_protected_ref` exists for reference `&'static str`, but its trait bounds were not satisfied
+  --> tests/ui/negative_space/plain_text_does_not_lend_a_protected_ref.rs:19:21
+   |
+19 |     read_bytes("pw".as_protected_ref());
+   |                     ^^^^^^^^^^^^^^^^ method cannot be called on `&'static str` due to unsatisfied trait bounds
+   |
+   = note: the following trait bounds were not satisfied:
+           `str: Sized`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `str: Controlled`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `str: vitaminc_protected::private::Lends`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `<str as Controlled>::Inner = _`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `&str: Controlled`
+           which is required by `&str: AsProtectedRef<'_, _>`
+           `&str: vitaminc_protected::private::Lends`
+           which is required by `&str: AsProtectedRef<'_, _>`
+           `<&str as Controlled>::Inner = _`
+           which is required by `&str: AsProtectedRef<'_, _>`
+
+error[E0599]: the method `as_protected_ref` exists for enum `Cow<'_, str>`, but its trait bounds were not satisfied
+  --> tests/ui/negative_space/plain_text_does_not_lend_a_protected_ref.rs:22:19
+   |
+22 |     read_text(cow.as_protected_ref());
+   |                   ^^^^^^^^^^^^^^^^ method cannot be called on `Cow<'_, str>` due to unsatisfied trait bounds
+   |
+   = note: the following trait bounds were not satisfied:
+           `Cow<'_, str>: Controlled`
+           which is required by `Cow<'_, str>: AsProtectedRef<'_, _>`
+           `Cow<'_, str>: vitaminc_protected::private::Lends`
+           which is required by `Cow<'_, str>: AsProtectedRef<'_, _>`
+           `<Cow<'_, str> as Controlled>::Inner = _`
+           which is required by `Cow<'_, str>: AsProtectedRef<'_, _>`
+           `str: Sized`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `str: Controlled`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `str: vitaminc_protected::private::Lends`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `<str as Controlled>::Inner = _`
+           which is required by `str: AsProtectedRef<'_, _>`
+
+error[E0599]: the method `as_protected_ref` exists for enum `Cow<'_, str>`, but its trait bounds were not satisfied
+  --> tests/ui/negative_space/plain_text_does_not_lend_a_protected_ref.rs:23:20
+   |
+23 |     read_bytes(cow.as_protected_ref());
+   |                    ^^^^^^^^^^^^^^^^ method cannot be called on `Cow<'_, str>` due to unsatisfied trait bounds
+   |
+   = note: the following trait bounds were not satisfied:
+           `Cow<'_, str>: Controlled`
+           which is required by `Cow<'_, str>: AsProtectedRef<'_, _>`
+           `Cow<'_, str>: vitaminc_protected::private::Lends`
+           which is required by `Cow<'_, str>: AsProtectedRef<'_, _>`
+           `<Cow<'_, str> as Controlled>::Inner = _`
+           which is required by `Cow<'_, str>: AsProtectedRef<'_, _>`
+           `str: Sized`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `str: Controlled`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `str: vitaminc_protected::private::Lends`
+           which is required by `str: AsProtectedRef<'_, _>`
+           `<str as Controlled>::Inner = _`
+           which is required by `str: AsProtectedRef<'_, _>`
