@@ -14,9 +14,9 @@ categories.workspace = true
 rust-version = "1.94.1"
 
 [dependencies]
-vitaminc-async-traits = { version = "0.9.0", path = "../async-traits" }
-vitaminc-traits = { version = "0.9.0", path = "../traits" }
-vitaminc-protected = { version = "0.9.0", path = "../protected" }
+vitaminc-async-traits = { version = "0.9.1", path = "../async-traits" }
+vitaminc-traits = { version = "0.9.1", path = "../traits" }
+vitaminc-protected = { version = "0.9.1", path = "../protected" }
 # `default-features = false` drops the SDK's `rustls` feature, which is the
 # legacy hyper 0.14 + rustls 0.21 + ring client: end-of-life, carrying open
 # RustSec advisories, and unused once `default-https-client` (hyper 1 +

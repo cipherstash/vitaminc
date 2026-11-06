@@ -1,4 +1,21 @@
 
+## [0.9.1] - 2026-11-06
+
+### Documentation
+
+- state the ProtectedRef wipe contract, not the open hole
+
+### Features
+
+- Buffer, byte slices and Vec<u8> lend a ProtectedRef<[u8]>
+- a Buffer moves into a Protected<Vec<u8>>
+- ProtectedRef::as_deref narrows a protected borrow, and Cow<[u8]> lends its bytes
+- ProtectedRef::as_ref_of narrows an array borrow to its bytes
+
+### Fixes
+
+- a plain Vec<u8> or [u8] does not lend a ProtectedRef
+
 ## [0.9.0] - 2026-11-04
 
 ### Breaking
