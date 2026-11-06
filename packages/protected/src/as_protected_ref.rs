@@ -108,7 +108,9 @@ impl<'a> AsProtectedRef<'a, str> for Cow<'a, str> {
 /// A function that reads bytes takes a `ProtectedRef<[u8]>`. Then a
 /// `Buffer` and a protected `Vec<u8>` both reach it. A
 /// `Protected<Vec<u8>>` lends a `ProtectedRef<Vec<u8>>`, which
-/// [`as_deref`](ProtectedRef::as_deref) narrows to its bytes. Bytes that
+/// [`as_deref`](ProtectedRef::as_deref) narrows to its bytes, and a
+/// `Protected<[u8; N]>` lends a `ProtectedRef<[u8; N]>`, which
+/// [`as_ref_of`](ProtectedRef::as_ref_of) narrows the same way. Bytes that
 /// arrive as a plain `Vec<u8>` or `&[u8]`, such as input from another
 /// process, go into a `Protected` or a `Buffer` first; a plain `Vec<u8>`
 /// does not lend, because nothing would wipe it.
@@ -127,6 +129,9 @@ impl<'a> AsProtectedRef<'a, str> for Cow<'a, str> {
 ///
 /// let kept = Protected::new(b"secret".to_vec());
 /// assert_eq!(length(kept.as_protected_ref().as_deref()), 6);
+///
+/// let key = Protected::new(*b"secret");
+/// assert_eq!(length(key.as_protected_ref().as_ref_of()), 6);
 ///
 /// let arrived: &[u8] = b"secret";
 /// let owned = Protected::new(arrived.to_vec());
@@ -151,7 +156,8 @@ impl<'a> AsProtectedRef<'a, [u8]> for Buffer {
 /// value; a hand-written impl that leaves memory it points at untouched
 /// leaves it untouched behind the borrow too. Dropping the `ProtectedRef`
 /// itself wipes nothing. One narrowed through [`as_deref`](Self::as_deref)
-/// borrows the same memory as the one it came from, and is wiped with it.
+/// or [`as_ref_of`](Self::as_ref_of) borrows the same memory as the one it
+/// came from, and is wiped with it.
 pub struct ProtectedRef<'a, T>(pub(crate) &'a T)
 where
     T: ?Sized;
@@ -212,6 +218,39 @@ impl<'a, T: ?Sized + Deref> ProtectedRef<'a, T> {
     }
 }
 
+impl<'a, T: ?Sized> ProtectedRef<'a, T> {
+    /// Narrows the borrow through `AsRef`, and keeps it protected. This is
+    /// how a fixed-size key reaches a function that reads bytes: a
+    /// `ProtectedRef<[u8; 32]>` becomes a `ProtectedRef<[u8]>` with no copy,
+    /// where [`as_deref`](Self::as_deref) cannot, because an array does not
+    /// implement `Deref`. Whatever lent the original borrow still owns the
+    /// value behind it, and wipes it as far as its `Zeroize` impl reaches
+    /// (see [`ProtectedRef`]).
+    ///
+    /// `AsRef` has more than one target for some types (`String` is
+    /// `AsRef<str>` and `AsRef<[u8]>`), so a call site names the target
+    /// when nothing else does. A parameter of type `ProtectedRef<[u8]>`
+    /// already does.
+    ///
+    /// ```
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{AsProtectedRef, Protected, ProtectedRef};
+    ///
+    /// fn length(bytes: ProtectedRef<'_, [u8]>) -> usize {
+    ///     bytes.risky_ref().len()
+    /// }
+    ///
+    /// let key = Protected::new([7u8; 32]);
+    /// assert_eq!(length(key.as_protected_ref().as_ref_of()), 32);
+    /// ```
+    pub fn as_ref_of<U: ?Sized>(&self) -> ProtectedRef<'a, U>
+    where
+        T: AsRef<U>,
+    {
+        ProtectedRef(self.0.as_ref())
+    }
+}
+
 #[cfg(test)]
 mod byte_lender_tests {
     use super::*;
@@ -259,6 +298,41 @@ mod byte_lender_tests {
         assert_eq!(lent(protected.as_protected_ref().as_deref()), b"frame");
         assert_eq!(lent(equatable.as_protected_ref().as_deref()), b"frame");
         assert_eq!(lent(locked.as_protected_ref().as_deref()), b"frame");
+    }
+
+    #[test]
+    fn array_owners_reach_a_byte_reader_through_as_ref_of() {
+        // An array does not implement Deref, so as_deref cannot narrow it;
+        // as_ref_of does, for every owner that lends one.
+        let protected = Protected::new(*b"frame");
+        let equatable: Equatable<Protected<[u8; 5]>> = Equatable::new(*b"frame");
+        let locked = Locked::new(*b"frame").unwrap();
+
+        assert_eq!(lent(protected.as_protected_ref().as_ref_of()), b"frame");
+        assert_eq!(lent(equatable.as_protected_ref().as_ref_of()), b"frame");
+        assert_eq!(lent(locked.as_protected_ref().as_ref_of()), b"frame");
+    }
+
+    #[test]
+    fn as_ref_of_narrows_without_a_copy() {
+        let key = Protected::new([7u8; 32]);
+        let address = key.risky_ref().as_ptr();
+        let bytes: ProtectedRef<[u8]> = key.as_protected_ref().as_ref_of();
+        assert_eq!(bytes.risky_ref().as_ptr(), address);
+        assert_eq!(bytes.risky_ref().len(), 32);
+    }
+
+    #[test]
+    fn as_ref_of_covers_what_as_deref_does() {
+        // The target is named because String is AsRef<str> and AsRef<[u8]>.
+        let text = Protected::new(String::from("frame"));
+        let narrowed: ProtectedRef<str> = text.as_protected_ref().as_ref_of();
+        assert_eq!(narrowed.risky_ref(), "frame");
+        let bytes: ProtectedRef<[u8]> = text.as_protected_ref().as_ref_of();
+        assert_eq!(bytes.risky_ref(), b"frame");
+
+        let vec = Protected::new(b"frame".to_vec());
+        assert_eq!(lent(vec.as_protected_ref().as_ref_of()), b"frame");
     }
 
     #[test]
