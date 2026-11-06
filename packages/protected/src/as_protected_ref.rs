@@ -1,17 +1,22 @@
 use crate::{private::Lends, Buffer, Controlled};
+use core::ops::Deref;
 use std::borrow::Cow;
 
 /// Trait for types that can be converted to a `ProtectedRef`.
 /// Conceptually similar to the `AsRef` trait in `std` but for `Protected` types.
 /// This prevents the inner value from being accessed directly.
-/// `ProtectedRef` cannot be constructed outside this crate, so downstream
-/// implementations must delegate to an existing protected source rather than
-/// wrapping an arbitrary reference.
+/// `ProtectedRef` cannot be constructed outside this crate, so a downstream
+/// implementation delegates to a value that already lends one.
+///
+/// Not every lender wipes what it lends. A `Protected` does, and so does a
+/// [`Buffer`]. A plain `[u8]`, `Vec<u8>` or `str` lends a plain borrow, and
+/// so does a downstream type that delegates to one of them. See
+/// [`ProtectedRef`] for the full list.
 ///
 /// # Implementing `AsProtectedRef`
 ///
 /// Implementing `AsProtectedRef` for a type allows it to be used in functions that take a `ProtectedRef`.
-/// Note, that such implementations must be defined on inner types that already implement `AsProtectedRef`
+/// The implementation delegates to a field that already implements `AsProtectedRef`,
 /// because `ProtectedRef` cannot be constructed from the inner type directly.
 ///
 /// ```
@@ -93,17 +98,25 @@ impl<'a> AsProtectedRef<'a, str> for Cow<'a, str> {
 /// [`risky_ref`](Controlled::risky_ref). The `Buffer` still wipes its bytes
 /// when it drops.
 ///
+/// A function that reads bytes takes a `ProtectedRef<[u8]>`. Then a
+/// `Buffer`, a byte slice and a protected `Vec<u8>` all reach it. A
+/// `Protected<Vec<u8>>` lends a `ProtectedRef<Vec<u8>>`, which
+/// [`as_deref`](ProtectedRef::as_deref) narrows to its bytes.
+///
 /// ```
 /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
-/// use vitaminc::protected::{AsProtectedRef, Buffer};
+/// use vitaminc::protected::{AsProtectedRef, Buffer, Protected, ProtectedRef};
 ///
-/// fn length(bytes: &(impl for<'a> AsProtectedRef<'a, [u8]> + ?Sized)) -> usize {
-///     bytes.as_protected_ref().risky_ref().len()
+/// fn length(bytes: ProtectedRef<'_, [u8]>) -> usize {
+///     bytes.risky_ref().len()
 /// }
 ///
 /// let mut out = Buffer::new();
 /// out.extend_from_slice(b"secret");
-/// assert_eq!(length(&out), 6);
+/// assert_eq!(length(out.as_protected_ref()), 6);
+///
+/// let kept = Protected::new(b"secret".to_vec());
+/// assert_eq!(length(kept.as_protected_ref().as_deref()), 6);
 /// ```
 impl<'a> AsProtectedRef<'a, [u8]> for Buffer {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
@@ -113,7 +126,9 @@ impl<'a> AsProtectedRef<'a, [u8]> for Buffer {
 
 /// A byte slice lends itself, as a `str` does, so a function that takes
 /// protected bytes also takes bytes that arrive unprotected, such as input
-/// from another process. Nothing wipes a slice lent this way.
+/// from another process. Nothing wipes a slice lent this way. To pass
+/// protected bytes held as a `Vec<u8>`, narrow the borrow with
+/// [`as_deref`](ProtectedRef::as_deref).
 impl<'a> AsProtectedRef<'a, [u8]> for [u8] {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
         ProtectedRef(self)
@@ -128,15 +143,28 @@ impl<'a> AsProtectedRef<'a, [u8]> for Vec<u8> {
     }
 }
 
+/// A `Cow<[u8]>` lends its bytes, as a `Cow<str>` does. Nothing wipes a
+/// `Cow` lent this way. The borrow it lends can be shorter than the `Cow`'s
+/// own lifetime, so a function that takes
+/// `impl for<'a> AsProtectedRef<'a, [u8]>` takes a borrowed `Cow` too.
+impl<'a, 'c> AsProtectedRef<'a, [u8]> for Cow<'c, [u8]> {
+    fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
+        ProtectedRef(self.as_ref())
+    }
+}
+
 /// A wrapper around a reference to prevent inner access.
 /// Conceptually similar to `&T`, but it can only be made inside this crate,
 /// through [`AsProtectedRef`], and the inner value is reached only through
 /// the combinators that take it or through [`risky_ref`](Self::risky_ref).
 ///
 /// A `ProtectedRef` does not mean the value behind it is wiped. One lent by
-/// a [`Controlled`] owner or a [`Locked`](crate::Locked) is wiped when that
-/// owner drops. One lent by a bare `[u8; N]`, `str` or `Cow<str>` is a plain
-/// borrow that nothing wipes.
+/// a [`Controlled`] owner, such as a `Protected` or a [`Buffer`], or by a
+/// [`Locked`](crate::Locked), is wiped when that owner drops. One lent by a
+/// bare `[u8; N]`, `[u8]`, `Vec<u8>`, `Cow<[u8]>`, `str` or `Cow<str>` is a
+/// plain borrow that nothing wipes. A `ProtectedRef` narrowed through
+/// [`as_deref`](Self::as_deref) is wiped exactly when the one it came from
+/// is.
 pub struct ProtectedRef<'a, T>(pub(crate) &'a T)
 where
     T: ?Sized;
@@ -174,33 +202,93 @@ impl<'a, T: ?Sized> ProtectedRef<'a, T> {
     }
 }
 
+impl<'a, T: ?Sized + Deref> ProtectedRef<'a, T> {
+    /// Narrows the borrow through `Deref`, and keeps it protected. A
+    /// `ProtectedRef<Vec<u8>>` becomes a `ProtectedRef<[u8]>`, and a
+    /// `ProtectedRef<String>` becomes a `ProtectedRef<str>`. Whatever lent
+    /// the original borrow still owns the value behind it, and still wipes
+    /// it.
+    ///
+    /// The name follows `Option::as_deref`. It needs no `risky_` name,
+    /// because the value never leaves a `ProtectedRef`.
+    ///
+    /// ```
+    /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+    /// use vitaminc::protected::{AsProtectedRef, Protected, ProtectedRef};
+    ///
+    /// let secret = Protected::new(b"secret".to_vec());
+    /// let bytes: ProtectedRef<[u8]> = secret.as_protected_ref().as_deref();
+    /// assert_eq!(bytes.risky_ref(), b"secret");
+    /// ```
+    pub fn as_deref(&self) -> ProtectedRef<'a, T::Target> {
+        ProtectedRef(Deref::deref(self.0))
+    }
+}
+
 #[cfg(test)]
 mod byte_lender_tests {
     use super::*;
+    use crate::{Equatable, Locked, Protected};
 
-    fn lent(bytes: &(impl for<'a> AsProtectedRef<'a, [u8]> + ?Sized)) -> Vec<u8> {
-        bytes.as_protected_ref().risky_ref().to_vec()
+    fn lent(bytes: ProtectedRef<'_, [u8]>) -> Vec<u8> {
+        bytes.risky_ref().to_vec()
     }
 
     #[test]
     fn a_buffer_lends_the_bytes_it_holds() {
         let mut buffer = Buffer::new();
         buffer.extend_from_slice(b"frame");
-        assert_eq!(lent(&buffer), b"frame");
+        assert_eq!(lent(buffer.as_protected_ref()), b"frame");
     }
 
     #[test]
     fn a_slice_and_a_vec_lend_themselves() {
-        assert_eq!(lent(&b"frame"[..]), b"frame");
-        assert_eq!(lent(&b"frame".to_vec()), b"frame");
+        assert_eq!(lent(b"frame"[..].as_protected_ref()), b"frame");
+        assert_eq!(lent(b"frame".to_vec().as_protected_ref()), b"frame");
+    }
+
+    #[test]
+    fn a_cow_of_bytes_lends_its_bytes() {
+        assert_eq!(
+            lent(Cow::Borrowed(&b"frame"[..]).as_protected_ref()),
+            b"frame"
+        );
+        assert_eq!(
+            lent(Cow::<[u8]>::Owned(b"frame".to_vec()).as_protected_ref()),
+            b"frame"
+        );
     }
 
     #[test]
     fn a_protected_vec_still_lends_without_an_annotation() {
         // Protected<Vec<u8>> keeps its one AsProtectedRef impl, so existing
         // unannotated calls still infer `Vec<u8>`.
-        let protected = crate::Protected::new(b"frame".to_vec());
+        let protected = Protected::new(b"frame".to_vec());
         let pref = protected.as_protected_ref();
         assert_eq!(pref.risky_ref().as_slice(), b"frame");
+    }
+
+    #[test]
+    fn protected_owners_reach_a_byte_reader_through_as_deref() {
+        let protected = Protected::new(b"frame".to_vec());
+        let equatable: Equatable<Protected<Vec<u8>>> = Equatable::new(b"frame".to_vec());
+        let locked = Locked::new(b"frame".to_vec()).unwrap();
+
+        assert_eq!(lent(protected.as_protected_ref().as_deref()), b"frame");
+        assert_eq!(lent(equatable.as_protected_ref().as_deref()), b"frame");
+        assert_eq!(lent(locked.as_protected_ref().as_deref()), b"frame");
+        assert_eq!(lent(b"frame"[..].as_protected_ref()), b"frame");
+    }
+
+    #[test]
+    fn as_deref_narrows_without_a_copy() {
+        let protected = Protected::new(b"frame".to_vec());
+        let address = protected.risky_ref().as_ptr();
+        let bytes = protected.as_protected_ref().as_deref();
+        assert_eq!(bytes.risky_ref().as_ptr(), address);
+
+        let text = Protected::new(String::from("frame"));
+        let narrowed: ProtectedRef<str> = text.as_protected_ref().as_deref();
+        assert_eq!(narrowed.risky_ref(), "frame");
     }
 }
