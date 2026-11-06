@@ -5,18 +5,18 @@ use std::borrow::Cow;
 /// Trait for types that can be converted to a `ProtectedRef`.
 /// Conceptually similar to the `AsRef` trait in `std` but for `Protected` types.
 /// This prevents the inner value from being accessed directly.
-/// `ProtectedRef` cannot be constructed outside this crate, so a downstream
-/// implementation delegates to a value that already lends one.
+/// `ProtectedRef` cannot be constructed outside this crate, so downstream
+/// implementations must delegate to an existing protected source rather than
+/// wrapping an arbitrary reference.
 ///
-/// Not every lender wipes what it lends. A `Protected` does, and so does a
-/// [`Buffer`]. A plain `[u8]`, `Vec<u8>` or `str` lends a plain borrow, and
-/// so does a downstream type that delegates to one of them. See
-/// [`ProtectedRef`] for the full list.
+/// A plain `Vec<u8>` or `[u8]` is not a protected source and does not lend.
+/// Bytes held that way go into a `Protected` or a [`Buffer`] first, which
+/// wipes them, and that owner lends.
 ///
 /// # Implementing `AsProtectedRef`
 ///
 /// Implementing `AsProtectedRef` for a type allows it to be used in functions that take a `ProtectedRef`.
-/// The implementation delegates to a field that already implements `AsProtectedRef`,
+/// Note, that such implementations must be defined on inner types that already implement `AsProtectedRef`
 /// because `ProtectedRef` cannot be constructed from the inner type directly.
 ///
 /// ```
@@ -99,9 +99,12 @@ impl<'a> AsProtectedRef<'a, str> for Cow<'a, str> {
 /// when it drops.
 ///
 /// A function that reads bytes takes a `ProtectedRef<[u8]>`. Then a
-/// `Buffer`, a byte slice and a protected `Vec<u8>` all reach it. A
+/// `Buffer` and a protected `Vec<u8>` both reach it. A
 /// `Protected<Vec<u8>>` lends a `ProtectedRef<Vec<u8>>`, which
-/// [`as_deref`](ProtectedRef::as_deref) narrows to its bytes.
+/// [`as_deref`](ProtectedRef::as_deref) narrows to its bytes. Bytes that
+/// arrive as a plain `Vec<u8>` or `&[u8]`, such as input from another
+/// process, go into a `Protected` or a `Buffer` first; a plain `Vec<u8>`
+/// does not lend, because nothing would wipe it.
 ///
 /// ```
 /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
@@ -117,39 +120,14 @@ impl<'a> AsProtectedRef<'a, str> for Cow<'a, str> {
 ///
 /// let kept = Protected::new(b"secret".to_vec());
 /// assert_eq!(length(kept.as_protected_ref().as_deref()), 6);
+///
+/// let arrived: &[u8] = b"secret";
+/// let owned = Protected::new(arrived.to_vec());
+/// assert_eq!(length(owned.as_protected_ref().as_deref()), 6);
 /// ```
 impl<'a> AsProtectedRef<'a, [u8]> for Buffer {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
         ProtectedRef(self.risky_ref())
-    }
-}
-
-/// A byte slice lends itself, as a `str` does, so a function that takes
-/// protected bytes also takes bytes that arrive unprotected, such as input
-/// from another process. Nothing wipes a slice lent this way. To pass
-/// protected bytes held as a `Vec<u8>`, narrow the borrow with
-/// [`as_deref`](ProtectedRef::as_deref).
-impl<'a> AsProtectedRef<'a, [u8]> for [u8] {
-    fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
-        ProtectedRef(self)
-    }
-}
-
-/// A `Vec<u8>` lends its bytes, as a byte slice does. Nothing wipes a `Vec`
-/// lent this way.
-impl<'a> AsProtectedRef<'a, [u8]> for Vec<u8> {
-    fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
-        ProtectedRef(self.as_slice())
-    }
-}
-
-/// A `Cow<[u8]>` lends its bytes, as a `Cow<str>` does. Nothing wipes a
-/// `Cow` lent this way. The borrow it lends can be shorter than the `Cow`'s
-/// own lifetime, so a function that takes
-/// `impl for<'a> AsProtectedRef<'a, [u8]>` takes a borrowed `Cow` too.
-impl<'a, 'c> AsProtectedRef<'a, [u8]> for Cow<'c, [u8]> {
-    fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
-        ProtectedRef(self.as_ref())
     }
 }
 
@@ -161,8 +139,8 @@ impl<'a, 'c> AsProtectedRef<'a, [u8]> for Cow<'c, [u8]> {
 /// A `ProtectedRef` does not mean the value behind it is wiped. One lent by
 /// a [`Controlled`] owner, such as a `Protected` or a [`Buffer`], or by a
 /// [`Locked`](crate::Locked), is wiped when that owner drops. One lent by a
-/// bare `[u8; N]`, `[u8]`, `Vec<u8>`, `Cow<[u8]>`, `str` or `Cow<str>` is a
-/// plain borrow that nothing wipes. A `ProtectedRef` narrowed through
+/// bare `[u8; N]`, `str` or `Cow<str>` is a plain borrow that nothing
+/// wipes. A `ProtectedRef` narrowed through
 /// [`as_deref`](Self::as_deref) is wiped exactly when the one it came from
 /// is.
 pub struct ProtectedRef<'a, T>(pub(crate) &'a T)
@@ -242,21 +220,16 @@ mod byte_lender_tests {
     }
 
     #[test]
-    fn a_slice_and_a_vec_lend_themselves() {
-        assert_eq!(lent(b"frame"[..].as_protected_ref()), b"frame");
-        assert_eq!(lent(b"frame".to_vec().as_protected_ref()), b"frame");
-    }
+    fn plain_bytes_reach_a_byte_reader_through_a_protected_owner() {
+        // A plain Vec<u8> or &[u8] does not lend (see tests/ui); it goes
+        // into an owner that wipes it, and that owner lends.
+        let arrived: &[u8] = b"frame";
+        let owned = Protected::new(arrived.to_vec());
+        assert_eq!(lent(owned.as_protected_ref().as_deref()), b"frame");
 
-    #[test]
-    fn a_cow_of_bytes_lends_its_bytes() {
-        assert_eq!(
-            lent(Cow::Borrowed(&b"frame"[..]).as_protected_ref()),
-            b"frame"
-        );
-        assert_eq!(
-            lent(Cow::<[u8]>::Owned(b"frame".to_vec()).as_protected_ref()),
-            b"frame"
-        );
+        let mut buffer = Buffer::new();
+        buffer.extend_from_slice(arrived);
+        assert_eq!(lent(buffer.as_protected_ref()), b"frame");
     }
 
     #[test]
@@ -277,7 +250,6 @@ mod byte_lender_tests {
         assert_eq!(lent(protected.as_protected_ref().as_deref()), b"frame");
         assert_eq!(lent(equatable.as_protected_ref().as_deref()), b"frame");
         assert_eq!(lent(locked.as_protected_ref().as_deref()), b"frame");
-        assert_eq!(lent(b"frame"[..].as_protected_ref()), b"frame");
     }
 
     #[test]
