@@ -233,9 +233,10 @@ pub trait ConstantTimeEq<Rhs: ?Sized = Self>: private::SupportsConstantTimeEq {
 /// Compare two arrays element by element.
 ///
 /// Every element pair is compared, whatever the earlier results. The
-/// per-element results are accumulated in a [`subtle::Choice`], whose `&=`
-/// goes through an optimisation barrier, so the compiler cannot turn the
-/// loop into one that stops at the first mismatch.
+/// accumulator is rebuilt as a [`subtle::Choice`] after each element, so each
+/// step passes through `subtle`'s optimisation barrier. Like `subtle` itself,
+/// this is a best-effort defence against the compiler adding an early exit,
+/// not a guarantee.
 impl<const N: usize, T> ConstantTimeEq<Self> for [T; N]
 where
     T: ConstantTimeEq,
@@ -243,7 +244,7 @@ where
     fn constant_time_eq(&self, other: &Self) -> bool {
         let mut x = Choice::from(1u8);
         for (ai, bi) in self.iter().zip(other.iter()) {
-            x &= Choice::from(u8::from(ai.constant_time_eq(bi)));
+            x = Choice::from(x.unwrap_u8() & u8::from(ai.constant_time_eq(bi)));
         }
 
         x.into()
@@ -483,7 +484,7 @@ mod tests {
 
         assert!(a.constant_time_eq(&vec![1, 2, 3, 4]));
         assert!(!a.constant_time_eq(&vec![1, 2, 3, 5]));
-        assert!(!a.constant_time_eq(&vec![9, 2, 3, 4])); // partial difference
+        assert!(!a.constant_time_eq(&vec![9, 2, 3, 4]));
         assert!(!a.constant_time_eq(&vec![1, 2, 3])); // length mismatch
         assert!(!a.constant_time_eq(&vec![1, 2, 3, 4, 5])); // length mismatch
     }
@@ -544,6 +545,22 @@ mod tests {
         assert!(a.constant_time_eq(&[1, 2, 3, 4]));
         assert!(!a.constant_time_eq(&[1, 2, 3, 5]));
         assert!(!a.constant_time_eq(&[9, 2, 3, 4])); // partial difference
+
+        // Two mismatches: an accumulator that XORs instead of ANDs would
+        // report these as equal.
+        assert!(!a.constant_time_eq(&[9, 2, 3, 5]));
+    }
+
+    /// The array impl is generic over the element type, so it must also
+    /// hold for an element type that is itself an array.
+    #[test]
+    fn ct_eq_nested_array() {
+        let a: [[u8; 2]; 2] = [[1, 2], [3, 4]];
+
+        assert!(a.constant_time_eq(&[[1, 2], [3, 4]]));
+        assert!(!a.constant_time_eq(&[[1, 2], [3, 5]]));
+        assert!(!a.constant_time_eq(&[[9, 2], [3, 4]]));
+        assert!(!a.constant_time_eq(&[[9, 2], [3, 5]]));
     }
 
     #[test]
