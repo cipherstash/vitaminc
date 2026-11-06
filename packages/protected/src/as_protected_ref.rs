@@ -8,12 +8,26 @@ use core::ops::Deref;
 /// implementations must delegate to an existing protected source rather than
 /// wrapping an arbitrary reference.
 ///
-/// A plain `Vec<u8>`, `[u8]`, `[u8; N]`, `str` or `Cow<str>` is not a
-/// protected source and does not lend. Bytes held that way go into a
-/// `Protected` or a [`Buffer`] first, which wipes them, and that owner
-/// lends; text goes into a `Protected<String>`, whose borrow
-/// [`as_deref`](ProtectedRef::as_deref) narrows to `str`. So a consumer that
-/// receives a `ProtectedRef` knows an owner that wipes stands behind it.
+/// Only an owner that wipes lends: a `Protected`, an `Equatable` or
+/// `Exportable` around one, a [`Locked`](crate::Locked) and a [`Buffer`].
+/// No plain value does, such as a `Vec<u8>`, `[u8]`, `[u8; N]`, `str` or
+/// `Cow<str>`, so a consumer that receives a `ProtectedRef` knows an owner
+/// that wipes stands behind it. Bytes held plain go into a `Protected` or a
+/// `Buffer` first, and that owner lends; text goes into a
+/// `Protected<String>`, whose borrow [`as_deref`](ProtectedRef::as_deref)
+/// narrows to `str` and [`as_ref_of`](ProtectedRef::as_ref_of) to bytes.
+///
+/// ```
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{AsProtectedRef, Protected, ProtectedRef};
+///
+/// let arrived: &str = "secret";
+/// let text = Protected::new(String::from(arrived));
+/// let as_text: ProtectedRef<str> = text.as_protected_ref().as_deref();
+/// assert_eq!(as_text.risky_ref(), "secret");
+/// let as_bytes: ProtectedRef<[u8]> = text.as_protected_ref().as_ref_of();
+/// assert_eq!(as_bytes.risky_ref(), b"secret");
+/// ```
 ///
 /// # Implementing `AsProtectedRef`
 ///
@@ -70,10 +84,7 @@ where
 /// [`as_ref_of`](ProtectedRef::as_ref_of) narrows the same way. Bytes that
 /// arrive as a plain `Vec<u8>` or `&[u8]`, such as input from another
 /// process, go into a `Protected` or a `Buffer` first; a plain `Vec<u8>`
-/// does not lend, because nothing would wipe it. Text is the same: a
-/// `&str` goes into a `Protected<String>`, which lends a
-/// `ProtectedRef<String>`, and `as_deref` narrows that to `str` or
-/// `as_ref_of` to `str` or bytes.
+/// does not lend, because nothing would wipe it.
 ///
 /// ```
 /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
@@ -96,12 +107,6 @@ where
 /// let arrived: &[u8] = b"secret";
 /// let owned = Protected::new(arrived.to_vec());
 /// assert_eq!(length(owned.as_protected_ref().as_deref()), 6);
-///
-/// let typed: &str = "secret";
-/// let text = Protected::new(String::from(typed));
-/// let as_text: ProtectedRef<str> = text.as_protected_ref().as_deref();
-/// assert_eq!(as_text.risky_ref(), "secret");
-/// assert_eq!(length(text.as_protected_ref().as_ref_of()), 6);
 /// ```
 impl<'a> AsProtectedRef<'a, [u8]> for Buffer {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
@@ -236,7 +241,9 @@ mod byte_lender_tests {
     #[test]
     fn plain_bytes_reach_a_byte_reader_through_a_protected_owner() {
         // A plain Vec<u8> or &[u8] does not lend (see tests/ui); it goes
-        // into an owner that wipes it, and that owner lends.
+        // into an owner that wipes it, and that owner lends. The same holds
+        // for a plain &str, Cow<str> or [u8; N]: the tests below reach
+        // text and arrays only through a Protected owner.
         let arrived: &[u8] = b"frame";
         let owned = Protected::new(arrived.to_vec());
         assert_eq!(lent(owned.as_protected_ref().as_deref()), b"frame");
@@ -244,25 +251,6 @@ mod byte_lender_tests {
         let mut buffer = Buffer::new();
         buffer.extend_from_slice(arrived);
         assert_eq!(lent(buffer.as_protected_ref()), b"frame");
-    }
-
-    #[test]
-    fn plain_text_reaches_a_reader_through_a_protected_owner() {
-        // A plain &str, Cow<str> or [u8; N] does not lend either (see
-        // tests/ui); the text goes into a Protected<String>, and the
-        // array into a Protected, and that owner lends.
-        fn text(lent: ProtectedRef<'_, str>) -> String {
-            lent.risky_ref().to_owned()
-        }
-
-        let arrived: &str = "frame";
-        let owned = Protected::new(String::from(arrived));
-        assert_eq!(text(owned.as_protected_ref().as_deref()), "frame");
-        assert_eq!(text(owned.as_protected_ref().as_ref_of()), "frame");
-        assert_eq!(lent(owned.as_protected_ref().as_ref_of()), b"frame");
-
-        let array = Protected::new(*b"frame");
-        assert_eq!(lent(array.as_protected_ref().as_ref_of()), b"frame");
     }
 
     #[test]
