@@ -55,16 +55,23 @@ where
     }
 }
 
+/// A bare `[u8; N]` lends itself with no owner behind it that wipes, which
+/// breaks the promise [`ProtectedRef`] makes. This impl predates that
+/// promise and is being removed
+/// ([#600](https://github.com/cipherstash/vitaminc/issues/600)); new code
+/// puts the array in a `Protected` first.
 impl<'a, const N: usize> AsProtectedRef<'a, [u8; N]> for [u8; N] {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8; N]> {
         ProtectedRef(self)
     }
 }
 
-/// String references cannot be zeroized, so we can't implement `Zeroize` for `Protected<&str>`.
-/// Instead, a string lends a `ProtectedRef`, so it can be passed to functions that take one.
-/// It lends its bytes here, and its text below; a caller whose target type does not
-/// already say which must annotate it.
+/// A bare `str` or `Cow<str>` lends itself with no owner behind it that
+/// wipes, as the `[u8; N]` impl above does, and is being removed with it
+/// ([#600](https://github.com/cipherstash/vitaminc/issues/600)); new code
+/// puts the text in a `Protected<String>` first. A `str` lends its bytes
+/// here, and its text below; a caller whose target type does not already
+/// say which must annotate it.
 impl<'a> AsProtectedRef<'a, [u8]> for str {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
         ProtectedRef(self.as_bytes())
@@ -136,13 +143,15 @@ impl<'a> AsProtectedRef<'a, [u8]> for Buffer {
 /// through [`AsProtectedRef`], and the inner value is reached only through
 /// the combinators that take it or through [`risky_ref`](Self::risky_ref).
 ///
-/// A `ProtectedRef` does not mean the value behind it is wiped. One lent by
-/// a [`Controlled`] owner, such as a `Protected` or a [`Buffer`], or by a
-/// [`Locked`](crate::Locked), is wiped when that owner drops. One lent by a
-/// bare `[u8; N]`, `str` or `Cow<str>` is a plain borrow that nothing
-/// wipes. A `ProtectedRef` narrowed through
-/// [`as_deref`](Self::as_deref) is wiped exactly when the one it came from
-/// is.
+/// Whatever lends a `ProtectedRef` owns the value behind it and wipes it
+/// when it drops: a [`Controlled`] owner such as a `Protected` or a
+/// [`Buffer`], or a [`Locked`](crate::Locked), runs the value's
+/// [`Zeroize`](zeroize::Zeroize) impl. The borrow is wiped as far as that
+/// impl reaches. For `Vec`, `String`, `Box` and arrays that is the whole
+/// value; a hand-written impl that leaves memory it points at untouched
+/// leaves it untouched behind the borrow too. Dropping the `ProtectedRef`
+/// itself wipes nothing. One narrowed through [`as_deref`](Self::as_deref)
+/// borrows the same memory as the one it came from, and is wiped with it.
 pub struct ProtectedRef<'a, T>(pub(crate) &'a T)
 where
     T: ?Sized;
@@ -184,8 +193,8 @@ impl<'a, T: ?Sized + Deref> ProtectedRef<'a, T> {
     /// Narrows the borrow through `Deref`, and keeps it protected. A
     /// `ProtectedRef<Vec<u8>>` becomes a `ProtectedRef<[u8]>`, and a
     /// `ProtectedRef<String>` becomes a `ProtectedRef<str>`. Whatever lent
-    /// the original borrow still owns the value behind it, and still wipes
-    /// it.
+    /// the original borrow still owns the value behind it, and wipes it as
+    /// far as its `Zeroize` impl reaches (see [`ProtectedRef`]).
     ///
     /// The name follows `Option::as_deref`. It needs no `risky_` name,
     /// because the value never leaves a `ProtectedRef`.
