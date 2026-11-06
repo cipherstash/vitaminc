@@ -1,4 +1,47 @@
 
+## [0.9.1] - 2026-11-06
+
+### Features
+
+- A `Buffer` now lends its bytes as a `ProtectedRef<[u8]>`, through `AsProtectedRef`.
+  A function that takes a `ProtectedRef<[u8]>` accepts a `Buffer` directly.
+  You no longer need to call `risky_ref` to pass the bytes on.
+  The `Buffer` still wipes its bytes when it is dropped.
+- A finished `Buffer` now moves into a `Protected<Vec<u8>>`, through `From`.
+  Call `.into()` on the `Buffer`.
+  The bytes move without a copy. You do not need to call `risky_unwrap`.
+  The `Protected` wipes the bytes when it is dropped, one byte per store.
+  A `Buffer` wipes 16 bytes per store, and wipes each allocation that it outgrows.
+  A `Protected<Vec<u8>>` that grows later does not wipe the allocation it leaves.
+  So move the bytes only when they are finished.
+- The new `ProtectedRef::as_deref` method narrows a protected borrow through `Deref`.
+  A `ProtectedRef<Vec<u8>>` becomes a `ProtectedRef<[u8]>`.
+  A `ProtectedRef<String>` becomes a `ProtectedRef<str>`.
+  Nothing is copied. The owner of the value still wipes it.
+- The new `ProtectedRef::as_ref_of` method narrows a protected borrow through `AsRef`.
+  A `ProtectedRef<[u8; N]>` becomes a `ProtectedRef<[u8]>`.
+  An array does not implement `Deref`, so `as_deref` cannot narrow it.
+  Name the target type when nothing else in your code names it.
+  With both methods, a `Protected`, `Equatable`, or `Locked` value of any byte type reaches a function that takes a `ProtectedRef<[u8]>`, without a copy.
+
+### Documentation
+
+- The `ProtectedRef` documentation now states what the type guarantees.
+  The type that lends a `ProtectedRef` stores the value.
+  When that type is dropped, it runs the value's `Zeroize` implementation.
+  The borrow is wiped as far as that implementation reaches.
+  For `Vec`, `String`, `Box`, and arrays, that is the whole value.
+  The 0.9.0 changelog said that a `ProtectedRef` does not guarantee a wipe.
+  That statement described a bug, not the design.
+
+### What is not guaranteed
+
+- A `str`, `[u8; N]`, or `Cow<str>` can still lend a `ProtectedRef`.
+  Those types still do not wipe their values.
+  That behaviour is a bug. Issue #600 tracks its fix.
+  A later release will remove those three implementations.
+  To prepare, put the value in a `Protected` first, and lend from that.
+
 ## [0.9.0] - 2026-11-04
 
 ### Breaking

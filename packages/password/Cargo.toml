@@ -14,8 +14,8 @@ rust-version.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-vitaminc-random = { version = "0.9.0", path = "../random" }
-vitaminc-protected = { version = "0.9.0", path = "../protected" }
+vitaminc-random = { version = "0.9.1", path = "../random" }
+vitaminc-protected = { version = "0.9.1", path = "../protected" }
 
 [dev-dependencies]
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
