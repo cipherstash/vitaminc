@@ -15,7 +15,7 @@ This crate is part of the [Vitamin C](https://github.com/cipherstash/vitaminc) f
 <!-- workspace-deps:start -->
 ```toml
 [dependencies]
-vitaminc-password = "0.9.0"
+vitaminc-password = "0.9.1"
 ```
 <!-- workspace-deps:end -->
 
@@ -93,8 +93,8 @@ Add `vitaminc-random` explicitly for this lower-level API:
 <!-- workspace-deps:start -->
 ```toml
 [dependencies]
-vitaminc-password = "0.9.0"
-vitaminc-random = "0.9.0"
+vitaminc-password = "0.9.1"
+vitaminc-random = "0.9.1"
 ```
 <!-- workspace-deps:end -->
 
