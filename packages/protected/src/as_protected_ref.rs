@@ -1,6 +1,5 @@
 use crate::{private::Lends, Buffer, Controlled};
 use core::ops::Deref;
-use std::borrow::Cow;
 
 /// Trait for types that can be converted to a `ProtectedRef`.
 /// Conceptually similar to the `AsRef` trait in `std` but for `Protected` types.
@@ -9,9 +8,12 @@ use std::borrow::Cow;
 /// implementations must delegate to an existing protected source rather than
 /// wrapping an arbitrary reference.
 ///
-/// A plain `Vec<u8>` or `[u8]` is not a protected source and does not lend.
-/// Bytes held that way go into a `Protected` or a [`Buffer`] first, which
-/// wipes them, and that owner lends.
+/// A plain `Vec<u8>`, `[u8]`, `[u8; N]`, `str` or `Cow<str>` is not a
+/// protected source and does not lend. Bytes held that way go into a
+/// `Protected` or a [`Buffer`] first, which wipes them, and that owner
+/// lends; text goes into a `Protected<String>`, whose borrow
+/// [`as_deref`](ProtectedRef::as_deref) narrows to `str`. So a consumer that
+/// receives a `ProtectedRef` knows an owner that wipes stands behind it.
 ///
 /// # Implementing `AsProtectedRef`
 ///
@@ -55,51 +57,6 @@ where
     }
 }
 
-/// A bare `[u8; N]` lends itself with no owner behind it that wipes, which
-/// breaks the promise [`ProtectedRef`] makes. This impl predates that
-/// promise and is being removed
-/// ([#600](https://github.com/cipherstash/vitaminc/issues/600)); new code
-/// puts the array in a `Protected` first.
-impl<'a, const N: usize> AsProtectedRef<'a, [u8; N]> for [u8; N] {
-    fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8; N]> {
-        ProtectedRef(self)
-    }
-}
-
-/// A bare `str` or `Cow<str>` lends itself with no owner behind it that
-/// wipes, as the `[u8; N]` impl above does, and is being removed with it
-/// ([#600](https://github.com/cipherstash/vitaminc/issues/600)); new code
-/// puts the text in a `Protected<String>` first. A `str` lends its bytes
-/// here, and its text below; a caller whose target type does not already
-/// say which must annotate it.
-impl<'a> AsProtectedRef<'a, [u8]> for str {
-    fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
-        ProtectedRef(self.as_bytes())
-    }
-}
-
-impl<'a> AsProtectedRef<'a, [u8]> for Cow<'a, str> {
-    fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
-        ProtectedRef(self.as_bytes())
-    }
-}
-
-/// A string can also lend itself as text, for a consumer that cares which
-/// it is (such as `vitaminc-aead`, which seals text and bytes as different
-/// leaves). With both impls, an unannotated `"pw".as_protected_ref()` does
-/// not compile, so a caller always picks one.
-impl<'a> AsProtectedRef<'a, str> for str {
-    fn as_protected_ref(&'a self) -> ProtectedRef<'a, str> {
-        ProtectedRef(self)
-    }
-}
-
-impl<'a> AsProtectedRef<'a, str> for Cow<'a, str> {
-    fn as_protected_ref(&'a self) -> ProtectedRef<'a, str> {
-        ProtectedRef(self)
-    }
-}
-
 /// A [`Buffer`] lends its bytes, so a function that reads bytes can take a
 /// `Buffer` without the caller reading it through
 /// [`risky_ref`](Controlled::risky_ref). The `Buffer` still wipes its bytes
@@ -113,7 +70,10 @@ impl<'a> AsProtectedRef<'a, str> for Cow<'a, str> {
 /// [`as_ref_of`](ProtectedRef::as_ref_of) narrows the same way. Bytes that
 /// arrive as a plain `Vec<u8>` or `&[u8]`, such as input from another
 /// process, go into a `Protected` or a `Buffer` first; a plain `Vec<u8>`
-/// does not lend, because nothing would wipe it.
+/// does not lend, because nothing would wipe it. Text is the same: a
+/// `&str` goes into a `Protected<String>`, which lends a
+/// `ProtectedRef<String>`, and `as_deref` narrows that to `str` or
+/// `as_ref_of` to `str` or bytes.
 ///
 /// ```
 /// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
@@ -136,6 +96,12 @@ impl<'a> AsProtectedRef<'a, str> for Cow<'a, str> {
 /// let arrived: &[u8] = b"secret";
 /// let owned = Protected::new(arrived.to_vec());
 /// assert_eq!(length(owned.as_protected_ref().as_deref()), 6);
+///
+/// let typed: &str = "secret";
+/// let text = Protected::new(String::from(typed));
+/// let as_text: ProtectedRef<str> = text.as_protected_ref().as_deref();
+/// assert_eq!(as_text.risky_ref(), "secret");
+/// assert_eq!(length(text.as_protected_ref().as_ref_of()), 6);
 /// ```
 impl<'a> AsProtectedRef<'a, [u8]> for Buffer {
     fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
@@ -278,6 +244,25 @@ mod byte_lender_tests {
         let mut buffer = Buffer::new();
         buffer.extend_from_slice(arrived);
         assert_eq!(lent(buffer.as_protected_ref()), b"frame");
+    }
+
+    #[test]
+    fn plain_text_reaches_a_reader_through_a_protected_owner() {
+        // A plain &str, Cow<str> or [u8; N] does not lend either (see
+        // tests/ui); the text goes into a Protected<String>, and the
+        // array into a Protected, and that owner lends.
+        fn text(lent: ProtectedRef<'_, str>) -> String {
+            lent.risky_ref().to_owned()
+        }
+
+        let arrived: &str = "frame";
+        let owned = Protected::new(String::from(arrived));
+        assert_eq!(text(owned.as_protected_ref().as_deref()), "frame");
+        assert_eq!(text(owned.as_protected_ref().as_ref_of()), "frame");
+        assert_eq!(lent(owned.as_protected_ref().as_ref_of()), b"frame");
+
+        let array = Protected::new(*b"frame");
+        assert_eq!(lent(array.as_protected_ref().as_ref_of()), b"frame");
     }
 
     #[test]
