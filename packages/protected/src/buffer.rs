@@ -1,6 +1,6 @@
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{locked::wipe_vec, private::ControlledPrivate, Controlled, OpaqueDebug};
+use crate::{locked::wipe_vec, private::ControlledPrivate, Controlled, OpaqueDebug, Protected};
 
 /// Secret bytes on the heap, written a few at a time: a frame, a blob, a
 /// serialisation of a value.
@@ -194,9 +194,37 @@ impl Drop for Buffer {
 
 impl ZeroizeOnDrop for Buffer {}
 
+/// A finished `Buffer` moves into a [`Protected`], so its bytes stay
+/// protected after the writing is done. The bytes move without being copied,
+/// and the caller does not read them through
+/// [`risky_unwrap`](Controlled::risky_unwrap).
+///
+/// ```
+/// use vitaminc_protected::{Buffer, Protected};
+///
+/// let mut out = Buffer::new();
+/// out.extend_from_slice(b"secret");
+/// let kept: Protected<Vec<u8>> = out.into();
+/// ```
+impl From<Buffer> for Protected<Vec<u8>> {
+    fn from(mut buffer: Buffer) -> Self {
+        Protected::new(core::mem::take(&mut buffer.0))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_buffer_moves_into_a_protected_without_a_copy() {
+        let mut buffer = Buffer::new();
+        buffer.extend_from_slice(b"frame");
+        let address = buffer.0.as_ptr();
+        let protected: Protected<Vec<u8>> = buffer.into();
+        assert_eq!(protected.risky_ref().as_ptr(), address);
+        assert_eq!(protected.risky_ref().as_slice(), b"frame");
+    }
 
     #[test]
     fn bytes_read_back_through_risky_ref() {
