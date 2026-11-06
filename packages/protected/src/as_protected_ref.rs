@@ -1,4 +1,4 @@
-use crate::{private::Lends, Controlled};
+use crate::{private::Lends, Buffer, Controlled};
 use std::borrow::Cow;
 
 /// Trait for types that can be converted to a `ProtectedRef`.
@@ -88,6 +88,46 @@ impl<'a> AsProtectedRef<'a, str> for Cow<'a, str> {
     }
 }
 
+/// A [`Buffer`] lends its bytes, so a function that reads bytes can take a
+/// `Buffer` without the caller reading it through
+/// [`risky_ref`](Controlled::risky_ref). The `Buffer` still wipes its bytes
+/// when it drops.
+///
+/// ```
+/// # mod vitaminc { pub mod protected { pub use vitaminc_protected::*; } }
+/// use vitaminc::protected::{AsProtectedRef, Buffer};
+///
+/// fn length(bytes: &(impl for<'a> AsProtectedRef<'a, [u8]> + ?Sized)) -> usize {
+///     bytes.as_protected_ref().risky_ref().len()
+/// }
+///
+/// let mut out = Buffer::new();
+/// out.extend_from_slice(b"secret");
+/// assert_eq!(length(&out), 6);
+/// ```
+impl<'a> AsProtectedRef<'a, [u8]> for Buffer {
+    fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
+        ProtectedRef(self.risky_ref())
+    }
+}
+
+/// A byte slice lends itself, as a `str` does, so a function that takes
+/// protected bytes also takes bytes that arrive unprotected, such as input
+/// from another process. Nothing wipes a slice lent this way.
+impl<'a> AsProtectedRef<'a, [u8]> for [u8] {
+    fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
+        ProtectedRef(self)
+    }
+}
+
+/// A `Vec<u8>` lends its bytes, as a byte slice does. Nothing wipes a `Vec`
+/// lent this way.
+impl<'a> AsProtectedRef<'a, [u8]> for Vec<u8> {
+    fn as_protected_ref(&'a self) -> ProtectedRef<'a, [u8]> {
+        ProtectedRef(self.as_slice())
+    }
+}
+
 /// A wrapper around a reference to prevent inner access.
 /// Conceptually similar to `&T`, but it can only be made inside this crate,
 /// through [`AsProtectedRef`], and the inner value is reached only through
@@ -131,5 +171,36 @@ impl<'a, T: ?Sized> ProtectedRef<'a, T> {
     /// ```
     pub fn risky_ref(&self) -> &'a T {
         self.0
+    }
+}
+
+#[cfg(test)]
+mod byte_lender_tests {
+    use super::*;
+
+    fn lent(bytes: &(impl for<'a> AsProtectedRef<'a, [u8]> + ?Sized)) -> Vec<u8> {
+        bytes.as_protected_ref().risky_ref().to_vec()
+    }
+
+    #[test]
+    fn a_buffer_lends_the_bytes_it_holds() {
+        let mut buffer = Buffer::new();
+        buffer.extend_from_slice(b"frame");
+        assert_eq!(lent(&buffer), b"frame");
+    }
+
+    #[test]
+    fn a_slice_and_a_vec_lend_themselves() {
+        assert_eq!(lent(&b"frame"[..]), b"frame");
+        assert_eq!(lent(&b"frame".to_vec()), b"frame");
+    }
+
+    #[test]
+    fn a_protected_vec_still_lends_without_an_annotation() {
+        // Protected<Vec<u8>> keeps its one AsProtectedRef impl, so existing
+        // unannotated calls still infer `Vec<u8>`.
+        let protected = crate::Protected::new(b"frame".to_vec());
+        let pref = protected.as_protected_ref();
+        assert_eq!(pref.risky_ref().as_slice(), b"frame");
     }
 }
