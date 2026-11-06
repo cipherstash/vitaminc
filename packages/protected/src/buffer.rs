@@ -1,6 +1,6 @@
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::{locked::wipe_vec, private::ControlledPrivate, Controlled, OpaqueDebug};
+use crate::{locked::wipe_vec, private::ControlledPrivate, Controlled, OpaqueDebug, Protected};
 
 /// Secret bytes on the heap, written a few at a time: a frame, a blob, a
 /// serialisation of a value.
@@ -13,10 +13,21 @@ use crate::{locked::wipe_vec, private::ControlledPrivate, Controlled, OpaqueDebu
 /// writer of secret bytes returns, and `&mut Buffer` is what it writes
 /// into.
 ///
-/// It is a [`Controlled`] type, like [`Protected`](crate::Protected): its
-/// bytes are read through [`risky_ref`](Controlled::risky_ref) and taken
-/// through [`risky_unwrap`](Controlled::risky_unwrap), so every read of
-/// what it holds is named at the use. Writing through `Buffer`'s own
+/// It is a [`Controlled`] type, like [`Protected`]. A read that copies its
+/// bytes out goes through [`risky_ref`](Controlled::risky_ref), and taking
+/// the `Vec<u8>` goes through [`risky_unwrap`](Controlled::risky_unwrap), so
+/// each of those is named at the use. Two things need no such name, because
+/// in both the bytes stay with an owner that wipes them:
+///
+/// - A `Buffer` lends its bytes as a [`ProtectedRef`](crate::ProtectedRef),
+///   through [`AsProtectedRef`](crate::AsProtectedRef). The function that
+///   receives it decides how to read it, and the `Buffer` still wipes the
+///   bytes when it drops.
+/// - A finished `Buffer` moves into a `Protected<Vec<u8>>`, through `From`.
+///   The `Protected` wipes the bytes when it drops. See that impl for what
+///   the move gives up.
+///
+/// Writing through `Buffer`'s own
 /// methods needs no such name: each of them that adds bytes goes through
 /// [`reserve`], so none of them grows it in a way that leaves a copy
 /// behind, and [`overwrite`] patches bytes already written without
@@ -194,9 +205,52 @@ impl Drop for Buffer {
 
 impl ZeroizeOnDrop for Buffer {}
 
+/// A finished `Buffer` moves into a [`Protected`], so its bytes keep an
+/// owner that wipes them after the writing is done. The bytes move without
+/// being copied, and the caller does not read them through
+/// [`risky_unwrap`](Controlled::risky_unwrap).
+///
+/// The move gives up two things a `Buffer` does:
+///
+/// - The `Protected` wipes the bytes through `zeroize`'s `Vec` impl, one
+///   byte a store, over the whole capacity. A `Buffer` wipes sixteen bytes a
+///   store, and it often holds more capacity than bytes, because it grows
+///   by doubling.
+/// - A `Protected<Vec<u8>>` grown later, through
+///   [`risky_inner_mut`](Controlled::risky_inner_mut) or
+///   [`update`](Controlled::update), frees its old allocation without
+///   wiping it. A `Buffer` wipes the old allocation when it grows.
+///
+/// So move a `Buffer` into a `Protected` only when the bytes are finished,
+/// such as a frame to store or seal. Keep writing into the `Buffer` while
+/// the bytes can still grow.
+///
+/// ```
+/// use vitaminc_protected::{Buffer, Protected};
+///
+/// let mut out = Buffer::new();
+/// out.extend_from_slice(b"secret");
+/// let kept: Protected<Vec<u8>> = out.into();
+/// ```
+impl From<Buffer> for Protected<Vec<u8>> {
+    fn from(mut buffer: Buffer) -> Self {
+        Protected::new(core::mem::take(&mut buffer.0))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_buffer_moves_into_a_protected_without_a_copy() {
+        let mut buffer = Buffer::new();
+        buffer.extend_from_slice(b"frame");
+        let address = buffer.0.as_ptr();
+        let protected: Protected<Vec<u8>> = buffer.into();
+        assert_eq!(protected.risky_ref().as_ptr(), address);
+        assert_eq!(protected.risky_ref().as_slice(), b"frame");
+    }
 
     #[test]
     fn bytes_read_back_through_risky_ref() {

@@ -1,0 +1,43 @@
+error[E0599]: the method `as_protected_ref` exists for struct `Vec<u8>`, but its trait bounds were not satisfied
+  --> tests/ui/negative_space/plain_bytes_do_not_lend_a_protected_ref.rs:13:16
+   |
+13 |     read(owned.as_protected_ref());
+   |                ^^^^^^^^^^^^^^^^ method cannot be called on `Vec<u8>` due to unsatisfied trait bounds
+   |
+   = note: the following trait bounds were not satisfied:
+           `Vec<u8>: Controlled`
+           which is required by `Vec<u8>: AsProtectedRef<'_, _>`
+           `Vec<u8>: vitaminc_protected::private::Lends`
+           which is required by `Vec<u8>: AsProtectedRef<'_, _>`
+           `<Vec<u8> as Controlled>::Inner = _`
+           which is required by `Vec<u8>: AsProtectedRef<'_, _>`
+           `[u8]: Sized`
+           which is required by `[u8]: AsProtectedRef<'_, _>`
+           `[u8]: Controlled`
+           which is required by `[u8]: AsProtectedRef<'_, _>`
+           `[u8]: vitaminc_protected::private::Lends`
+           which is required by `[u8]: AsProtectedRef<'_, _>`
+           `<[u8] as Controlled>::Inner = _`
+           which is required by `[u8]: AsProtectedRef<'_, _>`
+
+error[E0599]: the method `as_protected_ref` exists for reference `&[u8]`, but its trait bounds were not satisfied
+  --> tests/ui/negative_space/plain_bytes_do_not_lend_a_protected_ref.rs:16:19
+   |
+16 |     read(borrowed.as_protected_ref());
+   |                   ^^^^^^^^^^^^^^^^ method cannot be called on `&[u8]` due to unsatisfied trait bounds
+   |
+   = note: the following trait bounds were not satisfied:
+           `[u8]: Sized`
+           which is required by `[u8]: AsProtectedRef<'_, _>`
+           `[u8]: Controlled`
+           which is required by `[u8]: AsProtectedRef<'_, _>`
+           `[u8]: vitaminc_protected::private::Lends`
+           which is required by `[u8]: AsProtectedRef<'_, _>`
+           `<[u8] as Controlled>::Inner = _`
+           which is required by `[u8]: AsProtectedRef<'_, _>`
+           `&[u8]: Controlled`
+           which is required by `&[u8]: AsProtectedRef<'_, _>`
+           `&[u8]: vitaminc_protected::private::Lends`
+           which is required by `&[u8]: AsProtectedRef<'_, _>`
+           `<&[u8] as Controlled>::Inner = _`
+           which is required by `&[u8]: AsProtectedRef<'_, _>`
