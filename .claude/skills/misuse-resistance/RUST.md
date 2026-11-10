@@ -50,10 +50,19 @@ Put the invariant in the type.
 - **Typestate.** Encode protocol steps as types, so the unsafe order does not type-check:
 
 ```rust
-pub struct VerifyingKey { /* public key */ }
+use std::marker::PhantomData;
+
+/// The role a verifying key was loaded for. One marker per role, assigned where
+/// the key is loaded from configuration, so a message verified under a key of
+/// another role has another type.
+pub trait Role {}
+pub struct Issuer;
+impl Role for Issuer {}
+
+pub struct VerifyingKey<R: Role> { /* public key */ role: PhantomData<R> }
 
 pub struct Unverified { message: Vec<u8>, signature: [u8; 64] }
-pub struct Verified(Vec<u8>);
+pub struct Verified<R: Role> { message: Vec<u8>, role: PhantomData<R> }
 
 pub struct BadSignature;
 
@@ -65,21 +74,24 @@ impl Unverified {
 
     // The caller supplies a key, never the check: the library owns the
     // verification, so there is no predicate to stub out with `|_| true`.
-    pub fn verify(self, key: &VerifyingKey) -> Result<Verified, BadSignature> {
+    // The result carries the key's role, so "verified" always says by whom.
+    pub fn verify<R: Role>(self, key: &VerifyingKey<R>) -> Result<Verified<R>, BadSignature> {
         key.check(&self.message, &self.signature)?;
-        Ok(Verified(self.message))
+        Ok(Verified { message: self.message, role: PhantomData })
     }
 }
 
-impl VerifyingKey {
+impl<R: Role> VerifyingKey<R> {
     fn check(&self, _message: &[u8], _signature: &[u8; 64]) -> Result<(), BadSignature> {
         todo!("signature verification")
     }
 }
 
-/// Only verified messages can be processed. `Verified` has a private field, so
-/// the only way to obtain one is a signature check the library performs.
-pub fn process(message: Verified) -> usize { message.0.len() }
+/// Only messages verified under the issuer's key can be processed. A message
+/// verified under a key of another role has another type and does not compile
+/// here. `Verified` has private fields, so the only way to obtain one is a
+/// signature check the library performs.
+pub fn process(message: Verified<Issuer>) -> usize { message.message.len() }
 ```
 
 - **Consume one-shot values.** Take `self` by value for anything that must be used once (a nonce, a one-time key, a request token), so a second use is a move error.
@@ -87,11 +99,14 @@ pub fn process(message: Verified) -> usize { message.0.len() }
 - **Post-monomorphisation checks.** A `const` assertion can reject a generic parameter at compile time. Use a named associated `const` item, not an inline `const { }` block: trybuild does not report inline-const failures.
 - **Test the guarantee.** Every rung-2 claim gets a compile-fail test (trybuild) showing the misuse does not compile. Without one, a refactor can silently drop it to rung 6 or 7.
 
-## Rung 3: compiles with a warning
+## Rung 3: fails the build
 
-- `#[must_use]` on results, tags, and anything whose silent drop is a bug.
-- `#[deprecated(note = "use X instead: <reason>")]` names the replacement.
-- Ship a `clippy.toml` snippet with `disallowed-methods` / `disallowed-types` for downstream users (for example, banning a non-cryptographic RNG in key-handling code).
+A check that blocks the merge is as strong as a type check: the mistake cannot reach `main`. A warning that nothing denies is read once, then tuned out, so it counts as rung 7.
+
+- `#[must_use]` on results, tags, and anything whose silent drop is a bug, with `#![deny(unused_must_use)]` in the crate root.
+- `#[deprecated(note = "use X instead: <reason>")]` names the replacement, with `#![deny(deprecated)]` once callers have migrated.
+- Ship a `clippy.toml` snippet with `disallowed-methods` / `disallowed-types` for downstream users (for example, banning a non-cryptographic RNG in key-handling code). Run clippy with `-D warnings` in CI.
+- Every escape hatch (`risky_*`, `hazmat`, `*_unchecked`) has an allowlist of call sites that CI checks. A new call site fails CI until a reviewer adds it, with a reason.
 
 ## Rung 4: the simplest use is correct
 
@@ -117,7 +132,7 @@ A type holding a secret:
 - exposes its contents only through named, greppable methods, and offers `map`-style combinators so most code never unwraps;
 - compares in constant time, if at all;
 - serialises only through an explicit export type;
-- for process-lifetime secrets, lives in memory locked against swap and core dumps, since nothing drops a static or a killed process.
+- for process-lifetime secrets, lives in memory that is both locked against swap and excluded from core dumps, since nothing drops a static or a killed process. These are two separate protections: `mlock` keeps pages out of swap but does not keep them out of a dump, which needs its own call (`madvise(MADV_DONTDUMP)` on Linux and Android). Check that both succeeded.
 
 ## Errors
 
@@ -127,3 +142,12 @@ A type holding a secret:
 ## Features
 
 Optional functionality goes behind cargo features. Dangerous functionality goes behind a feature whose name says so, off by default.
+
+## What the compiler does not check
+
+"If it compiles, it is secure" holds only under assumptions. State them in the crate root and check them in CI:
+
+- No `unsafe`: `#![forbid(unsafe_code)]` in every crate that does not need it, and `cargo geiger` (or an equivalent) on dependencies. Memory-safety bugs were the largest class in the C libraries Blessing et al. 2021 studied; Rust prevents them only where `unsafe` is absent. Where a crate needs `unsafe` (memory locking, FFI), confine it to one module, give each block a `// SAFETY:` comment, run the module under Miri, and count the blocks.
+- No unbounded escape hatch: every `risky_*` call site is on the allowlist (rung 3).
+- No `#[allow]` on the lints above without a reason on the same line.
+- A change that adds any of these blocks review until a second person has read it. An agent writing the code does not change that.

@@ -5,7 +5,7 @@ description: Misuse-resistant API design for cryptography and sensitive data. Us
 
 # Misuse resistance
 
-A **footgun** is an API whose obvious use is insecure. Most cryptographic failures are footguns fired at the call site: in one study, 83% of crypto CVEs were applications misusing correct libraries. The people firing them, developers and coding agents alike, optimise for code that works, copy examples verbatim, and rate their insecure code as secure. Security therefore has to come from the API itself: the shortest path that works must be the secure path.
+A **footgun** is an API whose obvious use is insecure. Most cryptographic failures are footguns fired at the call site: in one study, 83% of crypto CVEs were applications misusing correct libraries. That count covers only CVEs tagged as cryptographic, so library bugs filed under other tags, such as Heartbleed, are outside it. The people firing them, developers and coding agents alike, optimise for code that works, copy examples verbatim, and rate their insecure code as secure. Security therefore has to come from the API itself: the shortest path that works must be the secure path.
 
 Design for two outcomes at once, **secure** and **functional**. An API that is secure but too hard to finish a task with sends its users to Stack Overflow or a model for a footgun. (Keyczar produced the most secure solutions of five libraries tested, and the fewest working ones.)
 
@@ -15,7 +15,7 @@ Ranks the ways a rule can be enforced, best first. Put every rule on the highest
 
 1. **Impossible to get wrong.** The wrong thing cannot be expressed: there is no nonce parameter to reuse.
 2. **Won't compile.**
-3. **Compiles with a warning**: a lint, `#[must_use]`, a deprecation.
+3. **Fails the build**: a `deny`-level lint, a compile-fail test, a conformance check that runs before merge. A warning that nothing denies is read once, then tuned out (Vance 2018), so it counts as rung 7.
 4. **The simplest use is correct**: the default is secure.
 5. **The name says how to use it**: `risky_unwrap`, a `hazmat` module.
 6. **Fails loudly at runtime**, on first use.
@@ -23,6 +23,8 @@ Ranks the ways a rule can be enforced, best first. Put every rule on the highest
 8. **Documented, but the obvious use is wrong.** A footgun.
 
 Below rung 6, a mistake ships silently. Treat rungs 7 and 8 as bugs to fix.
+
+This skill is rung 7. Every rule it enforces only by text is one a mistake can ship past. Treat it as a stopgap. Where it tells a caller to avoid something the API allows, raise that item into the API or into CI. Then delete the sentence.
 
 ## Rules
 
@@ -35,28 +37,30 @@ Each rule states the target. The studies behind each are in [EVIDENCE.md](EVIDEN
 5. **Make invalid states unrepresentable.** Parse once into a type that proves validity (key length, non-empty context, verified signature, authenticated ciphertext) and accept only that type.
 6. **Promise only what you deliver.** Names and types claim exactly the guarantee provided. Where a guarantee stops (an AEAD that does not commit to its key, a position that is not authenticated), say so at the type, where the caller looks.
 7. **Errors reveal nothing.** Errors never carry plaintext, keys or secret-derived values. Cryptographic failures are one opaque error: a wrong key, a wrong AAD and tampering look the same. Context comes from paths and positions.
-8. **Warn at the point of use.** A footgun that cannot be removed (a legacy algorithm, a compatibility mode) warns when used, or requires an explicit opt-in. A warning carries a classification, a title, the code location, and a link to the secure alternative. Keep warnings rare and specific so they are not tuned out. Escape hatches are obvious but effortful: a named feature, a `hazmat` module, a `risky_` prefix.
+8. **Warn at the point of use.** A footgun that cannot be removed (a legacy algorithm, a compatibility mode) warns when used, or requires an explicit opt-in. A warning carries a classification, a title, the code location, and a link to the secure alternative. Keep warnings rare and specific so they are not tuned out. Escape hatches are obvious but effortful: a named feature, a `hazmat` module, a `risky_` prefix. Every escape hatch has an allowlist of call sites that CI enforces: a new use fails CI until a reviewer adds it with a reason. The length of that list is the residual risk, so count it per release.
 9. **Every example is secure and complete.** Each example is the production path, inputs included: real key generation, real randomness, real error handling. An example labelled "insecure, for illustration" is copied anyway, so publish only secure ones. Compile-check every example in CI, and use `todo!()` for anything elided so a copied snippet fails loudly.
 10. **Keep it small.** Fewer features, options and dependencies. Complexity tracks vulnerability count.
-11. **Evolve loudly.** Deprecations name their replacement, and migrations are mechanical. A breaking change is acceptable when the upgrade path is smooth.
+11. **Evolve loudly.** Deprecations name their replacement, and migrations are mechanical. A breaking change is acceptable when the upgrade path is smooth. Finish every migration by denying the old path (rung 3), so it cannot return. Anything left on it is an exemption on the allowlist, not the default.
 
 When rules conflict with each other or with other goals (flexibility, performance, `no_std`), name the trade-off, choose explicitly, and record the choice where reviewers will find it: an ADR or the type's doc comment.
 
 ## Designing an API
 
-1. Write the task as the caller would state it, then list every input the caller must supply.
-2. For each input, list its footguns: wrong source, wrong length, reuse, leaking through logs, `Debug` or errors, non-constant-time comparison, accidental serialisation, wrong order of steps.
-3. Place each footgun on the ladder, then raise it as far as it will go. Removing the input altogether (rule 3) beats every other rung.
-4. Write the caller's secure example before the implementation. If it is longer or harder than the insecure code a caller could write with other tools, simplify the API until it is not.
-5. Add a compile-fail test for every rung-2 guarantee and a test for every rung-6 refusal.
+1. Write the invariant each type will guarantee, in one sentence a reviewer can test ("every `Verified<Issuer>` passed a signature check under the issuer's key"). A type with no stated invariant cannot be checked against rule 6.
+2. Write the task as the caller would state it, then list every input the caller must supply.
+3. For each input, list its footguns: wrong source, wrong length, reuse, leaking through logs, `Debug` or errors, non-constant-time comparison, accidental serialisation, wrong order of steps.
+4. Place each footgun on the ladder, then raise it as far as it will go. Removing the input altogether (rule 3) beats every other rung. What cannot be raised in the API gets a CI check (rung 3), not a sentence in the docs.
+5. Write the caller's secure example before the implementation. If it is longer or harder than the insecure code a caller could write with other tools, simplify the API until it is not.
+6. List what the change adds: public items, options, features, dependencies, lines. For each, say why it cannot be removed (rule 10).
+7. Add a compile-fail test for every rung-2 guarantee, a CI check for every rung-3 one, and a test for every rung-6 refusal.
 
-Done when every caller-supplied input has its footgun list, every footgun sits on rung 6 or higher, and each has a test.
+Done when every caller-supplied input has its footgun list, every footgun sits on rung 6 or higher, and each has a test. Also count the residual: record the number of `risky_*` call sites, `unsafe` blocks and allowlist exemptions per release. That number must not rise.
 
 ## Reviewing an API or change
 
-Check every public item in scope (type, function, trait, feature flag, example, doc comment) against all eleven rules. For each finding, report: the item, the rule, the rung it sits on now, the rung it could reach, and the concrete misuse (these inputs lead to this insecure outcome). Before reporting a finding, check the project's ADRs and design notes: a documented, deliberate trade-off is not a footgun.
+Check every public item in scope (type, function, trait, feature flag, example, doc comment) against all eleven rules. For each finding, report: the item, the rule, the rung it sits on now, the rung it could reach, and the concrete misuse (these inputs lead to this insecure outcome). Before reporting a finding, check the project's ADRs and design notes: a documented, deliberate trade-off is not a footgun. Also report every new `unsafe` block, `#[allow]` or `risky_*` call site the change adds, as a finding. Each needs a reason on the allowlist, or it blocks the change.
 
-Done when every public item in scope has been checked against every rule, with items that have no findings listed as such.
+Done when every public item in scope has been checked against every rule, with items that have no findings listed as such. Every finding that cannot be raised in the API names the CI check that will catch it instead. A review that ends in prose only has left the item on rung 7.
 
 ## Rust and vitaminc
 

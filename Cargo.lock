@@ -2275,9 +2275,11 @@ dependencies = [
  "vitaminc-aead",
  "vitaminc-encrypt",
  "vitaminc-hmac",
+ "vitaminc-password",
  "vitaminc-prf",
  "vitaminc-protected",
  "vitaminc-random",
+ "zeroize",
 ]
 
 [[package]]
