@@ -435,9 +435,9 @@ No optional features are enabled by default.
 
 | Feature | Effect |
 | --- | --- |
-| `chrono` | Adds date and UTC timestamp conversions, including `Timestamp` and its leap-second checks. |
-| `rust_decimal` | Adds `rust_decimal::Decimal` encoding and decoding. |
-| `uuid` | Adds `uuid::Uuid` encoding and decoding. |
+| `chrono` | Adds date and UTC timestamp conversions, including the wipeable `Date` and `Timestamp` and its leap-second checks. |
+| `rust_decimal` | Adds `rust_decimal::Decimal` encoding and decoding, and the wipeable `Decimal`. |
+| `uuid` | Adds `uuid::Uuid` encoding and decoding, and the wipeable `Uuid`. |
 | `hlist` | Exposes the static heterogeneous-list API in `hlist`. |
 
 ## Compatibility

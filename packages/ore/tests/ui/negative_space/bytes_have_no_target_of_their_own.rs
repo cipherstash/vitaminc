@@ -14,5 +14,10 @@ fn main() {
     let _ = clear::Clear.encrypt(vec![1u8]);
     let _ = clear::Clear.encrypt_checked(&b"raw"[..]);
     orderable::<Vec<u8>>();
+    orderable::<&Vec<u8>>();
+    orderable::<[u8; 4]>();
+    orderable::<&[u8; 4]>();
+    orderable::<vitaminc_aead::Bytes<'static>>();
+    orderable::<&vitaminc_aead::Bytes<'static>>();
     let _ = clear::Clear.target(Bytes).encrypt(vec![1u8]);
 }

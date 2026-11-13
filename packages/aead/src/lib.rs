@@ -83,7 +83,8 @@ pub use walk::{decrypt_into, decrypt_into_async, decrypt_to_frame, walk, Decrypt
 // The frame: a value as transport bytes, and back.
 #[doc(inline)]
 pub use frame::{to_frame, Frame, FrameWriter, PassthroughFrame};
-// A UTC instant that always encrypts.
+// Wipeable scalars: a UTC instant that always encrypts, and a date, a
+// decimal and a uuid, each the leaf of the type it wraps.
 #[cfg(feature = "chrono")]
 pub use date_value::Date;
 #[cfg(feature = "rust_decimal")]
