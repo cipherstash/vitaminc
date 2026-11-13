@@ -29,6 +29,9 @@ uuid = { version = "1", default-features = false, optional = true }
 vitaminc-context = { version = "0.9.1", path = "../context" }
 vitaminc-normalize = { version = "0.9.1", path = "../normalize" }
 vitaminc-protected = { version = "0.9.1", path = "../protected" }
+# `SchemeVisitor`, which keys a scheme from the block a PRF derives. Off,
+# this crate does not depend on `vitaminc-prf`.
+vitaminc-prf = { version = "0.9.1", path = "../prf", optional = true }
 zeroize = { workspace = true }
 thiserror = { workspace = true }
 
@@ -46,13 +49,15 @@ version = "=1.1.0"
 
 # docs.rs shows the typed rows of the `FitsIn` and `OwnTarget` tables.
 [package.metadata.docs.rs]
-features = ["chrono", "rust_decimal", "uuid"]
+features = ["chrono", "rust_decimal", "uuid", "prf"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 chrono = ["dep:chrono", "vitaminc-aead/chrono"]
 rust_decimal = ["dep:rust_decimal", "vitaminc-aead/rust_decimal"]
 uuid = ["dep:uuid", "vitaminc-aead/uuid"]
+# `SchemeVisitor`: key a scheme from the block a PRF derives.
+prf = ["dep:vitaminc-prf"]
 # The conformance checks a scheme crate runs against its real scheme, in
 # its tests. Not for a build that ships.
 test-support = []
@@ -62,7 +67,9 @@ test-support = []
 # `plaintext::render`, the path notation the tests assert against.
 vitaminc-aead = { path = "../aead", features = ["chrono", "rust_decimal", "uuid", "test-support"] }
 # This crate's own typed rows, on for its tests.
-vitaminc-ore = { path = ".", features = ["chrono", "rust_decimal", "uuid", "test-support"] }
+vitaminc-ore = { path = ".", features = ["chrono", "rust_decimal", "uuid", "prf", "test-support"] }
+# A real PRF, for the tests that key a scheme from one.
+vitaminc-hmac = { path = "../hmac" }
 quickcheck = "1.1.0"
 # Typed values as callers hold them, for the tests that encrypt them.
 chrono = { version = "0.4.44", default-features = false, features = ["std"] }

@@ -16,6 +16,9 @@
 mod casefold_unicode16;
 mod fold;
 mod order;
+#[cfg(feature = "prf")]
+#[cfg_attr(docsrs, doc(cfg(feature = "prf")))]
+mod prf;
 mod query;
 mod scheme;
 pub mod target;
@@ -26,6 +29,9 @@ pub use order::{
     domain, order, order_terms, order_with_nulls, text, NullOrder, Order, OrderTarget,
     VARIABLE_WIDTH_MARKER,
 };
+#[cfg(feature = "prf")]
+#[cfg_attr(docsrs, doc(cfg(feature = "prf")))]
+pub use prf::SchemeVisitor;
 pub use query::{OrderQuery, QueryTerm};
 #[allow(deprecated)]
 pub use scheme::OrderColumn;
