@@ -128,3 +128,12 @@ fn a_block_of_any_length_keys_a_scheme_of_that_length() {
     use vitaminc_protected::Controlled;
     assert_eq!(wide.0.risky_ref(), &[9; 64]);
 }
+
+/// It names itself and nothing else: there is nothing in it to show.
+#[test]
+fn a_visitor_debugs_as_its_name() {
+    assert_eq!(
+        format!("{:?}", SchemeVisitor::<Mock>::default()),
+        "SchemeVisitor"
+    );
+}
