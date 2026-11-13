@@ -435,7 +435,10 @@ the `vitaminc-prf` visitor that turns the derived block into the keyed
 scheme. It holds no plaintext, so the value to be ordered never enters
 the PRF call or waits inside a backend that derives the key later. The
 caller opens a space on the scheme once the key has arrived, and
-encrypts there by reference: `scheme.target(t).encrypt_checked(&value)`.
+encrypts there by reference: `scheme.target(t).encrypt_checked(&value)`. Derive order keys under
+a context of their own, one no stored or queried term is derived under:
+a key and a term from the same PRF key and context would be the same
+bytes.
 
 A term compares only with terms of the same scheme, key, target and
 context, which is what a space is, through `space.compare(&a, &b)` (the
