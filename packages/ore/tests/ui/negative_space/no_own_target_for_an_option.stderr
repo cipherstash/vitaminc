@@ -1,4 +1,4 @@
-error[E0277]: `Option<i64>` has no order target of its own
+error[E0277]: `Option<i64>` is not `Orderable`: it has no order target of its own
   --> tests/ui/negative_space/no_own_target_for_an_option.rs:10:34
    |
 10 |     let _ = clear::Clear.encrypt(Some(42i64));
@@ -6,18 +6,19 @@ error[E0277]: `Option<i64>` has no order target of its own
    |                          |
    |                          required by a bound introduced by this call
    |
-   = help: the trait `OwnTarget` is not implemented for `Option<i64>`
+   = help: the trait `Orderable` is not implemented for `Option<i64>`
    = note: name the target: `scheme.target(I64).encrypt_checked(value)`
    = note: there is no 8-bit target: an order term over 256 values reveals them, so an `i8` goes into `I16` or wider by name (`scheme.target(I16).encrypt(value)`), or into an equality index
-   = help: the following other types implement trait `OwnTarget`:
+   = note: bytes order only into a target named for them, `scheme.target(Bytes)`: no ordering operator compares bytes
+   = help: the following other types implement trait `Orderable`:
              &String
-             &Vec<u8>
-             &[u8; N]
-             &[u8]
              &chrono::datetime::DateTime<chrono::offset::utc::Utc>
              &chrono::naive::date::NaiveDate
              &f32
              &f64
+             &i128
+             &i16
+             &i32
            and $N others
 note: required by a bound in `encrypt`
   --> src/scheme.rs
@@ -25,7 +26,7 @@ note: required by a bound in `encrypt`
    |     fn encrypt<V>(&self, value: V) -> Result<OrderTerm<Self::Term, V::Target>, Self::Error>
    |        ------- required by a bound in this associated function
    |     where
-   |         V: OwnTarget + FitsIn<V::Target>,
+   |         V: Orderable + FitsIn<V::Target>,
    |            ^^^^^^^^^ required by this bound in `OrderEncrypt::encrypt`
 
 error[E0277]: `Option<i64>` is not a value that always fits `_`
@@ -55,5 +56,5 @@ note: required by a bound in `encrypt`
    |     fn encrypt<V>(&self, value: V) -> Result<OrderTerm<Self::Term, V::Target>, Self::Error>
    |        ------- required by a bound in this associated function
    |     where
-   |         V: OwnTarget + FitsIn<V::Target>,
+   |         V: Orderable + FitsIn<V::Target>,
    |                        ^^^^^^^^^^^^^^^^^ required by this bound in `OrderEncrypt::encrypt`

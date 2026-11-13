@@ -39,7 +39,7 @@ pub use scheme::{
     OrderContext, OrderEncrypt, OrderError, OrderKeyInit, OrderPlaintext, OrderScheme, OrderSpace,
     OrderTerm,
 };
-pub use target::{FitsIn, FixedWidth, OwnTarget, StaticTarget, Supports, Target};
+pub use target::{FitsIn, FixedWidth, Orderable, StaticTarget, Supports, Target};
 // The types in this crate's signatures, so a caller needs no second import:
 // a scheme encrypts values of the data model, and a typed scalar goes in
 // as `Raw(ty, physical)`, without depending on vitaminc-aead.

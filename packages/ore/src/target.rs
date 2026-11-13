@@ -6,7 +6,7 @@
 //! layer that reads its column types from a schema must. The zero-sized
 //! markers here name one when the program is compiled, so the compiler can
 //! check what goes in: [`FitsIn`] lists the conversions that never lose
-//! information, and [`OwnTarget`] gives a Rust type the target it is.
+//! information, and [`Orderable`] gives a Rust type the target it is.
 //! Both are sealed tables, generated in this module, so no caller can add
 //! a conversion that might be refused or infer a target from a value.
 //!
@@ -33,7 +33,7 @@ use crate::{NullOrder, OrderScheme, OrderTarget};
 
 mod private {
     /// Seals [`Target`](super::Target), [`FitsIn`](super::FitsIn) and
-    /// [`OwnTarget`](super::OwnTarget) to this crate.
+    /// [`Orderable`](super::Orderable) to this crate.
     pub trait Sealed {}
 }
 
@@ -231,10 +231,10 @@ impl Target for OrderTarget {
 /// | an integer target | every integer type whose whole range it holds, so `I32` takes `i8`, `i16`, `i32` and `u16` (a `u8` is not a scalar of the data model: `Vec<u8>` is bytes). There is no 8-bit target, so an `i8` fits `I16` and up: see [`OrderTarget`] |
 /// | `F64` | `f32`, `f64` |
 /// | `Bytes` | `&[u8]`, `Vec<u8>`, `[u8; N]`, [`Bytes`](vitaminc_aead::Bytes) |
-/// | `Date` | `chrono::NaiveDate` (feature `chrono`) |
+/// | `Date` | `chrono::NaiveDate`, `vitaminc_aead::Date` (feature `chrono`) |
 /// | `Timestamp` | `vitaminc_aead::Timestamp` (feature `chrono`) |
-/// | `Decimal` | `rust_decimal::Decimal` (feature `rust_decimal`) |
-/// | `Uuid` | `uuid::Uuid` (feature `uuid`) |
+/// | `Decimal` | `rust_decimal::Decimal`, `vitaminc_aead::Decimal` (feature `rust_decimal`) |
+/// | `Uuid` | `uuid::Uuid`, `vitaminc_aead::Uuid` (feature `uuid`) |
 ///
 /// and a reference to any of them. What is not here can be refused: an
 /// `i64` may not fit `I32`, text may hold a code point Unicode 16 does not
@@ -252,28 +252,38 @@ impl Target for OrderTarget {
 )]
 pub trait FitsIn<T: StaticTarget>: Encrypt + private::Sealed {}
 
-/// A Rust type's own target, for [`OrderEncrypt::encrypt`] and the other
-/// chains that name none: an `i64` is an `I64`, an `f32` an `F64`, a
-/// `&str` a `Text`.
+/// A type that orders as itself: it can go into an order index without
+/// naming a target, through [`OrderEncrypt::encrypt`] and the other chains
+/// that name none. An `i64` is an `I64`, an `f32` an `F64`, a `&str` a
+/// `Text`.
+///
+/// Not being `Orderable` does not mean a value cannot be ordered, only
+/// that its target must be named:
+///
+/// - An `i8` orders into a wider target it fits, by name:
+///   `scheme.target(I16).encrypt(value)`. It has no target of its own,
+///   because an order term over 256 values reveals them (see
+///   [`OrderTarget`]).
+/// - Bytes order into `Bytes`, by name. No ordering operator compares
+///   bytes, so an order term over them reveals the order of the rows and
+///   answers no query; asking for one is a decision, not a default.
+/// - A newtype names its target with [`OrderEncrypt::target`].
 ///
 /// Sealed, and implemented for the data model's own types only. A target
 /// is never inferred from a value: a JavaScript `BigInt` arrives as the
 /// narrowest integer that holds it, and inferring from the value would
-/// scatter one index across several domains. A newtype names its target
-/// with [`OrderEncrypt::target`]. An `i8` has no own target: an order
-/// term over 256 values reveals them (see [`OrderTarget`]), so an `i8`
-/// goes into a wider target it fits, by name:
-/// `scheme.target(I16).encrypt(value)`.
+/// scatter one index across several domains.
 ///
 /// [`OrderEncrypt::encrypt`]: crate::OrderEncrypt::encrypt
 /// [`OrderEncrypt::target`]: crate::OrderEncrypt::target
 #[diagnostic::on_unimplemented(
-    message = "`{Self}` has no order target of its own",
+    message = "`{Self}` is not `Orderable`: it has no order target of its own",
     label = "has no order target of its own",
     note = "name the target: `scheme.target(I64).encrypt_checked(value)`",
-    note = "there is no 8-bit target: an order term over 256 values reveals them, so an `i8` goes into `I16` or wider by name (`scheme.target(I16).encrypt(value)`), or into an equality index"
+    note = "there is no 8-bit target: an order term over 256 values reveals them, so an `i8` goes into `I16` or wider by name (`scheme.target(I16).encrypt(value)`), or into an equality index",
+    note = "bytes order only into a target named for them, `scheme.target(Bytes)`: no ordering operator compares bytes"
 )]
-pub trait OwnTarget: Encrypt + private::Sealed {
+pub trait Orderable: Encrypt + private::Sealed {
     /// The target this type is.
     type Target: StaticTarget;
 }
@@ -477,15 +487,15 @@ macro_rules! fits {
     };
 }
 
-/// `OwnTarget` rows: a type and the target it is, by value and by
+/// `Orderable` rows: a type and the target it is, by value and by
 /// reference.
 macro_rules! own {
     ($($ty:ty => $target:ident),* $(,)?) => {
         $(
-            impl OwnTarget for $ty {
+            impl Orderable for $ty {
                 type Target = $target;
             }
-            impl OwnTarget for &$ty {
+            impl Orderable for &$ty {
                 type Target = $target;
             }
         )*
@@ -551,26 +561,10 @@ own! {
     f32 => F64,
     f64 => F64,
     String => Text,
-    Vec<u8> => Bytes,
 }
 
-impl OwnTarget for &str {
+impl Orderable for &str {
     type Target = Text;
-}
-impl OwnTarget for &[u8] {
-    type Target = Bytes;
-}
-impl OwnTarget for RawBytes<'_> {
-    type Target = Bytes;
-}
-impl OwnTarget for &RawBytes<'_> {
-    type Target = Bytes;
-}
-impl<const N: usize> OwnTarget for [u8; N] {
-    type Target = Bytes;
-}
-impl<const N: usize> OwnTarget for &[u8; N] {
-    type Target = Bytes;
 }
 
 // The typed values callers hold. Each is inside the range its encoding
@@ -585,7 +579,7 @@ impl<const N: usize> OwnTarget for &[u8; N] {
 mod chrono_rows {
     use super::*;
     use chrono::{DateTime, NaiveDate, Utc};
-    use vitaminc_aead::Timestamp as Instant;
+    use vitaminc_aead::{Date as Day, Timestamp as Instant};
 
     impl private::Sealed for NaiveDate {}
     impl private::Sealed for &NaiveDate {}
@@ -593,29 +587,39 @@ mod chrono_rows {
     impl private::Sealed for &DateTime<Utc> {}
     impl private::Sealed for Instant {}
     impl private::Sealed for &Instant {}
+    impl private::Sealed for Day {}
+    impl private::Sealed for &Day {}
 
     impl FitsIn<Date> for NaiveDate {}
     impl FitsIn<Date> for &NaiveDate {}
+    impl FitsIn<Date> for Day {}
+    impl FitsIn<Date> for &Day {}
     impl FitsIn<Timestamp> for Instant {}
     impl FitsIn<Timestamp> for &Instant {}
 
-    impl OwnTarget for NaiveDate {
+    impl Orderable for NaiveDate {
         type Target = Date;
     }
-    impl OwnTarget for &NaiveDate {
+    impl Orderable for &NaiveDate {
         type Target = Date;
     }
-    impl OwnTarget for DateTime<Utc> {
+    impl Orderable for DateTime<Utc> {
         type Target = Timestamp;
     }
-    impl OwnTarget for &DateTime<Utc> {
+    impl Orderable for &DateTime<Utc> {
         type Target = Timestamp;
     }
-    impl OwnTarget for Instant {
+    impl Orderable for Instant {
         type Target = Timestamp;
     }
-    impl OwnTarget for &Instant {
+    impl Orderable for &Instant {
         type Target = Timestamp;
+    }
+    impl Orderable for Day {
+        type Target = Date;
+    }
+    impl Orderable for &Day {
+        type Target = Date;
     }
 }
 
@@ -628,10 +632,21 @@ mod decimal_rows {
     impl private::Sealed for &rust_decimal::Decimal {}
     impl FitsIn<Decimal> for rust_decimal::Decimal {}
     impl FitsIn<Decimal> for &rust_decimal::Decimal {}
-    impl OwnTarget for rust_decimal::Decimal {
+    impl Orderable for rust_decimal::Decimal {
         type Target = Decimal;
     }
-    impl OwnTarget for &rust_decimal::Decimal {
+    impl Orderable for &rust_decimal::Decimal {
+        type Target = Decimal;
+    }
+
+    impl private::Sealed for vitaminc_aead::Decimal {}
+    impl private::Sealed for &vitaminc_aead::Decimal {}
+    impl FitsIn<Decimal> for vitaminc_aead::Decimal {}
+    impl FitsIn<Decimal> for &vitaminc_aead::Decimal {}
+    impl Orderable for vitaminc_aead::Decimal {
+        type Target = Decimal;
+    }
+    impl Orderable for &vitaminc_aead::Decimal {
         type Target = Decimal;
     }
 }
@@ -645,10 +660,21 @@ mod uuid_rows {
     impl private::Sealed for &uuid::Uuid {}
     impl FitsIn<Uuid> for uuid::Uuid {}
     impl FitsIn<Uuid> for &uuid::Uuid {}
-    impl OwnTarget for uuid::Uuid {
+    impl Orderable for uuid::Uuid {
         type Target = Uuid;
     }
-    impl OwnTarget for &uuid::Uuid {
+    impl Orderable for &uuid::Uuid {
+        type Target = Uuid;
+    }
+
+    impl private::Sealed for vitaminc_aead::Uuid {}
+    impl private::Sealed for &vitaminc_aead::Uuid {}
+    impl FitsIn<Uuid> for vitaminc_aead::Uuid {}
+    impl FitsIn<Uuid> for &vitaminc_aead::Uuid {}
+    impl Orderable for vitaminc_aead::Uuid {
+        type Target = Uuid;
+    }
+    impl Orderable for &vitaminc_aead::Uuid {
         type Target = Uuid;
     }
 }

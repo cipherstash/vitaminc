@@ -23,7 +23,7 @@ use vitaminc_protected::{Controlled, OpaqueDebug, Protected};
 
 use crate::order::{encode, label, null_plaintext};
 use crate::target::{
-    FitsIn, FixedWidth, NullPolicy, Nulls, OwnTarget, RuntimeNulls, StaticTarget, Supports, Target,
+    FitsIn, FixedWidth, NullPolicy, Nulls, Orderable, RuntimeNulls, StaticTarget, Supports, Target,
 };
 use crate::{NullOrder, OrderTarget};
 
@@ -359,7 +359,7 @@ pub trait OrderEncrypt: OrderScheme {
     /// The scheme's own failure, and nothing else: the value always fits.
     fn encrypt<V>(&self, value: V) -> Result<OrderTerm<Self::Term, V::Target>, Self::Error>
     where
-        V: OwnTarget + FitsIn<V::Target>,
+        V: Orderable + FitsIn<V::Target>,
         Self: Supports<V::Target> + Supports<OrderTarget>,
     {
         self.target(V::Target::default()).encrypt(value)
@@ -373,7 +373,7 @@ pub trait OrderEncrypt: OrderScheme {
     ///
     /// As [`OrderSpace::encrypt_checked`].
     #[allow(clippy::type_complexity)]
-    fn encrypt_checked<V: OwnTarget>(
+    fn encrypt_checked<V: Orderable>(
         &self,
         value: V,
     ) -> Result<OrderTerm<Self::Term, V::Target>, OrderError<Self::Error>>
@@ -441,7 +441,7 @@ impl<'s, S: OrderScheme + ?Sized> OrderContext<'s, S> {
     /// The scheme's own failure, and nothing else: the value always fits.
     pub fn encrypt<V>(&self, value: V) -> Result<OrderTerm<S::Term, V::Target>, S::Error>
     where
-        V: OwnTarget + FitsIn<V::Target>,
+        V: Orderable + FitsIn<V::Target>,
         S: Supports<V::Target> + Supports<OrderTarget>,
     {
         self.target(V::Target::default()).encrypt(value)
@@ -454,7 +454,7 @@ impl<'s, S: OrderScheme + ?Sized> OrderContext<'s, S> {
     ///
     /// As [`OrderSpace::encrypt_checked`].
     #[allow(clippy::type_complexity)]
-    pub fn encrypt_checked<V: OwnTarget>(
+    pub fn encrypt_checked<V: Orderable>(
         &self,
         value: V,
     ) -> Result<OrderTerm<S::Term, V::Target>, OrderError<S::Error>>
