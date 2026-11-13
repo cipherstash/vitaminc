@@ -203,11 +203,24 @@ fn every_chain_lands_in_the_space_it_spells_out() {
         .salt()
         .as_bytes()
         .ends_with(empty.as_bytes()));
-    // An f32 is an F64, text is Text, bytes are Bytes.
+    // An f32 is an F64 and text is Text. Bytes have no target of their own,
+    // so they order only into `Bytes` named for them.
     assert_eq!(mock.encrypt(1.5f32).expect("mock").target(), T::F64);
     assert_eq!(mock.encrypt_checked("abc").expect("mock").target(), T::Text);
-    assert_eq!(mock.encrypt(vec![1u8]).expect("mock").target(), T::Bytes);
-    assert_eq!(mock.encrypt(&b"raw"[..]).expect("mock").target(), T::Bytes);
+    assert_eq!(
+        mock.target(target::Bytes)
+            .encrypt(vec![1u8])
+            .expect("mock")
+            .target(),
+        T::Bytes
+    );
+    assert_eq!(
+        mock.target(target::Bytes)
+            .encrypt(&b"raw"[..])
+            .expect("mock")
+            .target(),
+        T::Bytes
+    );
     // The checked chains land in the same space as the fitting ones.
     assert_eq!(
         mock.encrypt_checked(42i64).expect("mock"),

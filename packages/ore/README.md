@@ -136,18 +136,25 @@ assert!(matches!(
 
 `encrypt` takes a value that always fits, as the sealed `FitsIn` table
 says: a narrower integer, an `f32` into `F64`, bytes (`&[u8]`,
-`Vec<u8>`, `[u8; N]`) into `Bytes`, a `chrono::NaiveDate` into `Date`,
-a `vitaminc_aead::Timestamp` into `Timestamp`, a `rust_decimal::Decimal`
-into `Decimal`, a `uuid::Uuid` into `Uuid` (the typed rows behind the
-`chrono`, `rust_decimal` and `uuid` features). Its only error is the
+`Vec<u8>`, `[u8; N]`) into `Bytes`, a `chrono::NaiveDate` or
+`vitaminc_aead::Date` into `Date`, a `vitaminc_aead::Timestamp` into
+`Timestamp`, a `rust_decimal::Decimal` or `vitaminc_aead::Decimal` into
+`Decimal`, a `uuid::Uuid` or `vitaminc_aead::Uuid` into `Uuid` (the typed
+rows behind the `chrono`, `rust_decimal` and `uuid` features). The
+`vitaminc_aead` types are wiped when dropped and order exactly as the type
+each wraps. Its only error is the
 scheme's own, so a scheme whose error is `Infallible` cannot fail at
 all. `encrypt_checked` takes any value of the data model and checks it
 while the program runs: an integer that may not fit, text (a code point
 Unicode 16 does not assign is refused), a `chrono::DateTime<Utc>` (a
 leap second has no count, which is what `vitaminc_aead::Timestamp`
 refuses when it is built), or a value whose type the index layer does
-not know. A chain that names no target uses the Rust type's own, from
-the sealed `OwnTarget` table; a target is never inferred from a value.
+not know. A chain that names no target takes an `Orderable` value and
+uses the Rust type's own target, from that sealed table; a target is
+never inferred from a value. Bytes are not `Orderable`: no ordering
+operator compares them, so an order term over bytes reveals the order of
+the rows and answers no query, and they go into `Bytes` only when it is
+named.
 
 A term is an `OrderTerm`, labelled with its target. Under a marker the
 label is a zero-sized type, so two targets' terms cannot meet in
