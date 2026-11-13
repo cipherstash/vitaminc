@@ -1163,7 +1163,7 @@ fn scalars_without_a_domain_and_passthroughs_get_no_term_and_a_null_gets_one() {
             let mut map = sink.map(Some(5))?;
             true.visit(map.entry("active")?)?;
             None::<u32>.visit(map.entry("missing")?)?;
-            map.entry("tenant")?.passthrough("acme")?;
+            map.entry("tenant")?.passthrough(&"acme")?;
             vitaminc_aead::Raw(Some(Logical::Undefined), Physical::Null)
                 .visit(map.entry("undefined")?)?;
             "Ada".visit(map.entry("name")?)?;

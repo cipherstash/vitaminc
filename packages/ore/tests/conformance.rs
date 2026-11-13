@@ -539,7 +539,7 @@ fn a_container_or_a_failing_source_has_no_single_term() {
     struct Passed;
     impl Encrypt for Passed {
         fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-            sink.passthrough("public")
+            sink.passthrough(&"public")
         }
     }
 
