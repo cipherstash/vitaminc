@@ -65,8 +65,9 @@ fn another_context_keys_another_scheme() {
     );
 }
 
-/// The plaintext is borrowed, under a target chosen while the program runs,
-/// and stays the caller's: nothing was copied into the PRF call.
+/// The keyed scheme is all a caller needs: a borrowed plaintext, under a
+/// target chosen while the program runs, gives the term the owned value
+/// does. The visitor itself never takes a plaintext.
 #[test]
 fn a_keyed_scheme_encrypts_a_borrowed_plaintext() {
     let scheme = keyed(b"users/surname");
@@ -77,8 +78,53 @@ fn a_keyed_scheme_encrypts_a_borrowed_plaintext() {
         .expect("encrypts");
     let owned = scheme
         .target(OrderTarget::Text)
-        .encrypt_checked(surname.clone())
+        .encrypt_checked(surname)
         .expect("encrypts");
     assert_eq!(borrowed.as_ref(), owned.as_ref());
-    assert_eq!(surname, "Lovelace");
+}
+
+/// Any key length, not only 32 bytes: a block is keyed into a scheme
+/// whose key is an array of the block's length.
+#[test]
+fn a_block_of_any_length_keys_a_scheme_of_that_length() {
+    use vitaminc_ore::OrderScheme;
+    use vitaminc_prf::ResolvedPrf;
+
+    struct Wide(Protected<[u8; 64]>);
+    impl OrderScheme for Wide {
+        const NAME: &'static str = "wide";
+        type Term = Vec<u8>;
+        type Error = core::convert::Infallible;
+        type Space = ();
+        fn open(&self, _: OrderTarget, _: &vitaminc_ore::Context<'_>) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn encrypt_plaintext(
+            &self,
+            _: &(),
+            _: &vitaminc_ore::OrderPlaintext,
+        ) -> Result<Vec<u8>, Self::Error> {
+            use vitaminc_protected::Controlled;
+            Ok(self.0.risky_ref().to_vec())
+        }
+        fn compare(a: &Vec<u8>, b: &Vec<u8>) -> Option<core::cmp::Ordering> {
+            Some(a.cmp(b))
+        }
+    }
+    impl OrderKeyInit for Wide {
+        type Key = Protected<[u8; 64]>;
+        type KeyError = core::convert::Infallible;
+        fn new(key: Self::Key) -> Self {
+            Self(key)
+        }
+        fn try_from_bytes(_: Protected<Vec<u8>>) -> Result<Self, Self::KeyError> {
+            Ok(Self(Protected::new([0; 64])))
+        }
+    }
+
+    let wide = ResolvedPrf::<[u8; 64], ()>::Block([9; 64])
+        .visit(SchemeVisitor::<Wide>::new())
+        .expect("keys");
+    use vitaminc_protected::Controlled;
+    assert_eq!(wide.0.risky_ref(), &[9; 64]);
 }
