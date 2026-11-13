@@ -24,7 +24,7 @@
 //! scale, and no hardware division, whose latency is data-dependent on
 //! some targets.
 
-use vitaminc_aead::plaintext::kinds::MAX_DECIMAL_SCALE;
+use vitaminc_aead::plaintext::kinds::{strip_trailing_zeros, MAX_DECIMAL_SCALE};
 use vitaminc_protected::Protected;
 
 use crate::scalar::fixed;
@@ -50,15 +50,6 @@ const MANTISSA_LIMIT: u128 = 1 << 96;
 
 /// The length of the encoding.
 pub(crate) const ENCODED_LEN: usize = 14;
-
-/// `5⁻¹ mod 2¹²⁸`, so that dividing by ten (when exact) is a shift and a
-/// multiply rather than a hardware division.
-const INV5: u128 = 0xCCCC_CCCC_CCCC_CCCC_CCCC_CCCC_CCCC_CCCD;
-
-/// The largest `u128` divisible by 5. Multiplication by [`INV5`] is a
-/// bijection that maps the multiples of 5 onto `[0, MAX_DIV_5]`, so
-/// `x.wrapping_mul(INV5) <= MAX_DIV_5` exactly when `5 | x`.
-const MAX_DIV_5: u128 = u128::MAX / 5;
 
 /// The encoding of `mantissa × 10^(-scale)`. Two equal values give the
 /// same bytes, and the bytes sort as the values do. `None` if the mantissa
@@ -138,32 +129,6 @@ pub(crate) fn orderable(mantissa: i128, scale: u8) -> Option<Protected<Vec<u8>>>
             out[1 + i] = (padded_mantissa >> shift) as u8 ^ neg_mask;
         }
     }))
-}
-
-/// Divide by ten while the trailing digit is zero: the stripped value and
-/// how many zeros were removed. Zero strips to `(0, 0)`.
-///
-/// A fixed `PADDED_DIGITS` iterations, each selecting by mask. Division by
-/// ten, valid only when exact, is a halving and a multiply by [`INV5`];
-/// divisibility by ten is divisibility by two (the low bit) and by five
-/// (the [`MAX_DIV_5`] test), with the comparison done by `overflowing_sub`
-/// so it lowers to a borrow rather than a branch.
-fn strip_trailing_zeros(mut mantissa: u128) -> (u128, i32) {
-    let mut exponent: i32 = 0;
-    for _ in 0..PADDED_DIGITS {
-        let div = (mantissa >> 1).wrapping_mul(INV5);
-        let q5 = mantissa.wrapping_mul(INV5);
-        let (_, borrow) = MAX_DIV_5.overflowing_sub(q5);
-        let div_by_5 = (borrow as u128) ^ 1;
-        let div_by_2 = (mantissa & 1) ^ 1;
-        let div_by_10 = div_by_5 & div_by_2;
-        let mantissa_nz = (mantissa | mantissa.wrapping_neg()) >> 127;
-        let do_strip = mantissa_nz & div_by_10;
-        let mask = 0u128.wrapping_sub(do_strip);
-        mantissa = (div & mask) | (mantissa & !mask);
-        exponent = exponent.wrapping_add(do_strip as i32);
-    }
-    (mantissa, exponent)
 }
 
 /// The number of decimal digits in `m`, `0` for zero: how many powers of
@@ -275,21 +240,6 @@ mod tests {
             let (a, b) = (pair[0], pair[1]);
             assert!(encode(a.0, a.1) < encode(b.0, b.1), "{a:?} < {b:?} failed");
         }
-    }
-
-    #[test]
-    fn strip_trailing_zeros_edge_cases() {
-        assert_eq!(strip_trailing_zeros(0), (0, 0));
-        for d in 1u128..=9 {
-            assert_eq!(strip_trailing_zeros(d), (d, 0), "input {d}");
-        }
-        for k in 0..=28u32 {
-            assert_eq!(strip_trailing_zeros(10u128.pow(k)), (1, k as i32), "10^{k}");
-        }
-        assert_eq!(strip_trailing_zeros(U96_MAX), (U96_MAX, 0));
-        assert_eq!(strip_trailing_zeros(12_340_000), (1234, 4));
-        assert_eq!(strip_trailing_zeros(50), (5, 1));
-        assert_eq!(strip_trailing_zeros(100_500), (1005, 2));
     }
 
     #[test]
