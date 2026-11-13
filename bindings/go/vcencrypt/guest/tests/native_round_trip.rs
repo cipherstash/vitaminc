@@ -24,8 +24,8 @@ impl Encrypt for Sample {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         let mut map = sink.map(Some(4))?;
         // Non-secret fields travelling in the clear alongside the sealed ones.
-        map.entry("id")?.passthrough(7i64)?;
-        map.entry("created_at")?.passthrough("2026-07-25")?;
+        map.entry("id")?.passthrough(&7i64)?;
+        map.entry("created_at")?.passthrough(&"2026-07-25")?;
         {
             let mut user = map.entry("user")?.map(Some(4))?;
             "ada@example.com".visit(user.entry("email")?)?;

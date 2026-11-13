@@ -107,7 +107,7 @@ mod tests {
         struct Pass;
         impl Encrypt for Pass {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-                sink.passthrough("public")
+                sink.passthrough(&"public")
             }
         }
         let error = plan::<_, Unspecified, _>(vec![Pass], Context::from_encoded(b"aad"))

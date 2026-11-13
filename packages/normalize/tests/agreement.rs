@@ -9,8 +9,8 @@ use vitaminc_aead::frame::MAX_DEPTH;
 use vitaminc_aead::plaintext::render;
 use vitaminc_aead::seal::Cipher;
 use vitaminc_aead::{
-    Context, Encrypt, EncryptError, Logical, MapSink, Physical, Raw, SeqSink, Sink, SourceError,
-    Unencryptable,
+    Context, Encrypt, EncryptError, EncryptRef, Logical, MapSink, Physical, Raw, SeqSink, Sink,
+    SourceError, Unencryptable,
 };
 use vitaminc_normalize::{encrypt_with_terms, terms, NormalizeError, Term, TermError};
 use vitaminc_protected::{Controlled, Protected};
@@ -128,11 +128,11 @@ impl Encrypt for OnlyPass {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         if self.map {
             let mut map = sink.map(Some(1))?;
-            map.entry("note")?.passthrough("public")?;
+            map.entry("note")?.passthrough(&"public")?;
             map.end()
         } else {
             let mut seq = sink.seq(Some(1))?;
-            seq.element()?.passthrough("public")?;
+            seq.element()?.passthrough(&"public")?;
             seq.end()
         }
     }
@@ -175,14 +175,13 @@ impl Encrypt for Unclosed {
 }
 
 /// `inner` as a passthrough, beside a sealed sibling.
-#[derive(Clone)]
 struct Passes<P>(P);
 
-impl<P: Encrypt + Clone> Encrypt for Passes<P> {
+impl<P: EncryptRef> Encrypt for Passes<P> {
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         let mut seq = sink.seq(Some(2))?;
         "sealed".visit(seq.element()?)?;
-        seq.element()?.passthrough(self.0)?;
+        seq.element()?.passthrough(&self.0)?;
         seq.end()
     }
 }
@@ -233,10 +232,29 @@ impl Encrypt for Nest {
                 inner.visit(map.entry("k")?)?;
                 map.end()
             }
-            Kind::Pass => sink.passthrough(inner),
+            Kind::Pass => sink.passthrough(&inner),
         }
     }
 }
+
+/// A passthrough is lent, so a source a test passes through walks by
+/// reference too, as the value it is.
+macro_rules! lent_as_owned {
+    ($($ty:ident => $value:expr),+ $(,)?) => {$(
+        impl Encrypt for &$ty {
+            fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
+                let owned: $ty = $value(self);
+                owned.visit(sink)
+            }
+        }
+    )+};
+}
+lent_as_owned!(
+    Dup => |_| Dup,
+    Unclosed => |_| Unclosed,
+    Throws => |_| Throws,
+    Nest => |nest: &Nest| *nest,
+);
 
 #[test]
 fn both_accept_a_well_formed_value_with_the_same_terms() {

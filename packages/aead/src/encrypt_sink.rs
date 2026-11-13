@@ -36,7 +36,8 @@ use vitaminc_protected::{Controlled, Protected};
 use crate::frame::PassthroughFrame;
 use crate::leaf::{self, ScalarError};
 use crate::plaintext::{
-    Encrypt, Error, FixedType, Logical, MapSink, Physical, SeqSink, Sink, SourceError, Step,
+    Encrypt, EncryptRef, Error, FixedType, Logical, MapSink, Physical, SeqSink, Sink, SourceError,
+    Step,
 };
 use crate::seal::{
     seal_all, seal_all_async, AsyncCipher, Cipher, LeafCount, Node, Pending, SealError,
@@ -362,8 +363,9 @@ impl<E, O: Slot> Sink for EncryptSink<E, O> {
     }
 
     /// Passthrough is non-sensitive by design: it is framed, not sealed.
-    fn passthrough<P: Encrypt + Clone>(self, value: P) -> Result<O::Ok, Self::Error> {
-        let frame = shape::frame_passthrough(value, self.depth, &self.out, EncryptError::Shape)?;
+    fn passthrough<P: ?Sized + EncryptRef>(self, value: &P) -> Result<O::Ok, Self::Error> {
+        let frame =
+            shape::frame_passthrough(value.lend(), self.depth, &self.out, EncryptError::Shape)?;
         Ok(self.out.put(CipherText::Passthrough(PassthroughFrame(
             frame.risky_ref().to_vec(),
         ))))
@@ -474,6 +476,12 @@ mod tests {
     fn a_source_error_inside_a_passthrough_stays_a_source_error() {
         #[derive(Clone)]
         struct Throws;
+        /// Passthrough lends its value, so a test source walks by reference too.
+        impl Encrypt for &Throws {
+            fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
+                self.clone().visit(sink)
+            }
+        }
         impl Encrypt for Throws {
             fn visit<S: Sink>(self, _: S) -> Result<S::Ok, S::Error> {
                 Err(S::Error::source(SourceError::new(core::fmt::Error)))
@@ -482,7 +490,7 @@ mod tests {
         struct Doc;
         impl Encrypt for Doc {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-                sink.passthrough(Throws)
+                sink.passthrough(&Throws)
             }
         }
         assert!(matches!(
@@ -575,7 +583,7 @@ mod tests {
         struct Pass;
         impl Encrypt for Pass {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-                sink.passthrough("public")
+                sink.passthrough(&"public")
             }
         }
         assert_eq!(
@@ -658,7 +666,7 @@ mod tests {
         fn map(self, _: Option<usize>) -> Result<Self, E> {
             Ok(self)
         }
-        fn passthrough<P: Encrypt + Clone>(self, _: P) -> Result<(), E> {
+        fn passthrough<P: ?Sized + EncryptRef>(self, _: &P) -> Result<(), E> {
             Ok(())
         }
     }
@@ -777,6 +785,12 @@ mod tests {
     /// A passthrough that opens a container and never ends it.
     #[derive(Clone)]
     struct Unclosed;
+    /// Passthrough lends its value, so a test source walks by reference too.
+    impl Encrypt for &Unclosed {
+        fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
+            self.clone().visit(sink)
+        }
+    }
 
     impl Encrypt for Unclosed {
         fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
@@ -796,7 +810,7 @@ mod tests {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
                 let mut seq = sink.seq(Some(2))?;
                 1u32.visit(seq.element()?)?;
-                seq.element()?.passthrough(Unclosed)?;
+                seq.element()?.passthrough(&Unclosed)?;
                 seq.end()
             }
         }
@@ -824,6 +838,12 @@ mod tests {
     /// sequences.
     #[derive(Clone, Copy)]
     struct Nest(Kind, usize);
+    /// Passthrough lends its value, so a test source walks by reference too.
+    impl Encrypt for &Nest {
+        fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
+            (*self).visit(sink)
+        }
+    }
 
     impl Encrypt for Nest {
         fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
@@ -846,7 +866,7 @@ mod tests {
                     inner.visit(map.entry("k")?)?;
                     map.end()
                 }
-                Kind::Pass => sink.passthrough(inner),
+                Kind::Pass => sink.passthrough(&inner),
             }
         }
     }
@@ -875,7 +895,7 @@ mod tests {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
                 let mut seq = sink.seq(Some(2))?;
                 1u16.visit(seq.element()?)?;
-                seq.element()?.passthrough(Nest(Kind::Seq, self.0))?;
+                seq.element()?.passthrough(&Nest(Kind::Seq, self.0))?;
                 seq.end()
             }
         }
@@ -924,11 +944,11 @@ mod tests {
         fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
             if self.map {
                 let mut map = sink.map(Some(1))?;
-                map.entry("note")?.passthrough("public")?;
+                map.entry("note")?.passthrough(&"public")?;
                 map.end()
             } else {
                 let mut seq = sink.seq(Some(1))?;
-                seq.element()?.passthrough("public")?;
+                seq.element()?.passthrough(&"public")?;
                 seq.end()
             }
         }

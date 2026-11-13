@@ -40,9 +40,9 @@ impl Encrypt for Fixture {
         let mut map = sink.map(Some(14))?;
         // Passthrough fields: non-secret, travel in the clear. Go must read
         // these back WITHOUT the key path proving decryption.
-        map.entry("id")?.passthrough(42i64)?;
+        map.entry("id")?.passthrough(&42i64)?;
         map.entry("created_at")?
-            .passthrough("2026-07-25T00:00:00Z")?;
+            .passthrough(&"2026-07-25T00:00:00Z")?;
         "Ada Lovelace".visit(map.entry("name")?)?;
         36i64.visit(map.entry("age")?)?;
         1.5f64.visit(map.entry("score")?)?;
