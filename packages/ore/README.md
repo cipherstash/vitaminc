@@ -430,6 +430,12 @@ and `Sync` when that is `Sync` too.
 [`OrderKeyInit`] keys a scheme from a protected array or from bytes of
 a length only known at runtime, the way a PRF is keyed, so an index
 layer constructs any scheme the same way.
+With the `prf` feature, [`SchemeVisitor`] keys one from a PRF: it is
+the `vitaminc-prf` visitor that turns the derived block into the keyed
+scheme. It holds no plaintext, so the value to be ordered never enters
+the PRF call or waits inside a backend that derives the key later. The
+caller opens a space on the scheme once the key has arrived, and
+encrypts there by reference: `scheme.target(t).encrypt_checked(&value)`.
 
 A term compares only with terms of the same scheme, key, target and
 context, which is what a space is, through `space.compare(&a, &b)` (the
@@ -553,6 +559,7 @@ No optional features are enabled by default.
 | `chrono` | Adds order targets for date and timestamp types and enables AEAD date support. |
 | `rust_decimal` | Adds decimal order targets and enables AEAD decimal support. |
 | `uuid` | Adds UUID order targets and enables AEAD UUID support. |
+| `prf` | Adds `SchemeVisitor`, which keys a scheme from a PRF's block. |
 
 ## Compatibility
 
@@ -565,6 +572,7 @@ floor. See the [workspace compatibility policy](https://github.com/cipherstash/v
 [`OrderEncrypt`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/trait.OrderEncrypt.html
 [`OrderError::Unsupported`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/enum.OrderError.html#variant.Unsupported
 [`OrderKeyInit`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/trait.OrderKeyInit.html
+[`SchemeVisitor`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/struct.SchemeVisitor.html
 [`OrderPlaintext`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/struct.OrderPlaintext.html
 [`OrderScheme::compare`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/trait.OrderScheme.html#tymethod.compare
 [`OrderScheme`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/trait.OrderScheme.html
