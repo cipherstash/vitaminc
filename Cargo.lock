@@ -2947,8 +2947,10 @@ dependencies = [
  "uuid",
  "vitaminc-aead",
  "vitaminc-context",
+ "vitaminc-hmac",
  "vitaminc-normalize",
  "vitaminc-ore",
+ "vitaminc-prf",
  "vitaminc-protected",
  "zeroize",
 ]
