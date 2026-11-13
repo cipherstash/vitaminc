@@ -16,7 +16,7 @@
 use napi::bindgen_prelude::{BigInt, Buffer, JsValue, Null, Object, ToNapiValue, Unknown};
 use napi::{Env, Error, Status};
 use vitaminc_aead::{
-    Encrypt, FixedType, Float, Frame, Int, Logical, MapSink, Physical, SeqSink, Sink,
+    Encrypt, EncryptRef, FixedType, Float, Frame, Int, Logical, MapSink, Physical, SeqSink, Sink,
 };
 
 use crate::error::JsFault;
@@ -153,9 +153,9 @@ impl<'e, O: Out<'e>> Sink for JsBuilder<'e, O> {
 
     /// A passthrough subtree is plaintext to the application, so it is
     /// built like anything else, one level down as the frame counts it.
-    fn passthrough<P: Encrypt + Clone>(self, value: P) -> Result<O::Ok, JsFault> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, value: &P) -> Result<O::Ok, JsFault> {
         self.check_depth()?;
-        let built = value.visit(JsBuilder::at_depth(self.env, self.depth + 1))?;
+        let built = value.visit_ref(JsBuilder::at_depth(self.env, self.depth + 1))?;
         Ok(self.out.put(built))
     }
 }
@@ -387,9 +387,8 @@ mod tests {
     #[test]
     fn a_passthrough_at_the_limit_builds_its_value_one_level_deeper() {
         /// A value that opens a sequence and reports whether the sink let it.
-        #[derive(Clone)]
         struct Probe;
-        impl Encrypt for Probe {
+        impl Encrypt for &Probe {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
                 match sink.seq(Some(0)) {
                     Ok(_) => panic!("a sequence one level past the limit was accepted"),
@@ -399,7 +398,7 @@ mod tests {
         }
         let env = Env::from_raw(std::ptr::null_mut());
         let error = JsBuilder::at_depth(&env, MAX_DEPTH)
-            .passthrough(Probe)
+            .passthrough(&Probe)
             .err()
             .expect("the passthrough's value sits one level deeper");
         assert!(error.reason().contains("nested too deeply"), "{error:?}");

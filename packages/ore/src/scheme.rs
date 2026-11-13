@@ -16,7 +16,7 @@ use core::fmt;
 use std::sync::OnceLock;
 
 use vitaminc_aead::plaintext::{self, SourceError};
-use vitaminc_aead::{Encrypt, FixedType, Logical, MapSink, Physical, SeqSink, Sink};
+use vitaminc_aead::{Encrypt, EncryptRef, FixedType, Logical, MapSink, Physical, SeqSink, Sink};
 use vitaminc_context::{Context, IntoContext};
 use vitaminc_normalize::NormalizeError;
 use vitaminc_protected::{Controlled, OpaqueDebug, Protected};
@@ -1040,7 +1040,7 @@ impl Sink for Scalar {
         Err(ScalarError::NotScalar)
     }
 
-    fn passthrough<P: Encrypt + Clone>(self, _: P) -> Result<OrderPlaintext, ScalarError> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, _: &P) -> Result<OrderPlaintext, ScalarError> {
         Err(ScalarError::NotScalar)
     }
 }
