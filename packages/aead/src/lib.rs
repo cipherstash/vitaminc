@@ -31,6 +31,10 @@ mod aad;
 mod ciphertext;
 mod container;
 mod context;
+#[cfg(feature = "chrono")]
+mod date_value;
+#[cfg(feature = "rust_decimal")]
+mod decimal_value;
 mod encrypt_sink;
 pub mod frame;
 #[cfg(feature = "hlist")]
@@ -47,6 +51,8 @@ pub mod tags;
 mod timestamp;
 pub mod typed;
 mod unspecified;
+#[cfg(feature = "uuid")]
+mod uuid_value;
 mod walk;
 
 // The data model: sources, sinks and the scalar kinds.
@@ -79,9 +85,15 @@ pub use walk::{decrypt_into, decrypt_into_async, decrypt_to_frame, walk, Decrypt
 pub use frame::{to_frame, Frame, FrameWriter, PassthroughFrame};
 // A UTC instant that always encrypts.
 #[cfg(feature = "chrono")]
+pub use date_value::Date;
+#[cfg(feature = "rust_decimal")]
+pub use decimal_value::Decimal;
+#[cfg(feature = "chrono")]
 #[cfg_attr(docsrs, doc(cfg(feature = "chrono")))]
 #[doc(inline)]
 pub use timestamp::{LeapSecond, Timestamp};
+#[cfg(feature = "uuid")]
+pub use uuid_value::Uuid;
 
 #[doc(inline)]
 #[allow(deprecated)]
