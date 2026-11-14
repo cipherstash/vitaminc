@@ -1,14 +1,21 @@
-//! **SPIKE.** `#[derive(Seal)]`: a record sealed into its typed
-//! counterpart. Passthrough fields are moved (owned) or borrowed (by
-//! reference), never copied, and the sealed fields are the entries the
-//! dynamic tree holds.
+//! **SPIKE.** `Seal`: a record sealed into its typed counterpart. `User`
+//! implements it by hand, to show what the trait does; `DerivedUser` derives
+//! it, and is checked against `User`.
+//!
+//! Passthrough fields are moved (owned) or borrowed (by reference), never
+//! copied, and the sealed fields are the entries the dynamic tree holds.
 
+use core::convert::Infallible;
+use core::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures_executor::block_on;
+use vitaminc_aead::record::{
+    frame_field, open_record, open_record_async, seal_record, seal_record_async, RecordPlan,
+};
 use vitaminc_aead::{
-    decrypt, encrypt, AsyncCipher, CipherText, Context, Decrypt, DecryptError, Encrypt, Pending,
-    Seal,
+    decrypt, encrypt, AsyncCipher, Cipher, CipherText, Context, DecodeError, Decrypt, DecryptError,
+    Encrypt, EncryptError, IntoAad, Node, Pending, Seal,
 };
 use vitaminc_protected::{Controlled, Protected};
 
@@ -30,7 +37,7 @@ struct Mock {
     open_batches: AtomicUsize,
 }
 
-impl vitaminc_aead::seal::Cipher for Mock {
+impl Cipher for Mock {
     type Leaf = Leaf;
     type Error = Refused;
 
@@ -92,7 +99,10 @@ struct Audit {
     by: String,
 }
 
-#[derive(Encrypt, Decrypt, Seal, Debug, PartialEq)]
+/// The record. `Seal` is implemented by hand below, so the reader can see
+/// what it does; `DerivedUser` further down is the same record with
+/// `#[derive(Seal)]`, and a test checks the two agree.
+#[derive(Encrypt, Decrypt, Debug, PartialEq)]
 struct User {
     #[aead(passthrough)]
     id: u64,
@@ -105,6 +115,281 @@ struct User {
     age: u32,
     #[aead(skip)]
     cache: Option<u32>,
+}
+
+// ---------------------------------------------------------------------------
+// What `#[derive(Seal)]` writes for `User`, by hand.
+// ---------------------------------------------------------------------------
+
+/// `User`, sealed. The sealed fields are ciphertext nodes; the passthrough
+/// fields keep their own types and are moved in from the record.
+/// `cache` is skipped, so it has no field here.
+struct SealedUser<L> {
+    id: u64,
+    email: Node<L>,
+    notes: String,
+    audit: Audit,
+    age: Node<L>,
+}
+
+/// `User`, sealed from a borrow. The passthrough fields are references into
+/// the record.
+struct SealedUserRef<'r, L> {
+    id: &'r u64,
+    email: Node<L>,
+    notes: &'r String,
+    audit: &'r Audit,
+    age: Node<L>,
+}
+
+impl Seal for User {
+    type Sealed<L> = SealedUser<L>;
+    type SealedRef<'r, L> = SealedUserRef<'r, L>;
+
+    fn seal<'a, C: Cipher>(
+        self,
+        cipher: &C,
+        aad: impl IntoAad<'a>,
+    ) -> Result<SealedUser<C::Leaf>, EncryptError<C::Error>> {
+        // Take the record apart. Each field is now a local that can be
+        // moved exactly once.
+        let User {
+            id,
+            email,
+            notes,
+            audit,
+            age,
+            cache: _,
+        } = self;
+
+        // Plan only the sealed fields, as the entries of one map under
+        // `aad`. Each is planned under its key ("years" for `age`), so its
+        // context is the one `encrypt` would give it. The passthrough
+        // fields never go near the sink.
+        let mut plan = RecordPlan::new(aad, 2)?;
+        plan.field("email", email)?;
+        plan.field("years", age)?;
+
+        // Seal the whole plan in one batch, then take the sealed fields
+        // back out in the order they were planned.
+        let mut sealed = seal_record(cipher, plan.finish()?)?;
+        Ok(SealedUser {
+            id, // moved
+            email: sealed.next_field()?,
+            notes, // moved: the same heap buffer
+            audit, // moved
+            age: sealed.next_field()?,
+        })
+    }
+
+    // `age` is `Copy`, but it is borrowed anyway: `seal_ref` walks every
+    // field by reference, as the derive does.
+    #[allow(clippy::needless_borrows_for_generic_args)]
+    fn seal_ref<'r, 'a, C: Cipher>(
+        &'r self,
+        cipher: &C,
+        aad: impl IntoAad<'a>,
+    ) -> Result<SealedUserRef<'r, C::Leaf>, EncryptError<C::Error>> {
+        // The same plan, walking the sealed fields by reference.
+        let mut plan = RecordPlan::new(aad, 2)?;
+        plan.field("email", &self.email)?;
+        plan.field("years", &self.age)?;
+
+        let mut sealed = seal_record(cipher, plan.finish()?)?;
+        Ok(SealedUserRef {
+            id: &self.id, // borrowed
+            email: sealed.next_field()?,
+            notes: &self.notes, // borrowed
+            audit: &self.audit, // borrowed
+            age: sealed.next_field()?,
+        })
+    }
+
+    fn seal_async<'a, C: AsyncCipher>(
+        self,
+        cipher: &C,
+        aad: impl IntoAad<'a>,
+    ) -> impl Future<Output = Result<SealedUser<C::Leaf>, EncryptError<C::Error>>> {
+        let User {
+            id,
+            email,
+            notes,
+            audit,
+            age,
+            cache: _,
+        } = self;
+
+        // Planned before the future is built, so the future holds the
+        // planned leaves and the passthrough fields, not `email` or `age`.
+        let planned = (|| {
+            let mut plan = RecordPlan::new(aad, 2)?;
+            plan.field("email", email)?;
+            plan.field("years", age)?;
+            plan.finish()
+        })();
+
+        async move {
+            // One `seal_many` call for the whole record.
+            let mut sealed = seal_record_async(cipher, planned?).await?;
+            Ok(SealedUser {
+                id,
+                email: sealed.next_field()?,
+                notes,
+                audit,
+                age: sealed.next_field()?,
+            })
+        }
+    }
+}
+
+impl<L> SealedUser<L> {
+    /// Open the sealed fields in one batch and move the passthrough fields
+    /// back into a `User`.
+    fn open<'a, C: Cipher<Leaf = L>>(
+        self,
+        cipher: &C,
+        aad: impl IntoAad<'a>,
+    ) -> Result<User, DecryptError<DecodeError, C::Error>> {
+        // Each sealed field is opened under its key, in one batch.
+        let mut opened = open_record(
+            cipher,
+            vec![("email".into(), self.email), ("years".into(), self.age)],
+            aad,
+        )?;
+        Ok(User {
+            id: self.id,
+            email: opened.field::<_, C::Error>()?,
+            notes: self.notes,
+            audit: self.audit,
+            age: opened.field::<_, C::Error>()?,
+            cache: Default::default(),
+        })
+    }
+
+    /// [`open`](Self::open) through an async cipher, in one `open_many`
+    /// call.
+    async fn open_async<'a, C: AsyncCipher<Leaf = L>>(
+        self,
+        cipher: &C,
+        aad: impl IntoAad<'a>,
+    ) -> Result<User, DecryptError<DecodeError, C::Error>> {
+        let mut opened = open_record_async(
+            cipher,
+            vec![("email".into(), self.email), ("years".into(), self.age)],
+            aad,
+        )
+        .await?;
+        Ok(User {
+            id: self.id,
+            email: opened.field::<_, C::Error>()?,
+            notes: self.notes,
+            audit: self.audit,
+            age: opened.field::<_, C::Error>()?,
+            cache: Default::default(),
+        })
+    }
+
+    /// The tree `encrypt` would have made: every stored field in
+    /// declaration order. This is the only place a passthrough is framed
+    /// into bytes.
+    fn into_node(self) -> Result<Node<L>, EncryptError<Infallible>> {
+        Ok(CipherText::Map(vec![
+            ("id".into(), CipherText::Passthrough(frame_field(&self.id)?)),
+            ("email".into(), self.email),
+            (
+                "notes".into(),
+                CipherText::Passthrough(frame_field(&self.notes)?),
+            ),
+            (
+                "audit".into(),
+                CipherText::Passthrough(frame_field(&self.audit)?),
+            ),
+            ("years".into(), self.age),
+        ]))
+    }
+}
+
+impl<L> SealedUserRef<'_, L> {
+    /// As [`SealedUser::into_node`], framing each passthrough from its
+    /// borrow.
+    fn into_node(self) -> Result<Node<L>, EncryptError<Infallible>> {
+        Ok(CipherText::Map(vec![
+            ("id".into(), CipherText::Passthrough(frame_field(self.id)?)),
+            ("email".into(), self.email),
+            (
+                "notes".into(),
+                CipherText::Passthrough(frame_field(self.notes)?),
+            ),
+            (
+                "audit".into(),
+                CipherText::Passthrough(frame_field(self.audit)?),
+            ),
+            ("years".into(), self.age),
+        ]))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The same record with `#[derive(Seal)]`.
+// ---------------------------------------------------------------------------
+
+#[derive(Encrypt, Seal)]
+struct DerivedUser {
+    #[aead(passthrough)]
+    id: u64,
+    email: String,
+    #[aead(passthrough)]
+    notes: String,
+    #[aead(passthrough)]
+    audit: Audit,
+    #[aead(rename = "years")]
+    age: u32,
+    #[aead(skip)]
+    cache: Option<u32>,
+}
+
+fn derived_user() -> DerivedUser {
+    let User {
+        id,
+        email,
+        notes,
+        audit,
+        age,
+        cache,
+    } = user();
+    DerivedUser {
+        id,
+        email,
+        notes,
+        audit,
+        age,
+        cache,
+    }
+}
+
+/// The derive writes what the hand-written impl above does: the same tree,
+/// owned and borrowed, and the same moves.
+#[test]
+fn the_derive_seals_as_the_hand_written_impl_does() {
+    let cipher = Mock::default();
+    let by_hand = entries(
+        user()
+            .seal(&cipher, "ctx")
+            .expect("seals")
+            .into_node()
+            .expect("frames"),
+    );
+
+    let derived = derived_user();
+    let notes = derived.notes.as_ptr();
+    let sealed = derived.seal(&cipher, "ctx").expect("seals");
+    assert_eq!(sealed.notes.as_ptr(), notes);
+    assert_eq!(entries(sealed.into_node().expect("frames")), by_hand);
+
+    let borrowed_from = derived_user();
+    let borrowed = borrowed_from.seal_ref(&cipher, "ctx").expect("seals");
+    assert!(std::ptr::eq(borrowed.notes, &borrowed_from.notes));
+    assert_eq!(entries(borrowed.into_node().expect("frames")), by_hand);
 }
 
 fn user() -> User {
@@ -178,7 +463,7 @@ enum Column {
     Clear(Vec<u8>),
 }
 
-fn entries(node: vitaminc_aead::Node<Leaf>) -> Vec<(String, Column)> {
+fn entries(node: Node<Leaf>) -> Vec<(String, Column)> {
     let CipherText::Map(entries) = node else {
         panic!("a struct encrypts as a map");
     };
@@ -292,7 +577,7 @@ trait CloneLeaves {
     fn clone_leaves(&self) -> Self;
 }
 
-impl CloneLeaves for vitaminc_aead::Node<Leaf> {
+impl CloneLeaves for Node<Leaf> {
     fn clone_leaves(&self) -> Self {
         match self {
             CipherText::Single(leaf) => CipherText::Single(leaf.clone()),
