@@ -71,7 +71,7 @@ impl<E> DecryptError<E> {
     }
 }
 
-fn opening<E, C>(e: OpenError<C>) -> DecryptError<E, C> {
+pub(crate) fn opening<E, C>(e: OpenError<C>) -> DecryptError<E, C> {
     match e {
         OpenError::Cipher(c) => DecryptError::Cipher(c),
         OpenError::Malformed | OpenError::Count(_) => DecryptError::Malformed,

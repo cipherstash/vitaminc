@@ -39,6 +39,7 @@ pub mod hlist;
 pub mod leaf;
 mod nonce;
 pub mod plaintext;
+pub mod record;
 pub mod seal;
 pub mod shape;
 pub mod tags;
@@ -56,12 +57,19 @@ pub use plaintext::{
     Physical, Raw, Scalar, SeqSink, Sink, SourceError, Tee, TimeUnit, UnknownLogical,
     UnknownLogicalId, Width,
 };
+#[doc(inline)]
+pub use record::Seal;
 /// Derive [`Encrypt`] for a struct or a fieldless enum. A struct walks as
 /// a map keyed by field name; a fieldless enum as an int leaf holding the
 /// variant's discriminant. Pair it with [`Decrypt`] to read the value back.
 /// Inlined so the `#[aead(...)]` reference renders here.
 #[doc(inline)]
 pub use vitaminc_aead_derive::Encrypt;
+/// **SPIKE.** Derive [`Seal`](trait@crate::record::Seal): a struct that
+/// seals into its typed counterpart, with each passthrough field moved or
+/// borrowed rather than framed. See [`record`].
+#[doc(inline)]
+pub use vitaminc_aead_derive::Seal;
 // Encryption: the sink, the ciphers and the entry points.
 #[doc(inline)]
 pub use encrypt_sink::{encrypt, encrypt_async, plan, EncryptError, EncryptSink};
