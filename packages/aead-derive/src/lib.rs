@@ -92,6 +92,7 @@ use syn::{parse_macro_input, DeriveInput};
 
 mod attrs;
 mod encrypt;
+mod seal;
 mod shape;
 #[cfg(test)]
 mod test_support;
@@ -121,6 +122,17 @@ pub fn derive_encrypt(input: TokenStream) -> TokenStream {
 pub fn derive_decrypt(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     typed_decrypt::derive(input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// **SPIKE.** Derive `Seal` for a struct with named fields: the typed
+/// counterpart of the struct, with each passthrough field moved or borrowed
+/// rather than framed. See `vitaminc_aead::record`.
+#[proc_macro_derive(Seal, attributes(aead))]
+pub fn derive_seal(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    seal::derive(input)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
