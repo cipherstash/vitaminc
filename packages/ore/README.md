@@ -137,14 +137,16 @@ assert!(matches!(
 `encrypt` takes a value that always fits, as the sealed `FitsIn` table
 says: a narrower integer, an `f32` into `F64`, bytes (`&[u8]`,
 `Vec<u8>`, `[u8; N]`) into `Bytes`, a `jiff::civil::Date` into `Date`,
-a `jiff::Timestamp` or `vitaminc_aead::Timestamp` into `Timestamp`, a
+a `vitaminc_aead::Timestamp` into `Timestamp`, a
 `rust_decimal::Decimal` into `Decimal`, a `uuid::Uuid` into `Uuid` (the
 typed rows behind the `jiff`, `rust_decimal` and `uuid` features). Its
 only error is the scheme's own, so a scheme whose error is `Infallible`
 cannot fail at all. `encrypt_checked` takes any value of the data model
 and checks it while the program runs: an integer that may not fit, text
-(a code point Unicode 16 does not assign is refused), or a value whose
-type the index layer does not know. A chain that names no target uses the Rust type's own, from
+(a code point Unicode 16 does not assign is refused), a
+`jiff::Timestamp` (jiff 1.0.0 can make one just before its own minimum,
+which has no count; `vitaminc_aead::Timestamp` refuses it when it is
+built), or a value whose type the index layer does not know. A chain that names no target uses the Rust type's own, from
 the sealed `OwnTarget` table; a target is never inferred from a value.
 
 A term is an `OrderTerm`, labelled with its target. Under a marker the

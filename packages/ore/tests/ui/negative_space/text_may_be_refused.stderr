@@ -8,7 +8,7 @@ error[E0277]: `&str` is not a value that always fits `vitaminc_ore::target::Text
    |
    = help: the trait `FitsIn<vitaminc_ore::target::Text>` is not implemented for `&str`
    = note: `encrypt` takes a value the encoding never refuses: a narrower integer, an `f32`, bytes, or a typed value such as a `jiff::civil::Date`
-   = note: a value the encoding can refuse (an integer that may be out of range, text, or any other `Encrypt` value) goes through `encrypt_checked`, which checks it while the program runs
+   = note: a value the encoding can refuse (an integer that may be out of range, text, a `jiff::Timestamp`, or any other `Encrypt` value) goes through `encrypt_checked`, which checks it while the program runs
    = help: the following other types implement trait `FitsIn<T>`:
              `&Vec<u8>` implements `FitsIn<vitaminc_ore::target::Bytes>`
              `&[u8; N]` implements `FitsIn<vitaminc_ore::target::Bytes>`
@@ -35,7 +35,7 @@ error[E0277]: `&str` is not a value that always fits `vitaminc_ore::target::Text
    |
    = help: the trait `FitsIn<vitaminc_ore::target::Text>` is not implemented for `&str`
    = note: `encrypt` takes a value the encoding never refuses: a narrower integer, an `f32`, bytes, or a typed value such as a `jiff::civil::Date`
-   = note: a value the encoding can refuse (an integer that may be out of range, text, or any other `Encrypt` value) goes through `encrypt_checked`, which checks it while the program runs
+   = note: a value the encoding can refuse (an integer that may be out of range, text, a `jiff::Timestamp`, or any other `Encrypt` value) goes through `encrypt_checked`, which checks it while the program runs
    = help: the following other types implement trait `FitsIn<T>`:
              `&Vec<u8>` implements `FitsIn<vitaminc_ore::target::Bytes>`
              `&[u8; N]` implements `FitsIn<vitaminc_ore::target::Bytes>`

@@ -32,7 +32,8 @@ fn every_equality_domain_has_a_known_answer() {
     );
     let epoch = conv::date_days(jiff::civil::Date::constant(1970, 1, 1));
     let before_epoch =
-        conv::timestamp_nanos(jiff::Timestamp::new(-1, 999_999_999).expect("timestamp"));
+        conv::timestamp_nanos(jiff::Timestamp::new(-1, 999_999_999).expect("timestamp"))
+            .expect("count");
     let one: rust_decimal::Decimal = "1.00".parse().expect("decimal");
     let uuid = uuid::Uuid::from_bytes([
         0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,

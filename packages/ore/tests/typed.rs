@@ -150,10 +150,9 @@ fn every_fits_in_row_encrypts_at_its_extremes() {
     row(&s, &[CivilDate::MIN, CivilDate::MAX]);
     s.encrypt(&CivilDate::MAX).expect("date");
     let s = mock.target(target::Timestamp);
-    row(&s, &[jiff::Timestamp::MIN, jiff::Timestamp::MAX]);
     for instant in [jiff::Timestamp::MIN, jiff::Timestamp::MAX] {
-        s.encrypt(&instant).expect("timestamp");
-        let ts = vitaminc_aead::Timestamp::new(instant);
+        s.encrypt_checked(instant).expect("timestamp");
+        let ts = vitaminc_aead::Timestamp::new(instant).expect("in range");
         s.encrypt(&ts).expect("timestamp");
         s.encrypt(ts).expect("timestamp");
     }
@@ -245,15 +244,19 @@ fn typed_values_fit_the_space_of_their_type() {
         typed(T::Date, Logical::Date, Physical::Int(Int::I32(19_000)))
     );
     let at = jiff::Timestamp::new(1_700_000_000, 123_456_789).expect("instant");
-    let ts = vitaminc_aead::Timestamp::new(at);
+    let ts = vitaminc_aead::Timestamp::new(at).expect("in range");
     let expected = typed(
         T::Timestamp,
         Logical::Timestamp(vitaminc_aead::TimeUnit::Micros),
         Physical::Int(Int::I64(1_700_000_000_123_456)),
     );
     assert_eq!(mock.encrypt(ts).expect("timestamp").into_raw(), expected);
-    // A `jiff::Timestamp` is never a leap second either, so it fits too.
-    assert_eq!(mock.encrypt(at).expect("timestamp").into_raw(), expected);
+    // A `jiff::Timestamp` may lie just outside jiff's own range, so it is
+    // checked.
+    assert_eq!(
+        mock.encrypt_checked(at).expect("timestamp").into_raw(),
+        expected
+    );
     assert_eq!(
         mock.encrypt(Decimal::new(150, 2)).expect("decimal"),
         mock.encrypt(Decimal::new(15, 1)).expect("decimal")
