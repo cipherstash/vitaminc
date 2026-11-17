@@ -17,10 +17,56 @@ use crate::OrderKeyInit;
 /// on the scheme it returns and encrypt there, by reference, once the key has
 /// arrived:
 ///
-/// ```text
-/// let scheme: ClwwOre = context.prf_visit_with_context(&prf, domain, SchemeVisitor::new())
-///     .await?;
+/// ```
+/// use vitaminc_hmac::HmacSha256Prf;
+/// use vitaminc_ore::{OrderEncrypt, OrderTarget, SchemeVisitor};
+/// use vitaminc_prf::{PrfKeyInit, PrfValue};
+/// use vitaminc_protected::Protected;
+/// # use vitaminc_ore::{Context, OrderKeyInit, OrderPlaintext, OrderScheme};
+/// # /// Keeps its key and the bytes, for the example. Any scheme keyed
+/// # /// with a 32-byte array will do.
+/// # struct ClwwOre(Protected<[u8; 32]>);
+/// # impl OrderScheme for ClwwOre {
+/// #     const NAME: &'static str = "example";
+/// #     type Term = Vec<u8>;
+/// #     type Error = core::convert::Infallible;
+/// #     type Space = ();
+/// #     fn open(&self, _: OrderTarget, _: &Context<'_>) -> Result<(), Self::Error> {
+/// #         Ok(())
+/// #     }
+/// #     fn encrypt_plaintext(&self, _: &(), p: &OrderPlaintext) -> Result<Vec<u8>, Self::Error> {
+/// #         use vitaminc_protected::Controlled;
+/// #         let mut term = self.0.risky_ref().to_vec();
+/// #         term.extend_from_slice(p.bytes().risky_ref());
+/// #         Ok(term)
+/// #     }
+/// #     fn compare(a: &Vec<u8>, b: &Vec<u8>) -> Option<core::cmp::Ordering> {
+/// #         Some(a.cmp(b))
+/// #     }
+/// # }
+/// # impl OrderKeyInit for ClwwOre {
+/// #     type Key = Protected<[u8; 32]>;
+/// #     type KeyError = core::convert::Infallible;
+/// #     fn new(key: Self::Key) -> Self {
+/// #         Self(key)
+/// #     }
+/// #     fn try_from_bytes(_: Protected<Vec<u8>>) -> Result<Self, Self::KeyError> {
+/// #         unimplemented!("not used by the example")
+/// #     }
+/// # }
+/// # vitaminc_ore::supports_every_target!(ClwwOre);
+/// # let prf = HmacSha256Prf::new(Protected::new([7u8; 32]));
+/// # let context: &[u8] = b"users/surname";
+/// # let domain = "order";
+/// let value = String::from("Lovelace");
+///
+/// // A real backend may derive the block later; `.await` the result there.
+/// let scheme: ClwwOre = context
+///     .prf_visit_with_context(&prf, domain, SchemeVisitor::new())
+///     .into_result()?;
 /// let term = scheme.target(OrderTarget::Text).encrypt_checked(&value)?;
+/// # let _ = term;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
 /// `S` is any scheme keyed with a protected array of the block's length
