@@ -162,53 +162,63 @@ pub(crate) fn parse_timestamp(text: &str) -> Option<i128> {
         b't' | b' ' if !expanded => &rest[1..],
         _ => return None,
     };
-    let (hour, rest) = two_digits(rest)?;
-    let rest = rest.strip_prefix(':')?;
-    let (minute, rest) = two_digits(rest)?;
-    let rest = rest.strip_prefix(':')?;
-    let (second, rest) = two_digits(rest)?;
-    // 60 is a leap second, which has no count.
-    if hour > 23 || minute > 59 || second > 59 {
-        return None;
-    }
-    let (nanos, rest) = match rest.strip_prefix('.') {
-        Some(fraction) => {
-            let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
-            if digits == 0 {
-                return None;
-            }
-            let kept = &fraction[..digits.min(9)];
-            let scale = 10i128.pow(9 - u32::try_from(kept.len()).ok()?);
-            (kept.parse::<i128>().ok()? * scale, &fraction[digits..])
-        }
-        None => (0, rest),
-    };
-    let offset_seconds = match rest {
-        "Z" | "z" => 0,
-        _ => {
-            let (sign, rest) = match rest.as_bytes().first()? {
-                b'+' => (1, &rest[1..]),
-                b'-' => (-1, &rest[1..]),
-                _ => return None,
-            };
-            let (hours, rest) = two_digits(rest)?;
-            let rest = rest.strip_prefix(':')?;
-            let (minutes, rest) = two_digits(rest)?;
-            if !rest.is_empty() || hours > 23 || minutes > 59 {
-                return None;
-            }
-            sign * (i64::from(hours) * 3_600 + i64::from(minutes) * 60)
-        }
-    };
-    let seconds = date.days() * SECONDS_PER_DAY
-        + i64::from(hour) * 3_600
-        + i64::from(minute) * 60
-        + i64::from(second)
-        - offset_seconds;
+    let (of_day, rest) = time_of_day(rest)?;
+    let (nanos, rest) = fraction(rest)?;
+    let seconds = date.days() * SECONDS_PER_DAY + of_day - utc_offset(rest)?;
     let total = i128::from(seconds) * NANOS_PER_SECOND + nanos;
     (MIN_TIMESTAMP_NANOS..=MAX_TIMESTAMP_NANOS)
         .contains(&total)
         .then_some(total)
+}
+
+/// `HH:MM:SS` at the start of `text` as seconds into the day, and what
+/// follows. Second 60 is a leap second, which has no count.
+fn time_of_day(text: &str) -> Option<(i64, &str)> {
+    let (hour, rest) = two_digits(text)?;
+    let rest = rest.strip_prefix(':')?;
+    let (minute, rest) = two_digits(rest)?;
+    let rest = rest.strip_prefix(':')?;
+    let (second, rest) = two_digits(rest)?;
+    if hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    let seconds = i64::from(hour) * 3_600 + i64::from(minute) * 60 + i64::from(second);
+    Some((seconds, rest))
+}
+
+/// An optional `.` and fractional seconds at the start of `text`, as
+/// nanoseconds, and what follows. Digits past the ninth are read and
+/// dropped; a `.` with no digit is refused.
+fn fraction(text: &str) -> Option<(i128, &str)> {
+    let Some(fraction) = text.strip_prefix('.') else {
+        return Some((0, text));
+    };
+    let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0 {
+        return None;
+    }
+    let kept = &fraction[..digits.min(9)];
+    let scale = 10i128.pow(9 - u32::try_from(kept.len()).ok()?);
+    Some((kept.parse::<i128>().ok()? * scale, &fraction[digits..]))
+}
+
+/// The whole of `text` as a UTC offset in seconds: `Z`, `z` or `±HH:MM`.
+fn utc_offset(text: &str) -> Option<i64> {
+    if text == "Z" || text == "z" {
+        return Some(0);
+    }
+    let (sign, rest) = match text.as_bytes().first()? {
+        b'+' => (1, &text[1..]),
+        b'-' => (-1, &text[1..]),
+        _ => return None,
+    };
+    let (hours, rest) = two_digits(rest)?;
+    let rest = rest.strip_prefix(':')?;
+    let (minutes, rest) = two_digits(rest)?;
+    if !rest.is_empty() || hours > 23 || minutes > 59 {
+        return None;
+    }
+    Some(sign * (i64::from(hours) * 3_600 + i64::from(minutes) * 60))
 }
 
 /// Nanoseconds since the epoch as RFC 3339 text in UTC with nine
