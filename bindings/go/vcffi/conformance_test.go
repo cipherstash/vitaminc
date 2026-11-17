@@ -14,9 +14,13 @@ import (
 	"github.com/cipherstash/vitaminc/bindings/go/vcvalue"
 )
 
-// rfc3339ish matches the corpus timestamp spelling, including ISO 8601
-// expanded years, which time.Parse cannot read.
-var rfc3339ish = regexp.MustCompile(`^([+-]?\d{4,})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z$`)
+// isoDate and rfc3339ish match the corpus date and timestamp spellings,
+// including a negative year as a sign and six digits, which time.Parse
+// cannot read.
+var (
+	isoDate    = regexp.MustCompile(`^([+-]\d{6}|\d{4})-(\d{2})-(\d{2})$`)
+	rfc3339ish = regexp.MustCompile(`^([+-]\d{6}|\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z$`)
+)
 
 // expected builds the Go value a vector's kind and value fields describe,
 // without the transport decoder, so a bug that decodes and encodes
@@ -86,8 +90,14 @@ func expected(kind string, raw json.RawMessage) (any, error) {
 	case "bytes":
 		return hex.DecodeString(text)
 	case "date":
-		t, err := time.Parse("2006-01-02", text)
-		return vcvalue.Date{Year: t.Year(), Month: t.Month(), Day: t.Day()}, err
+		m := isoDate.FindStringSubmatch(text)
+		if m == nil {
+			return nil, fmt.Errorf("unparseable date %q", text)
+		}
+		year, _ := strconv.Atoi(m[1])
+		month, _ := strconv.Atoi(m[2])
+		day, _ := strconv.Atoi(m[3])
+		return vcvalue.Date{Year: year, Month: time.Month(month), Day: day}, nil
 	case "timestamp":
 		return timestamp(text)
 	case "decimal":

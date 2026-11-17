@@ -575,13 +575,13 @@ impl<const N: usize> OwnTarget for &[u8; N] {
 }
 
 // The typed values callers hold. Each is inside the range its encoding
-// takes for every value the type can hold: jiff's dates (years -9999 to
-// 9999) lie inside the range `Logical::Date` admits, a `Timestamp` is
-// always one jiff can rebuild, and a `rust_decimal::Decimal` has a 96-bit
+// takes for every value the type can hold: jiff's dates are the range
+// `Logical::Date` admits, a `Timestamp` is always inside the wire's range,
+// and a `rust_decimal::Decimal` has a 96-bit
 // mantissa and a scale of at most 28, which is what the decimal encoding
-// takes. A `jiff::Timestamp` may be one jiff 1.0.0 cannot rebuild (see
-// `vitaminc_aead::OutOfRange`), which has no count, so it is checked, not
-// fitting.
+// takes. A `jiff::Timestamp` may be one jiff 1.0.0 makes before its own
+// minimum (see `vitaminc_aead::OutOfRange`), which has no count, so it is
+// checked, not fitting.
 #[cfg(feature = "jiff")]
 #[cfg_attr(docsrs, doc(cfg(feature = "jiff")))]
 mod jiff_rows {

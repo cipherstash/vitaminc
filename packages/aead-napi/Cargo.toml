@@ -15,7 +15,8 @@ rust-version.workspace = true
 [dependencies]
 rust_decimal = { version = "1.41", default-features = false, features = ["std"] }
 thiserror.workspace = true
-vitaminc-aead = { version = "0.9.1", path = "../aead", features = ["rust_decimal"] }
+jiff = { version = "1.0.0", default-features = false }
+vitaminc-aead = { version = "0.9.1", path = "../aead", features = ["jiff", "rust_decimal"] }
 vitaminc-protected = { version = "0.9.1", path = "../protected" }
 
 # napi5 (Node ≥ 12) is needed for Date detection; napi6 (implies napi5) for
@@ -33,6 +34,3 @@ mutants = "0.0.4"
 # in `tests/addon`, which is its own workspace so this feature cannot stub
 # the real Node-API symbols there.
 napi = { version = "3", default-features = false, features = ["noop"] }
-# Checks the binding's own civil calendar against jiff, day for day, over
-# jiff's range.
-jiff = { version = "1.0.0", default-features = false }

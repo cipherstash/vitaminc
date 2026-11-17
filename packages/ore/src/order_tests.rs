@@ -547,7 +547,8 @@ fn every_nan_is_one_term_above_every_number(payload: u32, x: f32) -> bool {
 #[quickcheck]
 fn date_and_timestamp_byte_order_is_value_order(a: i32, b: i32, x: i64, y: i64) -> bool {
     // Inside the day range `Logical::Date` admits.
-    let (a, b) = (a % 95_000_000, b % 95_000_000);
+    let max = vitaminc_aead::plaintext::kinds::MAX_DATE_DAYS;
+    let (a, b) = (a % max, b % max);
     let date = |d: i32| bytes(T::Date, Some(Logical::Date), Physical::Int(Int::I32(d)));
     let nanos = |n: i64| {
         bytes(

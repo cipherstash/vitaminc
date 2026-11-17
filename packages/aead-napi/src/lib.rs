@@ -17,7 +17,6 @@
 #![deny(unsafe_op_in_unsafe_fn, clippy::undocumented_unsafe_blocks)]
 #![doc = include_str!("../README.md")]
 mod ciphertext;
-mod civil;
 mod error;
 mod js;
 mod js_builder;

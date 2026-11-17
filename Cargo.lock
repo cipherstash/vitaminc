@@ -2819,6 +2819,7 @@ version = "0.9.1"
 dependencies = [
  "borsh",
  "criterion",
+ "jiff",
  "quickcheck",
  "quickcheck_macros",
  "rmp-serde",

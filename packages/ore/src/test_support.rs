@@ -121,8 +121,8 @@ fn rows() -> Vec<Row> {
         typed(
             T::Date,
             Logical::Date,
-            I(Int::I32(-96_465_292)),
-            I(Int::I32(95_026_236)),
+            I(Int::I32(-4_371_587)),
+            I(Int::I32(2_932_896)),
         ),
         typed(
             T::Timestamp,

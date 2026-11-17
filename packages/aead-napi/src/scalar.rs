@@ -6,10 +6,9 @@
 
 use std::fmt;
 
+use jiff::fmt::temporal::Pieces;
 use rust_decimal::Decimal;
-use vitaminc_aead::plaintext::kinds::decimal as kinds_decimal;
-
-use crate::civil;
+use vitaminc_aead::plaintext::kinds::{decimal as kinds_decimal, jiff as kinds_jiff};
 use vitaminc_aead::{Int, Logical, TimeUnit};
 
 /// Host scalar conversion errors. Node receives a TypeError with the same
@@ -119,17 +118,17 @@ fn nanos_int(nanos: i128) -> Int {
     }
 }
 
-/// `YYYY-MM-DD` as days since 1970-01-01. The year is four digits from
-/// 0000 to 9999, and signed and at least four digits outside that.
+/// `YYYY-MM-DD` as days since 1970-01-01, spelled as jiff and JavaScript
+/// write it: a year from 0000 to 9999 in four digits, and a negative year
+/// as a sign and six digits (`-000005-03-01`).
 pub(crate) fn date(text: &str) -> Result<Int, ConversionError> {
-    let value = civil::Date::parse(text).ok_or(ConversionError::InvalidDate)?;
+    let value: jiff::civil::Date = text.parse().map_err(|_| ConversionError::InvalidDate)?;
+    // jiff reads other spellings too (`20240229`, `+002024-02-29`, a date
+    // with a time). Only the one it writes is taken, so a date has one.
     if !displays_as(&value, text) {
         return Err(ConversionError::InvalidDate);
     }
-    // Within the wire's range, which an i32 holds.
-    i32::try_from(value.days())
-        .map(Int::I32)
-        .map_err(|_| ConversionError::InvalidDate)
+    Ok(Int::I32(kinds_jiff::date_days(value)))
 }
 
 /// Whether `value` displays as exactly `text`. The display is compared as it
@@ -149,20 +148,83 @@ fn displays_as(value: &impl fmt::Display, text: &str) -> bool {
 
 /// A day count as `YYYY-MM-DD`, if it is within the wire's range.
 pub(crate) fn date_text(days: Int) -> Option<String> {
-    let days = i64::try_from(days.to_i128()?).ok()?;
-    civil::Date::from_days(days).map(|date| date.to_string())
+    kinds_jiff::date(days).map(|date| date.to_string())
 }
 
-/// RFC 3339 text, or an ISO 8601 expanded year outside 0000-9999, as
-/// nanoseconds since the epoch. A leap second has no count and is refused,
-/// as the leaf codec refuses it.
+/// RFC 3339 text as nanoseconds since the epoch, with a negative year
+/// spelled as a sign and six digits, as jiff and JavaScript write it
+/// (`-000005-03-01T12:00:00Z`), so a decrypted timestamp encrypts again. A
+/// leap second has no count and is refused, as the leaf codec refuses it.
 pub(crate) fn timestamp(text: &str) -> Result<Int, ConversionError> {
-    // RFC 3339 only spells years 0000-9999. Outside that range decryption
-    // emits an ISO 8601 expanded year (`+12000-…`, `-0005-…`), so accept that
-    // form too or a decrypted timestamp could not be encrypted again.
-    civil::parse_timestamp(text)
+    if !is_rfc3339(text) {
+        return Err(ConversionError::InvalidTimestamp);
+    }
+    // jiff reads the fields and checks their values. The instant is
+    // counted here, not by jiff's `Offset::to_timestamp`, which in jiff
+    // 1.0.0 can return one before jiff's minimum (BurntSushi/jiff#714).
+    let pieces = Pieces::parse(text).map_err(|_| ConversionError::InvalidTimestamp)?;
+    let (Some(time), Some(offset)) = (pieces.time(), pieces.to_numeric_offset()) else {
+        return Err(ConversionError::InvalidTimestamp);
+    };
+    let seconds = i128::from(kinds_jiff::date_days(pieces.date())) * 86_400
+        + i128::from(time.hour()) * 3_600
+        + i128::from(time.minute()) * 60
+        + i128::from(time.second())
+        - i128::from(offset.seconds());
+    let nanos = seconds * 1_000_000_000 + i128::from(time.subsec_nanosecond());
+    vitaminc_aead::plaintext::kinds::timestamp_nanos(TimeUnit::Nanos, Int::I128(nanos))
         .map(nanos_int)
         .ok_or(ConversionError::InvalidTimestamp)
+}
+
+/// Whether `text` has RFC 3339's shape: a date, `T`, `HH:MM:SS`, a
+/// fraction of one to nine digits or none, and `Z` or `±HH:MM`. `t` and
+/// `z` may be lower case, and a space may stand for `T`.
+///
+/// jiff's parser reads much more than this (no seconds, the basic format,
+/// a comma, a time zone annotation), and reads a leap second as the second
+/// before it. So the shape is checked first, and a leap second refused;
+/// jiff checks the values.
+fn is_rfc3339(text: &str) -> bool {
+    let year = if text.starts_with(['+', '-']) {
+        "s999999"
+    } else {
+        "9999"
+    };
+    let Some(rest) = after(text, year).and_then(|rest| after(rest, "-99-99T99:99:99")) else {
+        return false;
+    };
+    if text[..text.len() - rest.len()].ends_with("60") {
+        return false;
+    }
+    let rest = match rest.strip_prefix('.') {
+        Some(fraction) => {
+            let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
+            if !(1..=9).contains(&digits) {
+                return false;
+            }
+            &fraction[digits..]
+        }
+        None => rest,
+    };
+    matches!(rest, "Z" | "z") || after(rest, "s99:99") == Some("")
+}
+
+/// What follows a prefix of `text` that has `shape`, where `9` stands for
+/// an ASCII digit, `s` for `+` or `-`, `T` for `T`, `t` or a space, and
+/// any other byte for itself.
+fn after<'a>(text: &'a str, shape: &str) -> Option<&'a str> {
+    let head = text.as_bytes().get(..shape.len())?;
+    head.iter()
+        .zip(shape.bytes())
+        .all(|(&byte, want)| match want {
+            b'9' => byte.is_ascii_digit(),
+            b's' => matches!(byte, b'+' | b'-'),
+            b'T' => matches!(byte, b'T' | b't' | b' '),
+            _ => byte == want,
+        })
+        // The prefix is ASCII, so it ends on a character boundary.
+        .then(|| &text[shape.len()..])
 }
 
 /// A JavaScript `Date`'s millisecond count, as the `I64` it is stored as
@@ -193,9 +255,7 @@ pub(crate) fn timestamp_js_millis(unit: TimeUnit, count: Int) -> Option<f64> {
 /// A stored timestamp as RFC 3339 text with nanoseconds, for the
 /// `VcTimestamp` wrapper.
 pub(crate) fn timestamp_text(unit: TimeUnit, count: Int) -> Option<String> {
-    civil::timestamp_text(vitaminc_aead::plaintext::kinds::timestamp_nanos(
-        unit, count,
-    )?)
+    kinds_jiff::timestamp(unit, count).map(|instant| format!("{instant:.9}"))
 }
 
 /// Fixed-point decimal text as a scale and mantissa.
@@ -357,10 +417,32 @@ mod tests {
         assert_eq!(date("1970-01-01"), Ok(Int::I32(0)));
         assert_eq!(date("2024-02-29"), Ok(Int::I32(19782)));
         assert_eq!(date("0000-01-01"), Ok(Int::I32(-719_528)));
-        for text in ["2024-02-29", "0000-01-01", "9999-12-31"] {
+        assert_eq!(date("-009999-01-01"), Ok(Int::I32(-4_371_587)));
+        assert_eq!(date("9999-12-31"), Ok(Int::I32(2_932_896)));
+        for text in [
+            "2024-02-29",
+            "0000-01-01",
+            "9999-12-31",
+            "-000005-03-01",
+            "-009999-01-01",
+        ] {
             assert_eq!(date_text(date(text).expect("valid")).as_deref(), Some(text));
         }
-        for invalid in ["2023-02-29", "2024-2-9", "", "2024-01-01T00:00:00Z"] {
+        for invalid in [
+            "2023-02-29",
+            "2024-2-9",
+            "",
+            "2024-01-01T00:00:00Z",
+            "2024-01-01T00:00",
+            // Spellings jiff reads but does not write.
+            "20240229",
+            "+002024-02-29",
+            "-0005-03-01",
+            // Past the wire's range, which is jiff's.
+            "10000-01-01",
+            "+010000-01-01",
+            "-010000-01-01",
+        ] {
             assert_eq!(
                 date(invalid),
                 Err(ConversionError::InvalidDate),
@@ -394,13 +476,15 @@ mod tests {
             timestamp("2016-12-31T23:59:60.123456789Z"),
             Err(ConversionError::InvalidTimestamp)
         );
-        // Decryption spells years outside 0000-9999 in ISO 8601 expanded form;
-        // each must parse back to the same count, in i128 when i64 is too narrow.
+        // Each comes back as the text it went in as, in i128 when i64 is
+        // too narrow. A negative year has a sign and six digits.
         for (text, expected_width) in [
-            ("+12000-01-01T00:00:00.000000001Z", "i128"),
-            ("-0005-03-01T12:00:00.000000001Z", "i128"),
+            ("-000005-03-01T12:00:00.000000001Z", "i128"),
             ("2262-04-11T23:47:16.854775807Z", "i64"),
             ("2262-04-11T23:47:16.854775808Z", "i128"),
+            // The ends of the wire's range, which is jiff's.
+            ("-009999-01-02T01:59:59.000000000Z", "i128"),
+            ("9999-12-30T22:00:00.999999999Z", "i128"),
         ] {
             let count = timestamp(text).expect("valid");
             assert_eq!(width(count), expected_width, "{text}");
@@ -409,16 +493,61 @@ mod tests {
                 Some(text)
             );
         }
-        assert!(matches!(
-            timestamp("-0005-03-01T12:00:00+01:00"),
-            Ok(count) if timestamp_text(TimeUnit::Nanos, count).as_deref()
-                == Some("-0005-03-01T11:00:00.000000000Z")
-        ));
+        // An offset is applied, and the other spellings RFC 3339 allows
+        // are read.
+        for (text, utc) in [
+            (
+                "-000005-03-01T12:00:00+01:00",
+                "-000005-03-01T11:00:00.000000000Z",
+            ),
+            (
+                "2024-02-29T12:00:00.5-01:30",
+                "2024-02-29T13:30:00.500000000Z",
+            ),
+            ("2024-02-29t12:00:00z", "2024-02-29T12:00:00.000000000Z"),
+            (
+                "2024-02-29 12:00:00-00:00",
+                "2024-02-29T12:00:00.000000000Z",
+            ),
+            (
+                "+002024-02-29T12:00:00.1Z",
+                "2024-02-29T12:00:00.100000000Z",
+            ),
+        ] {
+            let count = timestamp(text).expect(text);
+            assert_eq!(timestamp_text(TimeUnit::Nanos, count).as_deref(), Some(utc));
+        }
         for invalid in [
-            "+12000-01-01",
-            "+12000-13-01T00:00:00Z",
-            "-0005-03-01T12:00:00",
+            "",
             "bad",
+            "+012000-01-01T00:00:00Z",
+            "+012000-13-01T00:00:00Z",
+            "-0005-03-01T12:00:00Z",
+            "-000005-03-01T12:00:00",
+            "-000005-03-01",
+            // Past either end of the wire's range: jiff 1.0.0 would make
+            // the first an instant before its own minimum.
+            "-009999-01-02T01:59:58.5Z",
+            "-009999-01-01T00:00:00Z",
+            "9999-12-30T22:00:01Z",
+            "9999-12-31T00:00:00+01:00",
+            // Spellings jiff reads that are not RFC 3339.
+            "2024-02-29T12:00Z",
+            "20240229T120000Z",
+            "2024-02-29T12:00:00Z[UTC]",
+            "2024-02-29T12:00:00,5Z",
+            "2024-02-29T12:00:00+0100",
+            "2024-02-29T12:00:00+01",
+            "2024-02-29T12:00:00.Z",
+            "2024-02-29T12:00:00.1234567891Z",
+            "2024-02-29X12:00:00Z",
+            "2024-02-29T12:00:00Zx",
+            // Values out of range in each field.
+            "2024-02-30T12:00:00Z",
+            "2024-02-29T24:00:00Z",
+            "2024-02-29T12:60:00Z",
+            "2024-02-29T12:00:61Z",
+            "2024-02-29T12:00:00+26:00",
         ] {
             assert_eq!(
                 timestamp(invalid),
@@ -470,8 +599,8 @@ mod tests {
         // Sub-millisecond precision needs the wrapper.
         assert_eq!(timestamp_js_millis(TimeUnit::Nanos, Int::I64(-1)), None);
         assert_eq!(timestamp_js_millis(TimeUnit::Micros, Int::I64(1)), None);
-        // The wire's whole range fits a `Date`: its limits are about
-        // ±8.2e15 milliseconds, inside `Date`'s ±8.64e15.
+        // The wire's whole range fits a `Date`: its limits are under
+        // 4e14 milliseconds either way, inside `Date`'s ±8.64e15.
         for limit in [MIN_TIMESTAMP_NANOS, MAX_TIMESTAMP_NANOS] {
             let ms = timestamp_js_millis(TimeUnit::Millis, Int::I64((limit / 1_000_000) as i64))
                 .expect("whole milliseconds at the bound");

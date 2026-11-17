@@ -129,8 +129,9 @@ another language wrote as an ordinary one-key object: Go's
 unchanged. Decimal text is exact fixed-point, not a JS number or an
 arbitrary decimal-library instance; a negative zero reads back as zero
 with its scale kept. A leap second has no count since the epoch
-and is refused. Timestamps outside years 0000–9999 use an ISO 8601
-expanded year (`+12000-01-01T00:00:00.000000001Z`), on both sides.
+and is refused. Dates and timestamps cover jiff's range, years -9999 to
+9999, as in every binding, and a negative year is a sign and six digits
+(`-000005-03-01T12:00:00.000000001Z`), as JavaScript writes it.
 
 Scalar failures throw a `TypeError` with a stable code: `ERR_INTEGER_RANGE`,
 `ERR_INVALID_DATE`, `ERR_INVALID_TIMESTAMP`, `ERR_INVALID_DECIMAL`,
@@ -139,7 +140,8 @@ Scalar failures throw a `TypeError` with a stable code: `ERR_INTEGER_RANGE`,
 ## Errors
 
 A getter that throws, a string with an unpaired surrogate, a `BigInt` out
-of range or a `Date` outside the wire's range (years -262143 to 262142)
+of range or a `Date` outside the wire's range (jiff's, about years -9999
+to 9999)
 stops the walk through the
 sink's `Error::source`, as a [`JsFault`] carrying the napi status and
 reason. At the boundary, `JsFault::from_source` turns it back into the
