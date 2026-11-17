@@ -43,11 +43,11 @@ impl Algorithm for Aes256Gcm { const NAME: &'static str = "AES-256-GCM"; }
 
 ## Rung 2: won't compile
 
-Put the invariant in the type.
+Put the invariant in the type. State the invariant first, in one sentence a reviewer can test; a type that says "verified" without saying under which key promises more than it delivers (rule 6).
 
 - **Newtypes over raw bytes.** `Key([u8; 32])`, never `&[u8]`. A key, a nonce and a ciphertext should not be interchangeable.
 - **Fixed-size arrays for fixed lengths.** A `[u8; 32]` argument makes the length check infallible and removes the error path; a const generic `[u8; N]` does the same for a family of sizes. Take runtime-length material through a separate, fallible `try_from_bytes` that rejects weak inputs.
-- **Typestate.** Encode protocol steps as types, so the unsafe order does not type-check:
+- **Typestate.** Encode protocol steps as types, so the unsafe order does not type-check. Carry "by whom" in the type too: a message verified under the wrong key is then a type error, not a review question.
 
 ```rust
 use std::marker::PhantomData;
@@ -115,7 +115,7 @@ A check that blocks the merge is as strong as a type check: the mistake cannot r
 
 ## Rung 5: the name says how to use it
 
-Name escape hatches so they are obvious and greppable: `risky_unwrap`, `risky_ref`, a `hazmat` module, an `insecure-*` feature, `*_unchecked`. Obvious, not easy: a caller who needs a legacy algorithm should find the door, and a reviewer should find every use with one search.
+Name escape hatches so they are obvious and greppable: `risky_unwrap`, `risky_ref`, a `hazmat` module, an `insecure-*` feature, `*_unchecked`. Obvious, not easy: a caller who needs a legacy algorithm should find the door, and a reviewer should find every use with one search. A search is a human step, so the allowlist in rung 3 is what makes the count hold.
 
 ## Rung 6: fails loudly at runtime
 
@@ -136,7 +136,7 @@ A type holding a secret:
 
 ## Errors
 
-- `Display` and `Debug` on error types never include plaintext, keys, or values derived from them. Report the path or position (`field "email"`), not the value. Redact messages that come from user-supplied types.
+- `Display` and `Debug` on error types never include plaintext, keys, or values derived from them. Report the path or position (`field "email"`), not the value. Redact messages that come from user-supplied types. Check what library errors carry before forwarding them: `std::env::VarError::NotUnicode` holds the variable's raw bytes.
 - Mark error enums `#[non_exhaustive]` so variants can be added without a breaking change.
 
 ## Features

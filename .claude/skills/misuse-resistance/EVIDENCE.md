@@ -4,7 +4,7 @@ The studies behind each rule in [SKILL.md](SKILL.md). Cite these when a rule is 
 
 ## Why the API carries the burden
 
-- **Lazar et al. 2014**, *Why does cryptographic software fail?* (APSys). Of 269 crypto CVEs, 83% were applications misusing libraries; 17% were in the libraries.
+- **Lazar et al. 2014**, *Why does cryptographic software fail?* (APSys). Of 269 crypto CVEs, 83% were applications misusing libraries; 17% were in the libraries. The sample is CVEs tagged CWE-310 (cryptographic issues), so library bugs filed under other weakness classes are outside the count.
 - **Oliveira et al. 2014**, *It's the psychology stupid* (ACSAC). Security is not part of developers' everyday heuristics. Primed developers found about twice as many vulnerabilities.
 - **Acar et al. 2016**, *You get where you're looking for* (IEEE S&P). Developers using Stack Overflow produced the most functional and least secure code, and rated insecure solutions as secure.
 - **Perry et al. 2023**, *Do users write more insecure code with AI assistants?* (CCS). Participants with an AI assistant wrote less secure code, including for encryption, and were more confident it was secure.
@@ -26,6 +26,6 @@ The studies behind each rule in [SKILL.md](SKILL.md). Cite these when a rule is 
 | 8. Warn at point of use | Gorski et al. 2018 (SOUPS): API warnings nearly doubled secure outcomes; code that triggered a warning was 15 times more likely to be fixed. Gorski et al. 2020 (CHI): the five parts of a warning. Vance et al. 2018 (CHI): repeated identical warnings stop being processed. Kern 2024: exemptions survive as a counted allowlist, not as individual review judgements. |
 | 9. Secure, complete examples | Acar et al. 2017: code copied from Stack Overflow was about three times more likely to be functional on the symmetric tasks, and insecure inputs in examples were copied with it. Fischer et al. 2017 (IEEE S&P): insecure Stack Overflow snippets propagated into Play Store apps. |
 | 10. Keep it small | Blessing et al. 2021: about one CVE per thousand lines added to OpenSSL, with ρ = 0.8 between lines added and CVEs introduced; LibreSSL and BoringSSL removed 22% and 70% of the code and with it 25% and 40.6% of the vulnerabilities. Both forks then grew back to OpenSSL's size at Heartbleed, so minimalism needs a review step, not a founding intention. |
-| 11. Evolve loudly | Holmwood 2022 (linux.conf.au): Keyczar's replacement by Tink as the model of a breaking change with a migration path. |
+| 11. Evolve loudly | Holmwood 2022 (linux.conf.au): Keyczar's replacement by Tink as the model of a breaking change with a migration path. Kern 2024: the rollout is deprecate, migrate, then enforce; the old path ends as a denied lint with a counted exemption list. |
 
 Experience does not protect against footguns: Acar et al. 2017 found Python, security and library experience did not predict success, and Brun et al. 2023 found long-time professionals made as many mistakes as novices.

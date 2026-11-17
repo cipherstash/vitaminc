@@ -169,24 +169,34 @@ fn open_user(
 }
 ```
 
-To encrypt a single secret, pass the `Protected` itself. It is walked inside the wrapper and decrypts back into one:
+To encrypt a single secret, pass the `Protected` itself. It is walked inside the wrapper and decrypts back into one. The AAD has no id, so a unit type names the one place the value lives:
 
 ```rust
+use vitaminc_aead::{ContextPiece, IntoContext};
 use vitaminc_encrypt::{
     decrypt, encrypt, Aes256Cipher, AesCipherText, DecodeError, DecryptError, EncryptError,
     Unspecified,
 };
 use vitaminc_protected::Protected;
 
+/// The one stored GitHub integration token. The one place its AAD is spelled.
+struct GithubToken;
+
+impl<'a> IntoContext<'a> for GithubToken {
+    fn into_context(self) -> ContextPiece<'a> {
+        ("integrations", "github/token").into_context()
+    }
+}
+
 fn seal_token(cipher: &Aes256Cipher, token: Protected<String>) -> Result<AesCipherText, EncryptError<Unspecified>> {
-    encrypt(token, cipher, "integrations/github/token")
+    encrypt(token, cipher, GithubToken)
 }
 
 fn open_token(
     cipher: &Aes256Cipher,
     stored: AesCipherText,
 ) -> Result<Protected<String>, DecryptError<DecodeError, Unspecified>> {
-    decrypt(cipher, stored, "integrations/github/token")
+    decrypt(cipher, stored, GithubToken)
 }
 ```
 
@@ -243,12 +253,12 @@ fn data_cipher(
 
 ## Keyed hash, blind index, or equality term
 
-An unkeyed hash of a low-entropy value (an email, a phone number) is reversible by guessing. Derive a keyed term instead, under a context naming the index and its version. Writes and queries must use the same input type and context. The key is what makes the terms unguessable, so it is generated once, kept in the secret store, and never written into the source.
+An unkeyed hash of a low-entropy value (an email, a phone number) is reversible by guessing. Derive a keyed term instead, under a context naming the index and its version; `nonempty!` refuses an empty context at compile time. Writes and queries must use the same input type and context. The key is what makes the terms unguessable, so it is generated once, kept in the secret store, and never written into the source.
 
 ```rust
 use vitaminc_hmac::HmacSha256Prf;
 use vitaminc_prf::{PrfKeyInit, PrfValue};
-use vitaminc_protected::Protected;
+use vitaminc_protected::{nonempty, Protected};
 use vitaminc_random::{Generatable, RandomError, SafeRand};
 
 /// Run once, when the index is created. Put the result in the secret store.
@@ -265,6 +275,13 @@ fn index_key_from_secret_store(
 }
 
 async fn email_term(prf: &HmacSha256Prf, email: &str) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-    Ok(email.prf_with_context(prf, "users/email/exact/v1").await?)
+    Ok(email.prf_with_context(prf, nonempty!("users/email/exact/v1")).await?)
 }
+
+// The index's first run: a fresh key, keyed directly. Later runs load it instead.
+let mut rng = SafeRand::from_entropy().unwrap();
+let prf = HmacSha256Prf::new(new_index_key(&mut rng).unwrap());
+let a = futures::executor::block_on(email_term(&prf, "ada@example.com")).unwrap();
+let b = futures::executor::block_on(email_term(&prf, "ada@example.com")).unwrap();
+assert_eq!(a, b);
 ```
