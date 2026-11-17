@@ -21,9 +21,10 @@ use vitaminc_aead::plaintext::kinds::{
 
 const NANOS_PER_SECOND: i128 = 1_000_000_000;
 const SECONDS_PER_DAY: i64 = 86_400;
-/// More digits than any year in the wire's range, so a year that parses
-/// cannot overflow before the range check.
-const MAX_YEAR_DIGITS: usize = 9;
+/// A year past these is outside the wire's range whatever its month and
+/// day, and is refused before its day count is computed, so the arithmetic
+/// cannot overflow. The day-count check decides the years at the ends.
+const YEARS: std::ops::RangeInclusive<i64> = -262_144..=262_143;
 
 /// A day of the proleptic Gregorian calendar, within the wire's range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +50,9 @@ fn days_in_month(year: i64, month: u8) -> u8 {
 impl Date {
     /// The date, if it is one and lies within the wire's range.
     pub(crate) fn new(year: i64, month: u8, day: u8) -> Option<Self> {
+        if !YEARS.contains(&year) {
+            return None;
+        }
         if !(1..=12).contains(&month) || day == 0 || day > days_in_month(year, month) {
             return None;
         }
@@ -110,10 +114,9 @@ impl Date {
             _ => (false, text),
         };
         let digits = unsigned.bytes().take_while(u8::is_ascii_digit).count();
-        if digits == 0 || digits > MAX_YEAR_DIGITS {
-            return None;
-        }
         let (year, rest) = unsigned.split_at(digits);
+        // No digits, or too many for an i64, fails here; any other year
+        // outside the wire's range fails in `Date::new`.
         let year: i64 = year.parse().ok()?;
         let rest = rest.strip_prefix('-')?;
         let (month, rest) = two_digits(rest)?;
@@ -365,6 +368,9 @@ mod tests {
             "+2024-01-01",
             "-05-03-01",
             "1234567890-01-01",
+            "99999999999999999999-01-01",
+            "+262143-01-01",
+            "-262144-12-31",
             "２０２４-01-01",
         ] {
             let parsed = Date::parse(invalid).filter(|d| d.to_string() == invalid);
@@ -383,6 +389,12 @@ mod tests {
             ("1970-01-01T00:00:00.1234567891Z", 123_456_789),
             ("1970-01-01T01:00:00+01:00", 0),
             ("1969-12-31T23:00:00-01:00", 0),
+            ("1970-01-01T01:30:00+01:30", 0),
+            ("1969-12-31T23:30:00-00:30", 0),
+            ("1970-01-01T23:59:00+23:59", 0),
+            ("1970-01-01T00:59:00+00:59", 0),
+            ("1970-01-01T23:59:59Z", 86_399_000_000_000),
+            ("1970-01-01T00:00:00.999999999Z", 999_999_999),
             ("1969-12-31T23:59:59.999999999Z", -1),
             ("-0005-03-01T12:00:00+01:00", -62_319_848_400_000_000_000),
         ] {
@@ -397,6 +409,9 @@ mod tests {
             "1970-01-01T00:00:00.Z",
             "1970-01-01T00:00:00+0100",
             "1970-01-01T00:00:00+24:00",
+            "1970-01-01T00:00:00+00:60",
+            "1970-01-01T00:00:00+01",
+            "1970-01-01T00:00:00 +01:00",
             "1970-01-01T00:00:00Zjunk",
             "1970-01-01",
             "+12000-01-01",
