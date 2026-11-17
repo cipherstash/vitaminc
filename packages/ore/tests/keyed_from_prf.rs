@@ -137,3 +137,44 @@ fn a_visitor_debugs_as_its_name() {
         "SchemeVisitor"
     );
 }
+
+/// Only a single block keys a scheme. Every other shape is refused, a
+/// sequence or map with blocks in it at any depth included.
+#[test]
+fn every_shape_but_a_block_is_refused() {
+    use vitaminc_prf::{PrfVisitorError, ResolvedPrf};
+
+    type Node = ResolvedPrf<[u8; 32], ()>;
+    let shapes: [(&str, Node); 4] = [
+        ("absent", ResolvedPrf::Absent),
+        ("passthrough", ResolvedPrf::Passthrough(())),
+        (
+            "sequence",
+            ResolvedPrf::Sequence(vec![
+                ResolvedPrf::Block([1; 32]),
+                ResolvedPrf::Sequence(vec![ResolvedPrf::Block([2; 32])]),
+                ResolvedPrf::Absent,
+            ]),
+        ),
+        (
+            "map",
+            ResolvedPrf::Map(vec![
+                (String::from("a"), ResolvedPrf::Block([3; 32])),
+                (
+                    String::from("b"),
+                    ResolvedPrf::Map(vec![(String::from("c"), ResolvedPrf::Block([4; 32]))]),
+                ),
+                (String::from("d"), ResolvedPrf::Passthrough(())),
+            ]),
+        ),
+    ];
+    for (name, node) in shapes {
+        assert!(
+            matches!(
+                node.visit(SchemeVisitor::<Mock>::new()),
+                Err(PrfVisitorError::UnexpectedShape)
+            ),
+            "{name} keyed a scheme"
+        );
+    }
+}
