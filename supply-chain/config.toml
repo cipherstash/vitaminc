@@ -289,10 +289,6 @@ criteria = "safe-to-deploy"
 version = "0.10.2"
 criteria = "crypto-reviewed"
 
-[[exemptions.chrono]]
-version = "0.4.45"
-criteria = "safe-to-deploy"
-
 [[exemptions.cipher]]
 version = "0.4.4"
 criteria = "crypto-reviewed"
