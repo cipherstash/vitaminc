@@ -299,6 +299,7 @@ jobs:
           cargo test -p vitaminc-prf --features normalize &&
           cargo test -p vitaminc-hmac --test normalized_equality &&
           cargo test -p vitaminc --features prf,normalize --test prf_normalize &&
+          cargo test -p vitaminc --features prf,ore --test prf_ore &&
           cargo check -p vitaminc --features ore
 
       - name: test (vitaminc-encrypt, RustCrypto backend on native)

@@ -63,6 +63,11 @@ name = "prf_normalize"
 path = "tests/prf_normalize.rs"
 required-features = ["prf", "normalize"]
 
+[[test]]
+name = "prf_ore"
+path = "tests/prf_ore.rs"
+required-features = ["prf", "ore"]
+
 [dev-dependencies]
 zeroize.workspace = true
 
