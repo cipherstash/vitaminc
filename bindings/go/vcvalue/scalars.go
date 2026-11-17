@@ -73,7 +73,9 @@ func (v Int128) String() string {
 }
 
 // Date is a proleptic Gregorian calendar date, without time or timezone.
-// Its range matches chrono::NaiveDate, including year zero and BCE dates.
+// Its range is the wire's, years -262143 through 262142 (chrono's
+// NaiveDate range, where it was first set), including year zero and BCE
+// dates.
 type Date struct {
 	Year  int
 	Month time.Month

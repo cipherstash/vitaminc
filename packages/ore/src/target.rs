@@ -231,24 +231,23 @@ impl Target for OrderTarget {
 /// | an integer target | every integer type whose whole range it holds, so `I32` takes `i8`, `i16`, `i32` and `u16` (a `u8` is not a scalar of the data model: `Vec<u8>` is bytes). There is no 8-bit target, so an `i8` fits `I16` and up: see [`OrderTarget`] |
 /// | `F64` | `f32`, `f64` |
 /// | `Bytes` | `&[u8]`, `Vec<u8>`, `[u8; N]`, [`Bytes`](vitaminc_aead::Bytes) |
-/// | `Date` | `chrono::NaiveDate` (feature `chrono`) |
-/// | `Timestamp` | `vitaminc_aead::Timestamp` (feature `chrono`) |
+/// | `Date` | `jiff::civil::Date` (feature `jiff`) |
+/// | `Timestamp` | `jiff::Timestamp`, `vitaminc_aead::Timestamp` (feature `jiff`) |
 /// | `Decimal` | `rust_decimal::Decimal` (feature `rust_decimal`) |
 /// | `Uuid` | `uuid::Uuid` (feature `uuid`) |
 ///
 /// and a reference to any of them. What is not here can be refused: an
-/// `i64` may not fit `I32`, text may hold a code point Unicode 16 does not
-/// assign, and a `chrono::DateTime<Utc>` may be a leap second. Those go
-/// through [`OrderSpace::encrypt_checked`], which checks the value while
-/// the program runs.
+/// `i64` may not fit `I32`, and text may hold a code point Unicode 16 does
+/// not assign. Those go through [`OrderSpace::encrypt_checked`], which
+/// checks the value while the program runs.
 ///
 /// [`OrderSpace::encrypt`]: crate::OrderSpace::encrypt
 /// [`OrderSpace::encrypt_checked`]: crate::OrderSpace::encrypt_checked
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a value that always fits `{T}`",
     label = "does not always fit `{T}`",
-    note = "`encrypt` takes a value the encoding never refuses: a narrower integer, an `f32`, bytes, or a typed value such as a `NaiveDate`",
-    note = "a value the encoding can refuse (an integer that may be out of range, text, a `DateTime<Utc>`, or any other `Encrypt` value) goes through `encrypt_checked`, which checks it while the program runs"
+    note = "`encrypt` takes a value the encoding never refuses: a narrower integer, an `f32`, bytes, or a typed value such as a `jiff::civil::Date`",
+    note = "a value the encoding can refuse (an integer that may be out of range, text, or any other `Encrypt` value) goes through `encrypt_checked`, which checks it while the program runs"
 )]
 pub trait FitsIn<T: StaticTarget>: Encrypt + private::Sealed {}
 
@@ -574,41 +573,42 @@ impl<const N: usize> OwnTarget for &[u8; N] {
 }
 
 // The typed values callers hold. Each is inside the range its encoding
-// takes for every value the type can hold: chrono's `NaiveDate` spans
-// exactly the day range `Logical::Date` admits, a `Timestamp` is never a
-// leap second and lies in chrono's range, and a `rust_decimal::Decimal`
-// has a 96-bit mantissa and a scale of at most 28, which is what the
-// decimal encoding takes. A `chrono::DateTime<Utc>` may be a leap second,
-// which has no count, so it is checked, not fitting.
-#[cfg(feature = "chrono")]
-#[cfg_attr(docsrs, doc(cfg(feature = "chrono")))]
-mod chrono_rows {
+// takes for every value the type can hold: jiff's dates and instants
+// (years -9999 to 9999) lie inside the range `Logical::Date` and
+// `Logical::Timestamp` admit, and have no leap seconds, and a
+// `rust_decimal::Decimal` has a 96-bit mantissa and a scale of at most 28,
+// which is what the decimal encoding takes.
+#[cfg(feature = "jiff")]
+#[cfg_attr(docsrs, doc(cfg(feature = "jiff")))]
+mod jiff_rows {
     use super::*;
-    use chrono::{DateTime, NaiveDate, Utc};
+    use jiff::civil::Date as CivilDate;
     use vitaminc_aead::Timestamp as Instant;
 
-    impl private::Sealed for NaiveDate {}
-    impl private::Sealed for &NaiveDate {}
-    impl private::Sealed for DateTime<Utc> {}
-    impl private::Sealed for &DateTime<Utc> {}
+    impl private::Sealed for CivilDate {}
+    impl private::Sealed for &CivilDate {}
+    impl private::Sealed for jiff::Timestamp {}
+    impl private::Sealed for &jiff::Timestamp {}
     impl private::Sealed for Instant {}
     impl private::Sealed for &Instant {}
 
-    impl FitsIn<Date> for NaiveDate {}
-    impl FitsIn<Date> for &NaiveDate {}
+    impl FitsIn<Date> for CivilDate {}
+    impl FitsIn<Date> for &CivilDate {}
+    impl FitsIn<Timestamp> for jiff::Timestamp {}
+    impl FitsIn<Timestamp> for &jiff::Timestamp {}
     impl FitsIn<Timestamp> for Instant {}
     impl FitsIn<Timestamp> for &Instant {}
 
-    impl OwnTarget for NaiveDate {
+    impl OwnTarget for CivilDate {
         type Target = Date;
     }
-    impl OwnTarget for &NaiveDate {
+    impl OwnTarget for &CivilDate {
         type Target = Date;
     }
-    impl OwnTarget for DateTime<Utc> {
+    impl OwnTarget for jiff::Timestamp {
         type Target = Timestamp;
     }
-    impl OwnTarget for &DateTime<Utc> {
+    impl OwnTarget for &jiff::Timestamp {
         type Target = Timestamp;
     }
     impl OwnTarget for Instant {

@@ -257,11 +257,11 @@ jobs:
 
       - name: test (aead optional scalar features)
         # Only dev-dependencies enable these on vitaminc-aead, so a build
-        # of the crate alone skips the tests that pin the chrono,
+        # of the crate alone skips the tests that pin the jiff,
         # rust_decimal and uuid conversions and range constants. Run each
         # alone and together.
         run: |
-          cargo test -p vitaminc-aead --features chrono &&
+          cargo test -p vitaminc-aead --features jiff &&
           cargo test -p vitaminc-aead --features rust_decimal &&
           cargo test -p vitaminc-aead --features uuid &&
           cargo test -p vitaminc-aead --all-features

@@ -139,7 +139,8 @@ Scalar failures throw a `TypeError` with a stable code: `ERR_INTEGER_RANGE`,
 ## Errors
 
 A getter that throws, a string with an unpaired surrogate, a `BigInt` out
-of range or a `Date` outside chrono's range stops the walk through the
+of range or a `Date` outside the wire's range (years -262143 to 262142)
+stops the walk through the
 sink's `Error::source`, as a [`JsFault`] carrying the napi status and
 reason. At the boundary, `JsFault::from_source` turns it back into the
 napi error, and a pending JavaScript exception surfaces unchanged: the
@@ -161,8 +162,8 @@ it is not itself loadable from Node.
   on drop.
 - On the way out, the build hands decrypted text and bytes to JavaScript,
   where the engine owns them. The Rust copies made along the way are not
-  wiped: the text of each wrapper class (formatted by `chrono`,
-  `rust_decimal` or the binding), each map key, and the bytes copied into a
+  wiped: the text of each wrapper class (formatted by the binding or
+  `rust_decimal`), each map key, and the bytes copied into a
   `Buffer`.
 - Property names that would touch the prototype chain (`__proto__`,
   `constructor`, `prototype`) are rejected in both directions. Nesting is

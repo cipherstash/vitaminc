@@ -170,7 +170,7 @@ fn a_value_that_does_not_fit_its_logical_type_is_invalid() {
         NormalizeError::Invalid
     );
     // The encoders say the same without going through `admits`, one day
-    // past chrono's range on either side included.
+    // past the wire's range on either side included.
     assert!(date(Int::I64(i64::MAX)).is_none());
     assert!(date(Int::I32(MAX_DATE_DAYS + 1)).is_none());
     assert!(date(Int::I32(MIN_DATE_DAYS - 1)).is_none());
@@ -446,7 +446,7 @@ mod given_any_canonical_f64 {
 }
 
 #[test]
-fn timestamps_one_past_chronos_range_are_invalid() {
+fn timestamps_one_past_the_wire_range_are_invalid() {
     use vitaminc_aead::plaintext::kinds::{MAX_TIMESTAMP_NANOS, MIN_TIMESTAMP_NANOS};
     let ns = Logical::Timestamp(TimeUnit::Nanos);
     assert!(timestamp(TimeUnit::Nanos, Int::I128(MAX_TIMESTAMP_NANOS)).is_some());

@@ -233,7 +233,8 @@ func decodeEnvelope(r *reader) (any, error) {
 }
 
 // envelopeTimestamp is a count of seconds, milliseconds or microseconds
-// since the epoch as a time.Time, in chrono's range. The nanosecond unit has
+// since the epoch as a time.Time, in the wire's range (years -262143 to
+// 262142, chrono's, where it was first set). The nanosecond unit has
 // the shorthand Timestamp tag and is refused in the envelope.
 func envelopeTimestamp(unit byte, physical any) (any, error) {
 	var per int64

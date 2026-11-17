@@ -49,15 +49,15 @@ No optional features are enabled by default.
 
 - `hlist` — static heterogeneous-list encryption support (enables `vitaminc-aead`'s `hlist` feature)
 
-The examples in this guide use the default features. To encrypt `chrono`,
+The examples in this guide use the default features. To encrypt `jiff`,
 `rust_decimal`, or `uuid` values, enable the corresponding feature on your
 `vitaminc-aead` dependency and add the external type's crate as a direct dependency.
 For example, date support uses:
 
 <!-- workspace-deps:start -->
 ```toml
-vitaminc-aead = { version = "0.9.1", features = ["chrono"] }
-chrono = { version = "0.4", default-features = false, features = ["std"] }
+vitaminc-aead = { version = "0.9.1", features = ["jiff"] }
+jiff = { version = "1.0", default-features = false }
 ```
 <!-- workspace-deps:end -->
 
@@ -157,7 +157,7 @@ let key = Key::from(key_bytes);
 - every integer and float width, `bool`, and `Option<T>` where `T: Encrypt`
 - `Vec<T>`, `HashMap<String, T>` and `BTreeMap<String, T>` where `T: Encrypt`
 - `Protected<T>` where `&T: Encrypt`, walked without leaving the wrapper
-- `chrono`, `rust_decimal` and `uuid` scalars behind `vitaminc-aead`'s features
+- `jiff`, `rust_decimal` and `uuid` scalars behind `vitaminc-aead`'s features
 
 ```rust
 use vitaminc_encrypt::{encrypt, Aes256Cipher, Key};

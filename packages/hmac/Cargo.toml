@@ -21,9 +21,9 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 vitaminc-prf = { path = "../prf", features = ["normalize"] }
-vitaminc-aead = { path = "../aead", features = ["chrono", "rust_decimal", "uuid"] }
+vitaminc-aead = { path = "../aead", features = ["jiff", "rust_decimal", "uuid"] }
 vitaminc-normalize = { path = "../normalize" }
-chrono = { version = "0.4.44", default-features = false, features = ["std"] }
+jiff = { version = "1.0.0", default-features = false }
 rust_decimal = { version = "1.41", default-features = false, features = ["std"] }
 uuid = { version = "1", default-features = false }
 futures = "0.3.31"

@@ -177,15 +177,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "chrono"
-version = "0.4.45"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
 name = "cipher"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1022,7 +1013,6 @@ name = "vitaminc-aead"
 version = "0.9.1"
 dependencies = [
  "bytes",
- "chrono",
  "futures-util",
  "rust_decimal",
  "serde",
@@ -1047,7 +1037,6 @@ dependencies = [
 name = "vitaminc-aead-napi"
 version = "0.9.1"
 dependencies = [
- "chrono",
  "mutants",
  "napi",
  "rust_decimal",

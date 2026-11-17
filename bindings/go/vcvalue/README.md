@@ -102,7 +102,7 @@ mirror of the reflection encode) is future work.
 `ParseInt128` / `ParseUint128` constructors and `String` methods. Out-of-range
 inputs return `ErrIntegerRange`.
 
-`Date{Year, Month, Day}` is a Gregorian calendar date in chrono's range
+`Date{Year, Month, Day}` is a Gregorian calendar date in the wire's range
 (-262143 through 262142). `time.Time` maps to Timestamp with nanoseconds and
 decodes in UTC; timezone/location and monotonic metadata are not retained.
 `Timestamp{Seconds, Nanoseconds}` encodes an instant from its parts. A leap

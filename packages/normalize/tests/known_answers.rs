@@ -9,9 +9,8 @@
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::collections::BTreeMap;
 
-use chrono::NaiveDate;
 use futures_executor::block_on;
-use vitaminc_aead::plaintext::kinds::chrono as conv;
+use vitaminc_aead::plaintext::kinds::jiff as conv;
 use vitaminc_aead::plaintext::render;
 use vitaminc_aead::seal::{AsyncCipher, Cipher};
 use vitaminc_aead::{
@@ -729,7 +728,8 @@ fn text_and_bytes_normalize_to_their_pinned_terms() {
 
 #[test]
 fn dates_normalize_to_their_pinned_terms() {
-    // NaiveDate::MIN, 0001-01-01, 1969-12-31, 1970-01-01, 2024-02-29, NaiveDate::MAX.
+    // The wire's minimum (chrono's NaiveDate::MIN), 0001-01-01, 1969-12-31,
+    // 1970-01-01, 2024-02-29, the wire's maximum (chrono's NaiveDate::MAX).
     pin(
         Some(Logical::Date),
         Physical::Int(Int::I32(-96465292)),
@@ -772,7 +772,8 @@ fn dates_normalize_to_their_pinned_terms() {
 fn timestamps_in_every_unit_normalize_to_their_pinned_terms() {
     // Five instants as nanoseconds, each then truncated to micros, millis
     // and seconds (a coarser unit matches the term of the instant at that
-    // precision), then chrono's MIN_UTC and MAX_UTC.
+    // precision), then the wire's minimum and maximum (chrono's MIN_UTC and
+    // MAX_UTC).
     pin(
         Some(Logical::Timestamp(TimeUnit::Nanos)),
         Physical::Int(Int::I128(0)),
@@ -1044,7 +1045,7 @@ fn a_uuid_has_a_domain_of_its_own() {
 
 #[test]
 fn a_date_never_matches_its_day_count_and_widths_agree() {
-    let date = NaiveDate::from_ymd_opt(2024, 2, 29).expect("date");
+    let date = jiff::civil::Date::constant(2024, 2, 29);
     let days = conv::date_days(date);
     let as_date = normalize(Some(Logical::Date), Physical::Int(Int::I32(days))).expect("date");
     let as_int = normalize(None, Physical::Int(Int::I32(days))).expect("int");

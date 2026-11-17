@@ -6,9 +6,10 @@
 
 use std::fmt;
 
-use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
-use vitaminc_aead::plaintext::kinds::{chrono as kinds_chrono, decimal as kinds_decimal};
+use vitaminc_aead::plaintext::kinds::decimal as kinds_decimal;
+
+use crate::civil;
 use vitaminc_aead::{Int, Logical, TimeUnit};
 
 /// Host scalar conversion errors. Node receives a TypeError with the same
@@ -118,14 +119,17 @@ fn nanos_int(nanos: i128) -> Int {
     }
 }
 
-/// `YYYY-MM-DD` as days since 1970-01-01.
+/// `YYYY-MM-DD` as days since 1970-01-01. The year is four digits from
+/// 0000 to 9999, and signed and at least four digits outside that.
 pub(crate) fn date(text: &str) -> Result<Int, ConversionError> {
-    let value =
-        NaiveDate::parse_from_str(text, "%Y-%m-%d").map_err(|_| ConversionError::InvalidDate)?;
+    let value = civil::Date::parse(text).ok_or(ConversionError::InvalidDate)?;
     if !displays_as(&value, text) {
         return Err(ConversionError::InvalidDate);
     }
-    Ok(Int::I32(kinds_chrono::date_days(value)))
+    // Within the wire's range, which an i32 holds.
+    i32::try_from(value.days())
+        .map(Int::I32)
+        .map_err(|_| ConversionError::InvalidDate)
 }
 
 /// Whether `value` displays as exactly `text`. The display is compared as it
@@ -143,9 +147,10 @@ fn displays_as(value: &impl fmt::Display, text: &str) -> bool {
     fmt::write(&mut rest, format_args!("{value}")).is_ok() && rest.0.is_empty()
 }
 
-/// A day count as `YYYY-MM-DD`, if it is a date chrono can represent.
+/// A day count as `YYYY-MM-DD`, if it is within the wire's range.
 pub(crate) fn date_text(days: Int) -> Option<String> {
-    kinds_chrono::date(days).map(|date| date.to_string())
+    let days = i64::try_from(days.to_i128()?).ok()?;
+    civil::Date::from_days(days).map(|date| date.to_string())
 }
 
 /// RFC 3339 text, or an ISO 8601 expanded year outside 0000-9999, as
@@ -155,22 +160,14 @@ pub(crate) fn timestamp(text: &str) -> Result<Int, ConversionError> {
     // RFC 3339 only spells years 0000-9999. Outside that range decryption
     // emits an ISO 8601 expanded year (`+12000-…`, `-0005-…`), so accept that
     // form too or a decrypted timestamp could not be encrypted again.
-    let parsed = if text.starts_with(['+', '-']) {
-        DateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S%.f%#z")
-    } else {
-        DateTime::parse_from_rfc3339(text)
-    };
-    let instant = parsed
-        .map(|value| value.with_timezone(&Utc))
-        .map_err(|_| ConversionError::InvalidTimestamp)?;
-    kinds_chrono::timestamp_nanos(instant)
+    civil::parse_timestamp(text)
         .map(nanos_int)
         .ok_or(ConversionError::InvalidTimestamp)
 }
 
 /// A JavaScript `Date`'s millisecond count, as the `I64` it is stored as
 /// under `Timestamp(Millis)`. Refused when it is not a whole number of
-/// milliseconds (`Invalid Date` is NaN) or lies outside chrono's range.
+/// milliseconds (`Invalid Date` is NaN) or lies outside the wire's range.
 pub(crate) fn date_millis(ms: f64) -> Result<Int, ConversionError> {
     if !ms.is_finite() || ms.fract() != 0.0 {
         return Err(ConversionError::InvalidTimestamp);
@@ -185,19 +182,20 @@ pub(crate) fn date_millis(ms: f64) -> Result<Int, ConversionError> {
 }
 
 /// The millisecond count a stored timestamp has as a JavaScript `Date`, if
-/// it is whole milliseconds. Every stored timestamp is inside chrono's
+/// it is whole milliseconds. Every stored timestamp is inside the wire's
 /// range, which is narrower than `Date`'s, so the count always fits.
 pub(crate) fn timestamp_js_millis(unit: TimeUnit, count: Int) -> Option<f64> {
     let nanos = vitaminc_aead::plaintext::kinds::timestamp_nanos(unit, count)?;
-    let millis = kinds_chrono::timestamp_count(TimeUnit::Millis, nanos)?;
-    Some(millis as f64)
+    let per_milli = TimeUnit::Millis.nanos();
+    (nanos % per_milli == 0).then(|| (nanos / per_milli) as f64)
 }
 
 /// A stored timestamp as RFC 3339 text with nanoseconds, for the
 /// `VcTimestamp` wrapper.
 pub(crate) fn timestamp_text(unit: TimeUnit, count: Int) -> Option<String> {
-    kinds_chrono::timestamp(unit, count)
-        .map(|instant| instant.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true))
+    civil::timestamp_text(vitaminc_aead::plaintext::kinds::timestamp_nanos(
+        unit, count,
+    )?)
 }
 
 /// Fixed-point decimal text as a scale and mantissa.
@@ -443,7 +441,7 @@ mod tests {
             f64::INFINITY,
             f64::NEG_INFINITY,
             0.5,
-            // Inside `Date`'s range but outside chrono's.
+            // Inside `Date`'s range but outside the wire's.
             8_640_000_000_000_000.0,
             -8_640_000_000_000_000.0,
         ] {
@@ -472,14 +470,14 @@ mod tests {
         // Sub-millisecond precision needs the wrapper.
         assert_eq!(timestamp_js_millis(TimeUnit::Nanos, Int::I64(-1)), None);
         assert_eq!(timestamp_js_millis(TimeUnit::Micros, Int::I64(1)), None);
-        // chrono's whole range fits a `Date`: its limits are about ±8.2e15
-        // milliseconds, inside `Date`'s ±8.64e15.
+        // The wire's whole range fits a `Date`: its limits are about
+        // ±8.2e15 milliseconds, inside `Date`'s ±8.64e15.
         for limit in [MIN_TIMESTAMP_NANOS, MAX_TIMESTAMP_NANOS] {
             let ms = timestamp_js_millis(TimeUnit::Millis, Int::I64((limit / 1_000_000) as i64))
                 .expect("whole milliseconds at the bound");
             assert!(ms.abs() <= 8_640_000_000_000_000.0, "{ms}");
         }
-        // Out of chrono's range entirely.
+        // Out of the wire's range entirely.
         assert_eq!(
             timestamp_js_millis(TimeUnit::Nanos, Int::I128(i128::MAX)),
             None

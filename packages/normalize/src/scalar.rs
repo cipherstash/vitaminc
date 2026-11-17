@@ -211,8 +211,8 @@ pub fn float(value: Float) -> Protected<Vec<u8>> {
 }
 
 /// A date's day count since 1970-01-01, as the orderable bytes of its
-/// count of days from 0001-01-01 (the same bytes chrono's `NaiveDate`
-/// orders by). `None` outside the date range.
+/// count of days from 0001-01-01, so the bytes order as the dates do.
+/// `None` outside the date range.
 pub fn date(days: Int) -> Option<Protected<Vec<u8>>> {
     let days = i32::try_from(days.to_i128()?).ok()?;
     if !(MIN_DATE_DAYS..=MAX_DATE_DAYS).contains(&days) {
@@ -225,9 +225,9 @@ pub fn date(days: Int) -> Option<Protected<Vec<u8>>> {
 }
 
 /// A count of `unit`s since the Unix epoch, as orderable seconds then
-/// big-endian nanoseconds truncated to microseconds (the same bytes
-/// chrono's `DateTime<Utc>` orders by, truncated). `None` outside the
-/// timestamp range.
+/// big-endian nanoseconds truncated to microseconds, so the bytes order as
+/// the instants do, to the microsecond. `None` outside the timestamp
+/// range.
 pub fn timestamp(unit: TimeUnit, count: Int) -> Option<Protected<Vec<u8>>> {
     // `timestamp_nanos` is `#[inline]` for the same reason as
     // `sign_and_word` in `integer`: so the count is not returned through
@@ -357,7 +357,8 @@ pub(crate) fn fixed<const N: usize>(mut write: impl FnMut(&mut [u8; N])) -> Prot
     bytes
 }
 
-/// Days from 0001-01-01 (day 1, chrono's "days from CE") to 1970-01-01.
+/// Days from 0001-01-01 (counted as day 1, the "days from CE" of the
+/// proleptic Gregorian calendar) to 1970-01-01.
 const EPOCH_DAYS_FROM_CE: i32 = 719_163;
 const NANOS_PER_SECOND: i128 = 1_000_000_000;
 

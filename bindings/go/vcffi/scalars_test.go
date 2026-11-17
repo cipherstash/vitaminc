@@ -96,7 +96,7 @@ func TestEnvelopeTimestampsDecodeToTime(t *testing.T) {
 		{"f3030205c8ff ffffffffffff", time.Unix(0, -56_000).UTC()},                             // -56 µs, as an i64
 		{"f303000c0a", time.Unix(10, 0).UTC()},                                                 // 10 s, as an i8
 		{"f3030210" + "00f1" + "ffffffffffffffffffffffffffff", time.Unix(0, -3_840_000).UTC()}, // -3840 µs, as an i128
-		{"f30300057f6b0a9a77070000", time.Unix(8210266876799, 0).UTC()},                        // the last second chrono can hold, as an i64
+		{"f30300057f6b0a9a77070000", time.Unix(8210266876799, 0).UTC()},                        // the last second the wire admits, as an i64
 	} {
 		t.Run(tc.wire, func(t *testing.T) {
 			raw, err := hex.DecodeString(strings.ReplaceAll(tc.wire, " ", ""))
@@ -116,8 +116,8 @@ func TestEnvelopeTimestampsDecodeToTime(t *testing.T) {
 		"f3030305" + "0000000000000000",                 // nanoseconds: the shorthand tag exists
 		"f3030405" + "0000000000000000",                 // no such unit
 		"f303010a" + "00000000",                         // a count that is not an int
-		"f3030010" + "0000000000000000000000000000ff7f", // out of chrono's range
-		"f3030005" + "806b0a9a77070000",                 // one second past chrono's range, as an i64
+		"f3030010" + "0000000000000000000000000000ff7f", // out of the wire's range
+		"f3030005" + "806b0a9a77070000",                 // one second past the wire's range, as an i64
 		"f3030107" + "18fcffffffffffff",                 // 2^64 - 1000 ms, a u64 above the i64 range
 	} {
 		t.Run(wire, func(t *testing.T) {
