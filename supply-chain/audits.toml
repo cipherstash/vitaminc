@@ -141,6 +141,12 @@ criteria = "safe-to-deploy"
 delta = "3.0.6 -> 3.0.9"
 notes = "Parser fixes matching upstream 3.0.7 (#2085 absolute path after a break label) and 3.0.8 (#2086, #2087: reject `<-` and stop treating `->` as subtraction), plus an additive Punctuated::retain in 3.0.9 (#2088) in safe code. The remainder is version bumps and nightly rustc_ast test-harness churn. No unsafe, no build script, no filesystem, env, network or process access added."
 
+[[audits.syn]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = ["safe-to-deploy", "does-not-implement-crypto"]
+delta = "3.0.9 -> 3.0.10"
+notes = "Performance fix matching upstream 3.0.10 (#2090): rightmost_subexpression_precedence gains an internal scan flag so scan_right no longer rescans operands whose scan already failed, avoiding exponential work on long chains of prefix ranges and binary operators; the new Bailout/Fail-versus-Consume condition is equivalent to the old nested if. The rest is the version bump, two new fixup test cases and nightly rustc_ast test-harness churn. No unsafe, no build script, no filesystem, env, network or process access added."
+
 [[audits.thiserror]]
 who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"
@@ -164,6 +170,12 @@ who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"
 delta = "1.21.0 -> 1.29.0"
 notes = "Eight minor releases, every hunk accounted for by the upstream release notes: branchless hex parse and format (#894), MaybeUninit encode helpers (#892; the new unsafe checks lengths before copying and fully initialises buffers before assume_init), parser diagnostics and the empty-input panic fix, case-insensitive urn prefix, v7 counter and ordering fixes, new serde adapters, NonNilUuid versioned constructors. No build script and no new runtime dependency (gungraun is a dev-dep for benches; the optional rand 0.9 to 0.10 bump sits behind fast-rng; rng.rs is unchanged). The byte-level API vitaminc uses (from_slice, as_bytes, into_bytes, field order) is unchanged; MSRV is now 1.89."
+
+[[audits.uuid]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "1.29.0 -> 1.29.2"
+notes = 'Two patch releases, every hunk accounted for by the upstream release notes: lint cleanup that drops the authors and html_root_url metadata, derives Default on the v7 context types and moves the optional zerocopy dependency behind cfg(uuid_unstable), where its derive was already gated (#921); deprecation of the borsh feature with no code change (#923); a rework of v7 timestamp and counter handling onto a single u128 nanosecond value with saturating conversions, which also removes a Duration::new overflow panic in From<Timestamp> for SystemTime (#926); and widening the WASM cfgs from target_arch = "wasm32" to target_family = "wasm" so the js rng path covers wasm64 (#928). No unsafe code changed (same unsafe sites, untouched files), no build script, and no new runtime dependency or fs, env, network or process access. The 1.29.2 tarball sha256 matches the lockfile and its sources match upstream merge commit 5205a6ea, published by the long-standing maintainer. The byte-level API vitaminc uses (from_bytes, from_slice, as_bytes, nil, max) is unchanged, and vitaminc enables no v7 or rng features; MSRV stays 1.89.'
 
 [[audits.wasm-bindgen]]
 who = "Dan Draper <dan@cipherstash.com>"

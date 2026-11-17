@@ -37,6 +37,12 @@ criteria = "safe-to-deploy"
 delta = "3.0.6 -> 3.0.9"
 notes = "Parser fixes matching upstream 3.0.7 (#2085 absolute path after a break label) and 3.0.8 (#2086, #2087: reject `<-` and stop treating `->` as subtraction), plus an additive Punctuated::retain in 3.0.9 (#2088) in safe code. The remainder is version bumps and nightly rustc_ast test-harness churn. No unsafe, no build script, no filesystem, env, network or process access added."
 
+[[audits.syn]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "3.0.9 -> 3.0.10"
+notes = "Performance fix matching upstream 3.0.10 (#2090): rightmost_subexpression_precedence gains an internal scan flag so scan_right no longer rescans operands whose scan already failed, avoiding exponential work on long chains of prefix ranges and binary operators; the new Bailout/Fail-versus-Consume condition is equivalent to the old nested if. The rest is the version bump, two new fixup test cases and nightly rustc_ast test-harness churn. No unsafe, no build script, no filesystem, env, network or process access added."
+
 [[audits.thiserror]]
 who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"
