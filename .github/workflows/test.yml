@@ -266,6 +266,13 @@ jobs:
           cargo test -p vitaminc-aead --features uuid &&
           cargo test -p vitaminc-aead --all-features
 
+      - name: test (aead jiff bug guard, release)
+        # jiff 1.0.0 can parse an instant before its own minimum
+        # (BurntSushi/jiff#714), but a debug assertion in jiff stops it
+        # first in a debug build. So the tests that check vitaminc refuses
+        # such an instant only build in release mode.
+        run: cargo test --release -p vitaminc-aead --features jiff an_instant_jiff_cannot_rebuild
+
       - name: test (aead-frame serde feature)
         # No workspace member enables `vitaminc-aead-frame/serde`, so the
         # workspace run skips the serde format's tests and doctest, and the
