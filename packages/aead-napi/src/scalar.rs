@@ -493,8 +493,9 @@ mod tests {
                 Some(text)
             );
         }
-        // An offset is applied, and the other spellings RFC 3339 allows
-        // are read.
+        // An offset is applied, the other spellings RFC 3339 allows are
+        // read, and so is a year with a `+` and six digits, as ISO 8601
+        // writes it.
         for (text, utc) in [
             (
                 "-000005-03-01T12:00:00+01:00",
