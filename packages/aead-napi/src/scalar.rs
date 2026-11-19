@@ -178,13 +178,15 @@ pub(crate) fn timestamp(text: &str) -> Result<Int, ConversionError> {
 }
 
 /// Whether `text` has RFC 3339's shape: a date, `T`, `HH:MM:SS`, a
-/// fraction of one to nine digits or none, and `Z` or `±HH:MM`. `t` and
-/// `z` may be lower case, and a space may stand for `T`.
+/// fraction of one to nine digits or none, and `Z` or `±HH:MM` with an
+/// hour of at most 23. `t` and `z` may be lower case, and a space may
+/// stand for `T`.
 ///
 /// jiff's parser reads much more than this (no seconds, the basic format,
-/// a comma, a time zone annotation), and reads a leap second as the second
-/// before it. So the shape is checked first, and a leap second refused;
-/// jiff checks the values.
+/// a comma, a time zone annotation, an offset of 24 or 25 hours), and
+/// reads a leap second as the second before it. So the shape is checked
+/// first, and a leap second and such an offset refused; jiff checks the
+/// other values.
 fn is_rfc3339(text: &str) -> bool {
     let year = if text.starts_with(['+', '-']) {
         "s999999"
@@ -207,7 +209,9 @@ fn is_rfc3339(text: &str) -> bool {
         }
         None => rest,
     };
-    matches!(rest, "Z" | "z") || after(rest, "s99:99") == Some("")
+    // The offset's two hour digits compare as text, since both are ASCII
+    // digits.
+    matches!(rest, "Z" | "z") || (after(rest, "s99:99") == Some("") && &rest[1..3] < "24")
 }
 
 /// What follows a prefix of `text` that has `shape`, where `9` stands for
@@ -248,8 +252,7 @@ pub(crate) fn date_millis(ms: f64) -> Result<Int, ConversionError> {
 /// range, which is narrower than `Date`'s, so the count always fits.
 pub(crate) fn timestamp_js_millis(unit: TimeUnit, count: Int) -> Option<f64> {
     let nanos = vitaminc_aead::plaintext::kinds::timestamp_nanos(unit, count)?;
-    let per_milli = TimeUnit::Millis.nanos();
-    (nanos % per_milli == 0).then(|| (nanos / per_milli) as f64)
+    kinds_jiff::timestamp_count(TimeUnit::Millis, nanos).map(|ms| ms as f64)
 }
 
 /// A stored timestamp as RFC 3339 text with nanoseconds, for the
@@ -514,6 +517,15 @@ mod tests {
                 "+002024-02-29T12:00:00.1Z",
                 "2024-02-29T12:00:00.100000000Z",
             ),
+            // The widest offsets RFC 3339 allows.
+            (
+                "2024-02-29T12:00:00+23:59",
+                "2024-02-28T12:01:00.000000000Z",
+            ),
+            (
+                "2024-02-29T12:00:00-23:59",
+                "2024-03-01T11:59:00.000000000Z",
+            ),
         ] {
             let count = timestamp(text).expect(text);
             assert_eq!(timestamp_text(TimeUnit::Nanos, count).as_deref(), Some(utc));
@@ -548,12 +560,71 @@ mod tests {
             "2024-02-29T24:00:00Z",
             "2024-02-29T12:60:00Z",
             "2024-02-29T12:00:61Z",
+            "2024-02-29T12:00:00+23:60",
+            // jiff reads an offset of up to 25 hours; RFC 3339 stops at 23.
+            "2024-02-29T12:00:00+24:00",
+            "2024-02-29T12:00:00-25:59",
             "2024-02-29T12:00:00+26:00",
         ] {
             assert_eq!(
                 timestamp(invalid),
                 Err(ConversionError::InvalidTimestamp),
                 "{invalid}"
+            );
+        }
+    }
+
+    /// `timestamp` counts the instant itself, so compare its count with
+    /// jiff's own for many dates, times, fractions and offsets. The years
+    /// stay away from the ends of the range, where jiff 1.0.0 miscounts
+    /// (BurntSushi/jiff#714) and an offset can carry the instant out.
+    #[test]
+    fn a_timestamp_count_is_the_one_jiff_counts() {
+        // A fixed xorshift sequence, so a failure can be reproduced.
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut below = |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % n) as i64
+        };
+        for _ in 0..20_000 {
+            let year = below(19_981) - 9_990;
+            let month = below(12) + 1;
+            let days_in_month = jiff::civil::Date::new(year as i16, month as i8, 1)
+                .expect("a date in range")
+                .days_in_month();
+            let day = below(days_in_month as u64) + 1;
+            let year = if (0..=9_999).contains(&year) {
+                format!("{year:04}")
+            } else {
+                format!("{}{:06}", if year < 0 { '-' } else { '+' }, year.abs())
+            };
+            let (hour, minute, second) = (below(24), below(60), below(60));
+            let fraction = match below(10) as usize {
+                0 => String::new(),
+                digits => format!(".{:09}", below(1_000_000_000))[..=digits].to_owned(),
+            };
+            let offset = match below(3) {
+                0 => "Z".to_owned(),
+                sign => format!(
+                    "{}{:02}:{:02}",
+                    if sign == 1 { '+' } else { '-' },
+                    below(24),
+                    below(60)
+                ),
+            };
+            let text = format!(
+                "{year}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}{fraction}{offset}"
+            );
+            let expected = text
+                .parse::<jiff::Timestamp>()
+                .unwrap_or_else(|e| panic!("jiff reads {text}: {e}"))
+                .as_nanosecond();
+            assert_eq!(
+                timestamp(&text).ok().and_then(|count| count.to_i128()),
+                Some(expected),
+                "{text}"
             );
         }
     }
