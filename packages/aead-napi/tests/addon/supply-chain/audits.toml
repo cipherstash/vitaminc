@@ -49,6 +49,12 @@ criteria = "safe-to-deploy"
 delta = "3.14.2 -> 3.15.0"
 notes = "Hunks map to napi-rs #3584, #3592, #3603, #3607, #3610, #3612, #3623 and #3626: memory-safety and leak fixes in class wrapping, native-borrow rooting, typed-array conversion and env teardown, plus ReadableStream cancel support. The new unsafe Send/Sync impls and the one napi_run_script of a constant three-line JS source were read and look sound. No new dependencies, no build.rs or FFI signature changes; Buffer and Uint8Array ownership paths are unchanged apart from a fixed reference leak on the error path."
 
+[[audits.napi]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "3.15.0 -> 3.16.1"
+notes = "Hunks map to napi-rs #3656, #3661, #3662, #3665, #3666, #3667 and #3670: leak fixes for threadsafe-function call data and define_class accessor closures, which are now owned through Rc so a cloned Property can no longer double-free; all-or-nothing class registration at module load; class identity stored as a NonZeroU32 index into a capped, append-only registry; a Tokio runtime lock fix; and symbol_for and well-known-symbol class keys, looked up with node_api_symbol_for or property reads on globalThis.Symbol, with no script evaluation. The new repr(C) PropertyClosuresData keeps PropertyClosures as its first field, so the existing getter and setter trampolines stay sound, and register_class rejects closure properties so the existing Send/Sync impl on ModuleClassProperty still holds. No new dependencies, no napi-sys bump, no build.rs or FFI signature changes; Buffer, TypedArray and ArrayBuffer ownership paths are untouched, and the define_properties with_name/with_value path aead-napi uses builds the same descriptor. Published by GitHub trusted publishing from 417375ad, whose sources match the tarball."
+
 [[audits.napi-derive]]
 who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"
