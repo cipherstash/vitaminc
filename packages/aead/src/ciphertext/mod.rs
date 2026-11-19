@@ -82,10 +82,10 @@ mod tests {
         let ciphertext = CipherTextBuilder::new()
             .append_nonce(nonce)
             .append_target_plaintext(plaintext)
-            .accepts_ciphertext_and_tag_ok(|mut ciphertext| {
+            .accepts_ciphertext_and_tag_ok(|ciphertext| {
                 ciphertext.copy_from_slice(&[2u8; 10]);
                 ciphertext.extend([3u8; 16]);
-                Ok(ciphertext)
+                Ok(())
             })
             .build()?;
 
@@ -108,10 +108,10 @@ mod tests {
         let ciphertext = CipherTextBuilder::new()
             .append_nonce(nonce)
             .append_target_plaintext(plaintext)
-            .accepts_ciphertext_and_tag_ok(|mut ciphertext| {
+            .accepts_ciphertext_and_tag_ok(|ciphertext| {
                 ciphertext.copy_from_slice(&[2u8; 10]);
                 ciphertext.extend([3u8; 16]);
-                Ok(ciphertext)
+                Ok(())
             })
             .build()?;
 

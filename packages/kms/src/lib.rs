@@ -25,9 +25,8 @@ use zeroize::Zeroize;
 ///
 /// SDK errors leave the caller's output untouched. Reset finalization retains
 /// the buffered input on SDK error or cancellation while awaiting KMS, allowing
-/// retry. On success it copies the MAC to the output, then clears the input's
-/// length. This clear retains capacity and does not immediately wipe the old
-/// message bytes; the protected buffer is wiped when dropped. Consuming
+/// retry. On success it copies the MAC to the output, then wipes the input
+/// and empties it, keeping its capacity for the next message. Consuming
 /// finalization drops the instance on success, failure, or cancellation.
 /// A cancelled request may still complete remotely.
 ///
@@ -103,7 +102,7 @@ where
 {
     fn update(&mut self, data: &Protected<T>) {
         let pref: ProtectedRef<T> = data.as_protected_ref();
-        self.input.update_with_ref(pref, |input, data| {
+        self.input.risky_update_with_ref(pref, |input, data| {
             input.extend(data.as_ref());
         });
     }
@@ -114,9 +113,9 @@ where
     T: AsRef<[u8]> + Zeroize,
 {
     fn update(&mut self, data: Protected<T>) {
-        self.input.update_with(data, |input, mut data| {
+        // `data` is wiped when `risky_update_with` drops it.
+        self.input.risky_update_with(data, |input, data| {
             input.extend_from_slice(data.as_ref());
-            data.zeroize();
         });
     }
 }
@@ -124,7 +123,7 @@ where
 impl<const N: usize> Update<Info> for AwsKmsHmac<N> {
     fn update(&mut self, data: Info) {
         let pref: ProtectedRef<[u8]> = data.0.as_protected_ref();
-        self.input.update_with_ref(pref, |input, data| {
+        self.input.risky_update_with_ref(pref, |input, data| {
             input.extend(data);
         });
     }
@@ -132,7 +131,7 @@ impl<const N: usize> Update<Info> for AwsKmsHmac<N> {
 
 impl<'r, const N: usize> Update<ProtectedRef<'r, [u8]>> for AwsKmsHmac<N> {
     fn update(&mut self, pref: ProtectedRef<[u8]>) {
-        self.input.update_with_ref(pref, |input, data| {
+        self.input.risky_update_with_ref(pref, |input, data| {
             input.extend(data);
         });
     }
@@ -152,7 +151,7 @@ where
         let output = self.generate_mac().await?;
         let response = Protected::new(output.into_inner());
 
-        out.update_with(response, |out, data| {
+        out.risky_update_with(response, |out, data| {
             out.copy_from_slice(data.as_ref());
         });
 
@@ -167,19 +166,19 @@ where
 {
     type Error = Error;
 
-    /// Send the buffered message to KMS, write the MAC, and clear the input length.
-    /// SDK errors and cancellation during the request retain the input and
-    /// leave `out` unchanged. Success retains input capacity without immediately
-    /// wiping the previous message. See [`AwsKmsHmac`] for panic behavior.
+    /// Send the buffered message to KMS, write the MAC, and wipe and empty
+    /// the input. SDK errors and cancellation during the request retain the
+    /// input and leave `out` unchanged. Success keeps the input's capacity for
+    /// the next message. See [`AwsKmsHmac`] for panic behavior.
     async fn try_finalize_into_reset(&mut self, out: &mut C) -> Result<(), Self::Error> {
         let output = self.generate_mac().await?;
         let response = Protected::new(output.into_inner());
 
-        out.update_with(response, |out, data| {
+        out.risky_update_with(response, |out, data| {
             out.copy_from_slice(data.as_ref());
         });
 
-        self.input.update(|input| input.clear());
+        self.input.risky_update(|input| input.zeroize());
 
         Ok(())
     }
@@ -224,8 +223,8 @@ mod tests {
         types::{KeySpec, KeyUsageType},
         Client, Config,
     };
-    use vitaminc_async_traits::AsyncFixedOutput;
-    use vitaminc_protected::{Controlled, Protected};
+    use vitaminc_async_traits::{AsyncFixedOutput, AsyncFixedOutputReset};
+    use vitaminc_protected::{AsProtectedRef, Controlled, Protected, ProtectedRef};
     use vitaminc_traits::Update;
 
     fn get_config() -> Config {
@@ -290,6 +289,19 @@ mod tests {
         Ok(())
     }
 
+    /// A `Protected` passed by value, and a `ProtectedRef<[u8]>`, are
+    /// appended like the borrowed forms.
+    #[tokio::test]
+    async fn test_update_by_value_and_by_protected_ref() {
+        let mut hmac: AwsKmsHmac<32> =
+            AwsKmsHmac::new(get_config(), "0cce5331-13a6-437f-a477-1c8988667281");
+        hmac.update(Protected::new(vec![0, 1]));
+        let pref: ProtectedRef<[u8]> = "ab".as_protected_ref();
+        hmac.update(pref);
+
+        assert_eq!(hmac.input.risky_unwrap(), vec![0, 1, 97, 98]);
+    }
+
     #[tokio::test]
     async fn test_finalize() -> Result<(), Box<dyn std::error::Error>> {
         let config = get_config();
@@ -301,6 +313,49 @@ mod tests {
             .try_finalize_fixed()
             .await?;
 
+        Ok(())
+    }
+
+    /// The MAC lands in `out`: a finalization that returned `Ok` without
+    /// writing would leave it all zeros.
+    #[tokio::test]
+    async fn test_finalize_into_writes_the_mac() -> Result<(), Box<dyn std::error::Error>> {
+        let client = Client::from_conf(get_config());
+        let key_id = get_key_id(&client, KeySpec::Hmac256).await?;
+
+        let mut out = Protected::new([0u8; 32]);
+        AwsKmsHmac::<32>::new(get_config(), key_id)
+            .chain(&Protected::new(vec![1, 2, 3]))
+            .try_finalize_into(&mut out)
+            .await?;
+
+        assert_ne!(out.risky_ref(), &[0u8; 32], "the MAC was written to out");
+        Ok(())
+    }
+
+    /// A reset finalization writes the MAC and leaves the input empty, so
+    /// the same message fed again gives the same MAC.
+    #[tokio::test]
+    async fn test_finalize_into_reset_writes_the_mac_and_empties_the_input(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let client = Client::from_conf(get_config());
+        let key_id = get_key_id(&client, KeySpec::Hmac256).await?;
+
+        let mut hmac = AwsKmsHmac::<32>::new(get_config(), key_id);
+        hmac.update(&Protected::new(vec![1, 2, 3]));
+        let mut first = Protected::new([0u8; 32]);
+        hmac.try_finalize_into_reset(&mut first).await?;
+        assert_ne!(first.risky_ref(), &[0u8; 32], "the MAC was written to out");
+        assert!(hmac.input.risky_ref().is_empty(), "the input was emptied");
+
+        hmac.update(&Protected::new(vec![1, 2, 3]));
+        let mut second = Protected::new([0u8; 32]);
+        hmac.try_finalize_into_reset(&mut second).await?;
+        assert_eq!(
+            first.risky_ref(),
+            second.risky_ref(),
+            "nothing of the first message was left in the input"
+        );
         Ok(())
     }
 }
