@@ -1,6 +1,7 @@
-//! A scheme keyed from a PRF with `SchemeVisitor`: it is the scheme keyed
-//! with the PRF's block, and it encrypts a borrowed plaintext once the key
-//! has arrived, so the plaintext never enters the PRF call.
+//! Tests for `SchemeVisitor`. The scheme it returns is the scheme keyed
+//! with the block the PRF derives. That scheme encrypts a borrowed
+//! plaintext after the key arrives, so the plaintext is never passed to
+//! the PRF call.
 
 mod common;
 
@@ -15,7 +16,7 @@ fn prf() -> HmacSha256Prf {
     HmacSha256Prf::new(Protected::new([7u8; 32]))
 }
 
-/// The scheme the visitor returns, under a context.
+/// Keys a scheme with `SchemeVisitor`, under the given context.
 fn keyed(context: &[u8]) -> Mock {
     context
         .prf_visit_with_context(&prf(), "order", SchemeVisitor::<Mock>::new())
@@ -23,7 +24,8 @@ fn keyed(context: &[u8]) -> Mock {
         .expect("keys")
 }
 
-/// The scheme keyed by hand with the same block.
+/// Keys the same scheme by hand, with the block that `BlockVisitor`
+/// derives under the given context.
 fn by_hand(context: &[u8]) -> Mock {
     let block: [u8; 32] = context
         .prf_visit_with_context(&prf(), "order", BlockVisitor)
@@ -65,9 +67,9 @@ fn another_context_keys_another_scheme() {
     );
 }
 
-/// The keyed scheme is all a caller needs: a borrowed plaintext, under a
-/// target chosen while the program runs, gives the term the owned value
-/// does. The visitor itself never takes a plaintext.
+/// A caller needs only the keyed scheme to encrypt. A borrowed plaintext,
+/// under a target chosen at runtime, gives the same term as the owned
+/// value. The visitor itself never takes a plaintext.
 #[test]
 fn a_keyed_scheme_encrypts_a_borrowed_plaintext() {
     let scheme = keyed(b"users/surname");
@@ -83,8 +85,8 @@ fn a_keyed_scheme_encrypts_a_borrowed_plaintext() {
     assert_eq!(borrowed.as_ref(), owned.as_ref());
 }
 
-/// Any key length, not only 32 bytes: a block is keyed into a scheme
-/// whose key is an array of the block's length.
+/// A block of any length keys a scheme whose key is an array of that
+/// length. The length is not limited to 32 bytes.
 #[test]
 fn a_block_of_any_length_keys_a_scheme_of_that_length() {
     use vitaminc_ore::OrderScheme;
@@ -129,7 +131,8 @@ fn a_block_of_any_length_keys_a_scheme_of_that_length() {
     assert_eq!(wide.0.risky_ref(), &[9; 64]);
 }
 
-/// It names itself and nothing else: there is nothing in it to show.
+/// The visitor's `Debug` output is only its name, because the visitor
+/// contains no data.
 #[test]
 fn a_visitor_debugs_as_its_name() {
     assert_eq!(
@@ -138,8 +141,8 @@ fn a_visitor_debugs_as_its_name() {
     );
 }
 
-/// Only a single block keys a scheme. Every other shape is refused, a
-/// sequence or map with blocks in it at any depth included.
+/// Only a single block keys a scheme. The visitor refuses every other
+/// shape, including a sequence or map with blocks in it at any depth.
 #[test]
 fn every_shape_but_a_block_is_refused() {
     use vitaminc_prf::{PrfVisitorError, ResolvedPrf};

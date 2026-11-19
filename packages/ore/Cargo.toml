@@ -29,8 +29,9 @@ uuid = { version = "1", default-features = false, optional = true }
 vitaminc-context = { version = "0.9.1", path = "../context" }
 vitaminc-normalize = { version = "0.9.1", path = "../normalize" }
 vitaminc-protected = { version = "0.9.1", path = "../protected" }
-# `SchemeVisitor`, which keys a scheme from the block a PRF derives. Off,
-# this crate does not depend on `vitaminc-prf`.
+# Needed by `SchemeVisitor`, the visitor that keys a scheme with the
+# block a PRF derives.
+# Without the `prf` feature, this crate does not depend on `vitaminc-prf`.
 vitaminc-prf = { version = "0.9.1", path = "../prf", optional = true }
 zeroize = { workspace = true }
 thiserror = { workspace = true }
@@ -56,7 +57,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 jiff = ["dep:jiff", "vitaminc-aead/jiff"]
 rust_decimal = ["dep:rust_decimal", "vitaminc-aead/rust_decimal"]
 uuid = ["dep:uuid", "vitaminc-aead/uuid"]
-# `SchemeVisitor`: key a scheme from the block a PRF derives.
+# Adds `SchemeVisitor`, the visitor that keys a scheme with the block a
+# PRF derives.
 prf = ["dep:vitaminc-prf"]
 # The conformance checks a scheme crate runs against its real scheme, in
 # its tests. Not for a build that ships.

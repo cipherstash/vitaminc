@@ -9,13 +9,13 @@ use zeroize::Zeroize;
 
 use crate::OrderKeyInit;
 
-/// A [`PrfVisitor`] that keys the order scheme `S` from the block a PRF
+/// A [`PrfVisitor`] that keys the order scheme `S` with the block a PRF
 /// derives, and returns the keyed scheme.
 ///
-/// The visitor holds no plaintext, so the PRF call, and a backend that
-/// derives the block later, never hold the value being ordered. Open a space
-/// on the scheme it returns and encrypt there, by reference, once the key has
-/// arrived:
+/// The visitor contains no plaintext. So the value you want to order is
+/// never passed to the PRF call. A backend that derives the block later
+/// never keeps a copy of the value either. When the visitor returns the
+/// scheme, open a space on it and encrypt the value there by reference:
 ///
 /// ```
 /// use vitaminc_hmac::HmacSha256Prf;
@@ -23,8 +23,9 @@ use crate::OrderKeyInit;
 /// use vitaminc_prf::{PrfKeyInit, PrfValue};
 /// use vitaminc_protected::Protected;
 /// # use vitaminc_ore::{Context, OrderKeyInit, OrderPlaintext, OrderScheme};
-/// # /// Keeps its key and the bytes, for the example. Any scheme keyed
-/// # /// with a 32-byte array will do.
+/// # /// A stand-in scheme for the example. The scheme's term is its key,
+/// # /// followed by the plaintext bytes. Any scheme keyed with a 32-byte
+/// # /// array works.
 /// # struct ClwwOre(Protected<[u8; 32]>);
 /// # impl OrderScheme for ClwwOre {
 /// #     const NAME: &'static str = "example";
@@ -60,7 +61,8 @@ use crate::OrderKeyInit;
 /// # let domain = "order";
 /// let value = String::from("Lovelace");
 ///
-/// // A real backend may derive the block later; `.await` the result there.
+/// // A backend that derives the block later returns a future. With that
+/// // backend, use `.await` in place of `into_result`.
 /// let scheme: ClwwOre = context
 ///     .prf_visit_with_context(&prf, domain, SchemeVisitor::new())
 ///     .into_result()?;
@@ -69,22 +71,33 @@ use crate::OrderKeyInit;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
-/// `S` is any scheme keyed with a protected array of the block's length
-/// ([`OrderKeyInit<Key = Protected<[u8; N]>>`](OrderKeyInit)), as every
-/// scheme in `clww-ore` and `ore-rs` is. The block is copied into that
-/// protected key and the visitor's own copy is wiped. Any other shape is
-/// refused with [`PrfVisitorError::UnexpectedShape`], and the visitor wipes
-/// every block in a refused sequence or map, at any depth, before it
-/// returns. Copies the PRF backend made before it called the visitor are
-/// the backend's to wipe.
+/// `S` can be any scheme whose key is a protected array of the block's
+/// length ([`OrderKeyInit<Key = Protected<[u8; N]>>`](OrderKeyInit)).
+/// Every scheme in `clww-ore` and `ore-rs` has a key of that type.
 ///
-/// Derive order keys under a context of their own, one that no stored or
-/// queried term is derived under. A key and a term from the same PRF key
-/// and context would be the same bytes.
+/// # Refused shapes
+///
+/// Only a single block keys a scheme. The visitor returns
+/// [`PrfVisitorError::UnexpectedShape`] for every other shape: a sequence,
+/// a map, an absent value, or a passthrough value.
+///
+/// # What the visitor wipes
+///
+/// The visitor copies the block into the scheme's protected key, then
+/// wipes its own copy. When the visitor refuses a sequence or map, it wipes
+/// every block in it, at any depth, before it returns. The visitor cannot
+/// wipe copies that the PRF backend made before calling it. The backend is
+/// responsible for those copies.
+///
+/// # Use a separate context for order keys
+///
+/// Derive order keys under a context that you use only for keys. Do not
+/// derive any stored or queried term under that context. With the same PRF
+/// key and context, a key and a term would be the same bytes.
 pub struct SchemeVisitor<S>(PhantomData<fn() -> S>);
 
 impl<S> SchemeVisitor<S> {
-    /// A visitor that keys an `S`.
+    /// Creates a visitor that keys an `S`.
     pub const fn new() -> Self {
         Self(PhantomData)
     }
@@ -125,9 +138,11 @@ where
     }
 }
 
-/// Wipe every block in a refused node, at any depth. Nested blocks are
-/// wiped where they are, in their container's buffer, not moved out first.
-/// Passthrough values are not secret and drop as they are.
+/// Wipes every block in a refused node, at any depth.
+///
+/// Each nested block is wiped in place, in its container's buffer. Moving a
+/// block out first would leave its bytes in the buffer, unwiped. Passthrough
+/// values are not secret, so they are dropped without a wipe.
 fn wipe<const N: usize, P>(node: &mut ResolvedPrf<[u8; N], P>) {
     match node {
         ResolvedPrf::Block(block) => block.zeroize(),
@@ -153,8 +168,8 @@ mod tests {
         }
     }
 
-    /// A refused node's blocks are wiped where they are, nested ones
-    /// included, and its other nodes are left as they were.
+    /// `wipe` zeroes every block in place, nested blocks included.
+    /// `wipe` leaves the other nodes as they were.
     #[test]
     fn wipe_zeroes_every_block_at_any_depth() {
         let mut node = ResolvedPrf::Sequence(vec![

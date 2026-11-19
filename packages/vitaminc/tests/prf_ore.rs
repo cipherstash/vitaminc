@@ -1,7 +1,8 @@
-//! The facade's `prf` feature turns on `vitaminc-ore/prf` when `ore` is on
-//! too. The workspace build turns that feature on anyway (through
-//! `vitaminc-ore`'s dev-dependencies), so CI runs this test on the facade
-//! alone.
+//! Checks that the facade's `prf` feature turns on `vitaminc-ore/prf` when
+//! the `ore` feature is also on. A workspace build turns on
+//! `vitaminc-ore/prf` anyway, through the dev-dependencies of
+//! `vitaminc-ore`. So CI runs this test on the facade alone, where only the
+//! facade's features can turn it on.
 
 use vitaminc::ore::SchemeVisitor;
 
