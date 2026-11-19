@@ -39,11 +39,23 @@ criteria = ["safe-to-deploy", "crypto-reviewed"]
 delta = "1.17.3 -> 1.18.2"
 notes = "Full read of the delta: ML-DSA stabilised out of unstable, RSA KeyPair::from_components validated with RSA_check_key, out-of-place AEAD seal_out_of_place_scatter with every buffer length checked before EVP_AEAD_CTX_seal_scatter, and 1.18.1's fail-closed tightening of seal_in_place_append_tag (post-Extend length verified before the FFI capacity is passed), streaming-cipher IV-context validation, and RSA digest-algorithm matching enforced on the ParsedPublicKey path. Zeroization only improved (ECDH agree returns Zeroizing<Vec<u8>>, KeyEncryptionKey zeroizes on drop); no change to rand/SystemRandom, AES-GCM, HMAC, nonce or tag handling, and the new branches are on public lengths only. No feature or build.rs change; aws-lc-sys moves 0.43 to 0.46 (AWS-LC 5.2 to 5.11, including the EVP_DecryptUpdate padded-mode fix the new canary tests pin) and is audited separately. One semantic change: hkdf::Salt::from(Okm<Algorithm>) now takes the Salt algorithm from the Okm's requested Algorithm rather than the PRK's; vitaminc does not use that path."
 
+[[audits.aws-lc-rs]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+delta = "1.18.2 -> 1.19.0"
+notes = "Full read of the delta: new AES OFB, CFB8 and CFB1 modes (one-shot via AES_ofb128/cfb8/cfb1_encrypt in place on one slice with its own length and a 16-byte stack IV zeroized after use, CFB1 bit counts chunked like AWS-LC MAXBITCHUNK; streaming via the EVP_aes_*_ofb/cfb8/cfb1 ciphers behind the existing mode, context and key-length checks), try_fips_self_test wrapping BORINGSSL_self_test, Keccak-256 behind unstable and not(fips), configurable RSA-PSS salt length (Max computed with checked arithmetic from the public modulus size, default still RSA_PSS_SALTLEN_DIGEST), and Clone on the RSA, ECDSA, Ed25519 and ML-DSA key pairs through the existing EVP_PKEY_up_ref clone, so private keys are shared by reference count and never copied into Rust memory. DecryptingKey::decrypt now validates its context and the ECB helpers return Err instead of unreachable!(), removing a panic. No change to aead (AES-GCM, ChaCha20-Poly1305, nonce or tag handling), hmac, hkdf, rand/SystemRandom, agreement or constant_time beyond #[deprecated(since)] attributes, and every new branch is on public modes and lengths. build.rs unchanged and no new dependencies; unstable now forwards to aws-lc-sys/unstable. aws-lc-sys moves 0.46 to 0.47 (AWS-LC 5.11.0 to 5.12.0) and is audited separately. vitaminc-encrypt uses only LessSafeKey AES-256-GCM seal_in_place_append_tag/open_in_place, which is unchanged. Sources match tag v1.19.0 (5d496f88); published by the same maintainer as 1.18.x."
+
 [[audits.aws-lc-sys]]
 who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"
 delta = "0.43.0 -> 0.46.0"
 notes = "The vendored aws-lc/ tree is byte-identical to upstream AWS-LC v5.11.0 (fa9bc8d6; 0.43.0 was v5.2.0, 683ebde4), verified by diff -rq against shallow clones of both tags with the only differences being paths excluded by the crate's Cargo.toml include globs; the C and assembly delta was not read line by line. All Rust and build glue outside aws-lc/ was read in full: the build scripts gain size-opt defines (AWS_LC_SYS_SMALL, or opt-level s/z), DEP_AWS_LC_* metadata, Cranelift link-name normalisation and jitterentropy CFLAGS fixes, with no new network, download or filesystem access beyond OUT_DIR. src/*_crypto.rs are rust-bindgen 0.73.2 output whose non-declaration changes are identical across every target, with symbol additions matching the AWS-LC 5.4 to 5.10 APIs; generated-include changes are symbol-list only. The 26 prebuilt NASM objects match the aws-lc-rs repository blobs at tag aws-lc-sys/v0.46.0 and its documented CI generation workflow, but were not rebuilt from source here."
+
+[[audits.aws-lc-sys]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = ["safe-to-deploy", "crypto-reviewed"]
+delta = "0.46.0 -> 0.47.0"
+notes = "The vendored aws-lc/ tree is byte-identical to upstream AWS-LC v5.12.0 (cd481c20; 0.46.0 was v5.11.0, fa9bc8d6), verified by diff -rq against a shallow clone of the tag; the only differences are paths excluded by the Cargo.toml include globs, which predict the 2,009 vendored files exactly. Crypto scope: the GCM C and assembly, the EVP_AEAD layer, AES, HMAC, HKDF, SHA-2, jitterentropy and mem.c are byte-identical to 0.46.0; the RNG change (#3654) was read in full and only strengthens fork/VM-snapshot (UBE) protection, sampling the generation number before any seed entropy is drawn so a fresh state reseeds on a detected UBE; the AES-XTS one-data-unit-per-key/IV check (#3621) was read. The rest of the C and assembly delta (RSA-PSS salt length, HPKE key layout, TLS record AEAD, X.509/OCSP, s2n-bignum ML-DSA and XTS assembly, Keccak constants moved to .rodata) was not read line by line; vitaminc reaches none of it. All Rust and build glue outside aws-lc/ was read in full: an empty unstable feature, one cloned cc::Build template, and the floor for auto-detecting a system-installed AWS-LC drops from 5.7.0 to 4.2.0 (FIPS LTS) unless unstable is enabled, so a host exposing a 4.x install through OPENSSL_DIR or pkg-config now links it instead of the vendored source (AWS_LC_SYS_USE_SYSTEM=0 forces the source build). No new network, download, process or filesystem access beyond OUT_DIR. src/*_crypto.rs bindgen changes are declaration-only and consistent across targets; generated-include adds three internal RSA-PSS symbols. The 26 prebuilt NASM objects match the aws-lc-rs repository blobs at tag aws-lc-sys/v0.47.0 and differ from 0.46.0 only in the symbol prefix and COFF timestamp; not rebuilt here. Tarball sha256 matches the lockfile; published by the same maintainer as 0.42 to 0.46."
 
 [[audits.digest]]
 who = "Dan Draper <dan@cipherstash.com>"
@@ -93,6 +105,12 @@ criteria = "safe-to-deploy"
 delta = "3.14.2 -> 3.15.0"
 notes = "Hunks map to napi-rs #3584, #3592, #3603, #3607, #3610, #3612, #3623 and #3626: memory-safety and leak fixes in class wrapping, native-borrow rooting, typed-array conversion and env teardown, plus ReadableStream cancel support. The new unsafe Send/Sync impls and the one napi_run_script of a constant three-line JS source were read and look sound. No new dependencies, no build.rs or FFI signature changes; Buffer and Uint8Array ownership paths are unchanged apart from a fixed reference leak on the error path."
 
+[[audits.napi]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "3.15.0 -> 3.16.1"
+notes = "Hunks map to napi-rs #3656, #3661, #3662, #3665, #3666, #3667 and #3670: leak fixes for threadsafe-function call data and define_class accessor closures, which are now owned through Rc so a cloned Property can no longer double-free; all-or-nothing class registration at module load; class identity stored as a NonZeroU32 index into a capped, append-only registry; a Tokio runtime lock fix; and symbol_for and well-known-symbol class keys, looked up with node_api_symbol_for or property reads on globalThis.Symbol, with no script evaluation. The new repr(C) PropertyClosuresData keeps PropertyClosures as its first field, so the existing getter and setter trampolines stay sound, and register_class rejects closure properties so the existing Send/Sync impl on ModuleClassProperty still holds. No new dependencies, no napi-sys bump, no build.rs or FFI signature changes; Buffer, TypedArray and ArrayBuffer ownership paths are untouched, and the define_properties with_name/with_value path aead-napi uses builds the same descriptor. Published by GitHub trusted publishing from 417375ad, whose sources match the tarball."
+
 [[audits.napi-sys]]
 who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"
@@ -141,6 +159,12 @@ criteria = "safe-to-deploy"
 delta = "3.0.6 -> 3.0.9"
 notes = "Parser fixes matching upstream 3.0.7 (#2085 absolute path after a break label) and 3.0.8 (#2086, #2087: reject `<-` and stop treating `->` as subtraction), plus an additive Punctuated::retain in 3.0.9 (#2088) in safe code. The remainder is version bumps and nightly rustc_ast test-harness churn. No unsafe, no build script, no filesystem, env, network or process access added."
 
+[[audits.syn]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = ["safe-to-deploy", "does-not-implement-crypto"]
+delta = "3.0.9 -> 3.0.10"
+notes = "Performance fix matching upstream 3.0.10 (#2090): rightmost_subexpression_precedence gains an internal scan flag so scan_right no longer rescans operands whose scan already failed, avoiding exponential work on long chains of prefix ranges and binary operators; the new Bailout/Fail-versus-Consume condition is equivalent to the old nested if. The rest is the version bump, two new fixup test cases and nightly rustc_ast test-harness churn. No unsafe, no build script, no filesystem, env, network or process access added."
+
 [[audits.thiserror]]
 who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"
@@ -164,6 +188,12 @@ who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"
 delta = "1.21.0 -> 1.29.0"
 notes = "Eight minor releases, every hunk accounted for by the upstream release notes: branchless hex parse and format (#894), MaybeUninit encode helpers (#892; the new unsafe checks lengths before copying and fully initialises buffers before assume_init), parser diagnostics and the empty-input panic fix, case-insensitive urn prefix, v7 counter and ordering fixes, new serde adapters, NonNilUuid versioned constructors. No build script and no new runtime dependency (gungraun is a dev-dep for benches; the optional rand 0.9 to 0.10 bump sits behind fast-rng; rng.rs is unchanged). The byte-level API vitaminc uses (from_slice, as_bytes, into_bytes, field order) is unchanged; MSRV is now 1.89."
+
+[[audits.uuid]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "1.29.0 -> 1.29.2"
+notes = 'Two patch releases, every hunk accounted for by the upstream release notes: lint cleanup that drops the authors and html_root_url metadata, derives Default on the v7 context types and moves the optional zerocopy dependency behind cfg(uuid_unstable), where its derive was already gated (#921); deprecation of the borsh feature with no code change (#923); a rework of v7 timestamp and counter handling onto a single u128 nanosecond value with saturating conversions, which also removes a Duration::new overflow panic in From<Timestamp> for SystemTime (#926); and widening the WASM cfgs from target_arch = "wasm32" to target_family = "wasm" so the js rng path covers wasm64 (#928). No unsafe code changed (same unsafe sites, untouched files), no build script, and no new runtime dependency or fs, env, network or process access. The 1.29.2 tarball sha256 matches the lockfile and its sources match upstream merge commit 5205a6ea, published by the long-standing maintainer. The byte-level API vitaminc uses (from_bytes, from_slice, as_bytes, nil, max) is unchanged, and vitaminc enables no v7 or rng features; MSRV stays 1.89.'
 
 [[audits.wasm-bindgen]]
 who = "Dan Draper <dan@cipherstash.com>"

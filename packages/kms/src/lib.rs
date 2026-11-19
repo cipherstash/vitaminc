@@ -121,11 +121,13 @@ where
     }
 }
 
+/// `Info` is non-sensitive by name, so its bytes are appended directly. A
+/// `&'static str` does not lend a `ProtectedRef`, because nothing wipes it;
+/// only the accumulator the bytes land in is protected.
 impl<const N: usize> Update<Info> for AwsKmsHmac<N> {
     fn update(&mut self, data: Info) {
-        let pref: ProtectedRef<[u8]> = data.0.as_protected_ref();
-        self.input.update_with_ref(pref, |input, data| {
-            input.extend(data);
+        self.input.update(|input| {
+            input.extend_from_slice(data.0.as_bytes());
         });
     }
 }
