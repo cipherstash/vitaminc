@@ -3,15 +3,14 @@
 
 ### Breaking
 
-- **Breaking:** take dates and timestamps from jiff, because chrono is unmaintained
+- **Breaking:** this crate re-exports crates that have breaking changes in 0.10.0.
+  Those crates are `aead`, `normalize`, `ore`, and `protected`.
+  Before you upgrade, read the 0.10.0 changelog of each crate you use.
 
-### Documentation
+### Features
 
-- rewrite the SchemeVisitor docs in plain English
-
-### Fixes
-
-- key a scheme of any key length, and say what the visitor wipes
+- With both the `prf` and `ore` features, `vitaminc::ore::SchemeVisitor` is now available.
+  The `prf` feature now enables the `prf` feature of `vitaminc-ore`.
 
 ## [0.9.1] - 2026-11-06
 

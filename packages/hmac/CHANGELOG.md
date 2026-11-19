@@ -1,11 +1,6 @@
 
 ## [0.10.0] - 2026-11-19
 
-### Breaking
-
-- **Breaking:** take dates and timestamps from jiff, because chrono is unmaintained
-- **Breaking:** refuse a jiff timestamp jiff cannot rebuild, so it is never sealed and then unreadable
-
 ## [0.9.1] - 2026-11-06
 
 ## [0.9.0] - 2026-11-04

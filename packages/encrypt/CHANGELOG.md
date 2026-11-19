@@ -1,10 +1,10 @@
 
 ## [0.10.0] - 2026-11-19
 
-### Breaking
+### Documentation
 
-- **Breaking:** take dates and timestamps from jiff, because chrono is unmaintained
-- **Breaking:** let generic code bound on a borrowed plaintext without copying it
+- The README now shows how to encrypt dates with the `jiff` feature of `vitaminc-aead`, in place of the `chrono` feature.
+  The 0.10.0 changelog for `vitaminc-aead` describes the change.
 
 ## [0.9.1] - 2026-11-06
 

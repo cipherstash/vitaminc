@@ -3,29 +3,14 @@
 
 ### Breaking
 
-- **Breaking:** take dates and timestamps from jiff, because chrono is unmaintained
-- **Breaking:** narrow dates and timestamps to jiff's range in every binding, so a value one binding seals every binding opens
-- **Breaking:** let generic code bound on a borrowed plaintext without copying it
-
-### Dependencies
-
-- bump napi in /packages/aead-napi/tests/addon
-- record the napi 3.16.1 audit, so the bump passes cargo vet
-- bump napi-derive in /packages/aead-napi/tests/addon
-- record the napi-derive 3.7.0 and napi-derive-backend 7.0.0 audits, so the addon passes cargo vet
-- bump the cargo-patch group across 1 directory with 2 updates
-- record the syn 3.0.10 and uuid 1.29.2 audits, so the patch group passes cargo vet
-- bump aws-lc-rs in /packages/aead-napi/tests/addon
-- record the aws-lc-rs 1.19.0 and aws-lc-sys 0.47.0 audits, so the addon passes cargo vet
-- point jiff-static at syn 3.0.10, which replaced 3.0.9 in this bump
-
-### Documentation
-
-- remove a stray README sentence, and say a + year is ISO 8601, not RFC 3339
-
-### Fixes
-
-- refuse a UTC offset of 24 or 25 hours, which jiff reads but RFC 3339 does not allow
+- **Breaking:** dates and timestamps must now be in years -9999 to 9999, the same range as every other binding.
+  The range applies to a JavaScript `Date`, and to date and timestamp text.
+  In 0.9.1, the range was years -262143 to 262142.
+  A year past 9999 was written with a `+` sign, such as `+12000-01-01T00:00:00.000000001Z`.
+  A value outside the new range is now refused.
+- **Breaking:** a negative year is now written as a minus sign and six digits, such as `-000005-03-01T12:00:00.000000001Z`.
+  JavaScript writes negative years the same way.
+  In 0.9.1, a negative year was written with four digits, such as `-0005`.
 
 ## [0.9.1] - 2026-11-06
 

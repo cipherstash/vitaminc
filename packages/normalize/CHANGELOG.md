@@ -1,11 +1,15 @@
 
 ## [0.10.0] - 2026-11-19
 
+### Index terms
+
+- Index terms for every value in the supported range are the same as in 0.9.1.
+
 ### Breaking
 
-- **Breaking:** take dates and timestamps from jiff, because chrono is unmaintained
-- **Breaking:** narrow dates and timestamps to jiff's range in every binding, so a value one binding seals every binding opens
-- **Breaking:** let generic code bound on a borrowed plaintext without copying it
+- **Breaking:** a date or timestamp outside years -9999 to 9999 no longer has an index term.
+  In 0.9.1, the range was years -262143 to 262142.
+  The 0.10.0 changelog for `vitaminc-aead` gives the exact limits.
 
 ## [0.9.1] - 2026-11-06
 

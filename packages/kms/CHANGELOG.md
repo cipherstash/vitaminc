@@ -1,10 +1,6 @@
 
 ## [0.10.0] - 2026-11-19
 
-### Breaking
-
-- **Breaking:** stop str, [u8; N] and Cow<str> lending an unwiped ProtectedRef
-
 ## [0.9.1] - 2026-11-06
 
 ## [0.9.0] - 2026-11-04

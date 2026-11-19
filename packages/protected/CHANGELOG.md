@@ -3,19 +3,31 @@
 
 ### Breaking
 
-- **Breaking:** stop str, [u8; N] and Cow<str> lending an unwiped ProtectedRef
+- **Breaking:** `str`, `Cow<str>`, and `[u8; N]` no longer implement `AsProtectedRef`.
+  These types do not wipe their values.
+  So a `ProtectedRef` borrowed from one of them broke the promise of `ProtectedRef`, that the owner wipes the value.
+  The 0.9.1 changelog listed this as a bug, and issue #600 tracked it.
+  To lend text, put it in a `Protected<String>`.
+  Then narrow the borrow to `str` with `as_deref`, or to `[u8]` with `as_ref_of`.
+  To lend an array, put it in a `Protected<[u8; N]>`.
+  Now only these types lend a `ProtectedRef`:
 
-### Documentation
-
-- list what lends a ProtectedRef, not what does not
+  - `Protected`, and the `Equatable` and `Exportable` wrappers around it
+  - `Locked`
+  - `Buffer`
 
 ### Features
 
-- implement ConstantTimeEq for Vec<u8>
+- You can now compare two `Equatable<Protected<Vec<u8>>>` values with `==`.
+  In 0.9.1, the comparison did not compile, because `Vec<u8>` did not implement `ConstantTimeEq`.
+  The comparison runs in constant time for vectors of the same length.
+  Two vectors of different lengths compare as unequal straight away, so the comparison does not hide the length.
 
 ### Fixes
 
-- harden the array ConstantTimeEq impl after review
+- The constant-time comparison of byte slices and arrays now goes through the optimisation barriers of the `subtle` crate.
+  The barriers make it less likely that the compiler adds an early exit.
+  As in `subtle`, this is a best effort, not a guarantee.
 
 ## [0.9.1] - 2026-11-06
 
