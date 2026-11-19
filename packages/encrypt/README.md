@@ -24,8 +24,8 @@ The quick start requires these dependencies in your `Cargo.toml`:
 <!-- workspace-deps:start -->
 ```toml
 [dependencies]
-vitaminc-encrypt = "0.9.1"
-vitaminc-random = "0.9.1"  # For key generation
+vitaminc-encrypt = "0.10.0"
+vitaminc-random = "0.10.0"  # For key generation
 ```
 <!-- workspace-deps:end -->
 
@@ -34,8 +34,8 @@ add these entries under `[dependencies]`:
 
 <!-- workspace-deps:start -->
 ```toml
-vitaminc-aead = "0.9.1"       # For the Encrypt and Decrypt derives
-vitaminc-protected = "0.9.1"  # For Protected<T>
+vitaminc-aead = "0.10.0"       # For the Encrypt and Decrypt derives
+vitaminc-protected = "0.10.0"  # For Protected<T>
 ```
 <!-- workspace-deps:end -->
 
@@ -56,7 +56,7 @@ For example, date support uses:
 
 <!-- workspace-deps:start -->
 ```toml
-vitaminc-aead = { version = "0.9.1", features = ["jiff"] }
+vitaminc-aead = { version = "0.10.0", features = ["jiff"] }
 jiff = { version = "1.0", default-features = false }
 ```
 <!-- workspace-deps:end -->

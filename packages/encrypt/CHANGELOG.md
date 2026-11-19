@@ -1,4 +1,11 @@
 
+## [0.10.0] - 2026-11-19
+
+### Documentation
+
+- The README now shows how to encrypt dates with the `jiff` feature of `vitaminc-aead`, in place of the `chrono` feature.
+  The 0.10.0 changelog for `vitaminc-aead` describes the change.
+
 ## [0.9.1] - 2026-11-06
 
 ## [0.9.0] - 2026-11-04
