@@ -136,3 +136,50 @@ fn wipe<const N: usize, P>(node: &mut ResolvedPrf<[u8; N], P>) {
         ResolvedPrf::Absent | ResolvedPrf::Passthrough(_) => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every block in the node, at any depth, in order.
+    fn blocks(node: &ResolvedPrf<[u8; 4], ()>) -> Vec<[u8; 4]> {
+        match node {
+            ResolvedPrf::Block(block) => vec![*block],
+            ResolvedPrf::Sequence(nodes) => nodes.iter().flat_map(blocks).collect(),
+            ResolvedPrf::Map(entries) => {
+                entries.iter().flat_map(|(_, node)| blocks(node)).collect()
+            }
+            ResolvedPrf::Absent | ResolvedPrf::Passthrough(_) => vec![],
+        }
+    }
+
+    /// A refused node's blocks are wiped where they are, nested ones
+    /// included, and its other nodes are left as they were.
+    #[test]
+    fn wipe_zeroes_every_block_at_any_depth() {
+        let mut node = ResolvedPrf::Sequence(vec![
+            ResolvedPrf::Block([1; 4]),
+            ResolvedPrf::Sequence(vec![ResolvedPrf::Block([2; 4]), ResolvedPrf::Absent]),
+            ResolvedPrf::Map(vec![
+                (String::from("a"), ResolvedPrf::Block([3; 4])),
+                (
+                    String::from("b"),
+                    ResolvedPrf::Map(vec![(String::from("c"), ResolvedPrf::Block([4; 4]))]),
+                ),
+                (String::from("d"), ResolvedPrf::Passthrough(())),
+            ]),
+        ]);
+        assert_eq!(blocks(&node).len(), 4, "the tree holds four blocks");
+
+        wipe(&mut node);
+
+        assert_eq!(blocks(&node), vec![[0; 4]; 4], "a block was left unwiped");
+        let ResolvedPrf::Sequence(nodes) = &node else {
+            panic!("wipe changed the node's shape")
+        };
+        assert!(
+            matches!(&nodes[1], ResolvedPrf::Sequence(inner) if matches!(inner[1], ResolvedPrf::Absent)),
+            "wipe changed an absent node"
+        );
+    }
+}
