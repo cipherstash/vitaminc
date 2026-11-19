@@ -546,9 +546,12 @@ fn every_nan_is_one_term_above_every_number(payload: u32, x: f32) -> bool {
 /// encoders, so check that their byte order is the value order.
 #[quickcheck]
 fn date_and_timestamp_byte_order_is_value_order(a: i32, b: i32, x: i64, y: i64) -> bool {
-    // Inside the day range `Logical::Date` admits.
-    let max = vitaminc_aead::plaintext::kinds::MAX_DATE_DAYS;
-    let (a, b) = (a % max, b % max);
+    // Spread over the whole day range `Logical::Date` admits, which is
+    // not symmetric about the epoch.
+    use vitaminc_aead::plaintext::kinds::{MAX_DATE_DAYS, MIN_DATE_DAYS};
+    let (min, max) = (i64::from(MIN_DATE_DAYS), i64::from(MAX_DATE_DAYS));
+    let in_range = |d: i32| (i64::from(d).rem_euclid(max - min + 1) + min) as i32;
+    let (a, b) = (in_range(a), in_range(b));
     let date = |d: i32| bytes(T::Date, Some(Logical::Date), Physical::Int(Int::I32(d)));
     let nanos = |n: i64| {
         bytes(
