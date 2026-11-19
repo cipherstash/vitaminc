@@ -55,11 +55,23 @@ criteria = "safe-to-deploy"
 delta = "3.6.12 -> 3.6.13"
 notes = "Version bump and the napi-derive-backend requirement raised to 6.1.6; no code change."
 
+[[audits.napi-derive]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "3.6.13 -> 3.7.0"
+notes = "Hunks map to napi-rs #3661, #3662 and #3665: parser support for symbol_for and well_known_symbol keys on class members, validated against a fixed list of well-known symbol names with compile errors for unsupported placements, and static methods keeping writable, enumerable and configurable off unless written out. No new unsafe, no change to the env reads or to the type-def file output under NAPI_TYPE_DEF_TMP_FOLDER, no new dependencies beyond the napi-derive-backend 7.0.0 requirement, no build.rs. Published by trusted publishing from napi-rs/napi-rs at f89400d9, and the sources match that commit. The addon uses only free-function #[napi] items, whose expansion is unchanged."
+
 [[audits.napi-derive-backend]]
 who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"
 delta = "6.1.5 -> 6.1.6"
 notes = "Codegen only (napi-rs #3584, #3603): fn.rs defers the native borrow scope through napi 3.15.0's defer_native_borrow_scope and NativeBorrowScopeRelease, and struct.rs replaces the ZST dangling pointer with a heap placeholder. Pure token generation with no env, filesystem, network or process access. Requires napi >= 3.15.0."
+
+[[audits.napi-derive-backend]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+delta = "6.1.6 -> 7.0.0"
+notes = "Hunks map to napi-rs #3661, #3662 and #3665: codegen for symbol_for and well-known-symbol keyed class members (through napi symbol_for_property! and Property::with_well_known_symbol, which need napi 3.16 or later), static members carrying the napi_static bit in their attribute value and de-duplicated separately from instance members, and TypeScript output fixes (computed symbol keys, TS1016). No new or changed unsafe in the generated templates: argument conversion, finalizers and accessor code are untouched. The major bump is for new pub fields on the exhaustive NapiFn and NapiStructField structs. Pure token generation with no env, filesystem, network or process access, no new dependencies, no build.rs. Published by trusted publishing from napi-rs/napi-rs at f89400d9, and the sources match that commit."
 
 [[audits.napi-sys]]
 who = "Dan Draper <dan@cipherstash.com>"
