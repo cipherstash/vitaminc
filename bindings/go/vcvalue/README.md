@@ -102,9 +102,13 @@ mirror of the reflection encode) is future work.
 `ParseInt128` / `ParseUint128` constructors and `String` methods. Out-of-range
 inputs return `ErrIntegerRange`.
 
-`Date{Year, Month, Day}` is a Gregorian calendar date in chrono's range
-(-262143 through 262142). `time.Time` maps to Timestamp with nanoseconds and
-decodes in UTC; timezone/location and monotonic metadata are not retained.
+`Date{Year, Month, Day}` is a Gregorian calendar date in the wire's range,
+years -9999 through 9999. `time.Time` maps to Timestamp with nanoseconds and
+decodes in UTC, without its location or monotonic reading, from
+-009999-01-02T01:59:59Z through 9999-12-30T22:00:00.999999999Z. These ranges
+are jiff's, in every binding, so a value one binding seals, every binding
+opens. `time.Time` itself reaches far wider, and a value outside the range is
+refused.
 `Timestamp{Seconds, Nanoseconds}` encodes an instant from its parts. A leap
 second has no count since the epoch and is refused everywhere in the model
 (ADR 0001). Invalid calendar/timestamp inputs return `ErrInvalidDate` or

@@ -110,10 +110,6 @@ criteria = "safe-to-deploy"
 version = "0.2.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.chrono]]
-version = "0.4.45"
-criteria = "safe-to-deploy"
-
 [[exemptions.cmake]]
 version = "0.1.58"
 criteria = "safe-to-deploy"

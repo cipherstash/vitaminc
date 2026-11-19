@@ -119,7 +119,7 @@ scheme.context("tenant-7").encrypt(40i64)?; // as the type's own target, I64
 scheme.encrypt(40i64)?; // both defaults
 
 // A typed value goes into the space of its type.
-let day = chrono::NaiveDate::from_ymd_opt(2022, 1, 8).expect("a date");
+let day = jiff::civil::date(2022, 1, 8);
 scheme.target(Date).context(("orders", "placed")).encrypt(day)?;
 scheme.encrypt(day)?;
 
@@ -136,17 +136,17 @@ assert!(matches!(
 
 `encrypt` takes a value that always fits, as the sealed `FitsIn` table
 says: a narrower integer, an `f32` into `F64`, bytes (`&[u8]`,
-`Vec<u8>`, `[u8; N]`) into `Bytes`, a `chrono::NaiveDate` into `Date`,
-a `vitaminc_aead::Timestamp` into `Timestamp`, a `rust_decimal::Decimal`
-into `Decimal`, a `uuid::Uuid` into `Uuid` (the typed rows behind the
-`chrono`, `rust_decimal` and `uuid` features). Its only error is the
-scheme's own, so a scheme whose error is `Infallible` cannot fail at
-all. `encrypt_checked` takes any value of the data model and checks it
-while the program runs: an integer that may not fit, text (a code point
-Unicode 16 does not assign is refused), a `chrono::DateTime<Utc>` (a
-leap second has no count, which is what `vitaminc_aead::Timestamp`
-refuses when it is built), or a value whose type the index layer does
-not know. A chain that names no target uses the Rust type's own, from
+`Vec<u8>`, `[u8; N]`) into `Bytes`, a `jiff::civil::Date` into `Date`,
+a `vitaminc_aead::Timestamp` into `Timestamp`, a
+`rust_decimal::Decimal` into `Decimal`, a `uuid::Uuid` into `Uuid` (the
+typed rows behind the `jiff`, `rust_decimal` and `uuid` features). Its
+only error is the scheme's own, so a scheme whose error is `Infallible`
+cannot fail at all. `encrypt_checked` takes any value of the data model
+and checks it while the program runs: an integer that may not fit, text
+(a code point Unicode 16 does not assign is refused), a
+`jiff::Timestamp` (jiff 1.0.0 can make one just before its own minimum,
+which has no count; `vitaminc_aead::Timestamp` refuses it when it is
+built), or a value whose type the index layer does not know. A chain that names no target uses the Rust type's own, from
 the sealed `OwnTarget` table; a target is never inferred from a value.
 
 A term is an `OrderTerm`, labelled with its target. Under a marker the
@@ -550,7 +550,7 @@ No optional features are enabled by default.
 
 | Feature | Effect |
 | --- | --- |
-| `chrono` | Adds order targets for date and timestamp types and enables AEAD date support. |
+| `jiff` | Adds order targets for `jiff::civil::Date`, `jiff::Timestamp` and `vitaminc_aead::Timestamp`, and enables AEAD date and timestamp support. |
 | `rust_decimal` | Adds decimal order targets and enables AEAD decimal support. |
 | `uuid` | Adds UUID order targets and enables AEAD UUID support. |
 

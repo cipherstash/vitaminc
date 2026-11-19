@@ -6,7 +6,7 @@
 //! one domain and payload, so each width carries the same vector for the
 //! same number; both float widths likewise share one domain, with `f32`
 //! widened exactly to `f64`.
-use vitaminc_aead::plaintext::kinds::chrono as conv;
+use vitaminc_aead::plaintext::kinds::jiff as conv;
 use vitaminc_aead::{Float, Int, Logical, Physical, TimeUnit};
 use vitaminc_hmac::HmacSha256Prf;
 use vitaminc_normalize::{domain, normalize};
@@ -30,11 +30,10 @@ fn every_equality_domain_has_a_known_answer() {
         "0100000000000000000000000000000007",
         "8e9c7310e99f566c03e43de34c13cd21fe0e3fc6fb03cf7a6c2f31b86e336a5a",
     );
-    let epoch = conv::date_days(chrono::NaiveDate::from_ymd_opt(1970, 1, 1).expect("date"));
-    let before_epoch = conv::timestamp_nanos(
-        chrono::DateTime::from_timestamp(-1, 999_999_999).expect("timestamp"),
-    )
-    .expect("not a leap second");
+    let epoch = conv::date_days(jiff::civil::Date::constant(1970, 1, 1));
+    let before_epoch =
+        conv::timestamp_nanos(jiff::Timestamp::new(-1, 999_999_999).expect("timestamp"))
+            .expect("count");
     let one: rust_decimal::Decimal = "1.00".parse().expect("decimal");
     let uuid = uuid::Uuid::from_bytes([
         0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,

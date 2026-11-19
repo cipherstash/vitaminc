@@ -23,7 +23,7 @@
 //! over the mantissa and `VcUuid` is `Uuid` over sixteen bytes.
 //!
 //! A getter that throws, a string with an unpaired surrogate, a BigInt out
-//! of range or a `Date` outside chrono's range stops the walk through
+//! of range or a `Date` outside the wire's range stops the walk through
 //! [`Error::source`](vitaminc_aead::plaintext::Error::source), and comes
 //! back to JavaScript as that error: see [`JsFault`].
 

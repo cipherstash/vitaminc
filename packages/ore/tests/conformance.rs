@@ -127,8 +127,8 @@ fn inventory() -> Vec<Orderable<'static>> {
         typed(
             T::Date,
             Logical::Date,
-            I(Int::I32(-96_465_292)),
-            I(Int::I32(95_026_236)),
+            I(Int::I32(-4_371_587)),
+            I(Int::I32(2_932_896)),
             domain::DATE,
             Some(4),
         ),
@@ -610,11 +610,10 @@ fn a_scheme_is_keyed_like_a_prf() {
     assert!(matches!(short, WrongKeyLength(16)));
 }
 
-/// Callers hold chrono, rust_decimal and uuid values, not `Raw`; each
+/// Callers hold jiff, rust_decimal and uuid values, not `Raw`; each
 /// encrypts into the space of its type as the typed scalar it stands for.
 #[test]
 fn typed_values_encrypt_into_the_space_of_their_type() {
-    use chrono::{NaiveDate, TimeZone, Utc};
     use rust_decimal::Decimal;
     let mock = Mock::new(key());
     let typed = |target, ty: Logical, v: Physical<'_>| {
@@ -624,7 +623,7 @@ fn typed_values_encrypt_into_the_space_of_their_type() {
     };
     // 2022-01-08 is day 19_000 after 1970-01-01.
     let dates = mock.target(T::Date);
-    let day = NaiveDate::from_ymd_opt(2022, 1, 8).expect("date");
+    let day = jiff::civil::Date::constant(2022, 1, 8);
     let date = dates.encrypt_checked(day).expect("date");
     assert_eq!(
         date,
@@ -633,16 +632,13 @@ fn typed_values_encrypt_into_the_space_of_their_type() {
     assert_eq!(
         dates.compare(
             &dates
-                .encrypt_checked(day.pred_opt().expect("date"))
+                .encrypt_checked(day.yesterday().expect("date"))
                 .expect("date"),
             &date
         ),
         Some(Ordering::Less)
     );
-    let at = Utc
-        .timestamp_opt(1_700_000_000, 123_456_789)
-        .single()
-        .expect("instant");
+    let at = jiff::Timestamp::new(1_700_000_000, 123_456_789).expect("instant");
     assert_eq!(
         mock.target(T::Timestamp)
             .encrypt_checked(at)

@@ -10,7 +10,7 @@
 # Reference: https://embarkstudios.github.io/cargo-deny/checks/cfg.html
 
 [graph]
-# Optional dependencies (chrono, uuid, rust_decimal, serde, ...) are part of
+# Optional dependencies (jiff, uuid, rust_decimal, serde, ...) are part of
 # what we ship, so check the graph with every feature on.
 all-features = true
 
@@ -97,6 +97,10 @@ allow-build-scripts = [
   "napi",
   "napi-sys",
   "num-traits",
+  # jiff, on targets without pointer-width atomics. Both scripts only run
+  # `$RUSTC -vV` and print cfgs: reviewed for the jiff migration (#626).
+  "portable-atomic",
+  "portable-atomic-util",
   "proc-macro2",
   "quote",
   "radium",

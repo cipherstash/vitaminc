@@ -145,13 +145,14 @@ fn every_fits_in_row_encrypts_at_its_extremes() {
     s.encrypt(&vec![1u8, 2]).expect("bytes");
     s.encrypt(&[1u8, 2]).expect("bytes");
     // The typed values at their own extremes.
-    use chrono::{NaiveDate, NaiveDateTime};
+    use jiff::civil::Date as CivilDate;
     let s = mock.target(target::Date);
-    row(&s, &[NaiveDate::MIN, NaiveDate::MAX]);
-    s.encrypt(&NaiveDate::MAX).expect("date");
+    row(&s, &[CivilDate::MIN, CivilDate::MAX]);
+    s.encrypt(&CivilDate::MAX).expect("date");
     let s = mock.target(target::Timestamp);
-    for instant in [NaiveDateTime::MIN, NaiveDateTime::MAX] {
-        let ts = vitaminc_aead::Timestamp::new(instant.and_utc()).expect("not a leap second");
+    for instant in [jiff::Timestamp::MIN, jiff::Timestamp::MAX] {
+        s.encrypt_checked(instant).expect("timestamp");
+        let ts = vitaminc_aead::Timestamp::new(instant).expect("in range");
         s.encrypt(&ts).expect("timestamp");
         s.encrypt(ts).expect("timestamp");
     }
@@ -228,7 +229,6 @@ fn every_chain_lands_in_the_space_it_spells_out() {
 /// space of their type, as the typed scalar they stand for.
 #[test]
 fn typed_values_fit_the_space_of_their_type() {
-    use chrono::{NaiveDate, TimeZone, Utc};
     use rust_decimal::Decimal;
     let mock = Mock::new(key());
     let typed = |target, ty: Logical, v: Physical<'_>| {
@@ -238,31 +238,24 @@ fn typed_values_fit_the_space_of_their_type() {
             .into_raw()
     };
     // 2022-01-08 is day 19_000 after 1970-01-01.
-    let day = NaiveDate::from_ymd_opt(2022, 1, 8).expect("date");
+    let day = jiff::civil::Date::constant(2022, 1, 8);
     assert_eq!(
         mock.encrypt(day).expect("date").into_raw(),
         typed(T::Date, Logical::Date, Physical::Int(Int::I32(19_000)))
     );
-    let at = Utc
-        .timestamp_opt(1_700_000_000, 123_456_789)
-        .single()
-        .expect("instant");
-    let ts = vitaminc_aead::Timestamp::new(at).expect("not a leap second");
-    assert_eq!(
-        mock.encrypt(ts).expect("timestamp").into_raw(),
-        typed(
-            T::Timestamp,
-            Logical::Timestamp(vitaminc_aead::TimeUnit::Micros),
-            Physical::Int(Int::I64(1_700_000_000_123_456))
-        )
+    let at = jiff::Timestamp::new(1_700_000_000, 123_456_789).expect("instant");
+    let ts = vitaminc_aead::Timestamp::new(at).expect("in range");
+    let expected = typed(
+        T::Timestamp,
+        Logical::Timestamp(vitaminc_aead::TimeUnit::Micros),
+        Physical::Int(Int::I64(1_700_000_000_123_456)),
     );
-    // A `DateTime<Utc>` may be a leap second, so it is checked.
+    assert_eq!(mock.encrypt(ts).expect("timestamp").into_raw(), expected);
+    // A `jiff::Timestamp` may lie just outside jiff's own range, so it is
+    // checked.
     assert_eq!(
         mock.encrypt_checked(at).expect("timestamp").into_raw(),
-        mock.target(target::Timestamp)
-            .encrypt_checked(at)
-            .expect("timestamp")
-            .into_raw()
+        expected
     );
     assert_eq!(
         mock.encrypt(Decimal::new(150, 2)).expect("decimal"),
@@ -336,7 +329,7 @@ fn a_runtime_target_the_scheme_does_not_take_is_refused_before_the_value() {
     assert!(fixed.target(target::I32).encrypt(1i8).is_ok());
     assert!(fixed
         .target(target::Date)
-        .encrypt(chrono::NaiveDate::MAX)
+        .encrypt(jiff::civil::Date::MAX)
         .is_ok());
     assert!(<Fixed<4> as Supports<OrderTarget>>::supports(T::I32));
     assert!(!<Fixed<4> as Supports<OrderTarget>>::supports(T::Text));

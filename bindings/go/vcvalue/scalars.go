@@ -72,8 +72,20 @@ func (v Int128) String() string {
 	return value.String()
 }
 
+// The wire's range is jiff's in every binding (vitaminc#626), so a value
+// one binding seals, every binding opens: dates in years -9999 through
+// 9999, and instants from -009999-01-02T01:59:59Z through
+// 9999-12-30T22:00:00.999999999Z.
+const (
+	minDateYear         = -9999
+	maxDateYear         = 9999
+	minTimestampSeconds = -377705023201 // -009999-01-02T01:59:59Z
+	maxTimestampSeconds = 253402207200  // 9999-12-30T22:00:00Z
+)
+
 // Date is a proleptic Gregorian calendar date, without time or timezone.
-// Its range matches chrono::NaiveDate, including year zero and BCE dates.
+// Its range is the wire's, years -9999 through 9999, including year zero
+// and BCE dates.
 type Date struct {
 	Year  int
 	Month time.Month
@@ -81,7 +93,7 @@ type Date struct {
 }
 
 func (d Date) Validate() error {
-	if d.Year < -262143 || d.Year > 262142 || d.Month < 1 || d.Month > 12 || d.Day < 1 || d.Day > 31 {
+	if d.Year < minDateYear || d.Year > maxDateYear || d.Month < 1 || d.Month > 12 || d.Day < 1 || d.Day > 31 {
 		return ErrInvalidDate
 	}
 	t := time.Date(d.Year, d.Month, d.Day, 0, 0, 0, 0, time.UTC)
@@ -109,16 +121,15 @@ func DateFromDaysCE(days int32) (Date, error) {
 // that holds the parts rather than a time.Time. Timestamps decode to
 // time.Time; this type only encodes. A leap second (nanoseconds of one
 // billion or more) has no count since the epoch and is refused, as it is
-// everywhere in the model (ADR 0001).
+// everywhere in the model (ADR 0001), and so is an instant outside the
+// wire's range.
 type Timestamp struct {
 	Seconds     int64
 	Nanoseconds uint32
 }
 
 func (t Timestamp) Validate() error {
-	min := time.Date(-262143, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
-	max := time.Date(262142, 12, 31, 23, 59, 59, 0, time.UTC).Unix()
-	if t.Seconds < min || t.Seconds > max || t.Nanoseconds >= 1000000000 {
+	if t.Seconds < minTimestampSeconds || t.Seconds > maxTimestampSeconds || t.Nanoseconds >= 1000000000 {
 		return ErrInvalidTimestamp
 	}
 	return nil

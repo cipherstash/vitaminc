@@ -51,6 +51,24 @@ criteria = ["safe-to-deploy", "crypto-reviewed"]
 delta = "0.11.2 -> 0.11.3"
 notes = "Additive only: a TryCustomizedInit trait with a blanket impl over CustomizedInit, and dev::initialized_mac_test split out of mac_test. No change to any hashing, MAC or buffer code; no unsafe, no new dependencies, no build script (build = false). Both hunks match RustCrypto/traits #2367 and #2395 in the changelog."
 
+[[audits.jiff]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+version = "1.0.0"
+notes = "Full review of the published crate, in three parts. Unsafe: every unsafe block, fn and impl read and sound: the uninitialised-buffer and Vec spare-capacity writer in fmt/buffer.rs (indexing bounds-checked before each unchecked access, only UTF-8 written before from_utf8_unchecked) and Write::as_mut_vec in fmt/mod.rs; the pointer-tagged TimeZone Repr in tz/timezone.rs (private tag set only by its constructors, 8-byte alignment asserted, Arc raw-pointer counts balanced, Send/Sync over plain-data payloads); and the Android dlopen/dlsym, emscripten and Windows GetDynamicTimeZoneInformation FFI under tz/system/, whose signatures match the platform headers. No unsafe relies on the value ranges of the datetime types. Time zones and system access: with default-features = false (with or without std) jiff reads no environment variables and no files; with tz-system, tzdb-zoneinfo or tzdb-concatenated it reads TZ, TZDIR, ANDROID_ROOT and ANDROID_DATA and TZif files, with no network, process spawning or writes; zone names are matched against enumerated files, never joined onto a path, and caches hold only zones that exist; a path in TZ or TZDIR is read unbounded and through symlinks, the libc trust model. Civil, Timestamp and fmt: checked arithmetic with explicit range types, fixed-size printer buffers, and 660M fuzz executions with overflow checks plus 1 MB pathological inputs found no unbounded allocation, recursion or superlinear time. One bug (jiff-core Offset::to_timestamp, below) can yield a Timestamp up to 1 s before Timestamp::MIN that jiff cannot rebuild; vitaminc refuses it before sealing. With alloc, parse errors echo the input, so vitaminc never forwards jiff error text. Panicking constructors and operators (constant, civil::date, Span setters, Add/Sub) are documented and avoided in favour of their checked forms. No build script, proc macro or links. Sources match crates/jiff at 3b1bdf9d, the trusted-publishing commit, apart from unpackaged test data. No advisories."
+
+[[audits.jiff-core]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+version = "1.0.0"
+notes = "Full review of the published crate. Its one unsafe block, ArrayStr::as_str (util/mod.rs), is sound: the private len and bytes fields are set only by new and push_str, which bound len by N <= 255 and copy only str bytes; Date::new_unchecked is commented out. Read: bounds.rs, civil date and epoch-day conversions, Timestamp, Offset conversions, and the TZif and POSIX TZ parsers. The parsers check every length with checked arithmetic before allocating, cap the footer scan and fattening, and were panic-free over about 3.4M mutation iterations; the date and timestamp code was fuzzed with the jiff crate (660M executions, overflow checks on). One bug: Offset::to_timestamp (tz/offset.rs:219-234) canonicalises a negative second with nonzero nanoseconds and checks only the seconds bound, so it can return a Timestamp up to 1 s before Timestamp::MIN, which trips a debug assertion and does not round-trip in release; vitaminc refuses such a value before sealing. Primitive::as_i8 and siblings truncate silently in release, but every use follows a bounds check. no_std, no build script, proc macro or links; dependencies only optional arbitrary, defmt and log. Sources match crates/jiff-core at 3b1bdf9d, the trusted-publishing commit. No advisories."
+
+[[audits.jiff-static]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+version = "1.0.0"
+notes = "Full review of the published proc macro (src/lib.rs, 498 lines); no build script. At expansion, include! reads exactly the one file named by a string literal in the macro call (no environment variables or default paths) and parses it with jiff-core TZif parser; get! (feature tzdb) reads jiff-tzdb embedded data. No network, process or environment access. The generated code builds statics from jiff-core types with checked const constructors and quote-escaped literals; its only unsafe, TZ.copy(), is on a static built by TimeZone::__internal_from_tzif, which meets the contract of jiff 1.0.0 TimeZone::copy (static TZif variant, no reference count). In our graph it is reachable only through jiff never-active cfg(any()) version pin or its optional static features. Sources match crates/jiff-static at 3b1bdf9d, the trusted-publishing commit. No advisories."
+
 [[audits.js-sys]]
 who = "Dan Draper <dan@cipherstash.com>"
 criteria = ["safe-to-deploy", "crypto-reviewed"]
@@ -80,6 +98,18 @@ who = "Dan Draper <dan@cipherstash.com>"
 criteria = "safe-to-deploy"
 delta = "3.4.0 -> 3.4.1"
 notes = "One doc-comment path fix in src/wasi_heap_sync.rs; no code change. build.rs unchanged."
+
+[[audits.portable-atomic]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+version = "1.15.0"
+notes = "Full review of the published crate, in two halves. Build: build.rs, version.rs and src/gen/build.rs read in full; the script runs `$RUSTC -vV` (through RUSTC_WRAPPER when set), reads cargo and rustc environment variables, and prints rustc-cfg, check-cfg and rerun-if directives, with no file or network I/O, no generated code and no build-dependencies; process spawning under src/ is test-only. Core: every unsafe site in src/lib.rs (from_ptr, get_mut, into_inner, layout casts and Sync impls of the public atomics, with layouts checked statically), utils.rs, core_atomic.rs, float/, the crossbeam-derived seqlock fallback (every access atomic or under the lock) and the interrupt and critical-section guards with their inline asm (Armv6-M, pre-v7 Arm, AVR, MSP430, RISC-V, Xtensa). Architecture: every inline-asm module under src/imp/ read line by line (atomic128 on x86_64, aarch64, powerpc64, riscv64 and s390x; atomic64 on Arm Linux; arm_linux, riscv, msp430, avr, x86, float/aarch64, outline_atomics), checking operand constraints, register pairs, clobbers, fences against the LLVM lowerings and alignment preconditions, and decoding the hand-encoded LSE128, RCPC3 and Zacas words (the LSFE words in float/aarch64.rs were not decoded); atomic64/riscv32.rs was reviewed by diff against riscv64.rs, and atomic128/intrinsics.rs (Miri and TSan only) skimmed. Runtime CPU detection (getauxval, elf_aux_info, sysctl, IsProcessorFeaturePresent, getisax, zx_system_get_features, getsystemcfg, riscv_hwprobe) has correct FFI signatures and buffer sizes, reads no files or environment outside tests, and is cached by CAS so native and lock-based paths never mix. The unsafe-assume-single-core and unsafe-assume-privileged features are unsound if misused, are compile errors on hosted targets, and are off in our graph. jiff takes it with default-features = false, only on targets without pointer-width atomics. Sources match tag v1.15.0 (e4595528), published by trusted publishing from taiki-e/portable-atomic; upstream CI at that commit (QEMU across 42 targets, Miri, sanitizers, Valgrind, asm snapshots) passed. No advisories."
+
+[[audits.portable-atomic-util]]
+who = "Dan Draper <dan@cipherstash.com>"
+criteria = "safe-to-deploy"
+version = "0.2.8"
+notes = 'Full review of the published crate. build.rs runs `$RUSTC -vV` through RUSTC_WRAPPER, reads environment variables and prints only rustc-cfg and check-cfg lines, with no file or network I/O. arc.rs read in full and compared with rust-lang/rust 1.93.0 alloc/src/sync.rs: every atomic operation and ordering in Arc and Weak (clone, drop, downgrade, is_unique, make_mut, get_mut, try_unwrap, into_inner, upgrade) matches std, and the layout arithmetic, from_raw and into_raw, allocation and deallocation pairing, panic guards, str, slice, Box and Vec conversions, downcast and the RawWaker vtable in task.rs are sound. Deviations from std, none unsound today: fat-pointer address replacement assumes the data pointer is the first word (utils.rs with_metadata_of); without std, abort() is a double panic; Weak::drop frees through Box<ArcInner<ManuallyDrop<T>>>; Weak raw-pointer APIs are sized only. tests/ and doc examples were not reviewed. Sources match the "Release 0.2.8" commit 6fb276ae of taiki-e/portable-atomic-util, the child of the trusted-publishing commit f0b9e652. No advisories.'
 
 [[audits.proptest]]
 who = "Dan Draper <dan@cipherstash.com>"

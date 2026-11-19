@@ -67,7 +67,7 @@ func TestDecimalExactness(t *testing.T) {
 }
 
 func TestDatesAndTimestampBounds(t *testing.T) {
-	for _, d := range []Date{{1, 1, 1}, {0, 1, 1}, {2024, 2, 29}, {-262143, 1, 1}, {262142, 12, 31}} {
+	for _, d := range []Date{{1, 1, 1}, {0, 1, 1}, {2024, 2, 29}, {-9999, 1, 1}, {9999, 12, 31}} {
 		days, err := d.DaysFromCE()
 		if err != nil {
 			t.Fatal(err)
@@ -77,18 +77,22 @@ func TestDatesAndTimestampBounds(t *testing.T) {
 			t.Fatalf("%v: %v %v", d, got, err)
 		}
 	}
-	for _, d := range []Date{{2023, 2, 29}, {2024, 0, 1}, {2024, 13, 1}, {2024, 1, 0}, {2024, 1, 32}, {-262144, 1, 1}, {262143, 1, 1}} {
+	for _, d := range []Date{{2023, 2, 29}, {2024, 0, 1}, {2024, 13, 1}, {2024, 1, 0}, {2024, 1, 32}, {-10000, 12, 31}, {10000, 1, 1}} {
 		if d.Validate() == nil {
 			t.Fatalf("accepted %v", d)
 		}
 	}
-	for _, ts := range []Timestamp{{0, 0}, {-1, 999999999}, {59, 123456789}} {
+	// The ends of the wire's range, which is jiff's.
+	first := time.Date(-9999, 1, 2, 1, 59, 59, 0, time.UTC).Unix()
+	last := time.Date(9999, 12, 30, 22, 0, 0, 0, time.UTC).Unix()
+	for _, ts := range []Timestamp{{0, 0}, {-1, 999999999}, {59, 123456789}, {first, 0}, {last, 999999999}} {
 		if ts.Validate() != nil {
 			t.Fatalf("rejected %v", ts)
 		}
 	}
 	// A leap second has no count since the epoch and is refused (ADR 0001).
-	for _, ts := range []Timestamp{{0, 1000000000}, {59, 1123456789}, {59, 2000000000}, {time.Date(262143, 1, 1, 0, 0, 0, 0, time.UTC).Unix(), 0}, {1<<63 - 1, 0}} {
+	// So is an instant past either end of the range.
+	for _, ts := range []Timestamp{{0, 1000000000}, {59, 1123456789}, {59, 2000000000}, {first - 1, 999999999}, {last + 1, 0}, {time.Date(12000, 1, 1, 0, 0, 0, 0, time.UTC).Unix(), 0}, {1<<63 - 1, 0}} {
 		if ts.Validate() == nil {
 			t.Fatalf("accepted %v", ts)
 		}
