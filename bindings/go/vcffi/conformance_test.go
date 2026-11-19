@@ -94,10 +94,15 @@ func expected(kind string, raw json.RawMessage) (any, error) {
 		if m == nil {
 			return nil, fmt.Errorf("unparseable date %q", text)
 		}
-		year, _ := strconv.Atoi(m[1])
-		month, _ := strconv.Atoi(m[2])
-		day, _ := strconv.Atoi(m[3])
-		return vcvalue.Date{Year: year, Month: time.Month(month), Day: day}, nil
+		n := make([]int, 3)
+		for i := range n {
+			v, err := strconv.Atoi(m[i+1])
+			if err != nil {
+				return nil, err
+			}
+			n[i] = v
+		}
+		return vcvalue.Date{Year: n[0], Month: time.Month(n[1]), Day: n[2]}, nil
 	case "timestamp":
 		return timestamp(text)
 	case "decimal":
@@ -129,7 +134,10 @@ func timestamp(text string) (any, error) {
 		}
 		n[i] = v
 	}
-	nanos, _ := strconv.Atoi((m[7] + "000000000")[:9])
+	nanos, err := strconv.Atoi((m[7] + "000000000")[:9])
+	if err != nil {
+		return nil, err
+	}
 	return time.Date(n[0], time.Month(n[1]), n[2], n[3], n[4], n[5], nanos, time.UTC), nil
 }
 
