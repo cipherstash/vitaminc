@@ -85,9 +85,14 @@ use crate::OrderKeyInit;
 ///
 /// The visitor copies the block into the scheme's protected key, then
 /// wipes its own copy. When the visitor refuses a sequence or map, it wipes
-/// every block in it, at any depth, before it returns. The visitor cannot
-/// wipe copies that the PRF backend made before calling it. The backend is
-/// responsible for those copies.
+/// each node it takes from it before it returns. Blocks nested in a node
+/// are wiped in place, at any depth.
+///
+/// The visitor cannot wipe copies that the PRF backend made before calling
+/// it. That includes the bytes of a top-level block that stay in the buffer
+/// of a [`SeqAccess`] or [`MapAccess`] after the node is taken out. The
+/// backend and `vitaminc-prf` are responsible for those copies; see
+/// [#629](https://github.com/cipherstash/vitaminc/issues/629).
 ///
 /// # Use a separate context for order keys
 ///
