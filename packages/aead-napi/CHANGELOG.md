@@ -1,4 +1,32 @@
 
+## [0.10.0] - 2026-11-19
+
+### Breaking
+
+- **Breaking:** take dates and timestamps from jiff, because chrono is unmaintained
+- **Breaking:** narrow dates and timestamps to jiff's range in every binding, so a value one binding seals every binding opens
+- **Breaking:** let generic code bound on a borrowed plaintext without copying it
+
+### Dependencies
+
+- bump napi in /packages/aead-napi/tests/addon
+- record the napi 3.16.1 audit, so the bump passes cargo vet
+- bump napi-derive in /packages/aead-napi/tests/addon
+- record the napi-derive 3.7.0 and napi-derive-backend 7.0.0 audits, so the addon passes cargo vet
+- bump the cargo-patch group across 1 directory with 2 updates
+- record the syn 3.0.10 and uuid 1.29.2 audits, so the patch group passes cargo vet
+- bump aws-lc-rs in /packages/aead-napi/tests/addon
+- record the aws-lc-rs 1.19.0 and aws-lc-sys 0.47.0 audits, so the addon passes cargo vet
+- point jiff-static at syn 3.0.10, which replaced 3.0.9 in this bump
+
+### Documentation
+
+- remove a stray README sentence, and say a + year is ISO 8601, not RFC 3339
+
+### Fixes
+
+- refuse a UTC offset of 24 or 25 hours, which jiff reads but RFC 3339 does not allow
+
 ## [0.9.1] - 2026-11-06
 
 ## [0.9.0] - 2026-11-04

@@ -1,4 +1,12 @@
 
+## [0.10.0] - 2026-11-19
+
+### Breaking
+
+- **Breaking:** take dates and timestamps from jiff, because chrono is unmaintained
+- **Breaking:** narrow dates and timestamps to jiff's range in every binding, so a value one binding seals every binding opens
+- **Breaking:** let generic code bound on a borrowed plaintext without copying it
+
 ## [0.9.1] - 2026-11-06
 
 ## [0.9.0] - 2026-11-04

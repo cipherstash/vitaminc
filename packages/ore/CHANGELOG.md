@@ -1,4 +1,30 @@
 
+## [0.10.0] - 2026-11-19
+
+### Breaking
+
+- **Breaking:** take dates and timestamps from jiff, because chrono is unmaintained
+- **Breaking:** refuse a jiff timestamp jiff cannot rebuild, so it is never sealed and then unreadable
+- **Breaking:** narrow dates and timestamps to jiff's range in every binding, so a value one binding seals every binding opens
+- **Breaking:** let generic code bound on a borrowed plaintext without copying it
+- **Breaking:** rename OwnTarget to Orderable, without bytes, and order the wipeable scalars
+
+### Documentation
+
+- compile SchemeVisitor's usage example
+- rewrite the SchemeVisitor docs in plain English
+- say which block copies SchemeVisitor cannot wipe
+
+### Features
+
+- key an order scheme from a PRF without the plaintext
+
+### Fixes
+
+- key a scheme of any key length, and say what the visitor wipes
+- wipe the blocks in a sequence or map SchemeVisitor refuses
+- compare decimals with no division instruction, and pin the wrappers' nulls and fields
+
 ## [0.9.1] - 2026-11-06
 
 ## [0.9.0] - 2026-11-04

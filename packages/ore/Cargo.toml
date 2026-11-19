@@ -19,20 +19,20 @@ rust-version.workspace = true
 exclude = ["tools/"]
 
 [dependencies]
-vitaminc-aead = { version = "0.9.1", path = "../aead" }
+vitaminc-aead = { version = "0.10.0", path = "../aead" }
 # The typed values callers hold, for the rows of the `FitsIn` and
 # `Orderable` tables that name them. Each turns on the matching
 # `vitaminc-aead` feature, which has the `Encrypt` impls.
 jiff = { version = "1.0.0", default-features = false, optional = true }
 rust_decimal = { version = "1.41", default-features = false, features = ["std"], optional = true }
 uuid = { version = "1", default-features = false, optional = true }
-vitaminc-context = { version = "0.9.1", path = "../context" }
-vitaminc-normalize = { version = "0.9.1", path = "../normalize" }
-vitaminc-protected = { version = "0.9.1", path = "../protected" }
+vitaminc-context = { version = "0.10.0", path = "../context" }
+vitaminc-normalize = { version = "0.10.0", path = "../normalize" }
+vitaminc-protected = { version = "0.10.0", path = "../protected" }
 # Needed by `SchemeVisitor`, the visitor that keys a scheme with the
 # block a PRF derives.
 # Without the `prf` feature, this crate does not depend on `vitaminc-prf`.
-vitaminc-prf = { version = "0.9.1", path = "../prf", optional = true }
+vitaminc-prf = { version = "0.10.0", path = "../prf", optional = true }
 zeroize = { workspace = true }
 thiserror = { workspace = true }
 

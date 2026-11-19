@@ -1,4 +1,22 @@
 
+## [0.10.0] - 2026-11-19
+
+### Breaking
+
+- **Breaking:** stop str, [u8; N] and Cow<str> lending an unwiped ProtectedRef
+
+### Documentation
+
+- list what lends a ProtectedRef, not what does not
+
+### Features
+
+- implement ConstantTimeEq for Vec<u8>
+
+### Fixes
+
+- harden the array ConstantTimeEq impl after review
+
 ## [0.9.1] - 2026-11-06
 
 ### Features

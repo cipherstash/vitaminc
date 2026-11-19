@@ -1,4 +1,18 @@
 
+## [0.10.0] - 2026-11-19
+
+### Breaking
+
+- **Breaking:** take dates and timestamps from jiff, because chrono is unmaintained
+
+### Documentation
+
+- rewrite the SchemeVisitor docs in plain English
+
+### Fixes
+
+- key a scheme of any key length, and say what the visitor wipes
+
 ## [0.9.1] - 2026-11-06
 
 ## [0.9.0] - 2026-11-04
