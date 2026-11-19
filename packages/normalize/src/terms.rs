@@ -20,8 +20,8 @@ use vitaminc_aead::plaintext::{Error, Path, Step};
 use vitaminc_aead::seal::{seal_all, seal_all_async, AsyncCipher, Cipher};
 use vitaminc_aead::shape::{self, Locate, MapRules, SeqRules, Settle};
 use vitaminc_aead::{
-    Encrypt, EncryptError, EncryptSink, FixedType, IntoAad, Logical, MapSink, Node, Pending,
-    Physical, Refusal, SeqSink, Sink, SourceError, Tee,
+    Encrypt, EncryptError, EncryptRef, EncryptSink, FixedType, IntoAad, Logical, MapSink, Node,
+    Pending, Physical, Refusal, SeqSink, Sink, SourceError, Tee,
 };
 
 use vitaminc_protected::OpaqueDebug;
@@ -519,13 +519,13 @@ impl<'t, E: Error, N: Normalize> Sink for Terms<'t, E, N> {
 
     /// No terms. Keeping the shape rules, the subtree is framed, as
     /// encryption frames it, and the frame dropped.
-    fn passthrough<P: Encrypt + Clone>(self, value: P) -> Result<(), E> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, value: &P) -> Result<(), E> {
         if let Some(rules) = self.rules {
             let at = At {
                 place: &self.at,
                 keys: self.keys.as_str(),
             };
-            shape::frame_passthrough(value, rules.depth, &at, refused)?;
+            shape::frame_passthrough(value.lend(), rules.depth, &at, refused)?;
             if let Some(settle) = rules.settle {
                 settle.passthrough();
             }

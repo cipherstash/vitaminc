@@ -136,18 +136,25 @@ assert!(matches!(
 
 `encrypt` takes a value that always fits, as the sealed `FitsIn` table
 says: a narrower integer, an `f32` into `F64`, bytes (`&[u8]`,
-`Vec<u8>`, `[u8; N]`) into `Bytes`, a `jiff::civil::Date` into `Date`,
-a `vitaminc_aead::Timestamp` into `Timestamp`, a
-`rust_decimal::Decimal` into `Decimal`, a `uuid::Uuid` into `Uuid` (the
-typed rows behind the `jiff`, `rust_decimal` and `uuid` features). Its
-only error is the scheme's own, so a scheme whose error is `Infallible`
-cannot fail at all. `encrypt_checked` takes any value of the data model
-and checks it while the program runs: an integer that may not fit, text
-(a code point Unicode 16 does not assign is refused), a
-`jiff::Timestamp` (jiff 1.0.0 can make one just before its own minimum,
-which has no count; `vitaminc_aead::Timestamp` refuses it when it is
-built), or a value whose type the index layer does not know. A chain that names no target uses the Rust type's own, from
-the sealed `OwnTarget` table; a target is never inferred from a value.
+`Vec<u8>`, `[u8; N]`) into `Bytes`, a `jiff::civil::Date` or
+`vitaminc_aead::Date` into `Date`, a `vitaminc_aead::Timestamp` into
+`Timestamp`, a `rust_decimal::Decimal` or `vitaminc_aead::Decimal` into
+`Decimal`, a `uuid::Uuid` or `vitaminc_aead::Uuid` into `Uuid` (the typed
+rows behind the `jiff`, `rust_decimal` and `uuid` features). The
+`vitaminc_aead` types are wiped when dropped and order exactly as the type
+each wraps. Its only error is the
+scheme's own, so a scheme whose error is `Infallible` cannot fail at
+all. `encrypt_checked` takes any value of the data model and checks it
+while the program runs: an integer that may not fit, text (a code point
+Unicode 16 does not assign is refused), a `jiff::Timestamp` (jiff 1.0.0
+can make one just before its own minimum, which has no count;
+`vitaminc_aead::Timestamp` refuses it when it is built), or a value whose
+type the index layer does not know. A chain that names no target takes an
+`Orderable` value and uses the Rust type's own target, from that sealed
+table; a target is never inferred from a value. Bytes are not
+`Orderable`: no ordering operator compares them, so an order term over
+bytes reveals the order of the rows and answers no query, and they go
+into `Bytes` only when it is named.
 
 A term is an `OrderTerm`, labelled with its target. Under a marker the
 label is a zero-sized type, so two targets' terms cannot meet in
@@ -431,6 +438,10 @@ and `Sync` when that is `Sync` too.
 a length only known at runtime, the way a PRF is keyed, so an index
 layer constructs any scheme the same way.
 
+With the `prf` feature, [`SchemeVisitor`] keys a scheme with the block a PRF derives. [`SchemeVisitor`] is a `vitaminc-prf` visitor that returns the keyed scheme. The visitor contains no plaintext, so the value you want to order is never passed to the PRF call. A backend that derives the key later never keeps a copy of the value either. When the key arrives, open a space on the scheme and encrypt the value there by reference: `scheme.target(t).encrypt_checked(&value)`.
+
+Derive order keys under a context that you use only for keys. Do not derive any stored or queried term under that context. With the same PRF key and context, a key and a term would be the same bytes.
+
 A term compares only with terms of the same scheme, key, target and
 context, which is what a space is, through `space.compare(&a, &b)` (the
 scheme's [`OrderScheme::compare`], which needs no key). The scheme's own
@@ -553,6 +564,7 @@ No optional features are enabled by default.
 | `jiff` | Adds order targets for `jiff::civil::Date`, `jiff::Timestamp` and `vitaminc_aead::Timestamp`, and enables AEAD date and timestamp support. |
 | `rust_decimal` | Adds decimal order targets and enables AEAD decimal support. |
 | `uuid` | Adds UUID order targets and enables AEAD UUID support. |
+| `prf` | Adds `SchemeVisitor`, the visitor that keys a scheme with the block a PRF derives. |
 
 ## Compatibility
 
@@ -565,6 +577,7 @@ floor. See the [workspace compatibility policy](https://github.com/cipherstash/v
 [`OrderEncrypt`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/trait.OrderEncrypt.html
 [`OrderError::Unsupported`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/enum.OrderError.html#variant.Unsupported
 [`OrderKeyInit`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/trait.OrderKeyInit.html
+[`SchemeVisitor`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/struct.SchemeVisitor.html
 [`OrderPlaintext`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/struct.OrderPlaintext.html
 [`OrderScheme::compare`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/trait.OrderScheme.html#tymethod.compare
 [`OrderScheme`]: https://docs.rs/vitaminc-ore/latest/vitaminc_ore/trait.OrderScheme.html

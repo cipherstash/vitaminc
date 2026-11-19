@@ -8,8 +8,8 @@ use napi::{Env, Error, Result, Status, Task};
 use napi_derive::napi;
 use vitaminc_aead::seal::Cipher;
 use vitaminc_aead::{
-    decrypt, decrypt_into, encrypt, to_frame, CipherText, Context, DecryptError, EncryptError,
-    Float, Frame, Int, Logical, MapSink, Node, PassthroughFrame, Physical, Encrypt, SeqSink,
+    decrypt, decrypt_into, encrypt, to_frame, CipherText, Context, DecryptError, Encrypt,
+    EncryptError, Float, Frame, Int, Logical, MapSink, Node, PassthroughFrame, Physical, SeqSink,
     Sink, TimeUnit,
 };
 use vitaminc_aead_napi::{JsBuilder, JsCipherText, JsFault, JsRef, Wrappers};
@@ -195,6 +195,13 @@ struct Nest {
     wrap: String,
 }
 
+/// Passthrough lends its value, so the nested source walks by reference too.
+impl Encrypt for &Nest {
+    fn visit<S: Sink>(self, sink: S) -> std::result::Result<S::Ok, S::Error> {
+        self.clone().visit(sink)
+    }
+}
+
 impl Encrypt for Nest {
     fn visit<S: Sink>(self, sink: S) -> std::result::Result<S::Ok, S::Error> {
         if self.levels == 0 {
@@ -215,7 +222,7 @@ impl Encrypt for Nest {
                 inner.visit(map.entry("k")?)?;
                 map.end()
             }
-            _ => sink.passthrough(inner),
+            _ => sink.passthrough(&inner),
         }
     }
 }

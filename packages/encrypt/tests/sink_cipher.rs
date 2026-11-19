@@ -125,7 +125,7 @@ mod given_a_nested_record {
         impl Encrypt for OnlyPlain {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
                 let mut map = sink.map(Some(1))?;
-                map.entry("id")?.passthrough(7u64)?;
+                map.entry("id")?.passthrough(&7u64)?;
                 map.end()
             }
         }

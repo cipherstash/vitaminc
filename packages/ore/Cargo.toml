@@ -21,7 +21,7 @@ exclude = ["tools/"]
 [dependencies]
 vitaminc-aead = { version = "0.9.1", path = "../aead" }
 # The typed values callers hold, for the rows of the `FitsIn` and
-# `OwnTarget` tables that name them. Each turns on the matching
+# `Orderable` tables that name them. Each turns on the matching
 # `vitaminc-aead` feature, which has the `Encrypt` impls.
 jiff = { version = "1.0.0", default-features = false, optional = true }
 rust_decimal = { version = "1.41", default-features = false, features = ["std"], optional = true }
@@ -29,6 +29,10 @@ uuid = { version = "1", default-features = false, optional = true }
 vitaminc-context = { version = "0.9.1", path = "../context" }
 vitaminc-normalize = { version = "0.9.1", path = "../normalize" }
 vitaminc-protected = { version = "0.9.1", path = "../protected" }
+# Needed by `SchemeVisitor`, the visitor that keys a scheme with the
+# block a PRF derives.
+# Without the `prf` feature, this crate does not depend on `vitaminc-prf`.
+vitaminc-prf = { version = "0.9.1", path = "../prf", optional = true }
 zeroize = { workspace = true }
 thiserror = { workspace = true }
 
@@ -44,15 +48,18 @@ version = "0.1.24"
 [dependencies.unicode-general-category]
 version = "=1.1.0"
 
-# docs.rs shows the typed rows of the `FitsIn` and `OwnTarget` tables.
+# docs.rs shows the typed rows of the `FitsIn` and `Orderable` tables.
 [package.metadata.docs.rs]
-features = ["jiff", "rust_decimal", "uuid"]
+features = ["jiff", "rust_decimal", "uuid", "prf"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 jiff = ["dep:jiff", "vitaminc-aead/jiff"]
 rust_decimal = ["dep:rust_decimal", "vitaminc-aead/rust_decimal"]
 uuid = ["dep:uuid", "vitaminc-aead/uuid"]
+# Adds `SchemeVisitor`, the visitor that keys a scheme with the block a
+# PRF derives.
+prf = ["dep:vitaminc-prf"]
 # The conformance checks a scheme crate runs against its real scheme, in
 # its tests. Not for a build that ships.
 test-support = []
@@ -62,7 +69,9 @@ test-support = []
 # `plaintext::render`, the path notation the tests assert against.
 vitaminc-aead = { path = "../aead", features = ["jiff", "rust_decimal", "uuid", "test-support"] }
 # This crate's own typed rows, on for its tests.
-vitaminc-ore = { path = ".", features = ["jiff", "rust_decimal", "uuid", "test-support"] }
+vitaminc-ore = { path = ".", features = ["jiff", "rust_decimal", "uuid", "prf", "test-support"] }
+# A real PRF, for the tests that key a scheme from one.
+vitaminc-hmac = { path = "../hmac" }
 quickcheck = "1.1.0"
 # Typed values as callers hold them, for the tests that encrypt them.
 jiff = { version = "1.0.0", default-features = false }
