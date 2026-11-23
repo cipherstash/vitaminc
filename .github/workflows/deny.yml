@@ -54,7 +54,7 @@ jobs:
       - name: cargo deny check
         # `--locked` refuses to touch Cargo.lock, so the graph checked is the
         # one the PR ships. `all-features` is set in deny.toml so optional
-        # dependencies (chrono, uuid, serde, ...) are covered too.
+        # dependencies (jiff, uuid, serde, ...) are covered too.
         run: cargo deny --locked check
 
       - name: cargo deny check (nested test workspaces)

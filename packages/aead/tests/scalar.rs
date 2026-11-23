@@ -129,21 +129,23 @@ fn protected_forms_of_a_scalar_are_scalars() {
     one_leaf(bytes.as_protected_ref());
 }
 
-#[cfg(feature = "chrono")]
+#[cfg(feature = "jiff")]
 #[test]
-fn chrono_types_are_scalars() {
-    use chrono::{DateTime, NaiveDate, Utc};
+fn jiff_types_are_scalars() {
     use vitaminc_aead::Timestamp;
 
-    let date = NaiveDate::from_ymd_opt(2024, 2, 29).expect("valid");
+    let date = jiff::civil::Date::constant(2024, 2, 29);
     one_leaf(date);
     one_leaf(&date);
-    let instant = DateTime::<Utc>::from_timestamp(1_700_000_000, 0).expect("valid");
+    let instant = jiff::Timestamp::new(1_700_000_000, 0).expect("valid");
     one_leaf(instant);
     one_leaf(&instant);
-    let stamp = Timestamp::new(instant).expect("not a leap second");
+    let stamp = Timestamp::new(instant).expect("in range");
     one_leaf(&stamp);
     one_leaf(stamp);
+    let wiped_date = vitaminc_aead::Date::new(date);
+    one_leaf(&wiped_date);
+    one_leaf(wiped_date);
 }
 
 #[cfg(feature = "rust_decimal")]
@@ -152,6 +154,9 @@ fn a_decimal_is_a_scalar() {
     let value = rust_decimal::Decimal::new(1234, 2);
     one_leaf(value);
     one_leaf(&value);
+    let wiped = vitaminc_aead::Decimal::new(value);
+    one_leaf(&wiped);
+    one_leaf(wiped);
 }
 
 #[cfg(feature = "uuid")]
@@ -160,6 +165,9 @@ fn a_uuid_is_a_scalar() {
     let id = uuid::Uuid::from_bytes([7; 16]);
     one_leaf(id);
     one_leaf(&id);
+    let wiped = vitaminc_aead::Uuid::new(id);
+    one_leaf(&wiped);
+    one_leaf(wiped);
 }
 
 // `trybuild` launches rustc and inspects the filesystem, neither of which can

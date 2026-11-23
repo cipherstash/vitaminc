@@ -1,4 +1,17 @@
 
+## [0.10.0] - 2026-11-19
+
+### Breaking
+
+- **Breaking:** dates and timestamps must now be in years -9999 to 9999, the same range as every other binding.
+  The range applies to a JavaScript `Date`, and to date and timestamp text.
+  In 0.9.1, the range was years -262143 to 262142.
+  A year past 9999 was written with a `+` sign, such as `+12000-01-01T00:00:00.000000001Z`.
+  A value outside the new range is now refused.
+- **Breaking:** a negative year is now written as a minus sign and six digits, such as `-000005-03-01T12:00:00.000000001Z`.
+  JavaScript writes negative years the same way.
+  In 0.9.1, a negative year was written with four digits, such as `-0005`.
+
 ## [0.9.1] - 2026-11-06
 
 ## [0.9.0] - 2026-11-04

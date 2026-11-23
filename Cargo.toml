@@ -24,13 +24,14 @@ members = [
     "packages/hmac",
     "packages/random",
     "packages/random-derives",
+    "packages/skill-doctests",
     "packages/traits",
     "packages/vitaminc",
 ]
 
 [workspace.package]
 documentation = "https://docs.rs/vitaminc"
-version = "0.9.1"
+version = "0.10.0"
 repository = "https://github.com/cipherstash/vitaminc"
 authors = [
   "Dan Draper <dan@cipherstash.com>",

@@ -153,7 +153,7 @@ Even when you use the facade, you need a direct dependency for these:
 
 - The `vitaminc-aead-frame` and `vitaminc-aead-napi` crates.
   The facade does not currently include them.
-- Crate features such as `hlist`, `chrono`, and `bitvec`.
+- Crate features such as `hlist`, `jiff`, and `bitvec`.
   Enable them on the crate that defines them, because the facade does not pass them on.
 - Some derive macros.
   A derive macro can need a direct dependency on the crate that re-exports it.
@@ -527,7 +527,7 @@ Some also enable supporting facade features:
 
 These dependencies apply transitively.
 `normalize` alone does not enable `prf`.
-For options such as `hlist`, `chrono`, or `bitvec`, add the relevant crate directly and enable its feature; the facade does not forward them.
+For options such as `hlist`, `jiff`, or `bitvec`, add the relevant crate directly and enable its feature; the facade does not forward them.
 
 ## Escape hatches - use with care!
 

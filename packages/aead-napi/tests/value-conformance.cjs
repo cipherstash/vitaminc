@@ -102,10 +102,18 @@ for (const [Wrapper, code] of [[VcDate, 'ERR_INVALID_DATE'], [VcTimestamp, 'ERR_
   forged.value = 42;
   assert.throws(() => addon.encode(forged), {name: 'TypeError', code}, Wrapper.name);
 }
-// Expanded-year timestamps decrypt as wrappers and encrypt again unchanged.
-for (const timestamp of ['+12000-01-01T00:00:00.000000001Z', '-0005-03-01T12:00:00.000000001Z']) {
+// Timestamps finer than a millisecond in a negative year (a sign and six
+// digits, as JavaScript writes it) and at the end of the wire's range,
+// which is jiff's, decrypt as wrappers and encrypt again unchanged.
+for (const timestamp of ['-000005-03-01T12:00:00.000000001Z', '-009999-01-02T01:59:59.000000001Z', '9999-12-30T22:00:00.999999999Z']) {
   assert.deepEqual(addon.decode(addon.encode(new VcTimestamp(timestamp))), new VcTimestamp(timestamp));
 }
+// Past the range, a value is refused, whichever way it is given.
+assert.throws(() => addon.encode(new VcTimestamp('+012000-01-01T00:00:00.000000001Z')), {code:'ERR_INVALID_TIMESTAMP'});
+assert.throws(() => addon.encode(new VcTimestamp('9999-12-30T22:00:01Z')), {code:'ERR_INVALID_TIMESTAMP'});
+assert.throws(() => addon.encode(new Date('+012000-01-01T00:00:00Z')), {code:'ERR_INVALID_TIMESTAMP'});
+assert.throws(() => addon.encode(new VcDate('+010000-01-01')), {code:'ERR_INVALID_DATE'});
+assert.deepEqual(addon.decode(addon.encode(new Date('-009999-01-02T01:59:59Z'))), new Date('-009999-01-02T01:59:59Z'));
 // A whole-millisecond timestamp written by another binding is a Date here;
 // a finer one is a VcTimestamp, so no precision is discarded.
 assert.deepEqual(addon.decode(Buffer.from('130000000000000000c0d45407', 'hex')), new Date(123));

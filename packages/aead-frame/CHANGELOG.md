@@ -1,4 +1,12 @@
 
+## [0.10.0] - 2026-11-19
+
+### Wire format
+
+- Storage blobs and transport frames are written the same way as in 0.9.1.
+- A blob or frame that contains a date or timestamp outside years -9999 to 9999 is now refused, because `vitaminc-aead` refuses that value.
+  The 0.10.0 changelog for `vitaminc-aead` gives the exact limits.
+
 ## [0.9.1] - 2026-11-06
 
 ## [0.9.0] - 2026-11-04

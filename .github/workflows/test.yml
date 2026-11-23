@@ -257,14 +257,26 @@ jobs:
 
       - name: test (aead optional scalar features)
         # Only dev-dependencies enable these on vitaminc-aead, so a build
-        # of the crate alone skips the tests that pin the chrono,
+        # of the crate alone skips the tests that pin the jiff,
         # rust_decimal and uuid conversions and range constants. Run each
         # alone and together.
         run: |
-          cargo test -p vitaminc-aead --features chrono &&
+          cargo test -p vitaminc-aead --features jiff &&
           cargo test -p vitaminc-aead --features rust_decimal &&
           cargo test -p vitaminc-aead --features uuid &&
           cargo test -p vitaminc-aead --all-features
+
+      - name: test (aead jiff bug guard, release)
+        # jiff 1.0.0 can parse an instant before its own minimum
+        # (BurntSushi/jiff#714), but a debug assertion in jiff stops it
+        # first in a debug build. So the tests that check vitaminc refuses
+        # such an instant only build in release mode. `cargo test` passes
+        # when its filter matches no test, so the step also checks that
+        # both tests ran.
+        run: |
+          out=$(cargo test --release -p vitaminc-aead --features jiff --lib an_instant_jiff_cannot_rebuild)
+          echo "$out"
+          grep -q 'test result: ok. 2 passed' <<<"$out"
 
       - name: test (aead-frame serde feature)
         # No workspace member enables `vitaminc-aead-frame/serde`, so the
@@ -287,6 +299,7 @@ jobs:
           cargo test -p vitaminc-prf --features normalize &&
           cargo test -p vitaminc-hmac --test normalized_equality &&
           cargo test -p vitaminc --features prf,normalize --test prf_normalize &&
+          cargo test -p vitaminc --features prf,ore --test prf_ore &&
           cargo check -p vitaminc --features ore
 
       - name: test (vitaminc-encrypt, RustCrypto backend on native)

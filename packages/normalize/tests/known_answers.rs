@@ -9,9 +9,8 @@
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::collections::BTreeMap;
 
-use chrono::NaiveDate;
 use futures_executor::block_on;
-use vitaminc_aead::plaintext::kinds::chrono as conv;
+use vitaminc_aead::plaintext::kinds::jiff as conv;
 use vitaminc_aead::plaintext::render;
 use vitaminc_aead::seal::{AsyncCipher, Cipher};
 use vitaminc_aead::{
@@ -729,12 +728,14 @@ fn text_and_bytes_normalize_to_their_pinned_terms() {
 
 #[test]
 fn dates_normalize_to_their_pinned_terms() {
-    // NaiveDate::MIN, 0001-01-01, 1969-12-31, 1970-01-01, 2024-02-29, NaiveDate::MAX.
+    // The wire's minimum (jiff's Date::MIN, -9999-01-01), 0001-01-01,
+    // 1969-12-31, 1970-01-01, 2024-02-29, the wire's maximum (jiff's
+    // Date::MAX, 9999-12-31).
     pin(
         Some(Logical::Date),
-        Physical::Int(Int::I32(-96465292)),
+        Physical::Int(Int::I32(-4371587)),
         "vitaminc/prf/value/date-orderable/v1",
-        "7a4b07af",
+        "7fc844b8",
     );
     pin(
         Some(Logical::Date),
@@ -762,9 +763,9 @@ fn dates_normalize_to_their_pinned_terms() {
     );
     pin(
         Some(Logical::Date),
-        Physical::Int(Int::I32(95026236)),
+        Physical::Int(Int::I32(2932896)),
         "vitaminc/prf/value/date-orderable/v1",
-        "85b4f577",
+        "8037b9db",
     );
 }
 
@@ -772,7 +773,8 @@ fn dates_normalize_to_their_pinned_terms() {
 fn timestamps_in_every_unit_normalize_to_their_pinned_terms() {
     // Five instants as nanoseconds, each then truncated to micros, millis
     // and seconds (a coarser unit matches the term of the instant at that
-    // precision), then chrono's MIN_UTC and MAX_UTC.
+    // precision), then the wire's minimum and maximum (jiff's
+    // Timestamp::MIN and Timestamp::MAX).
     pin(
         Some(Logical::Timestamp(TimeUnit::Nanos)),
         Physical::Int(Int::I128(0)),
@@ -895,15 +897,15 @@ fn timestamps_in_every_unit_normalize_to_their_pinned_terms() {
     );
     pin(
         Some(Logical::Timestamp(TimeUnit::Nanos)),
-        Physical::Int(Int::I128(-8334601228800000000000)),
+        Physical::Int(Int::I128(-377705023201000000000)),
         "vitaminc/prf/value/timestamp-micros-orderable/v1",
-        "7ffff86b730dee0000000000",
+        "7fffffa80f06b91f00000000",
     );
     pin(
         Some(Logical::Timestamp(TimeUnit::Nanos)),
-        Physical::Int(Int::I128(8210266876799999999999)),
+        Physical::Int(Int::I128(253402207200999999999)),
         "vitaminc/prf/value/timestamp-micros-orderable/v1",
-        "800007779a0a6b7f3b9ac618",
+        "8000003afff2d3e03b9ac618",
     );
 }
 
@@ -1044,7 +1046,7 @@ fn a_uuid_has_a_domain_of_its_own() {
 
 #[test]
 fn a_date_never_matches_its_day_count_and_widths_agree() {
-    let date = NaiveDate::from_ymd_opt(2024, 2, 29).expect("date");
+    let date = jiff::civil::Date::constant(2024, 2, 29);
     let days = conv::date_days(date);
     let as_date = normalize(Some(Logical::Date), Physical::Int(Int::I32(days))).expect("date");
     let as_int = normalize(None, Physical::Int(Int::I32(days))).expect("int");
@@ -1163,7 +1165,7 @@ fn scalars_without_a_domain_and_passthroughs_get_no_term_and_a_null_gets_one() {
             let mut map = sink.map(Some(5))?;
             true.visit(map.entry("active")?)?;
             None::<u32>.visit(map.entry("missing")?)?;
-            map.entry("tenant")?.passthrough("acme")?;
+            map.entry("tenant")?.passthrough(&"acme")?;
             vitaminc_aead::Raw(Some(Logical::Undefined), Physical::Null)
                 .visit(map.entry("undefined")?)?;
             "Ada".visit(map.entry("name")?)?;

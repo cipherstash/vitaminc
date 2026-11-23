@@ -69,7 +69,8 @@ func TestInvalidScalarHostEncoding(t *testing.T) {
 	}{
 		{vcvalue.Date{Year: 2023, Month: 2, Day: 29}, vcvalue.ErrInvalidDate},
 		{vcvalue.Timestamp{Seconds: 0, Nanoseconds: 1000000000}, vcvalue.ErrInvalidTimestamp},
-		{time.Date(262143, 1, 1, 0, 0, 0, 0, time.UTC), vcvalue.ErrInvalidTimestamp},
+		{time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC), vcvalue.ErrInvalidTimestamp},
+		{time.Date(-9999, 1, 1, 0, 0, 0, 0, time.UTC), vcvalue.ErrInvalidTimestamp},
 		{vcvalue.Decimal{Scale: 29}, vcvalue.ErrInvalidDecimal},
 		// A tagged value must be a physical scalar under an unknown id.
 		{vcvalue.Tagged{ID: 5, V: []byte{1}}, vcvalue.ErrInvalidTagged},
@@ -96,7 +97,8 @@ func TestEnvelopeTimestampsDecodeToTime(t *testing.T) {
 		{"f3030205c8ff ffffffffffff", time.Unix(0, -56_000).UTC()},                             // -56 µs, as an i64
 		{"f303000c0a", time.Unix(10, 0).UTC()},                                                 // 10 s, as an i8
 		{"f3030210" + "00f1" + "ffffffffffffffffffffffffffff", time.Unix(0, -3_840_000).UTC()}, // -3840 µs, as an i128
-		{"f30300057f6b0a9a77070000", time.Unix(8210266876799, 0).UTC()},                        // the last second chrono can hold, as an i64
+		{"f3030005e0d3f2ff3a000000", time.Unix(253402207200, 0).UTC()},                         // the last second the wire admits, as an i64
+		{"f30300051fb9060fa8ffffff", time.Unix(-377705023201, 0).UTC()},                        // the first second the wire admits
 	} {
 		t.Run(tc.wire, func(t *testing.T) {
 			raw, err := hex.DecodeString(strings.ReplaceAll(tc.wire, " ", ""))
@@ -116,8 +118,9 @@ func TestEnvelopeTimestampsDecodeToTime(t *testing.T) {
 		"f3030305" + "0000000000000000",                 // nanoseconds: the shorthand tag exists
 		"f3030405" + "0000000000000000",                 // no such unit
 		"f303010a" + "00000000",                         // a count that is not an int
-		"f3030010" + "0000000000000000000000000000ff7f", // out of chrono's range
-		"f3030005" + "806b0a9a77070000",                 // one second past chrono's range, as an i64
+		"f3030010" + "0000000000000000000000000000ff7f", // out of the wire's range
+		"f3030005" + "e1d3f2ff3a000000",                 // one second past the wire's range, as an i64
+		"f3030005" + "1eb9060fa8ffffff",                 // one second before it
 		"f3030107" + "18fcffffffffffff",                 // 2^64 - 1000 ms, a u64 above the i64 range
 	} {
 		t.Run(wire, func(t *testing.T) {

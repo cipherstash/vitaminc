@@ -1,4 +1,48 @@
 
+## [0.10.0] - 2026-11-19
+
+### Order terms
+
+- Order terms for every date and timestamp in years -9999 to 9999 are the same as in 0.9.1.
+  A date or timestamp outside that range is now refused.
+  The 0.10.0 changelog for `vitaminc-aead` gives the exact limits.
+
+### Breaking
+
+- **Breaking:** the `chrono` feature is renamed `jiff`.
+  Order `jiff::civil::Date` in place of `chrono::NaiveDate`, and `jiff::Timestamp` in place of `chrono::DateTime<Utc>`.
+  As with `DateTime<Utc>`, encrypt a `jiff::Timestamp` with `encrypt_checked`.
+  `vitaminc_aead::Timestamp` is always in range, so `encrypt` accepts it.
+- **Breaking:** the `OwnTarget` trait is renamed `Orderable`.
+  A type that is `Orderable` can go into an order index without naming a target.
+  You can still order a type that is not `Orderable`.
+  To order it, name its target.
+- **Breaking:** bytes are no longer `Orderable`.
+  Bytes are `Vec<u8>`, `&[u8]`, `[u8; N]`, and `vitaminc_aead::Bytes`.
+  No ordering query compares bytes.
+  So an order term over bytes reveals the order of the rows, and answers no query.
+  To order bytes on purpose, name the target with `scheme.target(Bytes)`.
+
+### Features
+
+- The new `SchemeVisitor` keys an order scheme with the block that a pseudorandom function (PRF) derives.
+  The new `prf` feature enables it.
+  The visitor contains no plaintext, so the value you order is never passed to the PRF backend.
+  When the visitor returns the keyed scheme, encrypt the value by reference with `encrypt_checked(&value)`.
+  `SchemeVisitor` works with a key of any length.
+  `SchemeVisitor` refuses every PRF result except a single block, and wipes the blocks that it refuses.
+- Derive order keys under a context that you use only for order keys.
+  With the same PRF key and context, an order key and a stored term would be the same bytes.
+- `vitaminc_aead::Date`, `Decimal`, and `Uuid` are now `Orderable`, both owned and borrowed.
+  Each gives the same order term as the type it wraps.
+
+### What is not guaranteed
+
+- `SchemeVisitor` wipes its own copy of the key.
+  The visitor cannot wipe copies that the PRF backend made before calling it.
+  Those copies include the bytes of a top-level block that stay in the backend's buffer.
+  Issue #629 tracks this.
+
 ## [0.9.1] - 2026-11-06
 
 ## [0.9.0] - 2026-11-04

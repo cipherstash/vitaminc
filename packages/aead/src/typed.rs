@@ -42,7 +42,7 @@ use vitaminc_protected::{Controlled, Protected};
 use zeroize::Zeroize;
 
 use crate::plaintext::{
-    Encrypt, Error, FixedType, Float, Logical, MapSink, Physical, SeqSink, Sink, SourceError,
+    EncryptRef, Error, FixedType, Float, Logical, MapSink, Physical, SeqSink, Sink, SourceError,
 };
 use crate::seal::{AsyncCipher, Cipher, Node};
 use crate::walk::{decrypt_into, decrypt_into_async, DecryptError};
@@ -198,7 +198,7 @@ pub trait FromScalar: Sized {
     /// field reads a `u32` field's `None` as it reads its values. Only a
     /// target that refuses zero needs this, to read its own `None`: a
     /// fieldless enum with no variant at zero sets it to its
-    /// [`Encrypt::FIXED`].
+    /// [`Encrypt::FIXED`](crate::Encrypt::FIXED).
     const FIXED: Option<FixedType> = None;
     /// Convert a physical value with its logical annotation, or return `None`
     /// for a wrong kind, unsupported annotation, or out-of-range value.
@@ -244,7 +244,7 @@ impl<T: FromScalar> Sink for ScalarSink<T> {
         Err(DecodeError::Expected(T::EXPECTED))
     }
 
-    fn passthrough<P: Encrypt + Clone>(self, _: P) -> Result<T, DecodeError> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, _: &P) -> Result<T, DecodeError> {
         Err(DecodeError::Expected(T::EXPECTED))
     }
 }
@@ -287,7 +287,7 @@ impl Sink for Nothing {
         match self {}
     }
 
-    fn passthrough<P: Encrypt + Clone>(self, _: P) -> Result<(), DecodeError> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, _: &P) -> Result<(), DecodeError> {
         match self {}
     }
 }
@@ -439,14 +439,15 @@ impl<const N: usize> FromScalar for [u8; N] {
     }
 }
 
-#[cfg(feature = "chrono")]
-#[cfg_attr(docsrs, doc(cfg(feature = "chrono")))]
-mod chrono_targets {
+#[cfg(feature = "jiff")]
+#[cfg_attr(docsrs, doc(cfg(feature = "jiff")))]
+mod jiff_targets {
     use super::*;
-    use crate::plaintext::kinds::chrono as conv;
-    use ::chrono::{DateTime, NaiveDate, Utc};
+    use crate::plaintext::kinds::jiff as conv;
+    use ::jiff::{civil::Date, Timestamp};
 
-    impl FromScalar for NaiveDate {
+    /// Every date the wire admits: its range is jiff's.
+    impl FromScalar for Date {
         const EXPECTED: &'static str = "date";
         fn from_scalar(ty: Option<Logical>, v: Physical<'_>) -> Option<Self> {
             match (ty, v) {
@@ -457,8 +458,9 @@ mod chrono_targets {
     }
 
     /// Any unit: a JavaScript `Date` in milliseconds decodes as well as a
-    /// Rust timestamp in nanoseconds.
-    impl FromScalar for DateTime<Utc> {
+    /// Rust timestamp in nanoseconds. Every instant the wire admits: its
+    /// range is jiff's.
+    impl FromScalar for Timestamp {
         const EXPECTED: &'static str = "timestamp";
         fn from_scalar(ty: Option<Logical>, v: Physical<'_>) -> Option<Self> {
             match (ty, v) {
@@ -565,7 +567,7 @@ impl<T: Decrypt, O: Put<T>> Sink for Forward<T, O> {
         Ok(ForwardEnd(self.0.map(len)?, self.1, PhantomData))
     }
 
-    fn passthrough<P: Encrypt + Clone>(self, value: P) -> Result<(), DecodeError> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, value: &P) -> Result<(), DecodeError> {
         self.1.put(self.0.passthrough(value)?);
         Ok(())
     }
@@ -658,7 +660,7 @@ impl<L: Sink, R: Sink<Error = L::Error>> Sink for Either<L, R> {
         }
     }
 
-    fn passthrough<P: Encrypt + Clone>(self, value: P) -> Result<Self::Ok, Self::Error> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, value: &P) -> Result<Self::Ok, Self::Error> {
         match self {
             Either::Left(l) => l.passthrough(value).map(Either::Left),
             Either::Right(r) => r.passthrough(value).map(Either::Right),
@@ -749,8 +751,8 @@ impl<T: Decrypt, O: Put<T>> Sink for Clear<T, O> {
         Err(DecodeError::Expected("passthrough"))
     }
 
-    fn passthrough<P: Encrypt + Clone>(self, value: P) -> Result<(), DecodeError> {
-        self.0.put(value.visit(T::sink())?);
+    fn passthrough<P: ?Sized + EncryptRef>(self, value: &P) -> Result<(), DecodeError> {
+        self.0.put(value.visit_ref(T::sink())?);
         Ok(())
     }
 }
@@ -800,7 +802,7 @@ impl<S: Sink<Error = DecodeError>, W: Rewrap<S::Ok>> Sink for Wrapped<S, W> {
         Ok(WrappedEnd(self.0.map(len)?, PhantomData))
     }
 
-    fn passthrough<P: Encrypt + Clone>(self, value: P) -> Result<W::Output, DecodeError> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, value: &P) -> Result<W::Output, DecodeError> {
         self.0.passthrough(value).and_then(W::rewrap)
     }
 }
@@ -867,7 +869,7 @@ impl<T: Decrypt> Sink for List<T> {
         Err(DecodeError::Expected("sequence"))
     }
 
-    fn passthrough<P: Encrypt + Clone>(self, _: P) -> Result<Vec<T>, DecodeError> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, _: &P) -> Result<Vec<T>, DecodeError> {
         Err(DecodeError::Expected("sequence"))
     }
 }
@@ -933,7 +935,7 @@ macro_rules! dict_target {
                     Ok(DictEntries($map::new()))
                 }
 
-                fn passthrough<P: Encrypt + Clone>(self, _: P) -> Result<Self::Ok, DecodeError> {
+                fn passthrough<P: ?Sized + EncryptRef>(self, _: &P) -> Result<Self::Ok, DecodeError> {
                     Err(DecodeError::Expected("map"))
                 }
             }
@@ -1004,7 +1006,7 @@ impl<T: Decrypt> Sink for Optional<T> {
         Ok(Some_(self.0.map(len)?, PhantomData))
     }
 
-    fn passthrough<P: Encrypt + Clone>(self, value: P) -> Result<Option<T>, DecodeError> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, value: &P) -> Result<Option<T>, DecodeError> {
         self.0.passthrough(value).map(Some)
     }
 }
@@ -1122,7 +1124,7 @@ impl<T: FromScalar + Zeroize> Sink for ScalarProtected<T> {
         Err(DecodeError::Expected(T::EXPECTED))
     }
 
-    fn passthrough<P: Encrypt + Clone>(self, _: P) -> Result<Protected<T>, DecodeError> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, _: &P) -> Result<Protected<T>, DecodeError> {
         Err(DecodeError::Expected(T::EXPECTED))
     }
 }
@@ -1166,7 +1168,7 @@ impl<T: DecryptProtected> Sink for ProtectedList<T> {
         Err(DecodeError::Expected("sequence"))
     }
 
-    fn passthrough<P: Encrypt + Clone>(self, _: P) -> Result<Self::Ok, DecodeError> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, _: &P) -> Result<Self::Ok, DecodeError> {
         Err(DecodeError::Expected("sequence"))
     }
 }
@@ -1253,7 +1255,7 @@ impl<T: DecryptProtected> Sink for ProtectedOptional<T> {
         Ok(SomeProtected(self.0.map(len)?, PhantomData))
     }
 
-    fn passthrough<P: Encrypt + Clone>(self, value: P) -> Result<Self::Ok, DecodeError> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, value: &P) -> Result<Self::Ok, DecodeError> {
         self.0.passthrough(value).map(some)
     }
 }
@@ -1299,7 +1301,7 @@ where
         Ok(WrapEnd(self.0.map(len)?))
     }
 
-    fn passthrough<P: Encrypt + Clone>(self, value: P) -> Result<Self::Ok, DecodeError> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, value: &P) -> Result<Self::Ok, DecodeError> {
         self.0.passthrough(value).map(Protected::new)
     }
 }
@@ -1398,6 +1400,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plaintext::Encrypt;
     use crate::plaintext::{Int, Raw, Width};
     use crate::seal::mock::{Mock, Remote};
     use crate::{encrypt, encrypt_async};
@@ -1735,7 +1738,7 @@ mod tests {
         impl Encrypt for Clear {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
                 let mut seq = sink.seq(Some(2))?;
-                seq.element()?.passthrough(7u16)?;
+                seq.element()?.passthrough(&7u16)?;
                 8u16.visit(seq.element()?)?;
                 seq.end()
             }
@@ -1764,7 +1767,7 @@ mod tests {
         struct Clear;
         impl Encrypt for Clear {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-                sink.passthrough(vec![1u16])
+                sink.passthrough(&vec![1u16])
             }
         }
         assert_eq!(expected(round_trip::<Vec<u16>>(Clear)), "sequence");
@@ -1782,7 +1785,7 @@ mod tests {
     fn clear_decodes_a_passthrough_and_nothing_else() {
         let mut held = None;
         Clear::<Vec<u16>, _>::new(Slot(&mut held))
-            .passthrough(vec![1u16, 2])
+            .passthrough(&vec![1u16, 2])
             .expect("decodes");
         assert_eq!(held, Some(vec![1, 2]));
         let refused = |r: Result<(), DecodeError>| {
@@ -1794,7 +1797,7 @@ mod tests {
         refused(Clear::<u16, _>::new(Slot(&mut held)).seq(None).map(|_| ()));
         refused(Clear::<u16, _>::new(Slot(&mut held)).map(None).map(|_| ()));
         assert!(matches!(
-            Clear::<u16, _>::new(Slot(&mut held)).passthrough("x"),
+            Clear::<u16, _>::new(Slot(&mut held)).passthrough(&"x"),
             Err(DecodeError::Expected("u16"))
         ));
     }
@@ -1873,25 +1876,51 @@ mod tests {
         assert!(core::error::Error::source(&source).is_some());
     }
 
-    #[cfg(feature = "chrono")]
+    #[cfg(feature = "jiff")]
     #[test]
-    fn chrono_targets_accept_any_unit() {
+    fn jiff_targets_accept_any_unit() {
         use crate::plaintext::TimeUnit;
-        use ::chrono::{DateTime, NaiveDate};
-        let date = NaiveDate::from_ymd_opt(2024, 2, 29).expect("date");
-        assert_eq!(round_trip::<NaiveDate>(date).expect("date"), date);
-        let ts = DateTime::from_timestamp(1_700_000_000, 123_456_789).expect("ts");
-        assert_eq!(round_trip::<DateTime<_>>(ts).expect("ts"), ts);
+        use ::jiff::{civil::Date, Timestamp};
+        let date = Date::constant(2024, 2, 29);
+        assert_eq!(round_trip::<Date>(date).expect("date"), date);
+        let ts = Timestamp::new(1_700_000_000, 123_456_789).expect("ts");
+        assert_eq!(round_trip::<Timestamp>(ts).expect("ts"), ts);
         // A JavaScript `Date` is milliseconds.
         let js = Raw(
             Some(Logical::Timestamp(TimeUnit::Millis)),
             Physical::Int(Int::I64(1_700_000_000_123)),
         );
         assert_eq!(
-            round_trip::<DateTime<_>>(js).expect("ms"),
-            DateTime::from_timestamp(1_700_000_000, 123_000_000).expect("ts")
+            round_trip::<Timestamp>(js).expect("ms"),
+            Timestamp::new(1_700_000_000, 123_000_000).expect("ts")
         );
-        assert_eq!(expected(round_trip::<NaiveDate>(0i32)), "date");
+        assert_eq!(expected(round_trip::<Date>(0i32)), "date");
+    }
+
+    /// The wire's range is jiff's, so a jiff target opens the values at
+    /// both ends of it.
+    #[cfg(feature = "jiff")]
+    #[test]
+    fn jiff_targets_open_both_ends_of_the_wire_range() {
+        use crate::plaintext::kinds::{
+            MAX_DATE_DAYS, MAX_TIMESTAMP_NANOS, MIN_DATE_DAYS, MIN_TIMESTAMP_NANOS,
+        };
+        use crate::plaintext::TimeUnit;
+        use ::jiff::{civil::Date, Timestamp};
+        for (days, date) in [(MIN_DATE_DAYS, Date::MIN), (MAX_DATE_DAYS, Date::MAX)] {
+            let raw = Raw(Some(Logical::Date), Physical::Int(Int::I32(days)));
+            assert_eq!(round_trip::<Date>(raw).expect("date"), date);
+        }
+        for (nanos, instant) in [
+            (MIN_TIMESTAMP_NANOS, Timestamp::MIN),
+            (MAX_TIMESTAMP_NANOS, Timestamp::MAX),
+        ] {
+            let raw = Raw(
+                Some(Logical::Timestamp(TimeUnit::Nanos)),
+                Physical::Int(Int::I128(nanos)),
+            );
+            assert_eq!(round_trip::<Timestamp>(raw).expect("timestamp"), instant);
+        }
     }
 
     #[cfg(feature = "rust_decimal")]
@@ -1922,7 +1951,7 @@ mod tests {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
                 let mut map = BTreeMap::new();
                 map.insert("a", 1u16);
-                sink.passthrough(map)
+                sink.passthrough(&map)
             }
         }
         assert_eq!(expected(round_trip::<HashMap<String, u16>>(Clear)), "map");
@@ -1940,21 +1969,21 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "chrono")]
+    #[cfg(feature = "jiff")]
     #[test]
-    fn chrono_targets_refuse_the_other_logical_types() {
+    fn jiff_targets_refuse_the_other_logical_types() {
         use crate::plaintext::TimeUnit;
-        use ::chrono::{DateTime, NaiveDate, Utc};
-        let date = NaiveDate::from_ymd_opt(2024, 2, 29).expect("date");
-        let ts = DateTime::from_timestamp(1_700_000_000, 0).expect("ts");
-        assert_eq!(expected(round_trip::<DateTime<Utc>>(date)), "timestamp");
+        use ::jiff::{civil::Date, Timestamp};
+        let date = Date::constant(2024, 2, 29);
+        let ts = Timestamp::new(1_700_000_000, 0).expect("ts");
+        assert_eq!(expected(round_trip::<Timestamp>(date)), "timestamp");
         assert_eq!(
-            expected(round_trip::<DateTime<Utc>>(1_700_000_000i64)),
+            expected(round_trip::<Timestamp>(1_700_000_000i64)),
             "timestamp"
         );
-        assert_eq!(expected(round_trip::<NaiveDate>(ts)), "date");
+        assert_eq!(expected(round_trip::<Date>(ts)), "date");
 
-        let instant = DateTime::from_timestamp(2, 0).expect("timestamp");
+        let instant = Timestamp::new(2, 0).expect("timestamp");
         for (unit, count) in [
             (TimeUnit::Seconds, 2),
             (TimeUnit::Millis, 2_000),
@@ -1965,7 +1994,7 @@ mod tests {
                 Some(Logical::Timestamp(unit)),
                 Physical::Int(Int::I64(count)),
             );
-            assert_eq!(round_trip::<DateTime<Utc>>(raw).expect("unit"), instant);
+            assert_eq!(round_trip::<Timestamp>(raw).expect("unit"), instant);
         }
     }
 
@@ -2103,7 +2132,7 @@ mod tests {
         struct Clear;
         impl Encrypt for Clear {
             fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-                sink.passthrough(vec![1u32])
+                sink.passthrough(&vec![1u32])
             }
         }
         assert_eq!(
@@ -2218,7 +2247,7 @@ mod tests {
             Ok(PointFields(None))
         }
 
-        fn passthrough<P: Encrypt + Clone>(self, _: P) -> Result<Point, DecodeError> {
+        fn passthrough<P: ?Sized + EncryptRef>(self, _: &P) -> Result<Point, DecodeError> {
             Err(DecodeError::Expected("point"))
         }
     }
@@ -2286,7 +2315,7 @@ mod tests {
             .expect("decodes");
         assert_eq!(n.risky_ref(), &5);
         assert!(matches!(
-            Wrap(u32::sink()).passthrough(5u32),
+            Wrap(u32::sink()).passthrough(&5u32),
             Err(DecodeError::Expected("u32"))
         ));
         let list = vec![1u32, 2]

@@ -7,8 +7,8 @@ error[E0277]: `i64` is not a value that always fits `vitaminc_ore::target::I32`
    |                                      required by a bound introduced by this call
    |
    = help: the trait `FitsIn<vitaminc_ore::target::I32>` is not implemented for `i64`
-   = note: `encrypt` takes a value the encoding never refuses: a narrower integer, an `f32`, bytes, or a typed value such as a `NaiveDate`
-   = note: a value the encoding can refuse (an integer that may be out of range, text, a `DateTime<Utc>`, or any other `Encrypt` value) goes through `encrypt_checked`, which checks it while the program runs
+   = note: `encrypt` takes a value the encoding never refuses: a narrower integer, an `f32`, bytes, or a typed value such as a `jiff::civil::Date`
+   = note: a value the encoding can refuse (an integer that may be out of range, text, a `jiff::Timestamp`, or any other `Encrypt` value) goes through `encrypt_checked`, which checks it while the program runs
 help: the following other types implement trait `FitsIn<T>`
   --> src/target.rs
    |

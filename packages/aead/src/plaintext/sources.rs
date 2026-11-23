@@ -13,7 +13,7 @@ use vitaminc_protected::{Controlled, OpaqueDebug, Protected, ProtectedRef};
 use zeroize::Zeroize;
 
 use super::kinds::{FixedType, Float, Logical, Physical, Width};
-use super::{depth, visit_seq, Encrypt, MapSink, Scalar, SeqSink, Sink};
+use super::{depth, visit_seq, Encrypt, EncryptRef, MapSink, Scalar, SeqSink, Sink};
 
 macro_rules! int {
     ($($ty:ty => $width:ident),* $(,)?) => {
@@ -222,18 +222,15 @@ impl<const N: usize> Scalar for &[u8; N] {}
 /// derived struct with a borrowed field (`&'a str`, `&'a [u8]`,
 /// `Option<&'a str>`) needs when it is walked by reference, as it is from
 /// inside a `Protected`: each field is then visited as `&&'a str`.
-impl<'b, T: ?Sized> Encrypt for &&'b T
-where
-    &'b T: Encrypt,
-{
-    const DEPTH: Option<usize> = <&'b T as Encrypt>::DEPTH;
-    const FIXED: Option<FixedType> = <&'b T as Encrypt>::FIXED;
+impl<T: ?Sized + EncryptRef> Encrypt for &&T {
+    const DEPTH: Option<usize> = T::REF_DEPTH;
+    const FIXED: Option<FixedType> = T::REF_FIXED;
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-        (*self).visit(sink)
+        (**self).visit_ref(sink)
     }
 }
 
-impl<'b, T: ?Sized> Scalar for &&'b T where &'b T: Scalar {}
+impl<'b, T: ?Sized + EncryptRef> Scalar for &&'b T where &'b T: Scalar {}
 
 /// `None` is a null. There is no separate "absent" in the data model: a
 /// Rust `None` and a host null mean the same thing.
@@ -326,23 +323,25 @@ impl<T: Encrypt> Encrypt for Option<T> {
     }
 }
 
-impl<'a, T> Encrypt for &'a Option<T>
-where
-    &'a T: Encrypt,
-{
-    const DEPTH: Option<usize> = <&'a T as Encrypt>::DEPTH;
-    const FIXED: Option<FixedType> = <&'a T as Encrypt>::FIXED;
+impl<T: EncryptRef> Encrypt for &Option<T> {
+    const DEPTH: Option<usize> = T::REF_DEPTH;
+    const FIXED: Option<FixedType> = T::REF_FIXED;
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         match self {
-            Some(v) => v.visit(sink),
-            None => null::<&'a T, S>(sink),
+            Some(v) => v.visit_ref(sink),
+            None => null_of(T::REF_FIXED, sink),
         }
     }
 }
 
 /// The null an absent `T` walks as: typed if `T` is fixed width.
 fn null<T: Encrypt, S: Sink>(sink: S) -> Result<S::Ok, S::Error> {
-    match T::FIXED {
+    null_of(T::FIXED, sink)
+}
+
+/// The null of a value whose fixed type is `fixed`.
+fn null_of<S: Sink>(fixed: Option<FixedType>, sink: S) -> Result<S::Ok, S::Error> {
+    match fixed {
         Some(ty) => sink.typed_null(ty),
         None => sink.scalar(None, Physical::Null),
     }
@@ -351,35 +350,29 @@ fn null<T: Encrypt, S: Sink>(sink: S) -> Result<S::Ok, S::Error> {
 /// A protected value walks as a borrow of what it wraps, so nothing leaves
 /// the wrapper during the walk, and everything in it, visited or not, is
 /// zeroized when the wrapper drops at the end of it.
-impl<T: Zeroize> Encrypt for Protected<T>
-where
-    for<'a> &'a T: Encrypt,
-{
-    const DEPTH: Option<usize> = <&T as Encrypt>::DEPTH;
-    const FIXED: Option<FixedType> = <&T as Encrypt>::FIXED;
+impl<T: Zeroize + EncryptRef> Encrypt for Protected<T> {
+    const DEPTH: Option<usize> = T::REF_DEPTH;
+    const FIXED: Option<FixedType> = T::REF_FIXED;
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-        self.risky_ref().visit(sink)
+        self.risky_ref().visit_ref(sink)
         // `self` drops here and zeroizes the whole value.
     }
 }
 
 /// A protected scalar is the scalar it wraps, walked as a borrow.
-impl<T: Zeroize> Scalar for Protected<T> where for<'a> &'a T: Scalar {}
+impl<T: Zeroize + EncryptRef> Scalar for Protected<T> where for<'a> &'a T: Scalar {}
 
 /// A borrowed protected value is the same borrow; the caller's wrapper
 /// does the wiping.
-impl<'a, T: Zeroize> Encrypt for &'a Protected<T>
-where
-    &'a T: Encrypt,
-{
-    const DEPTH: Option<usize> = <&'a T as Encrypt>::DEPTH;
-    const FIXED: Option<FixedType> = <&'a T as Encrypt>::FIXED;
+impl<T: Zeroize + EncryptRef> Encrypt for &Protected<T> {
+    const DEPTH: Option<usize> = T::REF_DEPTH;
+    const FIXED: Option<FixedType> = T::REF_FIXED;
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-        self.risky_ref().visit(sink)
+        self.risky_ref().visit_ref(sink)
     }
 }
 
-impl<'a, T: Zeroize> Scalar for &'a Protected<T> where &'a T: Scalar {}
+impl<'a, T: Zeroize + EncryptRef> Scalar for &'a Protected<T> where &'a T: Scalar {}
 
 /// A protected borrow ([`AsProtectedRef`](vitaminc_protected::AsProtectedRef))
 /// walks as the borrow it wraps, exactly as `&Protected<T>` does: the
@@ -396,39 +389,37 @@ impl<'a, T: Zeroize> Scalar for &'a Protected<T> where &'a T: Scalar {}
 /// consumer of the borrow does with the value it reads.
 ///
 /// `T` may be unsized. `ProtectedRef<'_, str>` is a text leaf and
-/// `ProtectedRef<'_, [u8]>` a byte leaf. A `str` lends either, so
-/// annotate which one you mean: a string sealed as bytes reads back only
-/// as bytes, never as a `String`.
-impl<'a, T: ?Sized> Encrypt for ProtectedRef<'a, T>
-where
-    &'a T: Encrypt,
-{
-    const DEPTH: Option<usize> = <&'a T as Encrypt>::DEPTH;
-    const FIXED: Option<FixedType> = <&'a T as Encrypt>::FIXED;
+/// `ProtectedRef<'_, [u8]>` a byte leaf. A `Protected<String>` lends a
+/// `ProtectedRef<String>`, which seals as text, as does the
+/// `ProtectedRef<str>` that [`as_deref`](ProtectedRef::as_deref) narrows
+/// it to. To seal its bytes instead, narrow it with
+/// [`as_ref_of`](ProtectedRef::as_ref_of) to `[u8]`; a string sealed as
+/// bytes reads back only as bytes, never as a `String`. A bare `str` lends
+/// nothing, because nothing wipes it.
+impl<T: ?Sized + EncryptRef> Encrypt for ProtectedRef<'_, T> {
+    const DEPTH: Option<usize> = T::REF_DEPTH;
+    const FIXED: Option<FixedType> = T::REF_FIXED;
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-        self.risky_ref().visit(sink)
+        self.risky_ref().visit_ref(sink)
     }
 }
 
 /// A protected borrow of a scalar is that scalar.
-impl<'a, T: ?Sized> Scalar for ProtectedRef<'a, T> where &'a T: Scalar {}
+impl<'a, T: ?Sized + EncryptRef> Scalar for ProtectedRef<'a, T> where &'a T: Scalar {}
 
 /// A borrowed protected borrow is the same borrow. A derived struct with a
 /// `ProtectedRef` field, or an `&Option<ProtectedRef<_>>`, walks it this way.
-impl<'a, T: ?Sized> Encrypt for &ProtectedRef<'a, T>
-where
-    &'a T: Encrypt,
-{
-    const DEPTH: Option<usize> = <ProtectedRef<'a, T> as Encrypt>::DEPTH;
-    const FIXED: Option<FixedType> = <ProtectedRef<'a, T> as Encrypt>::FIXED;
+impl<T: ?Sized + EncryptRef> Encrypt for &ProtectedRef<'_, T> {
+    const DEPTH: Option<usize> = T::REF_DEPTH;
+    const FIXED: Option<FixedType> = T::REF_FIXED;
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         // `ProtectedRef` is not `Copy`, so walk the borrow it wraps, which
         // is what the owned impl does.
-        self.risky_ref().visit(sink)
+        self.risky_ref().visit_ref(sink)
     }
 }
 
-impl<'a, T: ?Sized> Scalar for &ProtectedRef<'a, T> where &'a T: Scalar {}
+impl<'a, T: ?Sized + EncryptRef> Scalar for &ProtectedRef<'a, T> where &'a T: Scalar {}
 
 /// An owned sequence takes its elements out one at a time, so a walk that
 /// stops part way never drops an unvisited element bare: the elements the
@@ -515,7 +506,7 @@ impl Sink for Discard {
     }
 
     /// Passthrough is cleartext by contract, so it is not walked.
-    fn passthrough<P: Encrypt + Clone>(self, _: P) -> Result<(), Discarded> {
+    fn passthrough<P: ?Sized + EncryptRef>(self, _: &P) -> Result<(), Discarded> {
         Ok(())
     }
 }
@@ -548,23 +539,17 @@ impl MapSink for Discard {
     }
 }
 
-impl<'a, T> Encrypt for &'a Vec<T>
-where
-    &'a T: Encrypt,
-{
-    const DEPTH: Option<usize> = depth::container(<&'a T as Encrypt>::DEPTH);
+impl<T: EncryptRef> Encrypt for &Vec<T> {
+    const DEPTH: Option<usize> = depth::container(T::REF_DEPTH);
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-        visit_seq(sink, Some(self.len()), self.iter())
+        visit_seq(sink, Some(self.len()), self.iter().map(EncryptRef::lend))
     }
 }
 
-impl<'a, T> Encrypt for &'a [T]
-where
-    &'a T: Encrypt,
-{
-    const DEPTH: Option<usize> = depth::container(<&'a T as Encrypt>::DEPTH);
+impl<T: EncryptRef> Encrypt for &[T] {
+    const DEPTH: Option<usize> = depth::container(T::REF_DEPTH);
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
-        visit_seq(sink, Some(self.len()), self.iter())
+        visit_seq(sink, Some(self.len()), self.iter().map(EncryptRef::lend))
     }
 }
 
@@ -592,46 +577,40 @@ impl<K: AsRef<str>, V: Encrypt> Encrypt for BTreeMap<K, V> {
     }
 }
 
-impl<'a, K: AsRef<str>, V> Encrypt for &'a HashMap<K, V>
-where
-    &'a V: Encrypt,
-{
-    const DEPTH: Option<usize> = depth::container(<&'a V as Encrypt>::DEPTH);
+impl<K: AsRef<str>, V: EncryptRef> Encrypt for &HashMap<K, V> {
+    const DEPTH: Option<usize> = depth::container(V::REF_DEPTH);
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         let mut map = sink.map(Some(self.len()))?;
         for (key, value) in self {
-            value.visit(map.entry(key.as_ref())?)?;
+            value.visit_ref(map.entry(key.as_ref())?)?;
         }
         map.end()
     }
 }
 
-impl<'a, K: AsRef<str>, V> Encrypt for &'a BTreeMap<K, V>
-where
-    &'a V: Encrypt,
-{
-    const DEPTH: Option<usize> = depth::container(<&'a V as Encrypt>::DEPTH);
+impl<K: AsRef<str>, V: EncryptRef> Encrypt for &BTreeMap<K, V> {
+    const DEPTH: Option<usize> = depth::container(V::REF_DEPTH);
     fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
         let mut map = sink.map(Some(self.len()))?;
         for (key, value) in self {
-            value.visit(map.entry(key.as_ref())?)?;
+            value.visit_ref(map.entry(key.as_ref())?)?;
         }
         map.end()
     }
 }
 
-// The chrono and rust_decimal types are logical types over an int. Each
+// The jiff and rust_decimal types are logical types over an int. Each
 // source says which, and the int it stands for.
 
-#[cfg(feature = "chrono")]
-#[cfg_attr(docsrs, doc(cfg(feature = "chrono")))]
-mod chrono_sources {
+#[cfg(feature = "jiff")]
+#[cfg_attr(docsrs, doc(cfg(feature = "jiff")))]
+mod jiff_sources {
     use super::*;
-    use crate::plaintext::kinds::{chrono as conv, Int, TimeUnit};
+    use crate::plaintext::kinds::{jiff as conv, Int, TimeUnit};
     use crate::plaintext::{Error, SourceError};
-    use ::chrono::{DateTime, NaiveDate, Utc};
+    use ::jiff::{civil::Date, Timestamp};
 
-    impl Encrypt for NaiveDate {
+    impl Encrypt for Date {
         const DEPTH: Option<usize> = depth::SCALAR;
         const FIXED: Option<FixedType> = FixedType::new(Some(Logical::Date), Width::I32);
         fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
@@ -642,18 +621,18 @@ mod chrono_sources {
         }
     }
 
-    /// Stored as nanoseconds, the unit of the `TIMESTAMP` tag. A leap second
-    /// has no count and stops the walk; a [`Timestamp`](crate::Timestamp)
-    /// field refuses it when the value is built instead.
-    impl Encrypt for DateTime<Utc> {
+    /// Stored as nanoseconds, the unit of the `TIMESTAMP` tag. An instant
+    /// outside the wire's range, which jiff 1.0.0 can make (see
+    /// [`timestamp_nanos`](conv::timestamp_nanos)), stops the walk; a
+    /// [`Timestamp`](crate::Timestamp) field refuses it when the value is
+    /// built instead.
+    impl Encrypt for Timestamp {
         const DEPTH: Option<usize> = depth::SCALAR;
         const FIXED: Option<FixedType> =
             FixedType::new(Some(Logical::Timestamp(TimeUnit::Nanos)), Width::I128);
         fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
             let nanos = conv::timestamp_nanos(self).ok_or_else(|| {
-                S::Error::source(SourceError::msg(
-                    "a leap second has no count of nanoseconds",
-                ))
+                S::Error::source(SourceError::msg("a timestamp outside jiff's range"))
             })?;
             sink.scalar(
                 Some(Logical::Timestamp(TimeUnit::Nanos)),
@@ -662,23 +641,23 @@ mod chrono_sources {
         }
     }
 
-    impl Encrypt for &NaiveDate {
+    impl Encrypt for &Date {
         const DEPTH: Option<usize> = depth::SCALAR;
-        const FIXED: Option<FixedType> = NaiveDate::FIXED;
+        const FIXED: Option<FixedType> = Date::FIXED;
         fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
             (*self).visit(sink)
         }
     }
 
-    impl Encrypt for &DateTime<Utc> {
+    impl Encrypt for &Timestamp {
         const DEPTH: Option<usize> = depth::SCALAR;
-        const FIXED: Option<FixedType> = <DateTime<Utc> as Encrypt>::FIXED;
+        const FIXED: Option<FixedType> = <Timestamp as Encrypt>::FIXED;
         fn visit<S: Sink>(self, sink: S) -> Result<S::Ok, S::Error> {
             (*self).visit(sink)
         }
     }
 
-    scalar!(NaiveDate, &NaiveDate, DateTime<Utc>, &DateTime<Utc>);
+    scalar!(Date, &Date, Timestamp, &Timestamp);
 }
 
 #[cfg(feature = "rust_decimal")]
@@ -933,19 +912,25 @@ mod tests {
     fn a_protected_ref_walks_as_the_borrowed_protected_value() {
         use vitaminc_protected::AsProtectedRef;
 
-        // A macro, not a generic fn: a `for<'a> &'a T: Encrypt` bound on a
-        // helper sends the solver round the `&&T` impl until it overflows.
+        // A generic helper, bounded on `EncryptRef`: the bound generic code
+        // can write over a borrowed plaintext.
+        fn same<T: Zeroize + EncryptRef>(value: T) {
+            let owner = Protected::new(value);
+            let by_ref = record(&owner).expect("records");
+            assert_eq!(record(owner.as_protected_ref()).expect("records"), by_ref);
+            // The borrow is the point: this walks `&ProtectedRef`, a separate impl.
+            #[allow(clippy::needless_borrows_for_generic_args)]
+            let borrowed = record(&owner.as_protected_ref()).expect("records");
+            assert_eq!(borrowed, by_ref);
+            assert_eq!(
+                record(Some(owner.as_protected_ref())).expect("records"),
+                by_ref
+            );
+        }
         macro_rules! same {
-            ($value:expr) => {{
-                let owner = Protected::new($value);
-                let by_ref = record(&owner).expect("records");
-                assert_eq!(record(owner.as_protected_ref()).expect("records"), by_ref);
-                assert_eq!(record(&owner.as_protected_ref()).expect("records"), by_ref);
-                assert_eq!(
-                    record(Some(owner.as_protected_ref())).expect("records"),
-                    by_ref
-                );
-            }};
+            ($value:expr) => {
+                same($value)
+            };
         }
 
         same!(42i32);
@@ -962,14 +947,14 @@ mod tests {
         same!(vec![vec![1i64], vec![]]);
         same!(vec![Some(1u16), None]);
 
-        // Unsized borrows: a `str` lends itself as text or as bytes, and the
-        // caller has to say which.
-        let text: ProtectedRef<'_, str> = "pw".as_protected_ref();
+        // Unsized borrows: a protected `String` narrows to text or to
+        // bytes, and the caller has to say which.
+        let owner = Protected::new(String::from("pw"));
+        let text: ProtectedRef<'_, str> = owner.as_protected_ref().as_deref();
         assert_eq!(record(text).expect("records"), record("pw").expect("ok"));
-        let cow = std::borrow::Cow::Borrowed("pw");
-        let text: ProtectedRef<'_, str> = cow.as_protected_ref();
+        let text: ProtectedRef<'_, str> = owner.as_protected_ref().as_ref_of();
         assert_eq!(record(text).expect("records"), record("pw").expect("ok"));
-        let bytes: ProtectedRef<'_, [u8]> = "pw".as_protected_ref();
+        let bytes: ProtectedRef<'_, [u8]> = owner.as_protected_ref().as_ref_of();
         assert_eq!(
             record(bytes).expect("records"),
             [scalar(Owned::Bytes(b"pw".to_vec()))]
@@ -1097,7 +1082,7 @@ mod tests {
             Ok(self)
         }
 
-        fn passthrough<P: Encrypt + Clone>(self, _: P) -> Result<(), RecordError> {
+        fn passthrough<P: ?Sized + EncryptRef>(self, _: &P) -> Result<(), RecordError> {
             Ok(())
         }
     }
@@ -1188,7 +1173,7 @@ mod tests {
         map.insert("k", vec![String::from("v")]);
         assert!(map.visit(Discard).is_ok());
         assert!(Failing.visit(Discard).is_err());
-        assert!(Discard.passthrough(1u32).is_ok());
+        assert!(Discard.passthrough(&1u32).is_ok());
         assert!(Discard.map(None).and_then(MapSink::end).is_ok());
     }
 
@@ -1328,12 +1313,12 @@ mod tests {
         assert_eq!(err.0, "getter threw");
     }
 
-    #[cfg(feature = "chrono")]
+    #[cfg(feature = "jiff")]
     #[test]
-    fn chrono_types_are_logical_types_over_an_int() {
+    fn jiff_types_are_logical_types_over_an_int() {
         use crate::plaintext::kinds::TimeUnit;
-        use ::chrono::{DateTime, NaiveDate};
-        let date = NaiveDate::from_ymd_opt(2000, 3, 1).expect("ok");
+        use ::jiff::{civil::Date, Timestamp};
+        let date = Date::constant(2000, 3, 1);
         assert_eq!(
             record(date).expect("ok"),
             [Event::Scalar(
@@ -1341,7 +1326,7 @@ mod tests {
                 Owned::Int(Int::I32(11_017))
             )]
         );
-        let ts = DateTime::from_timestamp(1, 5).expect("ok");
+        let ts = Timestamp::new(1, 5).expect("ok");
         assert_eq!(
             record(ts).expect("ok"),
             [Event::Scalar(
@@ -1349,25 +1334,16 @@ mod tests {
                 Owned::Int(Int::I128(1_000_000_005))
             )]
         );
-        let leap = NaiveDate::from_ymd_opt(2016, 12, 31)
-            .expect("ok")
-            .and_hms_nano_opt(23, 59, 59, 1_500_000_000)
-            .expect("ok")
-            .and_utc();
-        assert_eq!(
-            record(leap).expect_err("should fail").0,
-            "a leap second has no count of nanoseconds"
-        );
     }
 
     // The borrows are the point: each one picks the reference impl.
     #[allow(clippy::needless_borrows_for_generic_args)]
-    #[cfg(all(feature = "chrono", feature = "rust_decimal", feature = "uuid"))]
+    #[cfg(all(feature = "jiff", feature = "rust_decimal", feature = "uuid"))]
     #[test]
     fn borrowed_logical_sources_walk_as_the_owned_ones() {
-        let date = ::chrono::NaiveDate::from_ymd_opt(2000, 3, 1).expect("ok");
+        let date = ::jiff::civil::Date::constant(2000, 3, 1);
         assert_eq!(record(&date).expect("ok"), record(date).expect("ok"));
-        let ts = ::chrono::DateTime::from_timestamp(1, 5).expect("ok");
+        let ts = ::jiff::Timestamp::new(1, 5).expect("ok");
         assert_eq!(record(&ts).expect("ok"), record(ts).expect("ok"));
         let d: rust_decimal::Decimal = "-1.50".parse().expect("ok");
         assert_eq!(record(&d).expect("ok"), record(d).expect("ok"));

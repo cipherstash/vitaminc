@@ -41,8 +41,7 @@ Node.js must be on `PATH` for the Node binding tests.
 `packages/aead-frame/tests/conformance.rs` checks the shared
 `testdata/value-conformance.json` corpus against the Rust codec. Node, Go,
 and the WASM guest consume the same vectors, including host-specific
-projections. `tests/legacy_fixture.rs` checks ciphertexts from the legacy
-`Value` path against the current decoder.
+projections.
 
 The storage tests in `packages/aead-frame/tests/storage.rs` check values,
 refusal classes, and typed reads against `testdata/storage-v1.json`. The

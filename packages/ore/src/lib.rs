@@ -16,6 +16,9 @@
 mod casefold_unicode16;
 mod fold;
 mod order;
+#[cfg(feature = "prf")]
+#[cfg_attr(docsrs, doc(cfg(feature = "prf")))]
+mod prf;
 mod query;
 mod scheme;
 pub mod target;
@@ -26,6 +29,9 @@ pub use order::{
     domain, order, order_terms, order_with_nulls, text, NullOrder, Order, OrderTarget,
     VARIABLE_WIDTH_MARKER,
 };
+#[cfg(feature = "prf")]
+#[cfg_attr(docsrs, doc(cfg(feature = "prf")))]
+pub use prf::SchemeVisitor;
 pub use query::{OrderQuery, QueryTerm};
 #[allow(deprecated)]
 pub use scheme::OrderColumn;
@@ -33,7 +39,7 @@ pub use scheme::{
     OrderContext, OrderEncrypt, OrderError, OrderKeyInit, OrderPlaintext, OrderScheme, OrderSpace,
     OrderTerm,
 };
-pub use target::{FitsIn, FixedWidth, OwnTarget, StaticTarget, Supports, Target};
+pub use target::{FitsIn, FixedWidth, Orderable, StaticTarget, Supports, Target};
 // The types in this crate's signatures, so a caller needs no second import:
 // a scheme encrypts values of the data model, and a typed scalar goes in
 // as `Raw(ty, physical)`, without depending on vitaminc-aead.

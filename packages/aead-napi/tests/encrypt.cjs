@@ -42,10 +42,15 @@ for (const [name, value] of Object.entries(rows)) {
 }
 // A Date keeps its exact millisecond count: no trip through seconds and
 // nanoseconds, and no rounding.
-for (const ms of [0, -1, 1, 1_700_000_000_123, -62_135_596_800_000, 253_402_300_799_999]) {
+// The last two are the ends of the wire's range, which is jiff's.
+for (const ms of [0, -1, 1, 1_700_000_000_123, -62_135_596_800_000, -377_705_023_201_000, 253_402_207_200_999]) {
   const got = addon.decryptValue(addon.encryptValue(new Date(ms), aad), aad);
   assert.ok(got instanceof Date, `${ms}`);
   assert.equal(got.getTime(), ms);
+}
+// A Date just past either end is refused.
+for (const ms of [-377_705_023_201_001, 253_402_207_201_000]) {
+  assert.throws(() => addon.encryptValue(new Date(ms), aad), {code: 'ERR_INVALID_TIMESTAMP'}, `${ms}`);
 }
 
 // A getter that throws stops the walk and rejects with that same error.
