@@ -64,7 +64,7 @@ delta = "0.11.2 -> 0.11.3"
 notes = "Additive only: a TryCustomizedInit trait with a blanket impl over CustomizedInit, and dev::initialized_mac_test split out of mac_test. No change to any hashing, MAC or buffer code; no unsafe, no new dependencies, no build script (build = false). Both hunks match RustCrypto/traits #2367 and #2395 in the changelog."
 
 [[audits.form_urlencoded]]
-who = "Dan Draper <dan@cipherstash.com>"
+who = "Toby Hede <toby@cipherstash.com>"
 criteria = "safe-to-deploy"
 delta = "1.2.2 -> 1.2.3"
 notes = "Serializer::for_suffix clamps a start_position past the end of the target to its length instead of panicking; percent-encoding requirement raised from 2.3.0 to 2.3.2 (already in our lockfile). No new unsafe, no build script, no new dependencies or features. Released with url 2.5.9. Not a cryptographic crate."
@@ -190,7 +190,7 @@ delta = "0.1.25 -> 0.1.26"
 notes = "Unicode 17.0.0 to 18.0.0 table regeneration (upstream #117: scripts/unicode.py version bump and regenerated src/tables.rs, all data literals and generated range patterns) plus licence metadata declaring Unicode-3.0 for the UCD data with LICENSE-UNICODE added (#116). The normalisation logic is untouched; no new unsafe, dependencies or build script. NFC/NFKC output changes only for code points newly assigned in Unicode 18."
 
 [[audits.url]]
-who = "Dan Draper <dan@cipherstash.com>"
+who = "Toby Hede <toby@cipherstash.com>"
 criteria = "safe-to-deploy"
 delta = "2.5.8 -> 2.5.9"
 notes = "Fix for RUSTSEC-2026-0592 (upstream servo/rust-url#1186): Url::origin() on a blob: URL now takes the inner URL's origin only for http, https and file and returns an opaque origin otherwise, so it no longer recurses without bound. Other changes: the path percent-encode set now also encodes ^ and ` per the URL Standard (QUERY/SPECIAL_QUERY constants moved, ^ dropped from USERINFO since PATH now has it); file URLs no longer drop the host when the path starts with a Windows drive letter; a backslash ends a port only for special schemes; last_slash_can_be_removed searches the path only, which also removes quadratic parsing of root double-dot segments; refactors with ? and Option::filter; doc and typo fixes; tests and WPT data updated. No new unsafe, no build script, no new dependencies or features (form_urlencoded 1.2.2 -> 1.2.3, audited separately). No file, environment, network or process access. Not a cryptographic crate."
